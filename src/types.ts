@@ -39,6 +39,10 @@ export interface ClipboardConfig {
   watch_images: boolean;
   watch_files: boolean;
   close_after_paste: boolean;
+  /** 剪贴板面板是否置顶显示 */
+  always_on_top: boolean;
+  /** 粘贴模式；顺序模式下全局 Ctrl+V 逐条带出队列内容 */
+  paste_mode: PasteMode;
 }
 
 export interface FolderConfig {
@@ -46,6 +50,10 @@ export interface FolderConfig {
   layout: FolderLayout;
   split: FolderSplit;
   page_size: number;
+  /** 文件夹面板是否置顶显示 */
+  always_on_top: boolean;
+  /** 是否追踪资源管理器中打开的文件夹并自动统计访问次数 */
+  track_explorer: boolean;
 }
 
 export interface ShortcutsConfig {
@@ -57,6 +65,10 @@ export interface GeneralConfig {
   theme: ThemeMode;
   silent_start: boolean;
   language: string;
+  /** 面板是否启用亚克力毛玻璃效果 */
+  acrylic_enabled: boolean;
+  /** 面板底色不透明度（0-100，越大越不透明，亚克力模糊越不明显） */
+  acrylic_opacity: number;
 }
 
 export interface AppConfig {
@@ -66,5 +78,5 @@ export interface AppConfig {
   general: GeneralConfig;
 }
 
-/** 粘贴模式 */
-export type PasteMode = "normal" | "fifo" | "lifo" | "pinned";
+/** 粘贴模式：普通 / 先进先出 / 后进先出 */
+export type PasteMode = "normal" | "fifo" | "lifo";

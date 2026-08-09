@@ -17,14 +17,42 @@
 }
 .clip-item.selected {
   background: var(--bg-item-hover);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
 }
+/* 当前待粘贴项：品牌色边框 + 软底 + 外发光，重点突出 */
 .clip-item.current {
   border-color: var(--accent);
   background: var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--accent), 0 2px 12px var(--accent-soft);
 }
 
 .clip-hotkey {
   flex-shrink: 0;
+}
+
+/* 顺序模式队列序号徽标；next = 下一条待粘贴，带光环强调 */
+.clip-order {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 4px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--bg-badge);
+  color: var(--text-secondary);
+}
+
+.clip-order.next {
+  min-width: 22px;
+  height: 22px;
+  font-size: 12px;
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .clip-icon {
@@ -81,10 +109,10 @@
   white-space: nowrap;
 }
 
-/* hover 时显示操作按钮 */
+/* hover 时显示操作按钮：每个图标带小胶囊底，更精致 */
 .clip-actions {
   display: flex;
-  gap: 2px;
+  gap: 4px;
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease-out);
 }
@@ -92,6 +120,14 @@
 .clip-item.selected .clip-actions {
   opacity: 1;
 }
-.clip-delete:hover {
-  color: var(--danger);
+.clip-actions .icon-btn {
+  width: 26px;
+  height: 26px;
+  background: var(--bg-badge);
+}
+.clip-actions .icon-btn:hover {
+  background: var(--bg-item-active);
+}
+.clip-actions .icon-btn.icon-btn-danger:hover {
+  background: var(--danger-soft);
 }

@@ -5,7 +5,7 @@
   "identifier": "com.xiaoxin.toolbox.app",
   "build": {
     "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://localhost:1421",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
@@ -31,7 +31,7 @@
         "fullscreen": false,
         "maximized": false,
         "decorations": false,
-        "transparent": true,
+        "transparent": false,
         "shadow": false,
         "alwaysOnTop": true,
         "skipTaskbar": true,
@@ -46,7 +46,7 @@
         "fullscreen": false,
         "maximized": false,
         "decorations": false,
-        "transparent": true,
+        "transparent": false,
         "shadow": false,
         "alwaysOnTop": true,
         "skipTaskbar": true,

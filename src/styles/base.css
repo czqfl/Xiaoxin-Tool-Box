@@ -15,14 +15,26 @@ body,
 }
 
 body {
-  font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI",
-    "Microsoft YaHei", "PingFang SC", system-ui, -apple-system, sans-serif;
+  /* 优先可变字体，中文回退到现代无衬线（MiSans/鸿蒙黑/苹方/雅黑） */
+  font-family: "Segoe UI Variable Text", "Segoe UI", "MiSans",
+    "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei UI",
+    "Microsoft YaHei", system-ui, -apple-system, sans-serif;
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.55;
+  letter-spacing: 0.01em;
+  font-optical-sizing: auto;
+  text-rendering: optimizeLegibility;
   color: var(--text-primary);
   background: var(--bg-app);
   -webkit-font-smoothing: antialiased;
   user-select: none;
+}
+
+h1,
+h2,
+h3 {
+  letter-spacing: 0.005em;
+  font-weight: 600;
 }
 
 input,
@@ -65,24 +77,31 @@ button {
   height: 32px;
   padding: 0 14px;
   border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
   font-size: 13px;
+  font-weight: 500;
   color: var(--text-primary);
-  background: var(--bg-item-hover);
+  background: var(--bg-elevated);
   transition: background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
     transform var(--dur-fast) var(--ease-out);
 }
 .btn:hover {
-  background: var(--bg-item-active);
+  background: var(--bg-item-hover);
+  border-color: var(--border-strong);
 }
 .btn:active {
   transform: scale(0.97);
 }
 .btn-primary {
   background: var(--accent);
+  border-color: transparent;
   color: var(--accent-text);
+  box-shadow: 0 2px 10px var(--accent-soft);
 }
 .btn-primary:hover {
   background: var(--accent-hover);
+  border-color: transparent;
 }
 .btn-primary:active {
   background: var(--accent-active);
@@ -90,6 +109,11 @@ button {
 .btn-danger {
   color: var(--danger);
   background: var(--danger-soft);
+  border-color: transparent;
+}
+.btn-danger:hover {
+  background: var(--danger-soft);
+  border-color: var(--danger);
 }
 .btn-sm {
   height: 26px;
@@ -102,19 +126,29 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: var(--radius-sm);
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
   color: var(--text-secondary);
   transition: background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out);
+    color var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
 }
 .icon-btn:hover {
-  background: var(--bg-item-hover);
+  background: var(--bg-item-active);
   color: var(--text-primary);
+}
+.icon-btn:active {
+  transform: scale(0.9);
 }
 .icon-btn.active {
   color: var(--accent);
+  background: var(--accent-soft);
+}
+/* 危险操作图标（删除等）：hover 变红 */
+.icon-btn.icon-btn-danger:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
 }
 
 /* 输入框 */

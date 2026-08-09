@@ -68,8 +68,18 @@ export const pickFolder = async (): Promise<string | null> => {
   return typeof selected === "string" ? selected : null;
 };
 
+// ---- 面板 ----
+/** 切换面板置顶（后端实现：切换后重新应用毛玻璃，避免 Windows 黑屏） */
+export const setPanelAlwaysOnTop = (on: boolean) =>
+  invoke<void>("panel_set_always_on_top", { on });
+
 // ---- 快捷键 ----
 export const testShortcut = (shortcut: string) =>
   invoke<void>("shortcut_test", { shortcut });
 export const applyShortcut = (target: "clipboard" | "folder", shortcut: string) =>
   invoke<void>("shortcut_apply", { target, shortcut });
+/** 录入捕获：钩子接管 Win 组合，避免系统功能抢先（与 capture_end 成对使用） */
+export const beginShortcutCapture = () =>
+  safe(invoke("shortcut_capture_begin"), undefined);
+export const endShortcutCapture = () =>
+  safe(invoke("shortcut_capture_end"), undefined);

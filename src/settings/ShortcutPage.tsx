@@ -1,7 +1,13 @@
 /** 快捷键设置页：录入组合键、冲突检测、保存后重新注册运行时热键 */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useConfigStore } from "../stores/configStore";
-import { applyShortcut, testShortcut } from "../core/tauri";
+import {
+  applyShortcut,
+  beginShortcutCapture,
+  endShortcutCapture,
+  testShortcut,
+} from "../core/tauri";
+import { EVT_SHORTCUT_WIN_CAPTURED, onEvent } from "../core/events";
 import { SettingGroup, SettingRow } from "./components";
 
 type Target = "clipboard" | "folder";
@@ -44,6 +50,9 @@ function ShortcutInput({
   const [listening, setListening] = useState(false);
   const listeningRef = useRef(false);
   listeningRef.current = listening;
+  // 用 ref 稳定 onChange，避免监听态下 effect 随父组件重渲染反复重启捕获
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -69,6 +78,28 @@ function ShortcutInput({
     const onBlur = () => setListening(false);
     window.addEventListener("blur", onBlur);
     return () => window.removeEventListener("blur", onBlur);
+  }, [listening]);
+
+  // Win 组合键到不了 webview（系统功能会抢先触发），改由后端钩子
+  // 在捕获模式下拦截并以事件回传组合串
+  useEffect(() => {
+    if (!listening) return;
+    let unsub: (() => void) | undefined;
+    let disposed = false;
+    onEvent<string>(EVT_SHORTCUT_WIN_CAPTURED, (combo) => {
+      if (!listeningRef.current) return;
+      onChangeRef.current(combo);
+      setListening(false);
+    }).then((un) => {
+      if (disposed) un();
+      else unsub = un;
+    });
+    void beginShortcutCapture();
+    return () => {
+      disposed = true;
+      unsub?.();
+      void endShortcutCapture();
+    };
   }, [listening]);
 
   const cls = [
@@ -197,7 +228,8 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
 
       <div className="shortcut-hint">
         支持 Ctrl / Alt / Shift / Win（Super）与字母、数字、F 键的组合；
-        若提示被占用，说明该组合已被系统或其他应用注册。
+        Win 组合由应用内核接管，保存后会替代其原有系统功能（如 Win+V
+        剪贴板历史）；若提示被占用，说明该组合已被系统或其他应用注册。
       </div>
     </div>
   );

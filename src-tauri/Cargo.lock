@@ -5307,6 +5307,7 @@ dependencies = [
  "chrono",
  "enigo",
  "image",
+ "raw-window-handle",
  "serde",
  "serde_json",
  "tauri",
@@ -5317,7 +5318,7 @@ dependencies = [
  "tauri-plugin-opener",
  "thiserror 2.0.20",
  "uuid",
- "window-vibrancy",
+ "webview2-com",
  "windows 0.61.3",
 ]
 

@@ -1,6 +1,12 @@
+#[cfg(windows)]
+mod acrylic;
 mod clipboard;
 mod config;
+#[cfg(windows)]
+mod explorer;
 mod folder;
+#[cfg(windows)]
+mod keyhook;
 mod panel;
 mod shortcut;
 mod storage;
@@ -14,30 +20,59 @@ use std::sync::Mutex;
 use tauri::Manager;
 use tauri_plugin_global_shortcut::ShortcutState;
 
-/// 获取 Windows 内部版本号，用于决定亚克力/模糊效果兼容性
+/// 面板窗口效果：不透明窗口 + DWM 系统原生圆角 +（可选）DWM 背景亚克力。
+/// 圆角由 DWM 直接裁剪窗口物理边角，从根上消除"圆角面板后露出矩形背景"；
+/// 亚克力走官方 DWMSBT_TRANSIENTWINDOW 路径（只对活动窗口渲染，失焦自动
+/// 退化为实色，是 Win11 系统设计；透明分层窗口上这条路径会渲染成黑色矩形，
+/// 也正是此前黑方块的根因）。
 #[cfg(windows)]
-fn os_build_number() -> u32 {
-    use windows::Wdk::System::SystemServices::RtlGetVersion;
-    use windows::Win32::System::SystemInformation::OSVERSIONINFOW;
-    let mut info = OSVERSIONINFOW {
-        dwOSVersionInfoSize: std::mem::size_of::<OSVERSIONINFOW>() as u32,
-        ..Default::default()
-    };
-    unsafe { let _ = RtlGetVersion(&mut info); };
-    info.dwBuildNumber
+pub(crate) fn apply_panel_effects_for<R: tauri::Runtime>(
+    window: &tauri::WebviewWindow<R>,
+    acrylic: bool,
+) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    if let Ok(handle) = window.window_handle() {
+        if let RawWindowHandle::Win32(h) = handle.as_raw() {
+            let hwnd = windows::Win32::Foundation::HWND(h.hwnd.get() as _);
+            let _ = acrylic::apply_rounded_corners(hwnd);
+            if acrylic {
+                let _ = acrylic::apply_acrylic(hwnd);
+            } else {
+                let _ = acrylic::clear_acrylic(hwnd);
+            }
+        }
+    }
 }
 
-/// 为两个悬浮面板应用毛玻璃效果（Win10 1903+ 亚克力，更早版本模糊，失败静默回退）
+/// 启动时给两个悬浮面板窗口应用效果，并把 webview 默认背景设为全透明。
+/// 前提：窗口 transparent: false；webview 背景全透明后，DWM 亚克力层才能
+/// 透过 CSS 透明区域显示出来（CSS 透明只能透出 webview 自身的默认底色）。
+///
+/// 注意必须直接调 WebView2 的 SetDefaultBackgroundColor，而【不是】
+/// WebviewWindow::set_background_color：后者会同时把 tao 窗口背景色设成
+/// 实心色，tao 在 WM_ERASEBKGND 里忽略 alpha 把整个客户区填成不透明色，
+/// 把亚克力层全部盖死——正是"panel 外边框一圈黑色"的来源。
 #[cfg(windows)]
-fn apply_panel_effects(app: &tauri::App) {
-    let build = os_build_number();
+fn apply_panel_acrylic<R: tauri::Runtime>(app: &tauri::AppHandle<R>, acrylic: bool) {
     for label in [panel::CLIPBOARD_PANEL, panel::FOLDER_PANEL] {
         if let Some(w) = app.get_webview_window(label) {
-            if build >= 18362 {
-                let _ = window_vibrancy::apply_acrylic(&w, Some((24, 24, 24, 60)));
-            } else {
-                let _ = window_vibrancy::apply_blur(&w, Some((24, 24, 24, 60)));
-            }
+            apply_panel_effects_for(&w, acrylic);
+            let _ = w.with_webview(|wv| {
+                use webview2_com::Microsoft::Web::WebView2::Win32::{
+                    COREWEBVIEW2_COLOR, ICoreWebView2Controller2,
+                };
+                use windows::core::Interface;
+                if let Ok(controller2) = wv.controller().cast::<ICoreWebView2Controller2>() {
+                    unsafe {
+                        let _ = controller2.SetDefaultBackgroundColor(COREWEBVIEW2_COLOR {
+                            A: 0,
+                            R: 0,
+                            G: 0,
+                            B: 0,
+                        });
+                    }
+                }
+            });
         }
     }
 }
@@ -79,12 +114,15 @@ pub fn run() {
             app.manage(ShortcutBindings::default());
             app.manage(paths);
 
-            #[cfg(windows)]
-            apply_panel_effects(app);
-
             tray::setup_tray(&handle).ok();
+            #[cfg(windows)]
+            apply_panel_acrylic(&handle, config.general.acrylic_enabled);
+            #[cfg(windows)]
+            keyhook::start(handle.clone());
             shortcut::register_initial(&handle, &config);
             clipboard::start_watcher(handle.clone());
+            #[cfg(windows)]
+            explorer::start_explorer_watcher(handle.clone());
 
             // 非静默启动时直接打开设置窗口
             if !config.general.silent_start {
@@ -116,6 +154,9 @@ pub fn run() {
             folder::folder_copy_path,
             shortcut::shortcut_test,
             shortcut::shortcut_apply,
+            shortcut::shortcut_capture_begin,
+            shortcut::shortcut_capture_end,
+            panel::panel_set_always_on_top,
         ])
         .run(tauri::generate_context!())
         .expect("应用启动失败");

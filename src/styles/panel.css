@@ -1,10 +1,18 @@
 /* 悬浮面板通用样式（剪贴板 / 文件夹面板共用外壳） */
 
+/* 面板窗口的 webview 背景必须透明：窗口本身透明 + 后端亚克力层，
+   不透明的 body 背景会在圆角外壳外画出黑色矩形 */
+html[data-window="panel"],
+html[data-window="panel"] body {
+  background: transparent;
+}
+
 .panel {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  padding: var(--panel-padding);
+  /* 无 padding：外壳铺满整个面板窗口，窗口四角由 DWM 原生圆角裁剪，
+     任何外圈留白（黑边）都不存在 */
   animation: panel-in var(--dur-base) var(--ease-out);
 }
 
@@ -19,18 +27,26 @@
   }
 }
 
-/* 毛玻璃外壳：颜色与模糊全部走 CSS 变量 + backdrop-filter */
+/* 毛玻璃外壳：模糊由 DWM 系统亚克力背景层提供（后端 acrylic::apply_acrylic +
+   全透明 webview 背景透出），这里只负责可配置透明度的底色 + 圆角 + 边框；
+   圆角用 --radius-panel（与窗口 DWM 原生圆角一致），底色透明度由
+   --panel-opacity 控制（设置里的"面板底色不透明度"）。
+   失焦时亚克力被系统退化为实色（Win11 设计），此时把底色加深一档，
+   让"实色面板"看起来是刻意设计而非效果丢失；
+   勿加 backdrop-filter，它只能模糊 webview 内容且可能干扰亚克力合成 */
 .panel-shell {
   display: flex;
   flex-direction: column;
   height: 100%;
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-panel);
   border: 1px solid var(--border-subtle);
-  background: var(--bg-panel);
-  backdrop-filter: blur(32px) saturate(1.4);
-  -webkit-backdrop-filter: blur(32px) saturate(1.4);
-  box-shadow: var(--shadow-panel);
+  background: rgba(var(--bg-panel-rgb), var(--shell-opacity, var(--panel-opacity)));
   overflow: hidden;
+}
+
+/* 失焦状态（焦点标记由 usePanel.ts 维护）：底色加深，配合系统实色退化 */
+html[data-window="panel"]:not([data-panel-focused]) .panel-shell {
+  --shell-opacity: min(calc(var(--panel-opacity) + 0.15), 1);
 }
 
 /* 头部：搜索框 + 操作区 */
@@ -122,25 +138,32 @@
   font-family: inherit;
 }
 
-/* 分段选择器（粘贴模式等） */
+/* 分段选择器（粘贴模式等）：选中项为实心品牌色胶囊，对比强烈 */
 .segmented {
   display: inline-flex;
-  padding: 2px;
-  border-radius: var(--radius-md);
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  border: 1px solid var(--border-subtle);
   background: var(--bg-item-hover);
 }
 .segmented button {
-  padding: 3px 10px;
-  border-radius: calc(var(--radius-md) - 2px);
+  padding: 4px 12px;
+  border-radius: 7px;
   font-size: 12px;
+  font-weight: 500;
   color: var(--text-secondary);
   transition: background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out);
+    color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+.segmented button:hover:not(.active) {
+  color: var(--text-primary);
 }
 .segmented button.active {
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  box-shadow: var(--shadow-item);
+  background: var(--accent);
+  color: var(--accent-text);
+  box-shadow: 0 1px 6px var(--accent-soft);
 }
 
 /* 右键菜单 */

@@ -1,5 +1,5 @@
 //! 剪贴板管理器：后台监听、历史记录持久化、写回与模拟粘贴。
-use crate::config::ConfigState;
+use crate::config::{ConfigState, PasteMode};
 use crate::storage::{save_json, AppPaths};
 use arboard::{Clipboard, ImageData};
 use serde::{Deserialize, Serialize};
@@ -7,7 +7,7 @@ use std::borrow::Cow;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
@@ -112,6 +112,11 @@ fn read_clipboard(watch_images: bool, watch_files: bool) -> Option<Snapshot> {
 /// 启动后台监听线程：每 500ms 轮询，内容变化时记录并广播事件
 pub fn start_watcher<R: Runtime>(app: AppHandle<R>) {
     std::thread::spawn(move || {
+        // 启动时先同步一次队列可用性（历史数据可能非空）
+        if let Some(store) = app.try_state::<ClipboardStore>() {
+            let entries = store.0.lock().unwrap();
+            sync_seq_availability(&entries);
+        }
         let mut last_hash: u64 = 0;
         loop {
             std::thread::sleep(Duration::from_millis(500));
@@ -163,6 +168,7 @@ pub fn start_watcher<R: Runtime>(app: AppHandle<R>) {
             entries.insert(0, entry);
             trim_entries(&mut entries, max_history as usize);
             let _ = save_json(&paths.clipboard_file, &*entries);
+            sync_seq_availability(&entries);
             drop(entries);
 
             let _ = app.emit(EVT_CHANGED, ());
@@ -178,6 +184,16 @@ fn trim_entries(entries: &mut Vec<ClipEntry>, max: usize) {
             .rposition(|e| !e.favorite)
             .unwrap_or(entries.len() - 1);
         entries.remove(idx);
+    }
+}
+
+/// 同步顺序粘贴队列可用性给键盘钩子：队列为空时放行全局 Ctrl+V
+fn sync_seq_availability(entries: &[ClipEntry]) {
+    #[cfg(windows)]
+    crate::keyhook::set_seq_queue_available(!entries.is_empty());
+    #[cfg(not(windows))]
+    {
+        let _ = entries;
     }
 }
 
@@ -313,6 +329,7 @@ pub fn clipboard_delete(
         let entry = entries.remove(pos);
         remove_image_file(&entry, &paths.images_dir);
     }
+    sync_seq_availability(&entries);
     save_json(&paths.clipboard_file, &*entries).map_err(|e| format!("保存失败：{e}"))
 }
 
@@ -327,6 +344,7 @@ pub fn clipboard_clear(
         remove_image_file(e, &paths.images_dir);
     }
     entries.retain(|e| e.favorite);
+    sync_seq_availability(&entries);
     save_json(&paths.clipboard_file, &*entries).map_err(|e| format!("保存失败：{e}"))
 }
 
@@ -409,6 +427,66 @@ pub fn clipboard_paste(
     Ok(())
 }
 
+/// 顺序粘贴去抖：按住 Ctrl 连点 V 时热键可能连发，150ms 内只处理一次
+static LAST_SEQ_PASTE: AtomicI64 = AtomicI64::new(0);
+
+/// 顺序模式下的全局 Ctrl+V：取队首条目（FIFO 按复制先后、LIFO 倒序），
+/// 写回剪贴板并模拟粘贴，随后消耗该条（收藏项保留）
+pub fn sequential_paste<R: Runtime>(app: &AppHandle<R>) {
+    let now = chrono::Utc::now().timestamp_millis();
+    let last = LAST_SEQ_PASTE.swap(now, Ordering::SeqCst);
+    if now - last < 150 {
+        return;
+    }
+    let mode = {
+        let Some(cfg) = app.try_state::<ConfigState>() else {
+            return;
+        };
+        let guard = cfg.0.lock().unwrap();
+        guard.clipboard.paste_mode
+    };
+    if mode == PasteMode::Normal {
+        return;
+    }
+    let Some(store) = app.try_state::<ClipboardStore>() else {
+        return;
+    };
+    let Some(paths) = app.try_state::<AppPaths>() else {
+        return;
+    };
+    // 队首 = 按模式排序后的第一条（与面板队列顺序一致）
+    let entry = {
+        let entries = store.0.lock().unwrap();
+        let mut queue: Vec<ClipEntry> = entries.clone();
+        match mode {
+            PasteMode::Fifo => queue.sort_by_key(|e| e.created_at),
+            PasteMode::Lifo => queue.sort_by_key(|e| std::cmp::Reverse(e.created_at)),
+            PasteMode::Normal => {}
+        }
+        queue.into_iter().next()
+    };
+    let Some(entry) = entry else { return };
+    if write_entry_to_clipboard(&entry, &paths.images_dir).is_err() {
+        return;
+    }
+    std::thread::spawn(|| {
+        std::thread::sleep(Duration::from_millis(80));
+        let _ = simulate_paste();
+    });
+    // 消耗已粘贴条目（收藏项保留，可反复带出）
+    if !entry.favorite {
+        let mut entries = store.0.lock().unwrap();
+        if let Some(pos) = entries.iter().position(|e| e.id == entry.id) {
+            let removed = entries.remove(pos);
+            remove_image_file(&removed, &paths.images_dir);
+        }
+        let _ = save_json(&paths.clipboard_file, &*entries);
+        sync_seq_availability(&entries);
+        drop(entries);
+        let _ = app.emit(EVT_CHANGED, ());
+    }
+}
+
 fn write_entry_to_clipboard(
     entry: &ClipEntry,
     images_dir: &std::path::Path,
@@ -453,13 +531,22 @@ fn write_entry_to_clipboard(
 }
 
 fn simulate_paste() -> Result<(), String> {
-    use enigo::{Direction, Enigo, Key, Keyboard, Settings};
-    let mut enigo =
-        Enigo::new(&Settings::default()).map_err(|e| format!("初始化输入模拟失败：{e}"))?;
-    let _ = enigo.key(Key::Control, Direction::Press);
-    let _ = enigo.key(Key::V, Direction::Click);
-    let _ = enigo.key(Key::Control, Direction::Release);
-    Ok(())
+    #[cfg(windows)]
+    {
+        // 自注入带魔数标记，键盘钩子会放行；用 enigo 会被自己的钩子误吞
+        crate::keyhook::send_ctrl_v();
+        return Ok(());
+    }
+    #[cfg(not(windows))]
+    {
+        use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+        let mut enigo =
+            Enigo::new(&Settings::default()).map_err(|e| format!("初始化输入模拟失败：{e}"))?;
+        let _ = enigo.key(Key::Control, Direction::Press);
+        let _ = enigo.key(Key::V, Direction::Click);
+        let _ = enigo.key(Key::Control, Direction::Release);
+        Ok(())
+    }
 }
 
 fn remove_image_file(entry: &ClipEntry, images_dir: &std::path::Path) {

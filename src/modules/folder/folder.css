@@ -108,6 +108,8 @@
 }
 .folder-card:hover {
   background: var(--bg-item-hover);
+  border-color: var(--border-subtle);
+  box-shadow: var(--shadow-item);
 }
 .folder-card:active {
   transform: scale(0.97);
@@ -118,6 +120,7 @@
 .folder-card.drag-over {
   border-color: var(--accent);
   background: var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--accent), 0 2px 12px var(--accent-soft);
 }
 
 .folder-list .folder-card {

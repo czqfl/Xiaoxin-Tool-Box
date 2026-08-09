@@ -2,7 +2,16 @@
 use crate::storage::{load_json, save_json, AppPaths};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{Manager, State};
+
+/// 粘贴模式：普通 / 先进先出 / 后进先出
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PasteMode {
+    Normal,
+    Fifo,
+    Lifo,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -15,6 +24,10 @@ pub struct ClipboardConfig {
     pub watch_files: bool,
     /// 粘贴后是否自动关闭面板
     pub close_after_paste: bool,
+    /// 剪贴板面板是否置顶显示
+    pub always_on_top: bool,
+    /// 粘贴模式；顺序模式下全局 Ctrl+V 逐条带出队列内容
+    pub paste_mode: PasteMode,
 }
 
 impl Default for ClipboardConfig {
@@ -24,6 +37,8 @@ impl Default for ClipboardConfig {
             watch_images: true,
             watch_files: true,
             close_after_paste: true,
+            always_on_top: true,
+            paste_mode: PasteMode::Normal,
         }
     }
 }
@@ -54,6 +69,10 @@ pub struct FolderConfig {
     pub split: FolderSplit,
     /// 每个分区每页展示的条目数
     pub page_size: u32,
+    /// 文件夹面板是否置顶显示
+    pub always_on_top: bool,
+    /// 是否追踪资源管理器中打开的文件夹并自动统计访问次数
+    pub track_explorer: bool,
 }
 
 impl Default for FolderConfig {
@@ -63,6 +82,8 @@ impl Default for FolderConfig {
             layout: FolderLayout::Grid,
             split: FolderSplit::Columns,
             page_size: 12,
+            always_on_top: true,
+            track_explorer: true,
         }
     }
 }
@@ -102,6 +123,10 @@ pub struct GeneralConfig {
     pub silent_start: bool,
     /// 语言（首期仅实现简体中文，预留字段）
     pub language: String,
+    /// 面板是否启用亚克力毛玻璃效果
+    pub acrylic_enabled: bool,
+    /// 面板底色不透明度（0-100，越大越不透明，亚克力模糊越不明显）
+    pub acrylic_opacity: u8,
 }
 
 impl Default for GeneralConfig {
@@ -110,6 +135,8 @@ impl Default for GeneralConfig {
             theme: ThemeMode::System,
             silent_start: true,
             language: "zh-CN".into(),
+            acrylic_enabled: true,
+            acrylic_opacity: 75,
         }
     }
 }
@@ -133,11 +160,21 @@ pub fn config_load(paths: State<'_, AppPaths>) -> AppConfig {
 
 #[tauri::command]
 pub fn config_save(
+    app: tauri::AppHandle,
     config: AppConfig,
     paths: State<'_, AppPaths>,
     state: State<'_, ConfigState>,
 ) -> Result<(), String> {
     save_json(&paths.config_file, &config).map_err(|e| format!("保存配置失败：{e}"))?;
-    *state.0.lock().unwrap() = config;
+    *state.0.lock().unwrap() = config.clone();
+    // 粘贴模式变化时同步全局 Ctrl+V 顺序粘贴快捷键的注册状态
+    crate::shortcut::sync_seq_shortcut(&app, config.clipboard.paste_mode);
+    // 面板亚克力开关变化时立即生效（开：重新上亚克力；关：清除亚克力）
+    #[cfg(windows)]
+    for label in [crate::panel::CLIPBOARD_PANEL, crate::panel::FOLDER_PANEL] {
+        if let Some(w) = app.get_webview_window(label) {
+            crate::apply_panel_effects_for(&w, config.general.acrylic_enabled);
+        }
+    }
     Ok(())
 }

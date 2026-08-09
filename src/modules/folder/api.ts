@@ -12,4 +12,5 @@ export {
   openFolderInTerminal,
   copyFolderPath,
   pickFolder,
+  setPanelAlwaysOnTop,
 } from "../../core/tauri";

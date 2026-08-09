@@ -2,7 +2,7 @@
 import { create } from "zustand";
 import type { AppConfig } from "../types";
 import { loadConfig, saveConfig } from "../core/tauri";
-import { applyTheme } from "../core/theme";
+import { applyPanelStyle, applyTheme } from "../core/theme";
 import { broadcastConfigChanged } from "../core/events";
 
 const defaultConfig: AppConfig = {
@@ -11,12 +11,16 @@ const defaultConfig: AppConfig = {
     watch_images: true,
     watch_files: true,
     close_after_paste: true,
+    always_on_top: true,
+    paste_mode: "normal",
   },
   folder: {
     show_visit_count: true,
     layout: "grid",
     split: "columns",
     page_size: 12,
+    always_on_top: true,
+    track_explorer: true,
   },
   shortcuts: {
     clipboard: "Alt+C",
@@ -26,6 +30,8 @@ const defaultConfig: AppConfig = {
     theme: "system",
     silent_start: true,
     language: "zh-CN",
+    acrylic_enabled: true,
+    acrylic_opacity: 75,
   },
 };
 
@@ -48,6 +54,10 @@ export const useConfigStore = create<ConfigStore>((set) => ({
       const config = await loadConfig();
       set({ config, loaded: true });
       applyTheme(config.general.theme);
+      applyPanelStyle(
+        config.general.acrylic_opacity,
+        config.general.acrylic_enabled
+      );
     } catch (err) {
       console.error("加载配置失败，使用默认配置", err);
       set({ config: defaultConfig, loaded: true });
@@ -57,15 +67,21 @@ export const useConfigStore = create<ConfigStore>((set) => ({
   update: async (next, broadcast = true) => {
     set({ config: next });
     applyTheme(next.general.theme);
+    applyPanelStyle(next.general.acrylic_opacity, next.general.acrylic_enabled);
     await saveConfig(next);
     if (broadcast) {
-      await broadcastConfigChanged();
+      await broadcastConfigChanged(next);
     }
   },
 
   sync: (next) => {
+    // 防御：无效载荷时保留当前配置，避免把 config 置为 undefined 导致界面崩溃
+    if (!next || typeof next !== "object" || !next.general || !next.clipboard) {
+      return;
+    }
     set({ config: next, loaded: true });
     applyTheme(next.general.theme);
+    applyPanelStyle(next.general.acrylic_opacity, next.general.acrylic_enabled);
   },
 }));
 

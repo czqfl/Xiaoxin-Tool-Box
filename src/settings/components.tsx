@@ -70,3 +70,29 @@ export function Segmented<T extends string>({
     </div>
   );
 }
+
+export function Slider({
+  value,
+  min = 0,
+  max = 100,
+  onChange,
+  disabled = false,
+}: {
+  value: number;
+  min?: number;
+  max?: number;
+  onChange: (v: number) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <input
+      type="range"
+      className="slider"
+      min={min}
+      max={max}
+      value={value}
+      disabled={disabled}
+      onChange={(e) => onChange(Number(e.target.value))}
+    />
+  );
+}

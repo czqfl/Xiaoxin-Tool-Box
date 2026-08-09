@@ -9,3 +9,15 @@ export function applyTheme(mode: ThemeMode) {
     root.setAttribute("data-theme", mode);
   }
 }
+
+/**
+ * 面板外壳底色不透明度（0-1）。
+ * 亚克力关闭时强制 1：外壳全不透明，避免圆角边缝露出窗口底色。
+ */
+export function applyPanelStyle(opacity: number, acrylicEnabled: boolean) {
+  const a = Math.min(100, Math.max(0, opacity)) / 100;
+  document.documentElement.style.setProperty(
+    "--panel-opacity",
+    String(acrylicEnabled ? a : 1)
+  );
+}

@@ -58,6 +58,16 @@ export function ClipboardPage() {
             onChange={(v) => patch({ close_after_paste: v })}
           />
         </SettingRow>
+
+        <SettingRow
+          title="面板置顶显示"
+          desc="剪贴板面板始终悬浮在其他窗口之上（面板头部的图钉按钮可快捷切换）"
+        >
+          <Switch
+            checked={config.clipboard.always_on_top}
+            onChange={(v) => patch({ always_on_top: v })}
+          />
+        </SettingRow>
       </SettingGroup>
     </div>
   );

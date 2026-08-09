@@ -23,7 +23,7 @@ serde_json = "1"
 arboard = "3"
 enigo = "0.3"
 image = { version = "0.25", default-features = false, features = ["png"] }
-window-vibrancy = "0.6"
+raw-window-handle = "0.6"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 thiserror = "2"
@@ -35,8 +35,16 @@ features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_System_Threading",
     "Win32_System_SystemInformation",
+    "Win32_Graphics_Dwm",
     "Wdk_System_SystemServices",
+    "Win32_UI_Shell",
+    "Win32_System_Com",
+    "Win32_System_Variant",
+    "Win32_UI_Input_KeyboardAndMouse",
 ]
+
+[target.'cfg(windows)'.dependencies.webview2-com]
+version = "0.38"
 
 [profile.release]
 panic = "abort"

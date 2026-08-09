@@ -1,8 +1,41 @@
 //! 悬浮面板的显示/隐藏与定位逻辑（两个面板共用）。
 use tauri::{AppHandle, LogicalPosition, Manager, Runtime, WebviewWindow};
 
+use crate::config::ConfigState;
+
 pub const CLIPBOARD_PANEL: &str = "clipboard-panel";
 pub const FOLDER_PANEL: &str = "folder-panel";
+
+/// 切换面板置顶状态。
+/// 透明窗口 z-order 变化可能使亚克力层失效，切换后补刷一次。
+#[tauri::command]
+pub fn panel_set_always_on_top(window: WebviewWindow, on: bool) -> Result<(), String> {
+    window.set_always_on_top(on).map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    {
+        let acrylic = window
+            .app_handle()
+            .state::<ConfigState>()
+            .0
+            .lock()
+            .unwrap()
+            .general
+            .acrylic_enabled;
+        crate::apply_panel_effects_for(&window, acrylic);
+    }
+    Ok(())
+}
+
+/// 若某个面板正持有焦点则隐藏它（全局顺序粘贴时让焦点回到之前的应用）
+pub fn hide_focused_panel<R: Runtime>(app: &AppHandle<R>) {
+    for label in [CLIPBOARD_PANEL, FOLDER_PANEL] {
+        if let Some(w) = app.get_webview_window(label) {
+            if w.is_focused().unwrap_or(false) {
+                let _ = w.hide();
+            }
+        }
+    }
+}
 
 /// 切换面板：已显示则隐藏；否则定位到光标所在显示器上方居中，然后显示并聚焦
 pub fn toggle_panel<R: Runtime>(app: &AppHandle<R>, label: &str) {
@@ -23,6 +56,18 @@ pub fn toggle_panel<R: Runtime>(app: &AppHandle<R>, label: &str) {
         let _ = window.hide();
     } else {
         position_near_cursor(app, &window);
+        // 隐藏/显示循环可能使亚克力层失效，每次呼出前重刷一次
+        #[cfg(windows)]
+        {
+            let acrylic = app
+                .state::<ConfigState>()
+                .0
+                .lock()
+                .unwrap()
+                .general
+                .acrylic_enabled;
+            crate::apply_panel_effects_for(&window, acrylic);
+        }
         let _ = window.show();
         let _ = window.set_focus();
     }

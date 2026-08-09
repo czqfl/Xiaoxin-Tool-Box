@@ -134,6 +134,28 @@
   gap: 8px;
 }
 
+/* 滑块（面板不透明度等） */
+.slider-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.slider {
+  width: 180px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.slider:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.slider-value {
+  min-width: 40px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
 /* 数字输入 */
 .number-input {
   width: 90px;

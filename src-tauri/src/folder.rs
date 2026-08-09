@@ -12,6 +12,9 @@ use tauri_plugin_opener::OpenerExt;
 /// 每个文件夹最多保留的访问历史时间戳数量
 const MAX_VISIT_HISTORY: usize = 100;
 
+/// 文件夹数据变化事件（资源管理器追踪新增/计数时广播，前端据此刷新）
+pub const EVT_CHANGED: &str = "folder://changed";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FolderEntry {
     pub id: String,
@@ -178,8 +181,9 @@ pub fn folder_reorder(
 }
 
 /// 记录一次访问（时间戳用于智能排序）。
-/// 由后端在打开文件夹时统一计数，避免前端先隐藏窗口导致计数请求漏发。
-fn record_visit(entries: &mut [FolderEntry], path: &str, now: i64) {
+/// 由后端在打开文件夹时统一计数，避免前端先隐藏窗口导致计数请求漏发；
+/// 条目不存在时自动登记（资源管理器全局追踪用），返回是否有变化。
+pub(crate) fn register_visit(entries: &mut Vec<FolderEntry>, path: &str, now: i64) -> bool {
     let canonical = path.trim_end_matches(['\\', '/']);
     if let Some(e) = entries
         .iter_mut()
@@ -192,7 +196,30 @@ fn record_visit(entries: &mut [FolderEntry], path: &str, now: i64) {
             let drain = e.visits.len() - MAX_VISIT_HISTORY;
             e.visits.drain(..drain);
         }
+        return true;
     }
+    // 未登记的目录自动加入列表（不固定），由"最常访问"分区按次数排序展示
+    let dir = Path::new(canonical);
+    if !dir.is_dir() {
+        return false;
+    }
+    let name = dir
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| canonical.to_string());
+    entries.push(FolderEntry {
+        id: uuid::Uuid::new_v4().to_string(),
+        name,
+        path: canonical.to_string(),
+        color: None,
+        pinned: false,
+        order: 0,
+        visit_count: 1,
+        last_visit: now,
+        visits: vec![now],
+        created_at: now,
+    });
+    true
 }
 
 /// 通过系统默认文件管理器打开文件夹（错误兜底，不抛崩溃），同时记录一次访问
@@ -208,8 +235,9 @@ pub fn folder_open(
     }
     {
         let mut entries = store.0.lock().unwrap();
-        record_visit(&mut entries, &path, chrono::Utc::now().timestamp_millis());
-        persist(&entries, &paths)?;
+        if register_visit(&mut entries, &path, chrono::Utc::now().timestamp_millis()) {
+            persist(&entries, &paths)?;
+        }
     }
     app.opener()
         .open_path(&path, None::<&str>)
@@ -228,8 +256,9 @@ pub fn folder_open_in_terminal(
     }
     {
         let mut entries = store.0.lock().unwrap();
-        record_visit(&mut entries, &path, chrono::Utc::now().timestamp_millis());
-        persist(&entries, &paths)?;
+        if register_visit(&mut entries, &path, chrono::Utc::now().timestamp_millis()) {
+            persist(&entries, &paths)?;
+        }
     }
     if Command::new("wt").arg("-d").arg(&path).spawn().is_ok() {
         return Ok(());

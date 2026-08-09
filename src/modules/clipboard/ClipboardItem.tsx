@@ -37,8 +37,10 @@ function ImageThumb({ entryId }: { entryId: string }) {
 
 interface Props {
   entry: ClipEntry;
-  /** 普通模式下的序号（1-9 快速粘贴） */
+  /** 普通模式下的序号（1-9 快速粘贴），顺序模式传 0 隐藏 */
   hotkeyIndex: number;
+  /** 顺序模式下的队列序号（1 = 下一条待粘贴） */
+  queueOrder?: number;
   /** 顺序模式下是否为当前待粘贴项 */
   isCurrent: boolean;
   selected: boolean;
@@ -48,6 +50,7 @@ interface Props {
 export function ClipboardItem({
   entry,
   hotkeyIndex,
+  queueOrder,
   isCurrent,
   selected,
   onPaste,
@@ -75,8 +78,16 @@ export function ClipboardItem({
       onClick={onPaste}
       title={entry.text ?? entry.preview}
     >
-      {hotkeyIndex > 0 && hotkeyIndex <= 9 && (
-        <span className="kbd clip-hotkey">{hotkeyIndex}</span>
+      {queueOrder ? (
+        <span
+          className={`clip-order${queueOrder === 1 ? " next" : ""}`}
+          title={queueOrder === 1 ? "下一条粘贴（Ctrl+V 带出）" : `队列第 ${queueOrder} 条`}
+        >
+          {queueOrder}
+        </span>
+      ) : (
+        hotkeyIndex > 0 &&
+        hotkeyIndex <= 9 && <span className="kbd clip-hotkey">{hotkeyIndex}</span>
       )}
 
       {entry.kind === "image" ? (
@@ -117,7 +128,7 @@ export function ClipboardItem({
           <IconPin size={14} filled={entry.pinned} />
         </button>
         <button
-          className="icon-btn clip-delete"
+          className="icon-btn icon-btn-danger"
           title="删除"
           onClick={() => remove(entry.id)}
         >

@@ -2,7 +2,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { FolderEntry } from "../../types";
-import { hideCurrentWindow, usePanelCommon } from "../../core/usePanel";
+import { hideCurrentWindow, usePanelCommon, withNativeDialog } from "../../core/usePanel";
+import { EVT_FOLDER_CHANGED, onEvent } from "../../core/events";
 import { useFolderStore, sortFolders } from "../../stores/folderStore";
 import { useConfigStore } from "../../stores/configStore";
 import * as api from "./api";
@@ -68,12 +69,12 @@ function ZonePager({
 }
 
 export function FolderPanel() {
-  usePanelCommon();
-
   const { folders, loaded, refresh, add, remove, togglePin, moveToTop, reorder } =
     useFolderStore();
   const config = useConfigStore((s) => s.config);
   const updateConfig = useConfigStore((s) => s.update);
+  // 置顶开启时面板常驻：失焦不再自动隐藏
+  usePanelCommon(config.folder.always_on_top);
 
   const [query, setQuery] = useState("");
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -117,8 +118,17 @@ export function FolderPanel() {
       })
       .then((un) => cleanup.push(un));
 
+    // 资源管理器追踪新增/计数后拉取最新数据
+    onEvent(EVT_FOLDER_CHANGED, () => refresh()).then((un) => cleanup.push(un));
+
     return () => cleanup.forEach((fn) => fn());
   }, [refresh, add]);
+
+  // 面板置顶状态跟随配置生效（经后端命令切换，避免透明窗口纯色屏）
+  const alwaysOnTop = config.folder.always_on_top;
+  useEffect(() => {
+    api.setPanelAlwaysOnTop(alwaysOnTop).catch(console.error);
+  }, [alwaysOnTop]);
 
   // Esc 隐藏
   useEffect(() => {
@@ -169,8 +179,8 @@ export function FolderPanel() {
 
   const handleAdd = async () => {
     try {
-      // 调起系统资源管理器选择文件夹
-      const path = await api.pickFolder();
+      // 调起系统资源管理器选择文件夹；弹窗期间面板保持可见
+      const path = await withNativeDialog(() => api.pickFolder());
       if (!path) return;
       const err = await add(path);
       if (err) window.alert(err);
@@ -184,6 +194,14 @@ export function FolderPanel() {
     void updateConfig({
       ...config,
       folder: { ...config.folder, layout: layout === "grid" ? "list" : "grid" },
+    });
+  };
+
+  /** 切换面板置顶（持久化到配置） */
+  const toggleAlwaysOnTop = () => {
+    void updateConfig({
+      ...config,
+      folder: { ...config.folder, always_on_top: !alwaysOnTop },
     });
   };
 
@@ -306,7 +324,7 @@ export function FolderPanel() {
       <div className="panel-shell" style={{ position: "relative" }}>
         {externalDrag && <div className="folder-drop-hint">松开以添加文件夹</div>}
 
-        <div className="panel-header">
+        <div className="panel-header" data-tauri-drag-region>
           <div className="panel-search">
             <span className="search-icon">
               <IconSearch size={15} />
@@ -328,6 +346,13 @@ export function FolderPanel() {
             onClick={toggleLayout}
           >
             {layout === "grid" ? <IconGrid size={16} /> : <IconList size={16} />}
+          </button>
+          <button
+            className={`icon-btn ${alwaysOnTop ? "active" : ""}`}
+            title={alwaysOnTop ? "取消面板置顶" : "面板置顶显示"}
+            onClick={toggleAlwaysOnTop}
+          >
+            <IconPin size={16} filled={alwaysOnTop} />
           </button>
         </div>
 

@@ -153,6 +153,21 @@ export function FolderPage() {
             onChange={(v) => patch({ show_visit_count: v })}
           />
         </SettingRow>
+        <SettingRow title="面板置顶显示" desc="文件夹面板始终保持在其他窗口之上">
+          <Switch
+            checked={config.folder.always_on_top}
+            onChange={(v) => patch({ always_on_top: v })}
+          />
+        </SettingRow>
+        <SettingRow
+          title="记录资源管理器访问"
+          desc="自动统计在 Windows 资源管理器中打开过的文件夹，计入“最常访问”排序"
+        >
+          <Switch
+            checked={config.folder.track_explorer}
+            onChange={(v) => patch({ track_explorer: v })}
+          />
+        </SettingRow>
         <SettingRow title="面板布局模式" desc="分区内卡片的展示方式">
           <Segmented
             value={config.folder.layout}

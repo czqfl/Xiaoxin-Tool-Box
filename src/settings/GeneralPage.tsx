@@ -1,8 +1,14 @@
-/** 通用设置页：开机自启、静默启动、语言、主题 */
+/** 通用设置页：开机自启、静默启动、语言、主题、面板外观 */
 import { useEffect, useState } from "react";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { useConfigStore } from "../stores/configStore";
-import { Segmented, SettingGroup, SettingRow, Switch } from "./components";
+import {
+  Segmented,
+  SettingGroup,
+  SettingRow,
+  Slider,
+  Switch,
+} from "./components";
 import type { ThemeMode } from "../types";
 
 export function GeneralPage() {
@@ -85,6 +91,34 @@ export function GeneralPage() {
             ]}
             onChange={(v) => patchGeneral({ theme: v })}
           />
+        </SettingRow>
+      </SettingGroup>
+
+      <SettingGroup>
+        <SettingRow
+          title="面板亚克力效果"
+          desc="剪贴板/文件夹面板使用亚克力毛玻璃背景（失焦时系统会退化为实色，属正常）"
+        >
+          <Switch
+            checked={config.general.acrylic_enabled}
+            onChange={(v) => patchGeneral({ acrylic_enabled: v })}
+          />
+        </SettingRow>
+
+        <SettingRow
+          title="面板底色不透明度"
+          desc="数值越大面板底色越不透明，亚克力模糊越不明显"
+        >
+          <div className="slider-wrap">
+            <Slider
+              value={config.general.acrylic_opacity}
+              disabled={!config.general.acrylic_enabled}
+              onChange={(v) => patchGeneral({ acrylic_opacity: v })}
+            />
+            <span className="slider-value">
+              {config.general.acrylic_opacity}%
+            </span>
+          </div>
         </SettingRow>
       </SettingGroup>
     </div>
