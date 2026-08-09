@@ -1,0 +1,200 @@
+/* 文件夹面板布局样式 */
+
+/* 双分区：固定 / 最常访问，支持左右分栏与上下分栏 */
+.folder-zones {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+.folder-zones.columns {
+  flex-direction: row;
+}
+.folder-zones.rows {
+  flex-direction: column;
+}
+
+.folder-zone {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.folder-zones.columns .folder-zone + .folder-zone {
+  border-left: 1px solid var(--border-subtle);
+}
+.folder-zones.rows .folder-zone + .folder-zone {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.zone-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 8px;
+}
+
+.zone-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.zone-empty {
+  padding: 24px 8px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+/* 分区分页器 */
+.zone-pager {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.pager-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.pager-btn:hover:not(:disabled) {
+  background: var(--bg-item-hover);
+  color: var(--text-primary);
+}
+.pager-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.zone-pager-info {
+  min-width: 30px;
+  text-align: center;
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.folder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+  padding: 4px;
+}
+
+.folder-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+}
+
+.folder-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 10px;
+  border-radius: var(--radius-lg);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+.folder-card:hover {
+  background: var(--bg-item-hover);
+}
+.folder-card:active {
+  transform: scale(0.97);
+}
+.folder-card.dragging {
+  opacity: 0.5;
+}
+.folder-card.drag-over {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.folder-list .folder-card {
+  flex-direction: row;
+  justify-content: flex-start;
+  padding: 8px 12px;
+  gap: 10px;
+}
+
+.folder-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.folder-list .folder-icon {
+  width: 32px;
+  height: 32px;
+}
+/* 颜色标签：图标左下角圆点 */
+.folder-color-dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--bg-panel);
+}
+
+.folder-name {
+  max-width: 100%;
+  font-size: 12px;
+  color: var(--text-primary);
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folder-list .folder-name {
+  text-align: left;
+  flex-shrink: 0;
+  max-width: 200px;
+}
+
+.folder-path {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-count {
+  flex-shrink: 0;
+}
+
+/* 拖拽添加提示层 */
+.folder-drop-hint {
+  position: absolute;
+  inset: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-xl);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 14px;
+  pointer-events: none;
+  z-index: 10;
+}
