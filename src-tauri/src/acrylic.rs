@@ -1,41 +1,103 @@
-//! 面板背景材质：Win11 官方 DWM 系统背景（DWMSBT_TRANSIENTWINDOW，mica）。
+//! 面板模糊效果：SetWindowCompositionAttribute + ACCENT_ENABLE_BLURBEHIND。
 //!
-//! 前提：窗口必须是不透明（transparent: false）的普通顶层窗口，
-//! 且 webview 背景由 WebView2 DefaultBackgroundColor 置为全透明，
-//! DWM 材质才能透过内容显示出来（CSS 透明做不到，只会露出 webview 默认底色）。
+//! 为什么不用 DWM 系统背景（DWMSBT_*）：
+//! - DWMSBT_TRANSIENTWINDOW（mica）仅在「活动窗口」上绘制，程序化呼出的面板
+//!   在 Win32 前景锁限制下未真正激活 → 不绘制 → 必须点一下才出模糊（用户已多次遇到）；
+//! - DWMSBT_MAINWINDOW（acrylic）在无边框（decorations:false）面板上经常完全
+//!   不绘制（实测"模糊消失"）。
+//! 二者都绕不开"依赖窗口是否激活"，无法满足"呼出即模糊、无需点击"。
 //!
-//! 为什么用 TRANSIENTWINDOW（mica）而不是 MAINWINDOW（acrylic）：
-//! MAINWINDOW 在无边框（decorations:false）面板上经常完全不绘制材质
-//! （实测表现为"模糊消失"）；mica 在无边框窗口上稳定渲染，仅依赖窗口是否处于
-//! 活动/置前状态。因此"无边框 + mica"需要程序化可靠置前（见 force_foreground），
-//! 否则托盘/热键呼出时 Win32 前景锁会拒绝 set_focus，窗口虽可见却非活动 → 材质
-//! 不绘制，表现为"必须先点一下面板才出模糊"。
+//! 本路径（SWCA + BLURBEHIND）的模糊只认"窗口可见"，与是否激活/聚焦完全无关，
+//! 窗口一显示即出模糊、失焦也保持。前提窗口为不透明（transparent: false）：
+//! 此前踩过的黑色矩形是 transparent:true（WS_EX_LAYERED 分层窗口）上 DWM
+//! 系统背景的坑，与本路径无关，故保持不透明窗口即可安全使用。
 //!
-//! 不用 transparent + SWCA（SetWindowCompositionAttribute）的原因：
-//! transparent: true 会把窗口变成 WS_EX_LAYERED 分层窗口，而 Win11
-//! build 22523+ 上 DWM 系统背景在分层窗口上整体渲染为黑色矩形，SWCA
-//! 亚克力也已失效——"圆角面板后有一层黑色方形"就是这条路径的产物。
-//! 这里在不透明窗口上用官方属性。
+//! 注意：SetWindowCompositionAttribute 是未公开 API——既不在 windows crate 元数据里
+//! （没法 use），也不在官方 user32.lib 导入库中（直接 #[link] 会 LNK2019 无法解析）。
+//! 因此用运行时 GetProcAddress 从已加载的 user32.dll 动态取出函数指针再调用。
 use std::ffi::c_void;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Dwm::{
-    DwmSetWindowAttribute, DWMSBT_NONE, DWMSBT_TRANSIENTWINDOW, DWMWA_SYSTEMBACKDROP_TYPE,
-    DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+    DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
 };
+use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 
-/// 给窗口应用背景材质（mica，Win11 build 22621+，仅支持不透明窗口）。
-/// 在 Win10 上该属性不存在，调用失败时保持普通窗口（无材质，但不黑）。
+// WINDOWCOMPOSITIONATTRIB::WCA_ACCENT_POLICY
+const WCA_ACCENT_POLICY: u32 = 19;
+// ACCENT_STATE
+const ACCENT_DISABLED: u32 = 0;
+const ACCENT_ENABLE_BLURBEHIND: u32 = 3;
+
+#[repr(C)]
+struct AccentPolicy {
+    accent_state: u32,
+    accent_flags: u32,
+    gradient_color: u32,
+    animation_id: u32,
+}
+
+#[repr(C)]
+struct WindowCompositionAttrData {
+    attribute: u32,
+    p_data: *mut c_void,
+    data_size: usize,
+}
+
+// 与未公开 API 匹配的签名
+type SetWindowCompositionAttributeFn =
+    unsafe extern "system" fn(HWND, *mut WindowCompositionAttrData) -> i32;
+
+/// 运行时从 user32.dll 取出 SetWindowCompositionAttribute 并调用。
+/// user32 在 GUI 进程里必然已加载，GetModuleHandle 不会失败；该 API 虽未公开
+/// 但在 user32 导出表里，GetProcAddress 可取。取不到（极老系统）则按"无模糊"处理。
+unsafe fn set_window_composition_attribute(
+    hwnd: HWND,
+    data: *mut WindowCompositionAttrData,
+) -> bool {
+    let hmod = match GetModuleHandleW(windows::core::w!("user32.dll")) {
+        Ok(h) => h,
+        Err(_) => return false,
+    };
+    let Some(farproc) = GetProcAddress(hmod, windows::core::s!("SetWindowCompositionAttribute"))
+    else {
+        return false;
+    };
+    let func: SetWindowCompositionAttributeFn = std::mem::transmute(farproc);
+    func(hwnd, data) != 0
+}
+
+/// 给窗口应用背景模糊（BLURBEHIND，与激活无关，窗口可见即出）。
+/// 失败（如系统不支持）返回 false，调用方保持普通窗口，不黑。
 pub fn apply_acrylic(hwnd: HWND) -> bool {
-    let backdrop = DWMSBT_TRANSIENTWINDOW;
-    unsafe {
-        DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_SYSTEMBACKDROP_TYPE,
-            &backdrop as *const _ as *const c_void,
-            std::mem::size_of_val(&backdrop) as u32,
-        )
-        .is_ok()
-    }
+    let mut policy = AccentPolicy {
+        accent_state: ACCENT_ENABLE_BLURBEHIND,
+        accent_flags: 0,
+        gradient_color: 0,
+        animation_id: 0,
+    };
+    let mut data = WindowCompositionAttrData {
+        attribute: WCA_ACCENT_POLICY,
+        p_data: &mut policy as *mut _ as *mut c_void,
+        data_size: std::mem::size_of::<AccentPolicy>(),
+    };
+    unsafe { set_window_composition_attribute(hwnd, &mut data) }
+}
+
+/// 清除背景模糊。
+#[allow(dead_code)]
+pub fn clear_acrylic(hwnd: HWND) -> bool {
+    let mut policy = AccentPolicy {
+        accent_state: ACCENT_DISABLED,
+        accent_flags: 0,
+        gradient_color: 0,
+        animation_id: 0,
+    };
+    let mut data = WindowCompositionAttrData {
+        attribute: WCA_ACCENT_POLICY,
+        p_data: &mut policy as *mut _ as *mut c_void,
+        data_size: std::mem::size_of::<AccentPolicy>(),
+    };
+    unsafe { set_window_composition_attribute(hwnd, &mut data) }
 }
 
 /// Win11：窗口自身设为系统原生圆角。
@@ -53,25 +115,10 @@ pub fn apply_rounded_corners(hwnd: HWND) -> bool {
     }
 }
 
-/// 清除 DWM 系统背景
-#[allow(dead_code)]
-pub fn clear_acrylic(hwnd: HWND) -> bool {
-    let backdrop = DWMSBT_NONE;
-    unsafe {
-        DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_SYSTEMBACKDROP_TYPE,
-            &backdrop as *const _ as *const c_void,
-            std::mem::size_of_val(&backdrop) as u32,
-        )
-        .is_ok()
-    }
-}
-
 /// 可靠置前：先把窗口顶到最前再降回（绕过 Win32 前景窗口锁），再 SetForegroundWindow。
 /// 背景进程（托盘菜单 / 全局热键）直接 set_focus 常被系统拒绝，导致窗口可见却
-/// 未真正置前、DWM 材质（mica）不绘制——这正是"必须先点一下面板才出模糊"的根因。
-/// 用本函数替代单纯的 show + set_focus，即可让面板/设置窗口呼出即绘制材质、无需点击。
+/// 未真正置前、无法接收键盘输入。用本函数替代单纯的 show + set_focus。
+/// 注：本路径模糊与激活无关，置前仅用于保证面板可正常交互，不再影响模糊绘制。
 pub fn force_foreground(hwnd: HWND) {
     use windows::Win32::UI::WindowsAndMessaging::{
         SetForegroundWindow, SetWindowPos, HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE,

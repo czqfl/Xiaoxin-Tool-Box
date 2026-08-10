@@ -4,9 +4,10 @@ use windows::Win32::Foundation::HWND;
 
 use crate::config::ConfigState;
 
-/// 可靠置前窗口：绕过 Win32 前景锁，让托盘/热键呼出的面板成为活动窗口。
-/// 背景进程直接 set_focus 常被系统拒绝，窗口可见却非活动 → DWM mica 材质
-/// 不绘制（"必须先点一下才出模糊"）。顶到最前再降回 + SetForegroundWindow 可破此锁。
+/// 可靠置前窗口：绕过 Win32 前景锁，让托盘/热键呼出的面板能正常接收输入。
+/// 背景进程直接 set_focus 常被系统拒绝，窗口可见却未真正置前、无法交互。
+/// 顶到最前再降回 + SetForegroundWindow 可破此锁。模糊绘制已与激活无关
+/// （走 SWCA BLURBEHIND），此处置前仅为保证交互，不再影响模糊是否出现。
 #[cfg(windows)]
 fn force_foreground_window<R: Runtime>(window: &WebviewWindow<R>) {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -74,7 +75,14 @@ pub fn toggle_panel<R: Runtime>(app: &AppHandle<R>, label: &str) {
         let _ = window.hide();
     } else {
         position_near_cursor(app, &window);
-        // 隐藏/显示循环可能使亚克力层失效，每次呼出前重刷一次
+        let _ = window.show();
+        // 可靠置前（绕过 Win32 前景锁），保证面板可正常交互/接收输入
+        #[cfg(windows)]
+        force_foreground_window(&window);
+        #[cfg(not(windows))]
+        let _ = window.set_focus();
+        // 显示在可见窗口上再应用模糊（SWCA 在可见窗口上才稳定）；
+        // BLURBEHIND 与激活无关，呼出即模糊、无需点击
         #[cfg(windows)]
         {
             let acrylic = app
@@ -86,12 +94,6 @@ pub fn toggle_panel<R: Runtime>(app: &AppHandle<R>, label: &str) {
                 .acrylic_enabled;
             crate::apply_panel_effects_for(&window, acrylic);
         }
-        let _ = window.show();
-        // 可靠置前（绕过 Win32 前景锁），mica 材质才会在呼出时立即绘制
-        #[cfg(windows)]
-        force_foreground_window(&window);
-        #[cfg(not(windows))]
-        let _ = window.set_focus();
     }
 }
 

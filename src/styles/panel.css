@@ -27,28 +27,20 @@ html[data-window="panel"] body {
   }
 }
 
-/* 毛玻璃外壳：材质由 DWM 系统背景层提供（后端 acrylic::apply_acrylic 用
-   DWMSBT_TRANSIENTWINDOW=mica，无边框窗口上稳定渲染，但仅当窗口处于活动/置前
-   状态才绘制；呼出时由 force_foreground 可靠置前，故无需点击即出材质）。
-   webview 背景全透明，mica 透过内容显示；这里只负责可配置透明度的底色 +
-   圆角 + 边框；圆角用 --radius-panel（与窗口 DWM 原生圆角一致），底色透明度由
+/* 毛玻璃外壳：模糊由后端 SWCA BLURBEHIND 提供（与窗口是否激活无关，
+   窗口一显示即模糊、失焦也保持，无需点击面板）。webview 背景全透明，
+   模糊透过透明区域显示；这里只负责可配置透明度的暗色底色 + 圆角 + 边框，
+   圆角用 --radius-panel（与窗口 DWM 原生圆角一致），底色透明度由
    --panel-opacity 控制（设置里的"面板底色不透明度"）。
-   失焦时 mica 被系统退化为实色（Win11 设计），此时把底色加深一档，让"实色
-   面板"看起来是刻意设计而非效果丢失；
-   勿加 backdrop-filter，它只能模糊 webview 内容且可能干扰 mica 合成 */
+   勿加 backdrop-filter，它只能模糊 webview 内容且可能干扰后端模糊合成 */
 .panel-shell {
   display: flex;
   flex-direction: column;
   height: 100%;
   border-radius: var(--radius-panel);
   border: 1px solid var(--border-subtle);
-  background: rgba(var(--bg-panel-rgb), var(--shell-opacity, var(--panel-opacity)));
+  background: rgba(var(--bg-panel-rgb), var(--panel-opacity));
   overflow: hidden;
-}
-
-/* 失焦状态（焦点标记由 usePanel.ts 维护）：底色加深，配合 mica 失焦退化为实色 */
-html[data-window="panel"]:not([data-panel-focused]) .panel-shell {
-  --shell-opacity: min(calc(var(--panel-opacity) + 0.15), 1);
 }
 
 /* 头部：搜索框 + 操作区 */

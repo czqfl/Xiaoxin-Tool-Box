@@ -22,11 +22,10 @@ use std::sync::Mutex;
 use tauri::Manager;
 use tauri_plugin_global_shortcut::ShortcutState;
 
-/// 面板窗口效果：不透明窗口 + DWM 系统原生圆角 +（可选）DWM 背景亚克力。
+/// 面板窗口效果：不透明窗口 + DWM 系统原生圆角 +（可选）背景模糊。
 /// 圆角由 DWM 直接裁剪窗口物理边角，从根上消除"圆角面板后露出矩形背景"；
-/// 亚克力走官方 DWMSBT_MAINWINDOW 路径（acrylic，窗口可见即绘制、不依赖
-/// 活动状态，因此无需点击面板即可永久模糊；透明分层窗口上这条路径会渲染成
-/// 黑色矩形，也正是此前黑方块的根因）。
+/// 模糊走 SetWindowCompositionAttribute + ACCENT_ENABLE_BLURBEHIND
+/// （与窗口是否激活无关，窗口可见即出模糊，无需点击、失焦也保持）。
 #[cfg(windows)]
 pub(crate) fn apply_panel_effects_for<R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
