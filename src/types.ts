@@ -94,6 +94,8 @@ export interface GeneralConfig {
 export interface CredentialConfig {
   /** 账号密码面板是否置顶显示 */
   always_on_top: boolean;
+  /** 是否默认显示全部密码（持久化，下次打开遵循） */
+  show_passwords: boolean;
 }
 
 export interface AppConfig {

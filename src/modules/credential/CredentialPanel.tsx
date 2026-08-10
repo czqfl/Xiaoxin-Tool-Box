@@ -31,10 +31,20 @@ function useCopyFeedback() {
   return { copiedId, mark };
 }
 
+/** 时间戳格式化为「2026-08-10 14:30」 */
+function formatDate(ts: number): string {
+  if (!ts) return "";
+  const d = new Date(ts);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 export function CredentialPanel() {
   const config = useConfigStore((s) => s.config);
   const updateConfig = useConfigStore((s) => s.update);
   usePanelCommon(config.credentials.always_on_top);
+
+  const showAll = config.credentials.show_passwords;
 
   const [items, setItems] = useState<Credential[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -44,6 +54,15 @@ export function CredentialPanel() {
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
 
   const { copiedId, mark } = useCopyFeedback();
+
+  // 头部拖动：避开输入框与按钮，避免与交互冲突
+  const onHeaderMouseDown = (e: React.MouseEvent) => {
+    const t = e.target as HTMLElement;
+    if (t.closest("input, textarea, button")) return;
+    getCurrentWindow()
+      .startDragging()
+      .catch(() => undefined);
+  };
 
   const refresh = () => {
     api.listCredentials().then((list) => {
@@ -121,10 +140,22 @@ export function CredentialPanel() {
     });
   };
 
+  /** 一键显示 / 隐藏全部密码，并持久化到配置（下次打开遵循） */
+  const toggleShowAll = () => {
+    void updateConfig({
+      ...config,
+      credentials: { ...config.credentials, show_passwords: !showAll },
+    });
+  };
+
   return (
     <div className="panel">
       <div className="panel-shell">
-        <div className="panel-header" data-tauri-drag-region>
+        <div
+          className="panel-header"
+          data-tauri-drag-region
+          onMouseDown={onHeaderMouseDown}
+        >
           <div className="panel-search">
             <span className="search-icon">
               <IconSearch size={15} />
@@ -136,6 +167,13 @@ export function CredentialPanel() {
               autoFocus
             />
           </div>
+          <button
+            className={`icon-btn ${showAll ? "active" : ""}`}
+            title={showAll ? "隐藏全部密码" : "显示全部密码"}
+            onClick={toggleShowAll}
+          >
+            {showAll ? <IconEyeOff size={16} /> : <IconEye size={16} />}
+          </button>
           <button
             className="icon-btn"
             title="添加账号密码"
@@ -170,7 +208,7 @@ export function CredentialPanel() {
           {filtered.length > 0 && (
             <div className="cred-list">
               {filtered.map((c) => {
-                const isRevealed = revealed.has(c.id);
+                const isRevealed = showAll || revealed.has(c.id);
                 return (
                   <div className="cred-card" key={c.id}>
                     <div className="cred-card-head">
@@ -216,15 +254,17 @@ export function CredentialPanel() {
                     <div className="cred-row">
                       <span className="cred-key">密码</span>
                       <span className="cred-val mono">
-                        {isRevealed ? c.password : "•".repeat(Math.min(c.password.length, 12))}
+                        {isRevealed ? c.password : "•".repeat(Math.min(c.password.length, 16))}
                       </span>
-                      <button
-                        className="icon-btn sm"
-                        title={isRevealed ? "隐藏密码" : "显示密码"}
-                        onClick={() => toggleReveal(c.id)}
-                      >
-                        {isRevealed ? <IconEyeOff size={14} /> : <IconEye size={14} />}
-                      </button>
+                      {!showAll && (
+                        <button
+                          className="icon-btn sm"
+                          title={isRevealed ? "隐藏密码" : "显示密码"}
+                          onClick={() => toggleReveal(c.id)}
+                        >
+                          {isRevealed ? <IconEyeOff size={14} /> : <IconEye size={14} />}
+                        </button>
+                      )}
                       <button
                         className={`copy-btn ${copiedId === `${c.id}:password` ? "ok" : ""}`}
                         title="复制密码"
@@ -239,6 +279,10 @@ export function CredentialPanel() {
                         {c.note}
                       </div>
                     )}
+
+                    <div className="cred-meta">
+                      更新于 {formatDate(c.updated_at)}
+                    </div>
                   </div>
                 );
               })}
@@ -247,7 +291,7 @@ export function CredentialPanel() {
         </div>
 
         <div className="panel-footer">
-          <span>{items.length} 个账号 · 点击复制 · 密码默认隐藏</span>
+          <span>{items.length} 个账号 · 点击复制 · 拖动标题栏移动</span>
           <span>
             <span className="kbd">Esc</span> 关闭
           </span>

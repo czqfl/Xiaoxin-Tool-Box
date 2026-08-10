@@ -5,8 +5,15 @@ use tauri::{
     AppHandle, Manager, Runtime,
 };
 
-/// 显示并聚焦设置窗口
+/// 显示并聚焦设置窗口。
+/// 呼出前先收起所有悬浮面板：面板默认 alwaysOnTop，若正显示在前面会盖住
+/// 设置窗口，表现为"偶尔打不开设置"；同时让设置窗口置于最前。
 pub fn show_settings_window<R: Runtime>(app: &AppHandle<R>) {
+    for label in crate::panel::ALL_PANELS {
+        if let Some(w) = app.get_webview_window(label) {
+            let _ = w.hide();
+        }
+    }
     if let Some(w) = app.get_webview_window("settings") {
         let _ = w.unminimize();
         let _ = w.show();

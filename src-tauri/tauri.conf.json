@@ -55,8 +55,8 @@
       {
         "label": "credential-panel",
         "title": "账号密码",
-        "width": 560,
-        "height": 600,
+        "width": 600,
+        "height": 640,
         "resizable": false,
         "fullscreen": false,
         "maximized": false,

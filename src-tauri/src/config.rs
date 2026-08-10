@@ -122,11 +122,16 @@ pub enum ThemeMode {
 pub struct CredentialConfig {
     /// 账号密码面板是否置顶显示
     pub always_on_top: bool,
+    /// 是否默认显示全部密码（按配置持久化，下次打开遵循）
+    pub show_passwords: bool,
 }
 
 impl Default for CredentialConfig {
     fn default() -> Self {
-        Self { always_on_top: true }
+        Self {
+            always_on_top: true,
+            show_passwords: false,
+        }
     }
 }
 

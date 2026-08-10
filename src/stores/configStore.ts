@@ -24,6 +24,7 @@ const defaultConfig: AppConfig = {
   },
   credentials: {
     always_on_top: true,
+    show_passwords: false,
   },
   shortcuts: {
     clipboard: "Alt+C",
