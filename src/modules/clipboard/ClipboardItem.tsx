@@ -13,16 +13,33 @@ import {
   IconTrash,
 } from "../../components/icons";
 
-/** 缩略图：异步加载 data-url 并缓存 */
+/** 缩略图：异步加载 data-url 并缓存；图片文件由后端后台保存，
+ *  首次请求可能抢跑失败，失败后自动重试若干次 */
 function ImageThumb({ entryId }: { entryId: string }) {
   const fetchImage = useClipboardStore((s) => s.fetchImage);
   const cached = useClipboardStore((s) => s.imageCache[entryId]);
   const [src, setSrc] = useState(cached ?? "");
 
   useEffect(() => {
-    if (!src) {
-      fetchImage(entryId).then(setSrc);
-    }
+    if (src) return;
+    let cancelled = false;
+    let attempts = 0;
+    const tryLoad = () => {
+      if (cancelled) return;
+      fetchImage(entryId).then((s) => {
+        if (cancelled) return;
+        if (s) {
+          setSrc(s);
+        } else if (attempts < 6) {
+          attempts += 1;
+          setTimeout(tryLoad, 400);
+        }
+      });
+    };
+    tryLoad();
+    return () => {
+      cancelled = true;
+    };
   }, [entryId, src, fetchImage]);
 
   if (!src) {

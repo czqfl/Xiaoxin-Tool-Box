@@ -176,13 +176,107 @@ fn read_png_from_clipboard() -> Option<image::RgbaImage> {
     }
 }
 
-/// 启动后台监听线程：每 500ms 轮询，内容变化时记录并广播事件。
-/// 线程内任何 panic 都会被捕获并自动重启，避免监听静默失效（表现为
-/// "复制了却再也不进历史"）。
+// ---------------------------------------------------------------------------
+// 剪贴板事件监听（Windows）：隐藏窗口 + WM_CLIPBOARDUPDATE 实时通知
+// ---------------------------------------------------------------------------
+
+/// 创建隐藏窗口注册剪贴板监听，剪贴板内容一变立即通过 channel 通知监听线程，
+/// 消除轮询延迟（复制后几乎瞬时入历史）。
+#[cfg(windows)]
+mod clipboard_listener {
+    use std::sync::mpsc::Sender;
+    use std::sync::OnceLock;
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::System::DataExchange::AddClipboardFormatListener;
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, RegisterClassW,
+        TranslateMessage, CW_USEDEFAULT, WM_CLIPBOARDUPDATE, WINDOW_EX_STYLE, WINDOW_STYLE,
+        WNDCLASSW, MSG,
+    };
+
+    const CLASS_NAME: &str = "XiaoxinClipboardListener";
+    static LISTENER_TX: OnceLock<Sender<()>> = OnceLock::new();
+
+    unsafe extern "system" fn wnd_proc(
+        hwnd: HWND,
+        msg: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        if msg == WM_CLIPBOARDUPDATE {
+            if let Some(tx) = LISTENER_TX.get() {
+                let _ = tx.send(());
+            }
+            return LRESULT(0);
+        }
+        DefWindowProcW(hwnd, msg, wparam, lparam)
+    }
+
+    pub fn start<R: tauri::Runtime>(app: tauri::AppHandle<R>, tx: Sender<()>) {
+        let _ = app; // 借入 AppHandle 保持模块活跃（实际由 watcher 线程持有）
+        std::thread::spawn(move || unsafe {
+            let Ok(hinstance) = GetModuleHandleW(None) else {
+                return;
+            };
+            let class_wide: Vec<u16> = CLASS_NAME
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+            let wc = WNDCLASSW {
+                lpfnWndProc: Some(wnd_proc),
+                hInstance: hinstance.into(),
+                lpszClassName: PCWSTR(class_wide.as_ptr()),
+                style: Default::default(),
+                ..Default::default()
+            };
+            if RegisterClassW(&wc) == 0 {
+                return;
+            }
+            let Ok(hwnd) = CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                PCWSTR(class_wide.as_ptr()),
+                PCWSTR(class_wide.as_ptr()),
+                WINDOW_STYLE(0),
+                CW_USEDEFAULT,
+                CW_USEDEFAULT,
+                CW_USEDEFAULT,
+                CW_USEDEFAULT,
+                None,
+                None,
+                Some(hinstance.into()),
+                None,
+            ) else {
+                return;
+            };
+            if AddClipboardFormatListener(hwnd).is_err() {
+                return;
+            }
+            let _ = LISTENER_TX.set(tx);
+            // 消息循环：阻塞于本线程，收到 WM_CLIPBOARDUPDATE 即通知监听线程
+            let mut msg = MSG::default();
+            while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                let _ = TranslateMessage(&msg);
+                let _ = DispatchMessageW(&msg);
+            }
+        });
+    }
+}
+
+/// 启动后台监听线程。
+/// - Windows 下由隐藏窗口监听 WM_CLIPBOARDUPDATE 事件，剪贴板一变立即唤醒（事件驱动，零轮询延迟）；
+/// - 500ms 轮询保留作兜底（事件可能被其他进程持锁期间的变更漏掉）；
+/// - 线程内任何 panic 都会被捕获并自动重启，避免监听静默失效。
 pub fn start_watcher<R: Runtime>(app: AppHandle<R>) {
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    #[cfg(windows)]
+    clipboard_listener::start(app.clone(), tx);
     std::thread::spawn(move || {
         let mut last_hash: u64 = 0;
         loop {
+            // 事件到达立即返回；否则 500ms 超时触发一次兜底轮询
+            let _ = rx.recv_timeout(Duration::from_millis(500));
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 watcher_tick(&app, &mut last_hash);
             }));
@@ -196,14 +290,13 @@ pub fn start_watcher<R: Runtime>(app: AppHandle<R>) {
 
 /// 单次轮询：读剪贴板，内容变化时记录并广播（panic 时由 start_watcher 重启线程）
 fn watcher_tick<R: Runtime>(app: &AppHandle<R>, last_hash: &mut u64) {
-    // 启动后首轮先同步一次队列可用性（历史数据可能非空）
+    // 首轮先同步一次队列可用性（历史数据可能非空）
     if *last_hash == 0 {
         if let Some(store) = app.try_state::<ClipboardStore>() {
             let entries = store.0.lock().unwrap();
             sync_seq_availability(&entries);
         }
     }
-    std::thread::sleep(Duration::from_millis(500));
 
     let (watch_images, watch_files, max_history) = {
         let Some(cfg) = app.try_state::<ConfigState>() else {
@@ -292,9 +385,19 @@ fn build_entry(snap: &Snapshot, hash: u64, images_dir: &std::path::Path) -> Opti
         Snapshot::Image(img) => {
             let rel = format!("{id}.png");
             let thumb_rel = format!("{id}.thumb.png");
-            // 原图无损保存（保持分辨率），缩略图仅用于面板预览
-            save_original(img, images_dir.join(&rel))?;
-            save_thumbnail(img, images_dir.join(&thumb_rel))?;
+            // 原图无损保存（保持分辨率），缩略图仅用于面板预览。
+            // 大图 PNG 编码可能耗时数秒，放到后台线程，监听线程不被阻塞，
+            // 条目立即入库并广播，前端先显示条目、缩略图稍后加载。
+            let bytes = img.bytes.to_vec();
+            let (w, h) = (img.width as u32, img.height as u32);
+            let dir = images_dir.to_path_buf();
+            let save_rel = rel.clone();
+            let save_thumb_rel = thumb_rel.clone();
+            std::thread::spawn(move || {
+                // 先缩略图（预览尽快可用）再原图
+                let _ = save_thumbnail(&bytes, w, h, dir.join(&save_thumb_rel));
+                let _ = save_original(&bytes, w, h, dir.join(&save_rel));
+            });
             (
                 EntryKind::Image,
                 "图片".into(),
@@ -338,17 +441,34 @@ fn build_entry(snap: &Snapshot, hash: u64, images_dir: &std::path::Path) -> Opti
     })
 }
 
-/// 保存完整分辨率原图（PNG 无损），写回剪贴板时保持清晰度
-fn save_original(img: &ImageData<'_>, path: PathBuf) -> Option<()> {
-    let rgba = image::RgbaImage::from_raw(img.width as u32, img.height as u32, img.bytes.to_vec())?;
-    rgba.save(&path).ok()
+/// 保存完整分辨率原图（PNG 无损，快速压缩），写回剪贴板时保持清晰度
+fn save_original(bytes: &[u8], width: u32, height: u32, path: PathBuf) -> std::io::Result<()> {
+    let rgba = image::RgbaImage::from_raw(width, height, bytes.to_vec())
+        .ok_or_else(|| std::io::Error::other("图片数据无效"))?;
+    save_png_fast(&rgba, path)
 }
 
 /// 保存 200px 缩略图，仅用于面板预览，减小内存与传输体积
-fn save_thumbnail(img: &ImageData<'_>, path: PathBuf) -> Option<()> {
-    let rgba = image::RgbaImage::from_raw(img.width as u32, img.height as u32, img.bytes.to_vec())?;
+fn save_thumbnail(bytes: &[u8], width: u32, height: u32, path: PathBuf) -> std::io::Result<()> {
+    let rgba = image::RgbaImage::from_raw(width, height, bytes.to_vec())
+        .ok_or_else(|| std::io::Error::other("图片数据无效"))?;
     let thumb = image::imageops::thumbnail(&rgba, 200, 200);
-    thumb.save(&path).ok()
+    save_png_fast(&thumb, path)
+}
+
+/// 用 Fast 压缩写 PNG：比默认压缩快数倍（大图从秒级降到亚秒级），体积略增
+fn save_png_fast(rgba: &image::RgbaImage, path: PathBuf) -> std::io::Result<()> {
+    use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+    use image::ImageEncoder;
+    let file = std::fs::File::create(path)?;
+    let enc = PngEncoder::new_with_quality(file, CompressionType::Fast, FilterType::Adaptive);
+    enc.write_image(
+        rgba.as_raw(),
+        rgba.width(),
+        rgba.height(),
+        image::ExtendedColorType::Rgba8,
+    )
+    .map_err(std::io::Error::other)
 }
 
 /// 获取前台窗口对应的进程名（如 chrome、Code），失败时回退窗口标题
