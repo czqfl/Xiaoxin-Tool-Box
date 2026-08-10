@@ -55,6 +55,9 @@ export const reorderFolders = (ids: string[]) =>
 export const openFolder = (path: string) => invoke<void>("folder_open", { path });
 export const openFolderInTerminal = (path: string) =>
   invoke<void>("folder_open_in_terminal", { path });
+/** 在指定终端打开文件夹：shell 取 "wt" | "cmd" | "powershell" */
+export const openFolderInTerminalWith = (path: string, shell: string) =>
+  invoke<void>("folder_open_in_terminal_with", { path, shell });
 export const copyFolderPath = (path: string) =>
   invoke<void>("folder_copy_path", { path });
 

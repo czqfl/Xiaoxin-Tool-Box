@@ -7,7 +7,10 @@ export interface ClipEntry {
   kind: EntryKind;
   text: string | null;
   preview: string;
+  /** 原图相对路径（写回剪贴板用，保持原分辨率） */
   image_path: string | null;
+  /** 缩略图相对路径（仅面板预览用，200px） */
+  image_thumb_path: string | null;
   files: string[] | null;
   source_app: string | null;
   created_at: number;

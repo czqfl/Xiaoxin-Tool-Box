@@ -223,6 +223,12 @@ export function FolderPanel() {
     setDragOverId(null);
   };
 
+  /** 在指定终端中打开（wt / cmd / powershell） */
+  const openInTerminal = (folder: FolderEntry, shell: "wt" | "cmd" | "powershell") => {
+    hideCurrentWindow();
+    api.openFolderInTerminalWith(folder.path, shell).catch((e) => window.alert(String(e)));
+  };
+
   const menuItems = (folder: FolderEntry): MenuItem[] => [
     {
       label: "打开",
@@ -232,11 +238,24 @@ export function FolderPanel() {
     {
       label: "在终端中打开",
       icon: <IconTerminal size={14} />,
-      onClick: () => {
-        hideCurrentWindow();
-        api.openFolderInTerminal(folder.path).catch((e) => window.alert(String(e)));
-      },
       dividerAfter: true,
+      children: [
+        {
+          label: "Windows Terminal",
+          icon: <IconTerminal size={13} />,
+          onClick: () => openInTerminal(folder, "wt"),
+        },
+        {
+          label: "命令提示符 (cmd)",
+          icon: <IconTerminal size={13} />,
+          onClick: () => openInTerminal(folder, "cmd"),
+        },
+        {
+          label: "PowerShell",
+          icon: <IconTerminal size={13} />,
+          onClick: () => openInTerminal(folder, "powershell"),
+        },
+      ],
     },
     {
       label: "复制路径",

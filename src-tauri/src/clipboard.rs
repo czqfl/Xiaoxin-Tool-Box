@@ -34,8 +34,10 @@ pub struct ClipEntry {
     pub text: Option<String>,
     /// 预览：文本前 100 字 / "图片" / 文件名列表
     pub preview: String,
-    /// 缩略图相对路径（image 类型）
+    /// 原图相对路径（image 类型，完整分辨率，写回剪贴板用）
     pub image_path: Option<String>,
+    /// 缩略图相对路径（image 类型，200px，仅面板预览用）
+    pub image_thumb_path: Option<String>,
     /// 文件路径列表（files 类型）
     pub files: Option<Vec<String>>,
     /// 来源应用（前台窗口进程名，尽力获取）
@@ -202,15 +204,25 @@ fn build_entry(snap: &Snapshot, hash: u64, images_dir: &std::path::Path) -> Opti
     let now = chrono::Utc::now().timestamp_millis();
     let source_app = source_app();
 
-    let (kind, preview, text, image_path, files) = match snap {
+    let (kind, preview, text, image_path, image_thumb_path, files) = match snap {
         Snapshot::Text(t) => {
             let preview: String = t.chars().take(100).collect();
-            (EntryKind::Text, preview, Some(t.clone()), None, None)
+            (EntryKind::Text, preview, Some(t.clone()), None, None, None)
         }
         Snapshot::Image(img) => {
             let rel = format!("{id}.png");
-            save_thumbnail(img, images_dir.join(&rel))?;
-            (EntryKind::Image, "图片".into(), None, Some(rel), None)
+            let thumb_rel = format!("{id}.thumb.png");
+            // 原图无损保存（保持分辨率），缩略图仅用于面板预览
+            save_original(img, images_dir.join(&rel))?;
+            save_thumbnail(img, images_dir.join(&thumb_rel))?;
+            (
+                EntryKind::Image,
+                "图片".into(),
+                None,
+                Some(rel),
+                Some(thumb_rel),
+                None,
+            )
         }
         Snapshot::Files(list) => {
             let names: Vec<String> = list
@@ -226,7 +238,7 @@ fn build_entry(snap: &Snapshot, hash: u64, images_dir: &std::path::Path) -> Opti
                 .iter()
                 .map(|p| p.to_string_lossy().to_string())
                 .collect();
-            (EntryKind::Files, preview, None, None, Some(paths))
+            (EntryKind::Files, preview, None, None, None, Some(paths))
         }
     };
 
@@ -236,6 +248,7 @@ fn build_entry(snap: &Snapshot, hash: u64, images_dir: &std::path::Path) -> Opti
         text,
         preview,
         image_path,
+        image_thumb_path,
         files,
         source_app,
         created_at: now,
@@ -245,7 +258,13 @@ fn build_entry(snap: &Snapshot, hash: u64, images_dir: &std::path::Path) -> Opti
     })
 }
 
-/// 保存 200px 缩略图，减小历史存储体积
+/// 保存完整分辨率原图（PNG 无损），写回剪贴板时保持清晰度
+fn save_original(img: &ImageData<'_>, path: PathBuf) -> Option<()> {
+    let rgba = image::RgbaImage::from_raw(img.width as u32, img.height as u32, img.bytes.to_vec())?;
+    rgba.save(&path).ok()
+}
+
+/// 保存 200px 缩略图，仅用于面板预览，减小内存与传输体积
 fn save_thumbnail(img: &ImageData<'_>, path: PathBuf) -> Option<()> {
     let rgba = image::RgbaImage::from_raw(img.width as u32, img.height as u32, img.bytes.to_vec())?;
     let thumb = image::imageops::thumbnail(&rgba, 200, 200);
@@ -374,7 +393,7 @@ pub fn clipboard_toggle_pin(
     save_json(&paths.clipboard_file, &*entries).map_err(|e| format!("保存失败：{e}"))
 }
 
-/// 返回缩略图的 base64 data-url（缩略图已压缩至 200px，体积可控）
+/// 返回预览图的 base64 data-url（优先缩略图；旧记录无缩略图时回退原图）
 #[tauri::command]
 pub fn clipboard_image_data(
     id: String,
@@ -386,7 +405,11 @@ pub fn clipboard_image_data(
         entries
             .iter()
             .find(|e| e.id == id)
-            .and_then(|e| e.image_path.clone())
+            .and_then(|e| {
+                e.image_thumb_path
+                    .clone()
+                    .or_else(|| e.image_path.clone())
+            })
             .ok_or_else(|| "未找到图片记录".to_string())?
     };
     let bytes = std::fs::read(paths.images_dir.join(&rel)).map_err(|e| format!("读取失败：{e}"))?;
@@ -551,6 +574,9 @@ fn simulate_paste() -> Result<(), String> {
 
 fn remove_image_file(entry: &ClipEntry, images_dir: &std::path::Path) {
     if let Some(rel) = &entry.image_path {
+        let _ = std::fs::remove_file(images_dir.join(rel));
+    }
+    if let Some(rel) = &entry.image_thumb_path {
         let _ = std::fs::remove_file(images_dir.join(rel));
     }
 }

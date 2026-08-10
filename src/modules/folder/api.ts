@@ -10,6 +10,7 @@ export {
   reorderFolders,
   openFolder,
   openFolderInTerminal,
+  openFolderInTerminalWith,
   copyFolderPath,
   pickFolder,
   setPanelAlwaysOnTop,

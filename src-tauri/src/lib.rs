@@ -151,6 +151,7 @@ pub fn run() {
             folder::folder_reorder,
             folder::folder_open,
             folder::folder_open_in_terminal,
+            folder::folder_open_in_terminal_with,
             folder::folder_copy_path,
             shortcut::shortcut_test,
             shortcut::shortcut_apply,

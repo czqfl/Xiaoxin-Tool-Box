@@ -244,10 +244,21 @@ pub fn folder_open(
         .map_err(|e| format!("打开失败：{e}"))
 }
 
-/// 在终端中打开：优先 Windows Terminal，回退 cmd，同时记录一次访问
+/// 在终端中打开（默认：优先 Windows Terminal，回退 cmd），同时记录一次访问
 #[tauri::command]
 pub fn folder_open_in_terminal(
     path: String,
+    store: State<'_, FolderStore>,
+    paths: State<'_, AppPaths>,
+) -> CmdResult {
+    folder_open_in_terminal_with(path, "wt".into(), store, paths)
+}
+
+/// 在指定终端中打开文件夹：shell 取 "wt" | "cmd" | "powershell"，同时记录一次访问
+#[tauri::command]
+pub fn folder_open_in_terminal_with(
+    path: String,
+    shell: String,
     store: State<'_, FolderStore>,
     paths: State<'_, AppPaths>,
 ) -> CmdResult {
@@ -260,15 +271,58 @@ pub fn folder_open_in_terminal(
             persist(&entries, &paths)?;
         }
     }
-    if Command::new("wt").arg("-d").arg(&path).spawn().is_ok() {
-        return Ok(());
+    open_in_shell(&path, &shell)
+}
+
+/// 拉起指定终端进程。Windows 下用 CREATE_NEW_CONSOLE 新开独立控制台窗口，
+/// 避免子进程继承宿主（无控制台窗口）环境导致看不到终端。
+#[cfg(windows)]
+fn open_in_shell(path: &str, shell: &str) -> CmdResult {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+
+    match shell {
+        "cmd" => {
+            let cmd = format!("cd /d \"{}\"", path.replace('"', "\"\""));
+            Command::new("cmd")
+                .args(["/k", &cmd])
+                .creation_flags(CREATE_NEW_CONSOLE)
+                .spawn()
+                .map_err(|e| format!("打开命令提示符失败：{e}"))?;
+        }
+        "powershell" => {
+            // 单引号内按 PowerShell 转义规则将 ' 翻倍
+            let cmd = format!("Set-Location -LiteralPath '{}'", path.replace('\'', "''"));
+            Command::new("powershell")
+                .args(["-NoExit", "-Command", &cmd])
+                .creation_flags(CREATE_NEW_CONSOLE)
+                .spawn()
+                .map_err(|e| format!("打开 PowerShell 失败：{e}"))?;
+        }
+        _ => {
+            // Windows Terminal；未安装时回退 cmd
+            if Command::new("wt")
+                .arg("-d")
+                .arg(path)
+                .creation_flags(CREATE_NEW_CONSOLE)
+                .spawn()
+                .is_err()
+            {
+                let cmd = format!("cd /d \"{}\"", path.replace('"', "\"\""));
+                Command::new("cmd")
+                    .args(["/k", &cmd])
+                    .creation_flags(CREATE_NEW_CONSOLE)
+                    .spawn()
+                    .map_err(|e| format!("打开终端失败：{e}"))?;
+            }
+        }
     }
-    let cmd = format!("cd /d \"{}\"", path);
-    Command::new("cmd")
-        .args(["/c", "start", "cmd", "/k", &cmd])
-        .spawn()
-        .map_err(|e| format!("打开终端失败：{e}"))?;
     Ok(())
+}
+
+#[cfg(not(windows))]
+fn open_in_shell(_path: &str, _shell: &str) -> CmdResult {
+    Err("当前平台暂不支持在终端中打开".into())
 }
 
 /// 复制文件夹路径到剪贴板（不触发剪贴板重复记录）
