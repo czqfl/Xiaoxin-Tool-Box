@@ -47,7 +47,9 @@ export interface Credential {
   updated_at: number;
 }
 
-export type FolderLayout = "grid" | "list";
+export type FolderLayout = "grid" | "list" | "tree";
+/** 终端类型：Windows Terminal / 命令提示符 / PowerShell */
+export type TerminalShell = "wt" | "cmd" | "powershell";
 /** 面板分区排布：左右分栏 / 上下分栏 */
 export type FolderSplit = "columns" | "rows";
 export type ThemeMode = "system" | "light" | "dark";
@@ -72,6 +74,8 @@ export interface FolderConfig {
   always_on_top: boolean;
   /** 是否追踪资源管理器中打开的文件夹并自动统计访问次数 */
   track_explorer: boolean;
+  /** 卡片快捷按钮默认打开的终端类型 */
+  terminal_shell: TerminalShell;
 }
 
 export interface ShortcutsConfig {

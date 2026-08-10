@@ -2,7 +2,7 @@
 use crate::clipboard::SUPPRESS_WATCH;
 use crate::storage::{save_json, AppPaths};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::Ordering;
 use std::sync::Mutex;
@@ -49,7 +49,9 @@ pub fn folder_list(store: State<'_, FolderStore>) -> Vec<FolderEntry> {
     store.0.lock().unwrap().clone()
 }
 
-/// 添加文件夹：校验目录存在性与重复
+/// 添加文件夹：校验目录存在性与重复。
+/// 已存在于列表中（如右侧“常用访问区”由资源管理器追踪自动登记的条目）
+/// 但尚未固定时，直接将其提升为固定，而非报错——用户意图是加进固定区。
 #[tauri::command]
 pub fn folder_add(
     path: String,
@@ -62,17 +64,26 @@ pub fn folder_add(
     }
     let canonical = path.trim_end_matches(['\\', '/']).to_string();
     let mut entries = store.0.lock().unwrap();
-    if entries
-        .iter()
-        .any(|e| e.path.eq_ignore_ascii_case(&canonical))
+    // 固定区排序权重：新固定项排在末尾
+    let max_order = entries.iter().map(|e| e.order).max().unwrap_or(-1);
+    if let Some(existing) = entries
+        .iter_mut()
+        .find(|e| e.path.eq_ignore_ascii_case(&canonical))
     {
-        return Err("该文件夹已在列表中".into());
+        if existing.pinned {
+            return Err("该文件夹已在固定区中".into());
+        }
+        // 在常用访问区里 → 提升为固定（排在固定区末尾）
+        existing.pinned = true;
+        existing.order = max_order + 1;
+        let result = existing.clone();
+        persist(&entries, &paths)?;
+        return Ok(result);
     }
     let name = dir
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| canonical.clone());
-    let max_order = entries.iter().map(|e| e.order).max().unwrap_or(-1);
     let entry = FolderEntry {
         id: uuid::Uuid::new_v4().to_string(),
         name,
@@ -325,6 +336,75 @@ fn open_in_shell(_path: &str, _shell: &str) -> CmdResult {
     Err("当前平台暂不支持在终端中打开".into())
 }
 
+/// 在默认终端中执行命令（如 git 命令）：进入目录后执行，窗口保留直接展示输出。
+/// 不记录访问次数——执行命令是主动操作，与打开/浏览无关。
+#[tauri::command]
+pub fn folder_git_exec(path: String, command: String, shell: String) -> CmdResult {
+    if !Path::new(&path).is_dir() {
+        return Err("文件夹不存在或已被移动".into());
+    }
+    exec_in_shell(&path, &shell, &command)
+}
+
+/// 拉起终端并执行命令：复用 open_in_shell 的壳，进入目录后追加命令。
+/// 命令执行失败时错误信息同样显示在终端窗口内，反馈天然可见。
+#[cfg(windows)]
+fn exec_in_shell(path: &str, shell: &str, command: &str) -> CmdResult {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+
+    match shell {
+        "cmd" => {
+            // /d 忽略自动运行命令，/s 保持引号原样，/k 执行后保留窗口
+            let cmd_line = format!("cd /d \"{}\" && {command}", path.replace('"', "\"\""));
+            Command::new("cmd")
+                .args(["/d", "/s", "/k", &cmd_line])
+                .creation_flags(CREATE_NEW_CONSOLE)
+                .spawn()
+                .map_err(|e| format!("打开命令提示符失败：{e}"))?;
+        }
+        "powershell" => {
+            // 单引号内按 PowerShell 转义规则将 ' 翻倍
+            let cmd_line = format!(
+                "Set-Location -LiteralPath '{}'; {command}",
+                path.replace('\'', "''")
+            );
+            Command::new("powershell")
+                .args(["-NoExit", "-Command", &cmd_line])
+                .creation_flags(CREATE_NEW_CONSOLE)
+                .spawn()
+                .map_err(|e| format!("打开 PowerShell 失败：{e}"))?;
+        }
+        _ => {
+            // Windows Terminal；未安装时回退 cmd
+            let cmd_line = format!(
+                "Set-Location -LiteralPath '{}'; {command}",
+                path.replace('\'', "''")
+            );
+            if Command::new("wt")
+                .args(["-d", path, "powershell", "-NoExit", "-Command", &cmd_line])
+                .creation_flags(CREATE_NEW_CONSOLE)
+                .spawn()
+                .is_err()
+            {
+                let cmd_line =
+                    format!("cd /d \"{}\" && {command}", path.replace('"', "\"\""));
+                Command::new("cmd")
+                    .args(["/d", "/s", "/k", &cmd_line])
+                    .creation_flags(CREATE_NEW_CONSOLE)
+                    .spawn()
+                    .map_err(|e| format!("打开终端失败：{e}"))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn exec_in_shell(_path: &str, _shell: &str, _command: &str) -> CmdResult {
+    Err("当前平台暂不支持在终端中执行命令".into())
+}
+
 /// 复制文件夹路径到剪贴板（不触发剪贴板重复记录）
 #[tauri::command]
 pub fn folder_copy_path(path: String) -> CmdResult {
@@ -335,4 +415,173 @@ pub fn folder_copy_path(path: String) -> CmdResult {
         return Err(format!("复制失败：{e}"));
     }
     Ok(())
+}
+
+/// 在指定编辑器中打开文件夹：editor 取 "code" | "idea" | "webstorm"，同时记录一次访问。
+/// VS Code 优先用 PATH 中的 code 命令（无窗口闪动），失败回退标准安装路径的 Code.exe；
+/// JetBrains 系列在常见安装根目录下按目录名前缀探测可执行文件。
+#[tauri::command]
+pub fn folder_open_in_editor(
+    path: String,
+    editor: String,
+    store: State<'_, FolderStore>,
+    paths: State<'_, AppPaths>,
+) -> CmdResult {
+    if !Path::new(&path).is_dir() {
+        return Err("文件夹不存在或已被移动".into());
+    }
+    {
+        let mut entries = store.0.lock().unwrap();
+        if register_visit(&mut entries, &path, chrono::Utc::now().timestamp_millis()) {
+            persist(&entries, &paths)?;
+        }
+    }
+    match editor.as_str() {
+        "code" => open_vscode(&path),
+        "idea" => open_jetbrains(&path, "IntelliJ IDEA", "idea64.exe"),
+        "webstorm" => open_jetbrains(&path, "WebStorm", "webstorm64.exe"),
+        _ => Err(format!("不支持的编辑器：{editor}")),
+    }
+}
+
+/// 用 VS Code 打开：PATH 中的 code 命令优先，回退安装目录里的 Code.exe
+fn open_vscode(path: &str) -> CmdResult {
+    if Command::new("code").arg(path).spawn().is_ok() {
+        return Ok(());
+    }
+    // 回退：标准安装位置（LOCALAPPDATA 优先，Program Files 次之）
+    let roots = [
+        std::env::var("LOCALAPPDATA")
+            .map(|d| format!("{d}\\Programs\\Microsoft VS Code"))
+            .ok(),
+        std::env::var("ProgramFiles")
+            .map(|d| format!("{d}\\Microsoft VS Code"))
+            .ok(),
+    ];
+    for root in roots.into_iter().flatten() {
+        let exe = Path::new(&root).join("Code.exe");
+        if exe.is_file() {
+            return Command::new(exe)
+                .arg(path)
+                .spawn()
+                .map(|_| ())
+                .map_err(|e| format!("启动 VS Code 失败：{e}"));
+        }
+    }
+    Err("未检测到 VS Code：请确认已安装，并在 VS Code 中执行「Command Palette → Shell 命令: 在 PATH 中安装 code 命令」".into())
+}
+
+/// 在 JetBrains 系 IDE 中打开：常见安装根 + 固定盘 JetBrains 目录，深度受限探测。
+/// 兼容三种安装形态：
+/// - 传统安装：Program Files\JetBrains\IntelliJ IDEA 2024.1\bin\idea64.exe
+/// - Toolbox 安装：%LOCALAPPDATA%\JetBrains\Toolbox\apps\IDEA-U\ch-0\242.x\bin\idea64.exe
+/// - 自定义盘符：D:\JetBrains\...（任意非系统盘根下的 JetBrains 目录）
+fn open_jetbrains(path: &str, display: &str, exe_name: &str) -> CmdResult {
+    let mut roots: Vec<PathBuf> = vec![
+        std::env::var("ProgramFiles").unwrap_or_default().into(),
+        std::env::var("ProgramFiles(x86)").unwrap_or_default().into(),
+    ];
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        roots.push(PathBuf::from(format!("{local}\\Programs")));
+        roots.push(PathBuf::from(format!("{local}\\JetBrains\\Toolbox\\apps")));
+    }
+    // 固定盘根下的 JetBrains 目录：自定义安装（如 D:\JetBrains）
+    for drive in b'A'..=b'Z' {
+        let root = PathBuf::from(format!("{}\\JetBrains", drive as char));
+        if root.is_dir() {
+            roots.push(root);
+        }
+    }
+    let mut found: Option<PathBuf> = None;
+    for root in &roots {
+        if find_editor_exe(root, exe_name, 0, &mut found) {
+            break;
+        }
+    }
+    match found {
+        Some(exe) => Command::new(exe)
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("启动 {display} 失败：{e}")),
+        None => Err(format!(
+            "未检测到 {display}：请确认已安装（支持 Toolbox 与自定义安装目录）"
+        )),
+    }
+}
+
+/// 深度受限查找 bin/{exe_name}：只深入 JetBrains 家族 / Toolbox 渠道 / 版本号目录，
+/// 避免在 Program Files 等大目录里无谓全量扫描；找到即停止。
+fn find_editor_exe(
+    dir: &Path,
+    exe_name: &str,
+    depth: usize,
+    out: &mut Option<PathBuf>,
+) -> bool {
+    if depth > 5 || out.is_some() {
+        return false;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if !p.is_dir() {
+            continue;
+        }
+        let Some(name) = p.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        // 当前目录就带 bin/{exe_name}：直接命中
+        if p.join("bin").join(exe_name).is_file() {
+            *out = Some(p.join("bin").join(exe_name));
+            return true;
+        }
+        // 只深入有希望的目录：JetBrains 家族 / Toolbox 渠道 / 版本号目录
+        let lower = name.to_ascii_lowercase();
+        let promising = lower.starts_with("idea")
+            || lower.starts_with("webstorm")
+            || lower.starts_with("intellij")
+            || lower.starts_with("jetbrains")
+            || lower.starts_with("toolbox")
+            || lower == "apps"
+            || lower.starts_with("ch-")
+            || name.chars().next().is_some_and(|c| c.is_ascii_digit());
+        if promising && find_editor_exe(&p, exe_name, depth + 1, out) {
+            return true;
+        }
+    }
+    false
+}
+
+/// 批量读取文件夹的 Git 当前分支（非仓库返回 None）。
+/// 读取 .git/HEAD 而非执行 git 命令：无外部依赖、毫秒级返回；
+/// 支持普通仓库（.git 目录）与子模块/工作树（.git 为指向真实 gitdir 的文本文件）。
+#[tauri::command]
+pub fn folder_git_branches(paths: Vec<String>) -> Vec<Option<String>> {
+    paths.iter().map(|p| git_branch_of(p)).collect()
+}
+
+fn git_branch_of(path: &str) -> Option<String> {
+    let git_dir = Path::new(path).join(".git");
+    let head_path = if git_dir.is_dir() {
+        git_dir.join("HEAD")
+    } else if git_dir.is_file() {
+        // gitdir: <相对路径> 形式，指向真实仓库目录
+        let content = std::fs::read_to_string(&git_dir).ok()?;
+        let real = content.strip_prefix("gitdir:")?.trim();
+        Path::new(path).join(real).join("HEAD")
+    } else {
+        return None;
+    };
+    let content = std::fs::read_to_string(head_path).ok()?;
+    let line = content.lines().next()?.trim();
+    if let Some(branch) = line.strip_prefix("ref: refs/heads/") {
+        Some(branch.to_string())
+    } else if !line.is_empty() {
+        // detached HEAD：显示短哈希
+        Some(line.chars().take(8).collect())
+    } else {
+        None
+    }
 }

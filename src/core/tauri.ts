@@ -60,6 +60,15 @@ export const openFolderInTerminalWith = (path: string, shell: string) =>
   invoke<void>("folder_open_in_terminal_with", { path, shell });
 export const copyFolderPath = (path: string) =>
   invoke<void>("folder_copy_path", { path });
+/** 在指定编辑器中打开文件夹：editor 取 "code" | "idea" | "webstorm" */
+export const openFolderInEditor = (path: string, editor: string) =>
+  invoke<void>("folder_open_in_editor", { path, editor });
+/** 在默认终端中执行命令（git 等）：shell 取 "wt" | "cmd" | "powershell" */
+export const gitExec = (path: string, command: string, shell: string) =>
+  invoke<void>("folder_git_exec", { path, command, shell });
+/** 批量读取文件夹的 Git 当前分支（非仓库为 null） */
+export const folderGitBranches = (paths: string[]) =>
+  safe(invoke<(string | null)[]>("folder_git_branches", { paths }), []);
 
 // ---- 账号密码 ----
 export const listCredentials = () =>

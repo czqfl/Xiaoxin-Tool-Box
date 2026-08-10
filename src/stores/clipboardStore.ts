@@ -13,6 +13,8 @@ interface ClipboardStore {
   clearAll: () => Promise<void>;
   toggleFavorite: (id: string) => Promise<void>;
   togglePin: (id: string) => Promise<void>;
+  /** 智能转换后更新条目文本（同步系统剪贴板由调用方负责） */
+  replaceText: (id: string, text: string) => void;
   fetchImage: (id: string) => Promise<string>;
 }
 
@@ -53,6 +55,20 @@ export const useClipboardStore = create<ClipboardStore>((set, get) => ({
       ),
     });
     await api.togglePin(id);
+  },
+
+  replaceText: (id, text) => {
+    set({
+      entries: get().entries.map((e) =>
+        e.id === id && e.text !== null
+          ? {
+              ...e,
+              text,
+              preview: text.length > 100 ? `${text.slice(0, 100)}…` : text,
+            }
+          : e
+      ),
+    });
   },
 
   fetchImage: async (id) => {

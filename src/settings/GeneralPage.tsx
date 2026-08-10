@@ -97,7 +97,7 @@ export function GeneralPage() {
       <SettingGroup>
         <SettingRow
           title="面板亚克力效果"
-          desc="剪贴板/文件夹面板使用亚克力毛玻璃背景（失焦时系统会退化为实色，属正常）"
+          desc="剪贴板/文件夹面板使用亚克力毛玻璃背景（与窗口是否聚焦无关，呼出即生效）"
         >
           <Switch
             checked={config.general.acrylic_enabled}

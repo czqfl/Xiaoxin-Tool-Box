@@ -75,16 +75,23 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
 
   return (
     <>
-      {/* 透明遮罩捕获外部点击 */}
+      {/* 透明遮罩捕获外部点击；阻止冒泡：菜单可能挂在带 onClick 的条目内部 */}
       <div
         style={{ position: "fixed", inset: 0, zIndex: 999 }}
-        onClick={onClose}
+        onClick={(e) => {
+          e.stopPropagation();
+          onClose();
+        }}
         onContextMenu={(e) => {
           e.preventDefault();
           onClose();
         }}
       />
-      <div className="context-menu" style={style}>
+      <div
+        className="context-menu"
+        style={style}
+        onClick={(e) => e.stopPropagation()}
+      >
         {items.map((item) => (
           <div key={item.label}>
             {renderItem(item)}

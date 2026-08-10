@@ -143,7 +143,7 @@ export function CredentialPanel() {
     <div className="panel">
       <div className="panel-shell">
         <div className="panel-header" data-tauri-drag-region>
-          <div className="panel-search">
+          <div className="panel-search" data-tauri-drag-region>
             <span className="search-icon">
               <IconSearch size={15} />
             </span>
@@ -185,7 +185,7 @@ export function CredentialPanel() {
           {loaded && items.length === 0 && (
             <div className="empty-state">
               <span className="empty-icon">🔑</span>
-              <span>点击右上角 + 添加第一个账号，支持一键复制</span>
+              <span>点击右上角 + 添加第一个账号，添加后可一键复制账号/密码</span>
             </div>
           )}
           {loaded && items.length > 0 && filtered.length === 0 && (

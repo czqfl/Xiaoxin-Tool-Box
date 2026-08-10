@@ -168,14 +168,26 @@ export function FolderPage() {
             onChange={(v) => patch({ track_explorer: v })}
           />
         </SettingRow>
-        <SettingRow title="面板布局模式" desc="分区内卡片的展示方式">
+        <SettingRow title="面板布局模式" desc="分区内卡片的展示方式，目录树按父目录分组缩进展示">
           <Segmented
             value={config.folder.layout}
             options={[
               { value: "grid", label: "网格" },
               { value: "list", label: "列表" },
+              { value: "tree", label: "目录树" },
             ]}
             onChange={(v) => patch({ layout: v })}
+          />
+        </SettingRow>
+        <SettingRow title="默认终端" desc="点击卡片/条目上的终端快捷按钮时，使用哪种终端打开当前文件夹">
+          <Segmented
+            value={config.folder.terminal_shell}
+            options={[
+              { value: "wt", label: "Windows Terminal" },
+              { value: "cmd", label: "命令提示符" },
+              { value: "powershell", label: "PowerShell" },
+            ]}
+            onChange={(v) => patch({ terminal_shell: v })}
           />
         </SettingRow>
         <SettingRow title="分区排布方式" desc="固定 / 最常访问两个分区的面板布局">

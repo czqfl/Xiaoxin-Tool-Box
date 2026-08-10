@@ -80,8 +80,8 @@
 
 .folder-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 6px;
   padding: 4px;
 }
 
@@ -98,7 +98,7 @@
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  padding: 14px 10px;
+  padding: 10px 6px;
   border-radius: var(--radius-lg);
   border: 1px solid transparent;
   cursor: pointer;
@@ -126,25 +126,37 @@
 .folder-list .folder-card {
   flex-direction: row;
   justify-content: flex-start;
-  padding: 8px 12px;
+  padding: 6px 10px;
   gap: 10px;
 }
 
+/* 图标块：整体按颜色标签染色（无标签时用品牌蓝），hover 时轻微放大 */
 .folder-icon {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 42px;
-  height: 42px;
+  width: 38px;
+  height: 38px;
   border-radius: var(--radius-md);
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: color-mix(in srgb, var(--folder-color, var(--accent)) 15%, transparent);
+  color: var(--folder-color, var(--accent));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
   flex-shrink: 0;
+  transition: transform var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+.folder-card:hover .folder-icon {
+  transform: scale(1.08);
+  background: color-mix(in srgb, var(--folder-color, var(--accent)) 22%, transparent);
 }
 .folder-list .folder-icon {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
+}
+.folder-list .folder-icon svg {
+  width: 15px;
+  height: 15px;
 }
 /* 颜色标签：图标左下角圆点 */
 .folder-color-dot {
@@ -157,20 +169,27 @@
   border: 2px solid var(--bg-panel);
 }
 
+/* 名称：紧凑尺寸下保持加粗，hover 时向品牌色过渡提示可点 */
 .folder-name {
   max-width: 100%;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
+  letter-spacing: 0.1px;
+  line-height: 1.35;
   color: var(--text-primary);
   text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.folder-card:hover .folder-name {
+  color: var(--accent);
 }
 .folder-list .folder-name {
   text-align: left;
   flex-shrink: 0;
-  max-width: 220px;
+  max-width: 170px;
   font-size: 13px;
 }
 
@@ -184,8 +203,188 @@
   white-space: nowrap;
 }
 
+/* 访问次数：accent 胶囊，热度一眼可见 */
 .folder-count {
   flex-shrink: 0;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* Git 分支徽章：绿色系，网格卡片与次数徽章并排一行，列表/树行内联 */
+.git-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  padding: 1px 6px;
+  color: var(--git-ok, #3fb950);
+  background: color-mix(in srgb, var(--git-ok, #3fb950) 14%, transparent);
+}
+/* 网格卡片：分支 + 次数徽章同行居中（正常流，不压名称） */
+.folder-meta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+.folder-meta .git-branch {
+  max-width: 52px;
+}
+.folder-list .git-branch {
+  position: static;
+}
+
+/* 分区标题：固定区用品牌色强调，常用区中性色，左侧色条区分 */
+.folder-zone .section-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 8px 6px;
+  font-size: 12px;
+}
+.folder-zone .section-label::before {
+  content: "";
+  width: 3px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--text-tertiary);
+}
+.folder-zone:first-child .section-label {
+  color: var(--accent);
+}
+.folder-zone:first-child .section-label::before {
+  background: var(--accent);
+}
+
+/* 目录树视图：按父目录分组，组标题吸顶，行紧凑缩进展示相对路径 */
+.folder-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px;
+}
+.tree-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.tree-group-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--accent) 28%, transparent);
+  cursor: default;
+}
+.tree-group-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 4px 22px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.tree-row:hover {
+  background: var(--bg-item-hover);
+}
+.tree-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.tree-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.tree-row:hover .tree-name {
+  color: var(--accent);
+}
+.tree-row .folder-count {
+  font-size: 10px;
+  padding: 0 6px;
+}
+.tree-term-btn {
+  width: 22px;
+  height: 22px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.tree-row:hover .tree-term-btn,
+.tree-term-btn:hover {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* 头部布局切换器：三按钮并列，当前项高亮 */
+.layout-switcher {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-md);
+  background: var(--bg-item-active);
+}
+.layout-switcher .icon-btn {
+  width: 24px;
+  height: 24px;
+}
+
+/* 终端快捷按钮：列表/树行内常显；网格悬浮在卡片右上角，hover 时淡入 */
+.term-btn {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  color: var(--text-tertiary);
+}
+.folder-card:hover .term-btn,
+.term-btn:hover {
+  color: var(--accent);
+}
+.folder-card .term-btn-float {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.folder-card:hover .term-btn-float,
+.folder-card:focus-within .term-btn-float {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 /* 拖拽添加提示层 */

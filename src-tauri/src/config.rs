@@ -48,6 +48,16 @@ impl Default for ClipboardConfig {
 pub enum FolderLayout {
     Grid,
     List,
+    Tree,
+}
+
+/// 终端类型：Windows Terminal / 命令提示符 / PowerShell
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum TerminalShell {
+    Wt,
+    Cmd,
+    Powershell,
 }
 
 /// 面板分区排布方式：左右分栏 / 上下分栏
@@ -73,6 +83,8 @@ pub struct FolderConfig {
     pub always_on_top: bool,
     /// 是否追踪资源管理器中打开的文件夹并自动统计访问次数
     pub track_explorer: bool,
+    /// 卡片快捷按钮默认打开的终端类型
+    pub terminal_shell: TerminalShell,
 }
 
 impl Default for FolderConfig {
@@ -84,6 +96,7 @@ impl Default for FolderConfig {
             page_size: 12,
             always_on_top: true,
             track_explorer: true,
+            terminal_shell: TerminalShell::Powershell,
         }
     }
 }
@@ -157,7 +170,7 @@ impl Default for GeneralConfig {
             silent_start: true,
             language: "zh-CN".into(),
             acrylic_enabled: true,
-            acrylic_opacity: 75,
+            acrylic_opacity: 60,
         }
     }
 }

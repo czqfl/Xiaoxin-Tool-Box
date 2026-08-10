@@ -1,7 +1,7 @@
 /** 文件夹快捷面板：固定/最常访问双分区、各自分页、搜索、右键菜单、拖拽添加与排序 */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { FolderEntry } from "../../types";
+import type { FolderEntry, FolderLayout } from "../../types";
 import { hideCurrentWindow, usePanelCommon, withNativeDialog } from "../../core/usePanel";
 import { EVT_FOLDER_CHANGED, onEvent } from "../../core/events";
 import { useFolderStore, sortFolders } from "../../stores/folderStore";
@@ -11,10 +11,13 @@ import { FolderCard } from "./FolderCard";
 import { ContextMenu, type MenuItem } from "./ContextMenu";
 import {
   IconArrowUp,
+  IconBranch,
   IconChevronLeft,
   IconChevronRight,
+  IconCode,
   IconCopy,
   IconExternal,
+  IconFolder,
   IconFolderPlus,
   IconGrid,
   IconList,
@@ -22,14 +25,63 @@ import {
   IconSearch,
   IconTerminal,
   IconTrash,
+  IconTree,
 } from "../../components/icons";
 import "../../styles/panel.css";
 import "./folder.css";
+
+/** 常用 Git 命令模板（右键在默认终端中执行，仅 Git 仓库展示） */
+const GIT_COMMANDS: Array<{ label: string; cmd: string }> = [
+  { label: "git status", cmd: "git status" },
+  { label: "git add .", cmd: "git add ." },
+  { label: "git commit -m \"update\"", cmd: "git commit -m \"update\"" },
+  { label: "git push", cmd: "git push" },
+  { label: "git pull", cmd: "git pull" },
+  { label: "git log --oneline", cmd: "git log --oneline" },
+  { label: "git stash", cmd: "git stash" },
+];
 
 interface MenuState {
   x: number;
   y: number;
   folder: FolderEntry;
+}
+
+/** 路径统一为反斜杠形态并去掉尾部斜杠 */
+function normPath(p: string): string {
+  return p.replaceAll("/", "\\").replace(/\\+$/, "");
+}
+
+/** 父目录路径；根目录（如 D: / D:\）无父级返回 null */
+function parentPathOf(p: string): string | null {
+  const n = normPath(p);
+  const idx = n.lastIndexOf("\\");
+  if (idx <= 0) return null;
+  return n.slice(0, idx);
+}
+
+/** 相对父目录的路径：多级子目录时显示完整相对路径（如 app-a\src） */
+function relPathOf(p: string, parent: string): string {
+  const n = normPath(p);
+  const pn = normPath(parent);
+  return n.startsWith(pn + "\\") ? n.slice(pn.length + 1) : n;
+}
+
+/** 按父目录分组构建目录树（组按路径排序，组内按名称排序） */
+function buildTree(items: FolderEntry[]): Array<{ parent: string; items: FolderEntry[] }> {
+  const groups = new Map<string, FolderEntry[]>();
+  for (const f of items) {
+    const parent = parentPathOf(f.path) ?? f.path;
+    const list = groups.get(parent);
+    if (list) list.push(f);
+    else groups.set(parent, [f]);
+  }
+  return [...groups.entries()]
+    .sort(([a], [b]) => a.localeCompare(b, "zh-CN"))
+    .map(([parent, list]) => ({
+      parent,
+      items: list.sort((a, b) => a.name.localeCompare(b.name, "zh-CN")),
+    }));
 }
 
 /** 单区分页器：仅多页时展示 */
@@ -84,6 +136,25 @@ export function FolderPanel() {
   const [pinnedPage, setPinnedPage] = useState(1);
   const [frequentPage, setFrequentPage] = useState(1);
   const inputRef = useRef<HTMLInputElement>(null);
+  /** 文件夹 id → Git 当前分支（非仓库无条目） */
+  const [branches, setBranches] = useState<Record<string, string>>({});
+
+  // 列表变化时批量读取 Git 分支（读 .git/HEAD，毫秒级）
+  useEffect(() => {
+    const paths = folders.map((f) => f.path);
+    if (paths.length === 0) {
+      setBranches({});
+      return;
+    }
+    api.folderGitBranches(paths).then((list) => {
+      const map: Record<string, string> = {};
+      folders.forEach((f, i) => {
+        const b = list[i];
+        if (b) map[f.id] = b;
+      });
+      setBranches(map);
+    });
+  }, [folders]);
 
   useEffect(() => {
     refresh();
@@ -151,6 +222,12 @@ export function FolderPanel() {
   const layout = config.folder.layout;
   const split = config.folder.split;
   const showCount = config.folder.show_visit_count;
+  const terminalLabel =
+    config.folder.terminal_shell === "wt"
+      ? "Windows Terminal"
+      : config.folder.terminal_shell === "cmd"
+        ? "命令提示符"
+        : "PowerShell";
   const pageSize = Math.max(1, config.folder.page_size);
 
   // 分区各自分页，条目变化导致页码越界时自动收敛
@@ -189,11 +266,11 @@ export function FolderPanel() {
     }
   };
 
-  /** 面板内快捷切换卡片展示模式（网格 / 列表） */
-  const toggleLayout = () => {
+  /** 面板内直接切换卡片展示模式（网格 / 列表 / 目录树），头部三按钮并列高亮 */
+  const setLayout = (next: FolderLayout) => {
     void updateConfig({
       ...config,
-      folder: { ...config.folder, layout: layout === "grid" ? "list" : "grid" },
+      folder: { ...config.folder, layout: next },
     });
   };
 
@@ -229,6 +306,22 @@ export function FolderPanel() {
     api.openFolderInTerminalWith(folder.path, shell).catch((e) => window.alert(String(e)));
   };
 
+  /** 在指定编辑器中打开（code / idea / webstorm） */
+  const openInEditor = (
+    folder: FolderEntry,
+    editor: "code" | "idea" | "webstorm"
+  ) => {
+    hideCurrentWindow();
+    api.openFolderInEditor(folder.path, editor).catch((e) => window.alert(String(e)));
+  };
+
+  /** 在默认终端中执行 Git 命令：终端窗口保留，命令输出直接可见 */
+  const execGitCommand = (folder: FolderEntry, cmd: string) => {
+    api
+      .gitExec(folder.path, cmd, config.folder.terminal_shell)
+      .catch((e) => console.error("执行 Git 命令失败", e));
+  };
+
   const menuItems = (folder: FolderEntry): MenuItem[] => [
     {
       label: "打开",
@@ -257,6 +350,40 @@ export function FolderPanel() {
         },
       ],
     },
+    {
+      label: "用编辑器打开",
+      icon: <IconCode size={14} />,
+      children: [
+        {
+          label: "VS Code",
+          icon: <IconCode size={13} />,
+          onClick: () => openInEditor(folder, "code"),
+        },
+        {
+          label: "IntelliJ IDEA",
+          icon: <IconCode size={13} />,
+          onClick: () => openInEditor(folder, "idea"),
+        },
+        {
+          label: "WebStorm",
+          icon: <IconCode size={13} />,
+          onClick: () => openInEditor(folder, "webstorm"),
+        },
+      ],
+    },
+    ...(branches[folder.id]
+      ? [
+          {
+            label: `Git 命令（${branches[folder.id]}）`,
+            icon: <IconBranch size={14} />,
+            children: GIT_COMMANDS.map(({ label, cmd }) => ({
+              label,
+              icon: <IconBranch size={13} />,
+              onClick: () => execGitCommand(folder, cmd),
+            })),
+          },
+        ]
+      : []),
     {
       label: "复制路径",
       icon: <IconCopy size={14} />,
@@ -289,10 +416,15 @@ export function FolderPanel() {
       folder={folder}
       layout={layout}
       showCount={showCount}
+      terminalShell={config.folder.terminal_shell}
+      branch={branches[folder.id]}
       draggable={sortable}
       dragging={draggingId === folder.id}
       dragOver={dragOverId === folder.id}
       onOpen={() => void openFolderItem(folder)}
+      onOpenTerminal={() =>
+        openInTerminal(folder, config.folder.terminal_shell)
+      }
       onContextMenu={(e) => {
         e.preventDefault();
         setMenu({ x: e.clientX, y: e.clientY, folder });
@@ -329,6 +461,54 @@ export function FolderPanel() {
       <div className="zone-content">
         {items.length === 0 ? (
           <div className="zone-empty">{emptyHint}</div>
+        ) : layout === "tree" ? (
+          <div className="folder-tree">
+            {buildTree(items).map((g) => (
+              <div className="tree-group" key={g.parent}>
+                <div className="tree-group-head" title={g.parent}>
+                  <IconFolder size={13} />
+                  <span className="tree-group-name">{g.parent}</span>
+                </div>
+                {g.items.map((f) => (
+                  <div
+                    className="tree-row"
+                    key={f.id}
+                    title={f.path}
+                    onClick={() => void openFolderItem(f)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setMenu({ x: e.clientX, y: e.clientY, folder: f });
+                    }}
+                  >
+                    <span
+                      className="tree-dot"
+                      style={{ background: f.color ?? "var(--accent)" }}
+                    />
+                    <span className="tree-name">{relPathOf(f.path, g.parent)}</span>
+                    {branches[f.id] && (
+                      <span className="badge git-branch">
+                        <IconBranch size={10} />
+                        {branches[f.id]}
+                      </span>
+                    )}
+                    {showCount && f.visit_count > 0 && (
+                      <span className="badge folder-count">{f.visit_count} 次</span>
+                    )}
+                    <button
+                      className="icon-btn tree-term-btn"
+                      title={`在${terminalLabel}中打开`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openInTerminal(f, config.folder.terminal_shell);
+                      }}
+                    >
+                      <IconTerminal size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
         ) : (
           <div className={layout === "grid" ? "folder-grid" : "folder-list"}>
             {items.map((f) => renderCard(f, sortable))}
@@ -344,7 +524,7 @@ export function FolderPanel() {
         {externalDrag && <div className="folder-drop-hint">松开以添加文件夹</div>}
 
         <div className="panel-header" data-tauri-drag-region>
-          <div className="panel-search">
+          <div className="panel-search" data-tauri-drag-region>
             <span className="search-icon">
               <IconSearch size={15} />
             </span>
@@ -359,13 +539,29 @@ export function FolderPanel() {
           <button className="icon-btn" title="添加文件夹" onClick={() => void handleAdd()}>
             <IconFolderPlus size={16} />
           </button>
-          <button
-            className="icon-btn"
-            title={layout === "grid" ? "当前：网格，点击切换为列表" : "当前：列表，点击切换为网格"}
-            onClick={toggleLayout}
-          >
-            {layout === "grid" ? <IconGrid size={16} /> : <IconList size={16} />}
-          </button>
+          <div className="layout-switcher">
+            <button
+              className={`icon-btn ${layout === "grid" ? "active" : ""}`}
+              title="网格视图"
+              onClick={() => setLayout("grid")}
+            >
+              <IconGrid size={16} />
+            </button>
+            <button
+              className={`icon-btn ${layout === "list" ? "active" : ""}`}
+              title="列表视图"
+              onClick={() => setLayout("list")}
+            >
+              <IconList size={16} />
+            </button>
+            <button
+              className={`icon-btn ${layout === "tree" ? "active" : ""}`}
+              title="目录树视图"
+              onClick={() => setLayout("tree")}
+            >
+              <IconTree size={16} />
+            </button>
+          </div>
           <button
             className={`icon-btn ${alwaysOnTop ? "active" : ""}`}
             title={alwaysOnTop ? "取消面板置顶" : "面板置顶显示"}

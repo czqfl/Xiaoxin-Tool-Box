@@ -24,7 +24,7 @@ use tauri_plugin_global_shortcut::ShortcutState;
 
 /// 面板窗口效果：不透明窗口 + DWM 系统原生圆角 +（可选）背景模糊。
 /// 圆角由 DWM 直接裁剪窗口物理边角，从根上消除"圆角面板后露出矩形背景"；
-/// 模糊走 SetWindowCompositionAttribute + ACCENT_ENABLE_BLURBEHIND
+/// 模糊走 SetWindowCompositionAttribute + ACCENT_ENABLE_ACRYLICBLURBEHIND
 /// （与窗口是否激活无关，窗口可见即出模糊，无需点击、失焦也保持）。
 #[cfg(windows)]
 pub(crate) fn apply_panel_effects_for<R: tauri::Runtime>(
@@ -165,6 +165,9 @@ pub fn run() {
             folder::folder_open,
             folder::folder_open_in_terminal,
             folder::folder_open_in_terminal_with,
+            folder::folder_open_in_editor,
+            folder::folder_git_exec,
+            folder::folder_git_branches,
             folder::folder_copy_path,
             shortcut::shortcut_test,
             shortcut::shortcut_apply,

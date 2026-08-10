@@ -179,7 +179,7 @@ export function ClipboardPanel() {
     <div className="panel">
       <div className="panel-shell">
         <div className="panel-header" data-tauri-drag-region>
-          <div className="panel-search">
+          <div className="panel-search" data-tauri-drag-region>
             <span className="search-icon">
               <IconSearch size={15} />
             </span>

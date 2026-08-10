@@ -97,9 +97,52 @@ export const IconList = (p: IconProps) => (
   </svg>
 );
 
+export const IconTree = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M5 3v18" />
+    <path d="M5 7h5" />
+    <path d="M5 13h9" />
+    <path d="M5 19h4" />
+  </svg>
+);
+
 export const IconTerminal = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="m4 17 6-5-6-5M12 19h8" />
+  </svg>
+);
+
+/** 代码/编辑器（>_） */
+export const IconCode = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M8 9l-4 3 4 3" />
+    <path d="M16 9l4 3-4 3" />
+    <path d="M13 6l-2 12" />
+  </svg>
+);
+
+/** Git 分支 */
+export const IconBranch = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="6" cy="5" r="2" />
+    <circle cx="6" cy="19" r="2" />
+    <circle cx="18" cy="7" r="2" />
+    <path d="M6 7v10" />
+    <path d="M18 9c0 3-4 4-6 5" />
+  </svg>
+);
+
+/** 转换/魔法棒（剪贴板智能转换入口） */
+export const IconWand = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M15 4V2" />
+    <path d="M15 10V8" />
+    <path d="M12 7h2" />
+    <path d="M18 7h2" />
+    <path d="M5 19l9-9" />
+    <path d="M4 20h2" />
+    <path d="M18 15l2 2" />
+    <path d="M15 18l2 2" />
   </svg>
 );
 

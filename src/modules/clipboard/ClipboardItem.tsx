@@ -1,8 +1,11 @@
-/** 剪贴板条目：预览 + 元信息 + hover 操作按钮 */
-import { useEffect, useState } from "react";
+/** 剪贴板条目：预览 + 元信息 + hover 操作按钮（含智能文本转换） */
+import { useEffect, useMemo, useState } from "react";
 import type { ClipEntry } from "../../types";
 import { relativeTime } from "../../core/format";
+import { copyText } from "../../core/tauri";
 import { useClipboardStore } from "../../stores/clipboardStore";
+import { ContextMenu, type MenuItem } from "../folder/ContextMenu";
+import { detectActions, type TransformAction } from "./transform";
 import {
   IconCopy,
   IconFiles,
@@ -11,6 +14,7 @@ import {
   IconStar,
   IconText,
   IconTrash,
+  IconWand,
 } from "../../components/icons";
 
 /** 缩略图：异步加载 data-url 并缓存；图片文件由后端后台保存，
@@ -72,7 +76,24 @@ export function ClipboardItem({
   selected,
   onPaste,
 }: Props) {
-  const { remove, toggleFavorite, togglePin } = useClipboardStore();
+  const { remove, toggleFavorite, togglePin, replaceText } = useClipboardStore();
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  /** 按内容类型检测可用的转换操作 */
+  const actions = useMemo(() => detectActions(entry.text), [entry.text]);
+
+  /** 执行转换：写回系统剪贴板（不重复记录）并同步更新条目 */
+  const runTransform = async (action: TransformAction) => {
+    setMenu(null);
+    try {
+      const result = action.run(entry.text ?? "");
+      await copyText(result);
+      replaceText(entry.id, result);
+    } catch (err) {
+      // 转换失败静默降级（各检测函数自带容错，正常不会走到这里）；
+      // 不用 alert：WebView2 透明置顶窗口弹原生对话框有崩溃风险
+      console.error("智能转换失败", err);
+    }
+  };
 
   const kindIcon =
     entry.kind === "image" ? (
@@ -127,6 +148,15 @@ export function ClipboardItem({
       </div>
 
       <div className="clip-actions" onClick={(e) => e.stopPropagation()}>
+        {actions.length > 0 && (
+          <button
+            className="icon-btn"
+            title="智能转换"
+            onClick={(e) => setMenu({ x: e.clientX, y: e.clientY })}
+          >
+            <IconWand size={14} />
+          </button>
+        )}
         <button className="icon-btn" title="粘贴" onClick={onPaste}>
           <IconCopy size={14} />
         </button>
@@ -152,6 +182,19 @@ export function ClipboardItem({
           <IconTrash size={14} />
         </button>
       </div>
+
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          items={actions.map<MenuItem>((a) => ({
+            label: a.label,
+            icon: <IconWand size={13} />,
+            onClick: () => void runTransform(a),
+          }))}
+        />
+      )}
     </div>
   );
 }

@@ -21,6 +21,7 @@ const defaultConfig: AppConfig = {
     page_size: 12,
     always_on_top: true,
     track_explorer: true,
+    terminal_shell: "powershell",
   },
   credentials: {
     always_on_top: true,
@@ -36,7 +37,7 @@ const defaultConfig: AppConfig = {
     silent_start: true,
     language: "zh-CN",
     acrylic_enabled: true,
-    acrylic_opacity: 75,
+    acrylic_opacity: 60,
   },
 };
 

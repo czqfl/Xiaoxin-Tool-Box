@@ -1,4 +1,4 @@
-//! 面板模糊效果：SetWindowCompositionAttribute + ACCENT_ENABLE_BLURBEHIND。
+//! 面板模糊效果：SetWindowCompositionAttribute + ACCENT_ENABLE_ACRYLICBLURBEHIND。
 //!
 //! 为什么不用 DWM 系统背景（DWMSBT_*）：
 //! - DWMSBT_TRANSIENTWINDOW（mica）仅在「活动窗口」上绘制，程序化呼出的面板
@@ -7,10 +7,17 @@
 //!   不绘制（实测"模糊消失"）。
 //! 二者都绕不开"依赖窗口是否激活"，无法满足"呼出即模糊、无需点击"。
 //!
-//! 本路径（SWCA + BLURBEHIND）的模糊只认"窗口可见"，与是否激活/聚焦完全无关，
+//! 本路径（SWCA + ACRYLICBLURBEHIND）的模糊只认"窗口可见"，与是否激活/聚焦完全无关，
 //! 窗口一显示即出模糊、失焦也保持。前提窗口为不透明（transparent: false）：
 //! 此前踩过的黑色矩形是 transparent:true（WS_EX_LAYERED 分层窗口）上 DWM
 //! 系统背景的坑，与本路径无关，故保持不透明窗口即可安全使用。
+//!
+//! 为什么用 ACRYLIC（state=4）而不用经典 BLURBEHIND（state=3）：
+//! BLURBEHIND 是 Win7 时代对背景快照的固定大半径粗糙模糊，高对比文字会被糊成
+//! 一团团明暗色块（实测观感"一坨一坨"）；ACRYLIC 模糊半径更小且带噪点颗粒，
+//! 观感接近 Win10/11 原生亚克力。二者同走 SWCA，激活无关性一致。
+//! 注意：ACRYLIC 的 gradient_color alpha 不能为 0（否则整窗渲染异常），
+//! 这里用 alpha=1 的透明底色，色调完全交给前端半透明外壳（主题自适应）。
 //!
 //! 注意：SetWindowCompositionAttribute 是未公开 API——既不在 windows crate 元数据里
 //! （没法 use），也不在官方 user32.lib 导入库中（直接 #[link] 会 LNK2019 无法解析）。
@@ -26,7 +33,7 @@ use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 const WCA_ACCENT_POLICY: u32 = 19;
 // ACCENT_STATE
 const ACCENT_DISABLED: u32 = 0;
-const ACCENT_ENABLE_BLURBEHIND: u32 = 3;
+const ACCENT_ENABLE_ACRYLICBLURBEHIND: u32 = 4;
 
 #[repr(C)]
 struct AccentPolicy {
@@ -66,13 +73,15 @@ unsafe fn set_window_composition_attribute(
     func(hwnd, data) != 0
 }
 
-/// 给窗口应用背景模糊（BLURBEHIND，与激活无关，窗口可见即出）。
+/// 给窗口应用背景模糊（ACRYLICBLURBEHIND，与激活无关，窗口可见即出）。
 /// 失败（如系统不支持）返回 false，调用方保持普通窗口，不黑。
 pub fn apply_acrylic(hwnd: HWND) -> bool {
     let mut policy = AccentPolicy {
-        accent_state: ACCENT_ENABLE_BLURBEHIND,
+        accent_state: ACCENT_ENABLE_ACRYLICBLURBEHIND,
         accent_flags: 0,
-        gradient_color: 0,
+        // ABGR：alpha=1 的透明底色（alpha 不能为 0，否则渲染异常）；
+        // 色调由前端半透明外壳负责，主题自适应。
+        gradient_color: 0x0100_0000,
         animation_id: 0,
     };
     let mut data = WindowCompositionAttrData {
@@ -121,9 +130,18 @@ pub fn apply_rounded_corners(hwnd: HWND) -> bool {
 /// 注：本路径模糊与激活无关，置前仅用于保证面板可正常交互，不再影响模糊绘制。
 pub fn force_foreground(hwnd: HWND) {
     use windows::Win32::UI::WindowsAndMessaging::{
-        SetForegroundWindow, SetWindowPos, HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE,
+        GetWindowLongPtrW, SetForegroundWindow, SetWindowPos, GWL_EXSTYLE, HWND_NOTOPMOST,
+        HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, WS_EX_TOPMOST,
     };
     unsafe {
+        // 若窗口当前已带置顶样式（WS_EX_TOPMOST），直接 SetForegroundWindow 即可，
+        // 绝不能先顶到最前再降回——降回会顺带清除置顶样式，导致配置开了置顶但
+        // 窗口实际不置顶、前端按钮状态与实际失配（首次点击置顶不生效的根因）。
+        let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        if ex_style != 0 && (ex_style as u32) & WS_EX_TOPMOST.0 != 0 {
+            let _ = SetForegroundWindow(hwnd);
+            return;
+        }
         let _ = SetWindowPos(
             hwnd,
             Some(HWND_TOPMOST),

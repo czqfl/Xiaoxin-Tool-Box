@@ -29,6 +29,10 @@ pub fn show_settings_window<R: Runtime>(app: &AppHandle<R>) {
         }
     }
     if let Some(w) = app.get_webview_window("settings") {
+        // 先确保置顶样式在：force_foreground 早前版本的 HWND_NOTOPMOST 破锁套路
+        // 会顺带清除置顶样式，窗口变普通窗口后 SetForegroundWindow 又被前景锁
+        // 拒绝，表现为“偶尔打不开设置”（窗口显示在其它窗口后面）。
+        let _ = w.set_always_on_top(true);
         let _ = w.unminimize();
         let _ = w.show();
         #[cfg(windows)]
@@ -38,10 +42,16 @@ pub fn show_settings_window<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
-/// 切换设置窗口显隐（托盘左键）
+/// 切换设置窗口显隐（托盘左键）。
+/// 用「可见且聚焦」判断开关状态：设置窗口若被其它置顶面板盖住（可见但失焦），
+/// 点击应把它带回前台而不是误判为"已打开"而隐藏——这正是"面板没关时设置
+/// 打不开"的根因：面板盖住设置窗口后 is_visible 仍为 true，左键点击反而
+/// 把设置窗口藏了。
 fn toggle_settings_window<R: Runtime>(app: &AppHandle<R>) {
     if let Some(w) = app.get_webview_window("settings") {
-        if w.is_visible().unwrap_or(false) {
+        let visible = w.is_visible().unwrap_or(false);
+        let focused = w.is_focused().unwrap_or(false);
+        if visible && focused {
             let _ = w.hide();
         } else {
             show_settings_window(app);

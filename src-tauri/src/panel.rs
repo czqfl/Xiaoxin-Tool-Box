@@ -67,6 +67,11 @@ pub fn toggle_panel<R: Runtime>(app: &AppHandle<R>, label: &str) {
             }
         }
     }
+    // 设置窗口一并收起：它与面板同为置顶窗口，若仍显示会被面板盖住，
+    // 且会让托盘左键的可见性判断失真（见 tray.rs toggle_settings_window）
+    if let Some(w) = app.get_webview_window("settings") {
+        let _ = w.hide();
+    }
 
     let Some(window) = app.get_webview_window(label) else {
         return;
