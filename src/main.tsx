@@ -6,7 +6,7 @@ import "./styles/base.css";
 
 // 面板窗口：标记 html，由 CSS 将 webview 背景置为透明，
 // 露出后端应用的亚克力层；否则不透明背景会在圆角外画出黑色矩形
-const panelLabels = ["clipboard-panel", "folder-panel"];
+const panelLabels = ["clipboard-panel", "folder-panel", "credential-panel"];
 if (panelLabels.includes(getCurrentWindow().label)) {
   document.documentElement.dataset.window = "panel";
 }

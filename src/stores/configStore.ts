@@ -22,9 +22,13 @@ const defaultConfig: AppConfig = {
     always_on_top: true,
     track_explorer: true,
   },
+  credentials: {
+    always_on_top: true,
+  },
   shortcuts: {
     clipboard: "Alt+C",
     folder: "Alt+F",
+    credentials: "Alt+A",
   },
   general: {
     theme: "system",

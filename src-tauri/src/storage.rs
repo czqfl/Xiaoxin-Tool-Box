@@ -14,6 +14,7 @@ pub struct AppPaths {
     pub config_file: PathBuf,
     pub clipboard_file: PathBuf,
     pub folders_file: PathBuf,
+    pub creds_file: PathBuf,
     pub images_dir: PathBuf,
 }
 
@@ -39,6 +40,7 @@ impl AppPaths {
             config_file: data_dir.join("config.json"),
             clipboard_file: data_dir.join("clipboard_history.json"),
             folders_file: data_dir.join("folders.json"),
+            creds_file: data_dir.join("credentials.json"),
             images_dir,
             data_dir,
         }

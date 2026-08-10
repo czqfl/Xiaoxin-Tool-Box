@@ -32,6 +32,21 @@ export interface FolderEntry {
   created_at: number;
 }
 
+/** 常用账号密码条目（手动添加） */
+export interface Credential {
+  id: string;
+  /** 名称 / 用途，如「GitHub」「公司邮箱」 */
+  label: string;
+  /** 账号（用户名 / 邮箱 / 手机号） */
+  account: string;
+  /** 密码 */
+  password: string;
+  /** 备注（可选） */
+  note: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
 export type FolderLayout = "grid" | "list";
 /** 面板分区排布：左右分栏 / 上下分栏 */
 export type FolderSplit = "columns" | "rows";
@@ -62,6 +77,8 @@ export interface FolderConfig {
 export interface ShortcutsConfig {
   clipboard: string;
   folder: string;
+  /** 呼出账号密码面板的快捷键 */
+  credentials: string;
 }
 
 export interface GeneralConfig {
@@ -74,9 +91,15 @@ export interface GeneralConfig {
   acrylic_opacity: number;
 }
 
+export interface CredentialConfig {
+  /** 账号密码面板是否置顶显示 */
+  always_on_top: boolean;
+}
+
 export interface AppConfig {
   clipboard: ClipboardConfig;
   folder: FolderConfig;
+  credentials: CredentialConfig;
   shortcuts: ShortcutsConfig;
   general: GeneralConfig;
 }

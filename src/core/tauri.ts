@@ -1,7 +1,7 @@
 /** Rust command 统一封装层：所有 invoke 调用经此收口，便于错误兜底 */
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AppConfig, ClipEntry, FolderEntry } from "../types";
+import type { AppConfig, ClipEntry, Credential, FolderEntry } from "../types";
 
 /** 安全调用：Rust 侧异常转为友好文案，不抛出未处理错误 */
 async function safe<T>(promise: Promise<T>, fallback: T): Promise<T> {
@@ -61,6 +61,22 @@ export const openFolderInTerminalWith = (path: string, shell: string) =>
 export const copyFolderPath = (path: string) =>
   invoke<void>("folder_copy_path", { path });
 
+// ---- 账号密码 ----
+export const listCredentials = () =>
+  safe(invoke<Credential[]>("cred_list"), [] as Credential[]);
+export const addCredential = (input: Omit<Credential, "id" | "created_at" | "updated_at">) =>
+  invoke<Credential>("cred_add", { input });
+export const updateCredential = (
+  id: string,
+  input: Omit<Credential, "id" | "created_at" | "updated_at">
+) => invoke<void>("cred_update", { id, input });
+export const deleteCredential = (id: string) =>
+  safe(invoke("cred_delete", { id }), undefined);
+
+/** 复制任意文本到剪贴板（不触发监听重复记录，避免密码泄露到剪贴板历史） */
+export const copyText = (text: string) =>
+  invoke<void>("clipboard_copy_text", { text });
+
 /** 调起系统资源管理器选择文件夹，取消时返回 null */
 export const pickFolder = async (): Promise<string | null> => {
   const selected = await open({
@@ -79,8 +95,10 @@ export const setPanelAlwaysOnTop = (on: boolean) =>
 // ---- 快捷键 ----
 export const testShortcut = (shortcut: string) =>
   invoke<void>("shortcut_test", { shortcut });
-export const applyShortcut = (target: "clipboard" | "folder", shortcut: string) =>
-  invoke<void>("shortcut_apply", { target, shortcut });
+export const applyShortcut = (
+  target: "clipboard" | "folder" | "credentials",
+  shortcut: string
+) => invoke<void>("shortcut_apply", { target, shortcut });
 /** 录入捕获：钩子接管 Win 组合，避免系统功能抢先（与 capture_end 成对使用） */
 export const beginShortcutCapture = () =>
   safe(invoke("shortcut_capture_begin"), undefined);

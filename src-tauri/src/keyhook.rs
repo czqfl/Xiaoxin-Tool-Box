@@ -38,6 +38,8 @@ enum Action {
     ToggleClipboard,
     /// 呼出/隐藏文件夹面板
     ToggleFolder,
+    /// 呼出/隐藏账号密码面板
+    ToggleCredential,
     /// 捕获模式：设置页录入 Win 组合键（payload 为虚拟键码）
     WinCaptured(u16),
 }
@@ -51,6 +53,7 @@ static CAPTURE_MODE: AtomicBool = AtomicBool::new(false);
 /// 钩子接管的 Win 组合面板热键虚拟键码；0 表示未启用
 static CLIPBOARD_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
 static FOLDER_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
+static CREDENTIAL_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
 static SENDER: OnceLock<Sender<Action>> = OnceLock::new();
 
 // ---- 仅钩子线程（回调与消息循环同线程）读写 ----
@@ -85,6 +88,7 @@ pub fn set_panel_hotkey(target: &str, vk: u16) {
     let slot = match target {
         "clipboard" => &CLIPBOARD_HOTKEY_VK,
         "folder" => &FOLDER_HOTKEY_VK,
+        "credentials" => &CREDENTIAL_HOTKEY_VK,
         _ => return,
     };
     slot.store(vk, Ordering::SeqCst);
@@ -191,6 +195,9 @@ fn run_action<R: Runtime>(app: &AppHandle<R>, action: Action) {
         }
         Action::ToggleClipboard => crate::panel::toggle_panel(app, crate::panel::CLIPBOARD_PANEL),
         Action::ToggleFolder => crate::panel::toggle_panel(app, crate::panel::FOLDER_PANEL),
+        Action::ToggleCredential => {
+            crate::panel::toggle_panel(app, crate::panel::CREDENTIAL_PANEL)
+        }
         Action::WinCaptured(vk) => {
             // 回传组合串给设置页录入框（与前端 comboFromEvent 的格式一致）
             if let Some(name) = vk_to_combo_name(vk as u32) {
@@ -261,6 +268,8 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                 Some(Action::ToggleClipboard)
             } else if vk == FOLDER_HOTKEY_VK.load(Ordering::SeqCst) as u32 {
                 Some(Action::ToggleFolder)
+            } else if vk == CREDENTIAL_HOTKEY_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::ToggleCredential)
             } else {
                 None
             };

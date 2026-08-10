@@ -170,3 +170,39 @@ export const IconPalette = (p: IconProps) => (
     <circle cx="15" cy="8" r="1" />
   </svg>
 );
+
+export const IconKey = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="7.5" cy="15.5" r="4" />
+    <path d="m10.5 12.5 8-8M16 3l3 3-2 2-3-3M18 5l2 2" />
+  </svg>
+);
+
+export const IconEye = (p: IconProps & { filled?: boolean }) => {
+  const { filled, ...rest } = p;
+  return (
+    <svg {...base(rest)} fill={filled ? "currentColor" : "none"}>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+};
+
+export const IconEyeOff = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M9.9 5.2A9.6 9.6 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3 3.8M6.1 6.1A17 17 0 0 0 2 12s3.5 7 10 7a9.6 9.6 0 0 0 4.1-.9" />
+    <path d="m3 3 18 18M9.5 9.5a3 3 0 0 0 4.2 4.2" />
+  </svg>
+);
+
+export const IconEdit = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+  </svg>
+);
+
+export const IconPlus = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M12 5v14M5 12h14" />
+  </svg>
+);

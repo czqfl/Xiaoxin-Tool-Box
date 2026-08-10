@@ -1,6 +1,6 @@
 //! 全局快捷键：注册/冲突检测/运行时切换。
 use crate::config::{AppConfig, ConfigState, PasteMode};
-use crate::panel::{self, CLIPBOARD_PANEL, FOLDER_PANEL};
+use crate::panel::{self, CLIPBOARD_PANEL, CREDENTIAL_PANEL, FOLDER_PANEL};
 use crate::storage::{save_json, AppPaths};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
@@ -19,6 +19,7 @@ pub struct ShortcutBindings(pub Mutex<ShortcutBindingsInner>);
 pub struct ShortcutBindingsInner {
     pub clipboard: Option<Shortcut>,
     pub folder: Option<Shortcut>,
+    pub credentials: Option<Shortcut>,
 }
 
 pub fn parse(shortcut: &str) -> Result<Shortcut, String> {
@@ -86,7 +87,10 @@ pub fn shortcut_test(
     let parsed = parse(&shortcut)?;
     {
         let inner = bindings.0.lock().unwrap();
-        if inner.clipboard == Some(parsed) || inner.folder == Some(parsed) {
+        if inner.clipboard == Some(parsed)
+            || inner.folder == Some(parsed)
+            || inner.credentials == Some(parsed)
+        {
             return Ok(());
         }
     }
@@ -126,15 +130,17 @@ pub fn shortcut_apply(
     paths: State<'_, AppPaths>,
     config_state: State<'_, ConfigState>,
 ) -> Result<(), String> {
-    if target != "clipboard" && target != "folder" {
+    if target != "clipboard" && target != "folder" && target != "credentials" {
         return Err("未知的快捷键目标".into());
     }
     let parsed = parse(&shortcut)?;
     let mut inner = bindings.0.lock().unwrap();
     let current = if target == "clipboard" {
         inner.clipboard
-    } else {
+    } else if target == "folder" {
         inner.folder
+    } else {
+        inner.credentials
     };
     if current == Some(parsed) {
         return Ok(());
@@ -146,8 +152,10 @@ pub fn shortcut_apply(
     }
     if target == "clipboard" {
         inner.clipboard = Some(parsed);
-    } else {
+    } else if target == "folder" {
         inner.folder = Some(parsed);
+    } else {
+        inner.credentials = Some(parsed);
     }
     drop(inner);
 
@@ -155,18 +163,21 @@ pub fn shortcut_apply(
     let mut config = config_state.0.lock().unwrap().clone();
     if target == "clipboard" {
         config.shortcuts.clipboard = shortcut;
-    } else {
+    } else if target == "folder" {
         config.shortcuts.folder = shortcut;
+    } else {
+        config.shortcuts.credentials = shortcut;
     }
     let _ = save_json(&paths.config_file, &config);
     *config_state.0.lock().unwrap() = config;
     Ok(())
 }
 
-/// 启动时按配置注册两个全局热键；失败则通知前端并打开设置页引导修改
+/// 启动时按配置注册全局热键；失败则通知前端并打开设置页引导修改
 pub fn register_initial<R: Runtime>(app: &AppHandle<R>, config: &AppConfig) {
     register_one(app, "clipboard", &config.shortcuts.clipboard);
     register_one(app, "folder", &config.shortcuts.folder);
+    register_one(app, "credentials", &config.shortcuts.credentials);
     sync_seq_shortcut(app, config.clipboard.paste_mode);
 }
 
@@ -191,8 +202,10 @@ fn register_one<R: Runtime>(app: &AppHandle<R>, target: &str, shortcut_str: &str
                 let mut inner = b.0.lock().unwrap();
                 if target == "clipboard" {
                     inner.clipboard = Some(parsed);
-                } else {
+                } else if target == "folder" {
                     inner.folder = Some(parsed);
+                } else {
+                    inner.credentials = Some(parsed);
                 }
             }
         }
@@ -214,6 +227,8 @@ pub fn panel_label_for(
         Some(CLIPBOARD_PANEL)
     } else if bindings.folder == Some(*shortcut) {
         Some(FOLDER_PANEL)
+    } else if bindings.credentials == Some(*shortcut) {
+        Some(CREDENTIAL_PANEL)
     } else {
         None
     }

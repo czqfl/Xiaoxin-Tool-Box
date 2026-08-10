@@ -51,6 +51,21 @@
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "visible": false
+      },
+      {
+        "label": "credential-panel",
+        "title": "账号密码",
+        "width": 560,
+        "height": 600,
+        "resizable": false,
+        "fullscreen": false,
+        "maximized": false,
+        "decorations": false,
+        "transparent": false,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false
       }
     ],
     "security": {

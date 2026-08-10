@@ -5,6 +5,7 @@ mod config;
 #[cfg(windows)]
 mod explorer;
 mod folder;
+mod credentials;
 #[cfg(windows)]
 mod keyhook;
 mod panel;
@@ -14,6 +15,7 @@ mod tray;
 
 use crate::clipboard::ClipboardStore;
 use crate::config::{AppConfig, ConfigState};
+use crate::credentials::CredentialStore;
 use crate::folder::FolderStore;
 use crate::shortcut::ShortcutBindings;
 use std::sync::Mutex;
@@ -54,7 +56,11 @@ pub(crate) fn apply_panel_effects_for<R: tauri::Runtime>(
 /// 把亚克力层全部盖死——正是"panel 外边框一圈黑色"的来源。
 #[cfg(windows)]
 fn apply_panel_acrylic<R: tauri::Runtime>(app: &tauri::AppHandle<R>, acrylic: bool) {
-    for label in [panel::CLIPBOARD_PANEL, panel::FOLDER_PANEL] {
+    for label in [
+        panel::CLIPBOARD_PANEL,
+        panel::FOLDER_PANEL,
+        panel::CREDENTIAL_PANEL,
+    ] {
         if let Some(w) = app.get_webview_window(label) {
             apply_panel_effects_for(&w, acrylic);
             let _ = w.with_webview(|wv| {
@@ -107,10 +113,13 @@ pub fn run() {
                 storage::load_json(&paths.clipboard_file, vec![]);
             let folders: Vec<folder::FolderEntry> =
                 storage::load_json(&paths.folders_file, vec![]);
+            let creds: Vec<credentials::Credential> =
+                storage::load_json(&paths.creds_file, vec![]);
 
             app.manage(ConfigState(Mutex::new(config.clone())));
             app.manage(ClipboardStore(Mutex::new(history)));
             app.manage(FolderStore(Mutex::new(folders)));
+            app.manage(CredentialStore(Mutex::new(creds)));
             app.manage(ShortcutBindings::default());
             app.manage(paths);
 
@@ -141,6 +150,11 @@ pub fn run() {
             clipboard::clipboard_image_data,
             clipboard::clipboard_write_back,
             clipboard::clipboard_paste,
+            clipboard::clipboard_copy_text,
+            credentials::cred_list,
+            credentials::cred_add,
+            credentials::cred_update,
+            credentials::cred_delete,
             folder::folder_list,
             folder::folder_add,
             folder::folder_remove,

@@ -650,6 +650,19 @@ pub fn clipboard_paste(
     Ok(())
 }
 
+/// 直接写入一段文本到系统剪贴板（不触发监听重复记录）。
+/// 供账号密码面板使用：复制账号/密码时不污染剪贴板历史，避免凭据泄露。
+#[tauri::command]
+pub fn clipboard_copy_text(text: String) -> Result<(), String> {
+    let mut cb = Clipboard::new().map_err(|e| format!("访问剪贴板失败：{e}"))?;
+    SUPPRESS_WATCH.store(true, Ordering::SeqCst);
+    if let Err(e) = cb.set_text(text) {
+        SUPPRESS_WATCH.store(false, Ordering::SeqCst);
+        return Err(format!("复制失败：{e}"));
+    }
+    Ok(())
+}
+
 /// 顺序粘贴去抖：按住 Ctrl 连点 V 时热键可能连发，150ms 内只处理一次
 static LAST_SEQ_PASTE: AtomicI64 = AtomicI64::new(0);
 

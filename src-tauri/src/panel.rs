@@ -5,6 +5,10 @@ use crate::config::ConfigState;
 
 pub const CLIPBOARD_PANEL: &str = "clipboard-panel";
 pub const FOLDER_PANEL: &str = "folder-panel";
+pub const CREDENTIAL_PANEL: &str = "credential-panel";
+
+/// 所有悬浮面板标签（同一时间只展示一个）
+pub const ALL_PANELS: &[&str] = &[CLIPBOARD_PANEL, FOLDER_PANEL, CREDENTIAL_PANEL];
 
 /// 切换面板置顶状态。
 /// 透明窗口 z-order 变化可能使亚克力层失效，切换后补刷一次。
@@ -28,7 +32,7 @@ pub fn panel_set_always_on_top(window: WebviewWindow, on: bool) -> Result<(), St
 
 /// 若某个面板正持有焦点则隐藏它（全局顺序粘贴时让焦点回到之前的应用）
 pub fn hide_focused_panel<R: Runtime>(app: &AppHandle<R>) {
-    for label in [CLIPBOARD_PANEL, FOLDER_PANEL] {
+    for label in ALL_PANELS {
         if let Some(w) = app.get_webview_window(label) {
             if w.is_focused().unwrap_or(false) {
                 let _ = w.hide();
@@ -39,14 +43,13 @@ pub fn hide_focused_panel<R: Runtime>(app: &AppHandle<R>) {
 
 /// 切换面板：已显示则隐藏；否则定位到光标所在显示器上方居中，然后显示并聚焦
 pub fn toggle_panel<R: Runtime>(app: &AppHandle<R>, label: &str) {
-    // 同一时间只展示一个面板
-    let other = if label == CLIPBOARD_PANEL {
-        FOLDER_PANEL
-    } else {
-        CLIPBOARD_PANEL
-    };
-    if let Some(w) = app.get_webview_window(other) {
-        let _ = w.hide();
+    // 同一时间只展示一个面板：先隐藏其它所有面板
+    for other in ALL_PANELS {
+        if *other != label {
+            if let Some(w) = app.get_webview_window(other) {
+                let _ = w.hide();
+            }
+        }
     }
 
     let Some(window) = app.get_webview_window(label) else {

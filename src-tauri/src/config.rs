@@ -95,6 +95,8 @@ pub struct ShortcutsConfig {
     pub clipboard: String,
     /// 呼出文件夹面板
     pub folder: String,
+    /// 呼出账号密码面板
+    pub credentials: String,
 }
 
 impl Default for ShortcutsConfig {
@@ -102,6 +104,7 @@ impl Default for ShortcutsConfig {
         Self {
             clipboard: "Alt+C".into(),
             folder: "Alt+F".into(),
+            credentials: "Alt+A".into(),
         }
     }
 }
@@ -112,6 +115,19 @@ pub enum ThemeMode {
     System,
     Light,
     Dark,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CredentialConfig {
+    /// 账号密码面板是否置顶显示
+    pub always_on_top: bool,
+}
+
+impl Default for CredentialConfig {
+    fn default() -> Self {
+        Self { always_on_top: true }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -146,6 +162,7 @@ impl Default for GeneralConfig {
 pub struct AppConfig {
     pub clipboard: ClipboardConfig,
     pub folder: FolderConfig,
+    pub credentials: CredentialConfig,
     pub shortcuts: ShortcutsConfig,
     pub general: GeneralConfig,
 }
@@ -171,7 +188,11 @@ pub fn config_save(
     crate::shortcut::sync_seq_shortcut(&app, config.clipboard.paste_mode);
     // 面板亚克力开关变化时立即生效（开：重新上亚克力；关：清除亚克力）
     #[cfg(windows)]
-    for label in [crate::panel::CLIPBOARD_PANEL, crate::panel::FOLDER_PANEL] {
+    for label in [
+        crate::panel::CLIPBOARD_PANEL,
+        crate::panel::FOLDER_PANEL,
+        crate::panel::CREDENTIAL_PANEL,
+    ] {
         if let Some(w) = app.get_webview_window(label) {
             crate::apply_panel_effects_for(&w, config.general.acrylic_enabled);
         }

@@ -26,9 +26,24 @@ fn toggle_settings_window<R: Runtime>(app: &AppHandle<R>) {
 }
 
 pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    let clipboard_item =
+        MenuItem::with_id(app, "toggle_clipboard", "剪贴板面板", true, None::<&str>)?;
+    let folder_item =
+        MenuItem::with_id(app, "toggle_folder", "文件夹面板", true, None::<&str>)?;
+    let cred_item =
+        MenuItem::with_id(app, "toggle_credential", "账号密码面板", true, None::<&str>)?;
     let open_item = MenuItem::with_id(app, "open_settings", "打开设置", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open_item, &quit_item])?;
+    let menu = Menu::with_items(
+        app,
+        &[
+            &clipboard_item,
+            &folder_item,
+            &cred_item,
+            &open_item,
+            &quit_item,
+        ],
+    )?;
     // 复用应用默认图标，双主题下均为中性彩色，无需切换
     let icon = app
         .default_window_icon()
@@ -43,6 +58,11 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .tooltip("小心工具箱")
         .title("小心工具箱")
         .on_menu_event(|app, event| match event.id.as_ref() {
+            "toggle_clipboard" => crate::panel::toggle_panel(app, crate::panel::CLIPBOARD_PANEL),
+            "toggle_folder" => crate::panel::toggle_panel(app, crate::panel::FOLDER_PANEL),
+            "toggle_credential" => {
+                crate::panel::toggle_panel(app, crate::panel::CREDENTIAL_PANEL)
+            }
             "open_settings" => show_settings_window(app),
             "quit" => app.exit(0),
             _ => {}
