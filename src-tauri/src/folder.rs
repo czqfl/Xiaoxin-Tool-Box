@@ -355,8 +355,12 @@ fn exec_in_shell(path: &str, shell: &str, command: &str) -> CmdResult {
 
     match shell {
         "cmd" => {
-            // /d 忽略自动运行命令，/s 保持引号原样，/k 执行后保留窗口
-            let cmd_line = format!("cd /d \"{}\" && {command}", path.replace('"', "\"\""));
+            // /d 忽略自动运行命令，/s 保持引号原样，/k 执行后保留窗口；
+            // 先用 mode con 撑大屏幕缓冲（150x9999），输出多时可滚动看全
+            let cmd_line = format!(
+                "mode con: cols=150 lines=9999 & cd /d \"{}\" & {command}",
+                path.replace('"', "\"\"")
+            );
             Command::new("cmd")
                 .args(["/d", "/s", "/k", &cmd_line])
                 .creation_flags(CREATE_NEW_CONSOLE)
@@ -364,9 +368,10 @@ fn exec_in_shell(path: &str, shell: &str, command: &str) -> CmdResult {
                 .map_err(|e| format!("打开命令提示符失败：{e}"))?;
         }
         "powershell" => {
-            // 单引号内按 PowerShell 转义规则将 ' 翻倍
+            // 单引号内按 PowerShell 转义规则将 ' 翻倍；
+            // 先撑大缓冲（150x9999），再进入目录执行命令
             let cmd_line = format!(
-                "Set-Location -LiteralPath '{}'; {command}",
+                "$Host.UI.RawUI.BufferSize = New-Object System.Management.Automation.Host.Size(150,9999); Set-Location -LiteralPath '{}'; {command}",
                 path.replace('\'', "''")
             );
             Command::new("powershell")
@@ -376,9 +381,9 @@ fn exec_in_shell(path: &str, shell: &str, command: &str) -> CmdResult {
                 .map_err(|e| format!("打开 PowerShell 失败：{e}"))?;
         }
         _ => {
-            // Windows Terminal；未安装时回退 cmd
+            // Windows Terminal；未安装时回退 cmd。wt 窗口较宽，命令执行沿用 PowerShell 分支逻辑
             let cmd_line = format!(
-                "Set-Location -LiteralPath '{}'; {command}",
+                "$Host.UI.RawUI.BufferSize = New-Object System.Management.Automation.Host.Size(150,9999); Set-Location -LiteralPath '{}'; {command}",
                 path.replace('\'', "''")
             );
             if Command::new("wt")
@@ -485,11 +490,12 @@ fn open_jetbrains(path: &str, display: &str, exe_name: &str) -> CmdResult {
         roots.push(PathBuf::from(format!("{local}\\Programs")));
         roots.push(PathBuf::from(format!("{local}\\JetBrains\\Toolbox\\apps")));
     }
-    // 固定盘根下的 JetBrains 目录：自定义安装（如 D:\JetBrains）
+    // 固定盘根：直接装在盘根（D:\IntelliJ IDEA 2023.2.8）、D:\JetBrains 或 D:\Program Files 下
     for drive in b'A'..=b'Z' {
-        let root = PathBuf::from(format!("{}\\JetBrains", drive as char));
+        let root = PathBuf::from(format!("{}\\", drive as char));
         if root.is_dir() {
-            roots.push(root);
+            roots.push(root.clone());
+            roots.push(root.join("JetBrains"));
         }
     }
     let mut found: Option<PathBuf> = None;
@@ -544,6 +550,7 @@ fn find_editor_exe(
             || lower.starts_with("intellij")
             || lower.starts_with("jetbrains")
             || lower.starts_with("toolbox")
+            || lower.starts_with("program files")
             || lower == "apps"
             || lower.starts_with("ch-")
             || name.chars().next().is_some_and(|c| c.is_ascii_digit());
