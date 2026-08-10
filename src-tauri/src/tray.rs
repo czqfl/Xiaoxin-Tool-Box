@@ -2,12 +2,26 @@
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, Runtime,
+    AppHandle, Manager, Runtime, WebviewWindow,
 };
+use windows::Win32::Foundation::HWND;
+
+/// 可靠置前窗口（绕过 Win32 前景锁），背景进程直接 set_focus 常被拒绝，
+/// 导致设置窗口虽显示却未真正置前/置顶，表现为"偶尔打不开设置"。
+#[cfg(windows)]
+fn force_foreground_window<R: Runtime>(window: &WebviewWindow<R>) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    if let Ok(handle) = window.window_handle() {
+        if let RawWindowHandle::Win32(h) = handle.as_raw() {
+            let hwnd = HWND(h.hwnd.get() as *mut _);
+            crate::acrylic::force_foreground(hwnd);
+        }
+    }
+}
 
 /// 显示并聚焦设置窗口。
 /// 呼出前先收起所有悬浮面板：面板默认 alwaysOnTop，若正显示在前面会盖住
-/// 设置窗口，表现为"偶尔打不开设置"；同时让设置窗口置于最前。
+/// 设置窗口，表现为"偶尔打不开设置"；随后用可靠置前法让设置窗口真正置于最前。
 pub fn show_settings_window<R: Runtime>(app: &AppHandle<R>) {
     for label in crate::panel::ALL_PANELS {
         if let Some(w) = app.get_webview_window(label) {
@@ -17,6 +31,9 @@ pub fn show_settings_window<R: Runtime>(app: &AppHandle<R>) {
     if let Some(w) = app.get_webview_window("settings") {
         let _ = w.unminimize();
         let _ = w.show();
+        #[cfg(windows)]
+        force_foreground_window(&w);
+        #[cfg(not(windows))]
         let _ = w.set_focus();
     }
 }

@@ -1,7 +1,22 @@
 //! 悬浮面板的显示/隐藏与定位逻辑（两个面板共用）。
 use tauri::{AppHandle, LogicalPosition, Manager, Runtime, WebviewWindow};
+use windows::Win32::Foundation::HWND;
 
 use crate::config::ConfigState;
+
+/// 可靠置前窗口：绕过 Win32 前景锁，让托盘/热键呼出的面板成为活动窗口。
+/// 背景进程直接 set_focus 常被系统拒绝，窗口可见却非活动 → DWM mica 材质
+/// 不绘制（"必须先点一下才出模糊"）。顶到最前再降回 + SetForegroundWindow 可破此锁。
+#[cfg(windows)]
+fn force_foreground_window<R: Runtime>(window: &WebviewWindow<R>) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    if let Ok(handle) = window.window_handle() {
+        if let RawWindowHandle::Win32(h) = handle.as_raw() {
+            let hwnd = HWND(h.hwnd.get() as *mut _);
+            crate::acrylic::force_foreground(hwnd);
+        }
+    }
+}
 
 pub const CLIPBOARD_PANEL: &str = "clipboard-panel";
 pub const FOLDER_PANEL: &str = "folder-panel";
@@ -72,6 +87,10 @@ pub fn toggle_panel<R: Runtime>(app: &AppHandle<R>, label: &str) {
             crate::apply_panel_effects_for(&window, acrylic);
         }
         let _ = window.show();
+        // 可靠置前（绕过 Win32 前景锁），mica 材质才会在呼出时立即绘制
+        #[cfg(windows)]
+        force_foreground_window(&window);
+        #[cfg(not(windows))]
         let _ = window.set_focus();
     }
 }

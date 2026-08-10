@@ -55,15 +55,6 @@ export function CredentialPanel() {
 
   const { copiedId, mark } = useCopyFeedback();
 
-  // 头部拖动：避开输入框与按钮，避免与交互冲突
-  const onHeaderMouseDown = (e: React.MouseEvent) => {
-    const t = e.target as HTMLElement;
-    if (t.closest("input, textarea, button")) return;
-    getCurrentWindow()
-      .startDragging()
-      .catch(() => undefined);
-  };
-
   const refresh = () => {
     api.listCredentials().then((list) => {
       setItems(list);
@@ -154,7 +145,6 @@ export function CredentialPanel() {
         <div
           className="panel-header"
           data-tauri-drag-region
-          onMouseDown={onHeaderMouseDown}
         >
           <div className="panel-search">
             <span className="search-icon">
