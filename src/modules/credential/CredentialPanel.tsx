@@ -62,16 +62,6 @@ export function CredentialPanel() {
     });
   };
 
-  // 头部拖动：避开输入框与按钮，避免与交互冲突。
-  // 用 JS startDragging 而非 data-tauri-drag-region（二者并存会冲突导致拖不动）。
-  const onHeaderMouseDown = (e: React.MouseEvent) => {
-    const t = e.target as HTMLElement;
-    if (t.closest("input, textarea, button")) return;
-    getCurrentWindow()
-      .startDragging()
-      .catch(() => undefined);
-  };
-
   useEffect(() => {
     refresh();
     const cleanup: Array<() => void> = [];
@@ -152,7 +142,7 @@ export function CredentialPanel() {
   return (
     <div className="panel">
       <div className="panel-shell">
-        <div className="panel-header" onMouseDown={onHeaderMouseDown}>
+        <div className="panel-header" data-tauri-drag-region>
           <div className="panel-search">
             <span className="search-icon">
               <IconSearch size={15} />
