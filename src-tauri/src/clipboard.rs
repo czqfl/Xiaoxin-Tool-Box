@@ -85,21 +85,34 @@ impl Snapshot {
     }
 }
 
-/// 按 文件 > 图片 > 文本 的优先级读取剪贴板（尊重配置开关）
+/// 按 图片 > 文件 > 文本 的优先级读取剪贴板（尊重配置开关）。
+/// 图片必须优先于文件：部分截图工具（如 Snipaste）复制图片时会附带文件列表，
+/// 若文件优先会把图片误判为"文件复制"而永远进不了图片历史。
 fn read_clipboard(watch_images: bool, watch_files: bool) -> Option<Snapshot> {
     let mut cb = Clipboard::new().ok()?;
 
-    if watch_files {
-        if let Ok(files) = cb.get().file_list() {
-            if !files.is_empty() {
-                return Some(Snapshot::Files(files));
-            }
-        }
-    }
     if watch_images {
         if let Ok(img) = cb.get_image() {
             if img.width > 0 && img.height > 0 {
                 return Some(Snapshot::Image(img));
+            }
+        }
+        // arboard 在 Windows 只读 CF_DIB 位图；Snipaste/系统截图等工具写入的
+        // 主格式可能是 PNG/EMF（DIB 缺失或解析失败），此时枚举自定义 "PNG" 兜底
+        #[cfg(windows)]
+        if let Some(rgba) = read_png_from_clipboard() {
+            let (w, h) = rgba.dimensions();
+            return Some(Snapshot::Image(ImageData {
+                bytes: Cow::Owned(rgba.into_raw()),
+                width: w as usize,
+                height: h as usize,
+            }));
+        }
+    }
+    if watch_files {
+        if let Ok(files) = cb.get().file_list() {
+            if !files.is_empty() {
+                return Some(Snapshot::Files(files));
             }
         }
     }
@@ -111,71 +124,138 @@ fn read_clipboard(watch_images: bool, watch_files: bool) -> Option<Snapshot> {
     None
 }
 
-/// 启动后台监听线程：每 500ms 轮询，内容变化时记录并广播事件
+/// Windows：枚举剪贴板自定义格式，读取名为 "PNG" 的格式字节并解码为 RGBA。
+/// Snipaste 等工具复制图片时常以 PNG 为主格式，arboard（仅 CF_DIB）读不到。
+#[cfg(windows)]
+fn read_png_from_clipboard() -> Option<image::RgbaImage> {
+    use windows::Win32::System::DataExchange::{
+        CloseClipboard, EnumClipboardFormats, GetClipboardData, GetClipboardFormatNameW,
+        OpenClipboard,
+    };
+    use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
+
+    unsafe {
+        if OpenClipboard(None).is_err() {
+            return None;
+        }
+        let mut png_bytes: Option<Vec<u8>> = None;
+        let mut fmt = 0u32;
+        loop {
+            fmt = EnumClipboardFormats(fmt);
+            if fmt == 0 {
+                break;
+            }
+            let mut buf = [0u16; 64];
+            let len = GetClipboardFormatNameW(fmt, &mut buf);
+            if len <= 0 {
+                continue;
+            }
+            let name = String::from_utf16_lossy(&buf[..len as usize]);
+            if !name.eq_ignore_ascii_case("png") {
+                continue;
+            }
+            let Ok(h) = GetClipboardData(fmt) else {
+                continue;
+            };
+            // GetClipboardData 返回 HANDLE，Global* 系列需要 HGLOBAL（同样是指针包装）
+            let hg = windows::Win32::Foundation::HGLOBAL(h.0);
+            let ptr = GlobalLock(hg);
+            if ptr.is_null() {
+                continue;
+            }
+            let size = GlobalSize(hg);
+            if size > 0 {
+                png_bytes = Some(std::slice::from_raw_parts(ptr as *const u8, size).to_vec());
+            }
+            let _ = GlobalUnlock(hg);
+            break;
+        }
+        let _ = CloseClipboard();
+        let bytes = png_bytes?;
+        image::load_from_memory(&bytes).ok()?.into_rgba8().into()
+    }
+}
+
+/// 启动后台监听线程：每 500ms 轮询，内容变化时记录并广播事件。
+/// 线程内任何 panic 都会被捕获并自动重启，避免监听静默失效（表现为
+/// "复制了却再也不进历史"）。
 pub fn start_watcher<R: Runtime>(app: AppHandle<R>) {
     std::thread::spawn(move || {
-        // 启动时先同步一次队列可用性（历史数据可能非空）
+        let mut last_hash: u64 = 0;
+        loop {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                watcher_tick(&app, &mut last_hash);
+            }));
+            if result.is_err() {
+                eprintln!("[clipboard] watcher panic, restarting...");
+                std::thread::sleep(Duration::from_millis(1000));
+            }
+        }
+    });
+}
+
+/// 单次轮询：读剪贴板，内容变化时记录并广播（panic 时由 start_watcher 重启线程）
+fn watcher_tick<R: Runtime>(app: &AppHandle<R>, last_hash: &mut u64) {
+    // 启动后首轮先同步一次队列可用性（历史数据可能非空）
+    if *last_hash == 0 {
         if let Some(store) = app.try_state::<ClipboardStore>() {
             let entries = store.0.lock().unwrap();
             sync_seq_availability(&entries);
         }
-        let mut last_hash: u64 = 0;
-        loop {
-            std::thread::sleep(Duration::from_millis(500));
+    }
+    std::thread::sleep(Duration::from_millis(500));
 
-            let (watch_images, watch_files, max_history) = {
-                let Some(cfg) = app.try_state::<ConfigState>() else {
-                    continue;
-                };
-                let guard = cfg.0.lock().unwrap();
-                (
-                    guard.clipboard.watch_images,
-                    guard.clipboard.watch_files,
-                    guard.clipboard.max_history,
-                )
-            };
+    let (watch_images, watch_files, max_history) = {
+        let Some(cfg) = app.try_state::<ConfigState>() else {
+            return;
+        };
+        let guard = cfg.0.lock().unwrap();
+        (
+            guard.clipboard.watch_images,
+            guard.clipboard.watch_files,
+            guard.clipboard.max_history,
+        )
+    };
 
-            let Some(snap) = read_clipboard(watch_images, watch_files) else {
-                continue;
-            };
-            let hash = snap.hash();
-            if hash == last_hash {
-                continue;
-            }
-            last_hash = hash;
+    let Some(snap) = read_clipboard(watch_images, watch_files) else {
+        return;
+    };
+    let hash = snap.hash();
+    if hash == *last_hash {
+        return;
+    }
+    *last_hash = hash;
 
-            // 主动写回引起的变化：跳过记录
-            if SUPPRESS_WATCH.swap(false, Ordering::SeqCst) {
-                continue;
-            }
+    // 主动写回引起的变化：跳过记录
+    if SUPPRESS_WATCH.swap(false, Ordering::SeqCst) {
+        return;
+    }
 
-            let Some(paths) = app.try_state::<AppPaths>() else {
-                continue;
-            };
-            let Some(store) = app.try_state::<ClipboardStore>() else {
-                continue;
-            };
-            let Some(entry) = build_entry(&snap, hash, &paths.images_dir) else {
-                continue;
-            };
+    let Some(paths) = app.try_state::<AppPaths>() else {
+        return;
+    };
+    let Some(store) = app.try_state::<ClipboardStore>() else {
+        return;
+    };
+    let Some(entry) = build_entry(&snap, hash, &paths.images_dir) else {
+        return;
+    };
 
-            let mut entries = store.0.lock().unwrap();
-            // 去重：相同内容已有记录则移到最前并更新时间
-            if let Some(pos) = entries
-                .iter()
-                .position(|e| e.content_hash == entry.content_hash)
-            {
-                entries.remove(pos);
-            }
-            entries.insert(0, entry);
-            trim_entries(&mut entries, max_history as usize);
-            let _ = save_json(&paths.clipboard_file, &*entries);
-            sync_seq_availability(&entries);
-            drop(entries);
+    let mut entries = store.0.lock().unwrap();
+    // 去重：相同内容已有记录则移到最前并更新时间
+    if let Some(pos) = entries
+        .iter()
+        .position(|e| e.content_hash == entry.content_hash)
+    {
+        entries.remove(pos);
+    }
+    entries.insert(0, entry);
+    trim_entries(&mut entries, max_history as usize);
+    let _ = save_json(&paths.clipboard_file, &*entries);
+    sync_seq_availability(&entries);
+    drop(entries);
 
-            let _ = app.emit(EVT_CHANGED, ());
-        }
-    });
+    let _ = app.emit(EVT_CHANGED, ());
 }
 
 /// 超出容量时删除最旧的未收藏记录；若全部已收藏则删除最旧记录
