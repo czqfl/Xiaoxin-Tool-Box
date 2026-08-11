@@ -174,7 +174,7 @@ export function ClipboardItem({
         {onEnqueue && (
           <button
             className="icon-btn"
-            title="加入粘贴队列（视为重新复制一次；LIFO 下立即成为下一条，FIFO 下排在队尾）"
+            title="设为下一条：点击后立即成为 Ctrl+V 带出的内容，排在队列最前"
             onClick={onEnqueue}
           >
             <IconPlus size={14} />

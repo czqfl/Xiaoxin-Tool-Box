@@ -117,7 +117,7 @@ export function ClipboardPanel() {
     // 事件广播会触发 refresh，这里不再手动刷新
   };
 
-  /** 把条目加入粘贴队列：视为重新复制，LIFO 下立即成为下一条 */
+  /** 把条目设为下一条待粘贴：点击后它立即成为 Ctrl+V 带出的内容 */
   const enqueue = async (id: string) => {
     await enqueueEntry(id);
   };

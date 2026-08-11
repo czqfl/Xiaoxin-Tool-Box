@@ -806,23 +806,32 @@ pub fn clipboard_rollback(
     Ok(())
 }
 
-/// 把指定条目加入粘贴队列：视为"重新复制"（created_at 置为现在、移到历史最前）。
-/// - LIFO 下它立即成为下一条（最新优先）；
-/// - FIFO 下它排在队尾（先进先出，等更早的条目粘贴完才轮到）。
-/// 面板列表在顺序模式下按队列顺序展示，用户可直观看到它的位置。
+/// 把指定条目设为"下一条待粘贴"：无论当前是 FIFO 还是 LIFO，点击后它立即成为
+/// 队列队首（Ctrl+V 带出的内容），面板列表同步把它排到第一项。
+/// 实现：把 created_at 放到"当前模式下队首的前一位"——
+/// - LIFO（最新优先）：置为 now，必然最新 → 队首；
+/// - FIFO（最旧优先）：置为比当前最旧还旧 1ms → 队首。
 #[tauri::command]
 pub fn clipboard_enqueue(
     app: AppHandle,
     id: String,
     store: State<'_, ClipboardStore>,
     paths: State<'_, AppPaths>,
+    config: State<'_, ConfigState>,
 ) -> Result<(), String> {
+    let mode = config.0.lock().unwrap().clipboard.paste_mode;
     let mut entries = store.0.lock().unwrap();
     let Some(pos) = entries.iter().position(|e| e.id == id) else {
         return Err("记录不存在".into());
     };
     let mut entry = entries.remove(pos);
-    entry.created_at = chrono::Utc::now().timestamp_millis();
+    let now = chrono::Utc::now().timestamp_millis();
+    entry.created_at = if mode == PasteMode::Fifo {
+        let oldest = entries.iter().map(|e| e.created_at).min().unwrap_or(now);
+        oldest.saturating_sub(1)
+    } else {
+        now
+    };
     entries.insert(0, entry);
     save_json(&paths.clipboard_file, &*entries).map_err(|e| format!("保存失败：{e}"))?;
     drop(entries);
