@@ -163,3 +163,28 @@ pub fn force_foreground(hwnd: HWND) {
         let _ = SetForegroundWindow(hwnd);
     }
 }
+
+/// 置顶并置前（设置窗口等"必须始终在最上面"的场景）：
+/// 直接用 Win32 SetWindowPos 同步把窗口顶到最前（TOPMOST 立刻生效），再
+/// SetForegroundWindow。不依赖 Tauri set_always_on_top 的异步 IPC——异步时序下
+/// force_foreground 可能读到"尚未置顶"的样式而走降回分支，把本应置顶的窗口
+/// 降成普通窗口，被其它窗口盖住（"偶尔打不开设置"的根因）。
+pub fn force_topmost_foreground(hwnd: HWND) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetForegroundWindow, SetWindowPos, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE,
+        SWP_NOACTIVATE,
+    };
+    unsafe {
+        // SWP_NOACTIVATE：先同步置顶但不抢焦点，随后 SetForegroundWindow 统一置前
+        let _ = SetWindowPos(
+            hwnd,
+            Some(HWND_TOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        );
+        let _ = SetForegroundWindow(hwnd);
+    }
+}

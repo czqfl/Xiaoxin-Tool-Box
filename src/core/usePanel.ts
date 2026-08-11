@@ -48,6 +48,19 @@ export function usePanelCommon(stayVisible = false) {
     window.addEventListener("blur", onBlur);
     cleanup.push(() => window.removeEventListener("blur", onBlur));
 
+    // 鼠标悬停/点击面板即请求聚焦：WebView2 在窗口非活动（失焦）时不响应滚轮，
+    // 导致"呼出后面板滚不动、要点一下才行"。鼠标一进面板就补一次 setFocus，
+    // 滚轮立即可用（有真实鼠标输入时 Windows 允许置前，通常能成功）。
+    const onMouseActivate = () => {
+      if (!document.hasFocus()) {
+        getCurrentWindow().setFocus().catch(() => undefined);
+      }
+    };
+    document.addEventListener("mouseover", onMouseActivate);
+    document.addEventListener("mousedown", onMouseActivate);
+    cleanup.push(() => document.removeEventListener("mouseover", onMouseActivate));
+    cleanup.push(() => document.removeEventListener("mousedown", onMouseActivate));
+
     return () => cleanup.forEach((fn) => fn());
   }, [load, sync, stayVisible]);
 }

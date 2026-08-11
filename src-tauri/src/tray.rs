@@ -2,26 +2,15 @@
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, Runtime, WebviewWindow,
+    AppHandle, Manager, Runtime,
 };
 use windows::Win32::Foundation::HWND;
 
-/// 可靠置前窗口（绕过 Win32 前景锁），背景进程直接 set_focus 常被拒绝，
-/// 导致设置窗口虽显示却未真正置前/置顶，表现为"偶尔打不开设置"。
-#[cfg(windows)]
-fn force_foreground_window<R: Runtime>(window: &WebviewWindow<R>) {
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    if let Ok(handle) = window.window_handle() {
-        if let RawWindowHandle::Win32(h) = handle.as_raw() {
-            let hwnd = HWND(h.hwnd.get() as *mut _);
-            crate::acrylic::force_foreground(hwnd);
-        }
-    }
-}
-
 /// 显示并聚焦设置窗口。
 /// 呼出前先收起所有悬浮面板：面板默认 alwaysOnTop，若正显示在前面会盖住
-/// 设置窗口，表现为"偶尔打不开设置"；随后用可靠置前法让设置窗口真正置于最前。
+/// 设置窗口，表现为"偶尔打不开设置"；随后用同步置顶 + 可靠置前让设置窗口
+/// 始终位于最上层。不用 Tauri 异步 set_always_on_top——它与 force_foreground
+/// 的 Win32 样式读取存在时序差，可能把设置窗口降成普通窗口被其它窗口盖住。
 pub fn show_settings_window<R: Runtime>(app: &AppHandle<R>) {
     for label in crate::panel::ALL_PANELS {
         if let Some(w) = app.get_webview_window(label) {
@@ -29,14 +18,19 @@ pub fn show_settings_window<R: Runtime>(app: &AppHandle<R>) {
         }
     }
     if let Some(w) = app.get_webview_window("settings") {
-        // 先确保置顶样式在：force_foreground 早前版本的 HWND_NOTOPMOST 破锁套路
-        // 会顺带清除置顶样式，窗口变普通窗口后 SetForegroundWindow 又被前景锁
-        // 拒绝，表现为“偶尔打不开设置”（窗口显示在其它窗口后面）。
-        let _ = w.set_always_on_top(true);
         let _ = w.unminimize();
         let _ = w.show();
         #[cfg(windows)]
-        force_foreground_window(&w);
+        {
+            use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+            if let Ok(handle) = w.window_handle() {
+                if let RawWindowHandle::Win32(h) = handle.as_raw() {
+                    let hwnd = HWND(h.hwnd.get() as *mut _);
+                    // 同步置顶 + 置前：SetWindowPos(TOPMOST) 立即生效，不依赖异步 IPC
+                    crate::acrylic::force_topmost_foreground(hwnd);
+                }
+            }
+        }
         #[cfg(not(windows))]
         let _ = w.set_focus();
     }
