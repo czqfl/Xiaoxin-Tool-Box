@@ -16,8 +16,8 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
-# 读取版本号
-$conf = Get-Content "src-tauri\tauri.conf.json" -Raw | ConvertFrom-Json
+# 读取版本号（tauri.conf.json 是 UTF-8 无 BOM，PS5.1 默认按 ANSI 读会乱码，须显式指定）
+$conf = Get-Content "src-tauri\tauri.conf.json" -Raw -Encoding UTF8 | ConvertFrom-Json
 $version = $conf.version
 
 # ---- 1. Tauri 构建（NSIS + MSI 两种安装包） ----
