@@ -1,12 +1,12 @@
-﻿# 小心工具箱 - 一键打包脚本（安装版 x2 + 便携版）
+﻿# 小心工具箱 - 一键打包脚本（安装版 + 便携版）
 # 用法：
-#   npm run pack                                # 完整构建（前端 + Rust release + 两种安装包 + 便携版）
+#   npm run pack                                # 完整构建（前端 + Rust release + NSIS 安装包 + 便携版）
 #   .\scripts\build-release.ps1 -SkipBuild      # 仅打包（已执行过 tauri build 时）
 #
 # 产出（项目最顶层）：
 #   小心工具箱-安装版-v<版本>.exe    NSIS 安装包（双击安装）
-#   小心工具箱-安装版-v<版本>.msi    MSI 安装包（企业分发用，需 WiX；失败自动跳过）
 #   小心工具箱-便携版-v<版本>.zip    绿色便携版（解压即用，数据存 exe 同级 data\，可整体迁移）
+# 注：MSI 安装包（WiX）因 WiX 下载失败已停用，需要时可重新加 --bundles nsis,msi。
 
 param(
     [switch]$SkipBuild
@@ -20,16 +20,11 @@ Set-Location $root
 $conf = Get-Content "src-tauri\tauri.conf.json" -Raw -Encoding UTF8 | ConvertFrom-Json
 $version = $conf.version
 
-# ---- 1. Tauri 构建（NSIS + MSI 两种安装包） ----
+# ---- 1. Tauri 构建（NSIS 安装包） ----
 if (-not $SkipBuild) {
-    Write-Host "==> 构建安装包（NSIS + MSI）..." -ForegroundColor Cyan
-    # 一次构建两种；MSI 需要 WiX（首次构建自动下载，可能因网络失败），失败则回退仅 NSIS
-    npm run tauri build -- --bundles nsis,msi
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning "NSIS+MSI 构建失败（常见原因：WiX 下载失败）。回退为仅构建 NSIS..."
-        npm run tauri build
-        if ($LASTEXITCODE -ne 0) { throw "tauri build 失败" }
-    }
+    Write-Host "==> 构建安装包（NSIS）..." -ForegroundColor Cyan
+    npm run tauri build
+    if ($LASTEXITCODE -ne 0) { throw "tauri build 失败" }
 }
 
 # ---- 2. 收集安装包到项目根 ----
@@ -40,15 +35,6 @@ if ($nsisExe) {
     Write-Host "  [NSIS]   $dest" -ForegroundColor Green
 } else {
     Write-Warning "未找到 NSIS 产物，跳过安装版 exe"
-}
-
-$msiFile = Get-ChildItem "src-tauri\target\release\bundle\msi\*.msi" -ErrorAction SilentlyContinue | Select-Object -First 1
-if ($msiFile) {
-    $dest = Join-Path $root "小心工具箱-安装版-v$version.msi"
-    Copy-Item $msiFile.FullName $dest -Force
-    Write-Host "  [MSI]    $dest" -ForegroundColor Green
-} else {
-    Write-Warning "未找到 MSI 产物（可能 WiX 不可用），跳过"
 }
 
 # ---- 3. 便携版（绿色 exe，可直接执行） ----
