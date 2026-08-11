@@ -294,7 +294,12 @@ export function ClipboardPanel() {
           <span>
             {sequential ? (
               <>
-                下一条：{(queue[0]?.preview ?? "无").slice(0, 24)}
+                <span
+                  className="next-hint"
+                  title={queue[0]?.text ?? queue[0]?.preview ?? ""}
+                >
+                  下一条：{(queue[0]?.preview ?? "无").slice(0, 16)}
+                </span>
                 <span className="kbd" style={{ marginLeft: 8 }}>Ctrl+V</span> 带出
                 <button
                   className="rollback-btn"

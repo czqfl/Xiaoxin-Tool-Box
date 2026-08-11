@@ -115,6 +115,28 @@ html[data-window="panel"] body {
   font-size: 11px;
   color: var(--text-tertiary);
 }
+/* 左侧分段选择器：禁止压缩，避免提示过长时按钮文字被挤换行 */
+.panel-footer .segmented {
+  flex-shrink: 0;
+}
+/* 右侧提示区：flex 布局内可收缩，仅"下一条"预览允许省略，kbd/按钮不压缩 */
+.panel-footer > span:last-child {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.panel-footer .kbd,
+.panel-footer .rollback-btn {
+  flex-shrink: 0;
+}
+/* 下一条预览：过长省略号，悬停 title 看全文 */
+.next-hint {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* 键盘提示 */
 .kbd {
