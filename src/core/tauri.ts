@@ -34,6 +34,15 @@ export const writeBackEntry = (id: string) =>
   invoke<void>("clipboard_write_back", { id });
 export const pasteEntry = (id: string) =>
   invoke<void>("clipboard_paste", { id });
+/** 顺序模式手动粘贴后消耗条目（记录到后端回滚缓冲） */
+export const consumeEntry = (id: string) =>
+  safe(invoke("clipboard_consume", { id }), undefined);
+/** 撤销上一次顺序粘贴的消耗，恢复被消耗的条目 */
+export const rollbackPaste = () =>
+  safe(invoke("clipboard_rollback"), undefined);
+/** 把指定条目加入粘贴队列（视为重新复制一次） */
+export const enqueueEntry = (id: string) =>
+  safe(invoke("clipboard_enqueue", { id }), undefined);
 
 // ---- 文件夹 ----
 export const listFolders = () =>

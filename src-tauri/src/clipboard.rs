@@ -5,8 +5,9 @@ use arboard::{Clipboard, ImageData};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -17,6 +18,10 @@ pub const EVT_CHANGED: &str = "clipboard://changed";
 
 /// 主动写回剪贴板时置位，监听线程跳过本次变化，避免重复记录
 pub static SUPPRESS_WATCH: AtomicBool = AtomicBool::new(false);
+
+/// 最近一次被顺序粘贴（全局 Ctrl+V / 面板手动粘贴）消耗的条目，供"撤销粘贴"恢复。
+/// 收藏项不会被消耗，不进入此缓冲。
+static LAST_CONSUMED: Mutex<Option<ClipEntry>> = Mutex::new(None);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -586,6 +591,8 @@ pub fn clipboard_clear(
         remove_image_file(e, &paths.images_dir);
     }
     entries.retain(|e| e.favorite);
+    // 顺带回收孤儿图片（顺序粘贴消耗但未撤销的条目残留的文件）
+    cleanup_orphan_images(&paths.images_dir, &entries);
     sync_seq_availability(&entries);
     save_json(&paths.clipboard_file, &*entries).map_err(|e| format!("保存失败：{e}"))
 }
@@ -737,12 +744,112 @@ pub fn sequential_paste<R: Runtime>(app: &AppHandle<R>) {
         let mut entries = store.0.lock().unwrap();
         if let Some(pos) = entries.iter().position(|e| e.id == entry.id) {
             let removed = entries.remove(pos);
-            remove_image_file(&removed, &paths.images_dir);
+            // 记录到回滚缓冲（撤销粘贴可恢复）；图片文件保留不删——
+            // 否则回滚时文件已不存在无法完整恢复。孤儿文件由清空时统一清理。
+            *LAST_CONSUMED.lock().unwrap() = Some(removed);
         }
         let _ = save_json(&paths.clipboard_file, &*entries);
         sync_seq_availability(&entries);
         drop(entries);
         let _ = app.emit(EVT_CHANGED, ());
+    }
+}
+
+/// 顺序模式下手动粘贴（点击 / Enter / 数字键）后的消耗：
+/// 从队列移除条目并记录到回滚缓冲，不删图片文件（保证可撤销恢复）。
+/// 与全局 Ctrl+V 的 sequential_paste 消耗路径语义一致，撤销统一生效。
+#[tauri::command]
+pub fn clipboard_consume(
+    app: AppHandle,
+    id: String,
+    store: State<'_, ClipboardStore>,
+    paths: State<'_, AppPaths>,
+) -> Result<(), String> {
+    let mut entries = store.0.lock().unwrap();
+    if let Some(pos) = entries.iter().position(|e| e.id == id) {
+        let removed = entries.remove(pos);
+        *LAST_CONSUMED.lock().unwrap() = Some(removed);
+        save_json(&paths.clipboard_file, &*entries).map_err(|e| format!("保存失败：{e}"))?;
+        sync_seq_availability(&entries);
+    }
+    drop(entries);
+    let _ = app.emit(EVT_CHANGED, ());
+    Ok(())
+}
+
+/// 撤销上一次顺序粘贴的消耗：把条目按原 created_at 插回队列的正确位置
+/// （FIFO 下回到队首附近，LIFO 下回到队尾附近，语义一致）。
+/// 用于"按了 Ctrl+V 却没粘贴上 / 粘贴错地方"时恢复内容。
+#[tauri::command]
+pub fn clipboard_rollback(
+    app: AppHandle,
+    store: State<'_, ClipboardStore>,
+    paths: State<'_, AppPaths>,
+) -> Result<(), String> {
+    let Some(entry) = LAST_CONSUMED.lock().unwrap().take() else {
+        return Ok(());
+    };
+    let mut entries = store.0.lock().unwrap();
+    // 已在队列（收藏项等）则幂等跳过
+    if entries.iter().any(|e| e.id == entry.id) {
+        return Ok(());
+    }
+    let pos = entries
+        .iter()
+        .position(|e| e.created_at > entry.created_at)
+        .unwrap_or(entries.len());
+    entries.insert(pos, entry);
+    save_json(&paths.clipboard_file, &*entries).map_err(|e| format!("保存失败：{e}"))?;
+    sync_seq_availability(&entries);
+    drop(entries);
+    let _ = app.emit(EVT_CHANGED, ());
+    Ok(())
+}
+
+/// 把指定条目加入粘贴队列：视为"重新复制"（created_at 置为现在、移到历史最前）。
+/// - LIFO 下它立即成为下一条（最新优先）；
+/// - FIFO 下它排在队尾（先进先出，等更早的条目粘贴完才轮到）。
+/// 面板列表在顺序模式下按队列顺序展示，用户可直观看到它的位置。
+#[tauri::command]
+pub fn clipboard_enqueue(
+    app: AppHandle,
+    id: String,
+    store: State<'_, ClipboardStore>,
+    paths: State<'_, AppPaths>,
+) -> Result<(), String> {
+    let mut entries = store.0.lock().unwrap();
+    let Some(pos) = entries.iter().position(|e| e.id == id) else {
+        return Err("记录不存在".into());
+    };
+    let mut entry = entries.remove(pos);
+    entry.created_at = chrono::Utc::now().timestamp_millis();
+    entries.insert(0, entry);
+    save_json(&paths.clipboard_file, &*entries).map_err(|e| format!("保存失败：{e}"))?;
+    drop(entries);
+    let _ = app.emit(EVT_CHANGED, ());
+    Ok(())
+}
+
+/// 清理孤儿图片文件：images 目录中未被任何条目引用的文件。
+/// 顺序粘贴消耗的条目不再即时删文件（保证可撤销），其残留文件在此统一回收。
+fn cleanup_orphan_images(images_dir: &Path, entries: &[ClipEntry]) {
+    let referenced: HashSet<PathBuf> = entries
+        .iter()
+        .flat_map(|e| {
+            [e.image_path.as_deref(), e.image_thumb_path.as_deref()]
+                .into_iter()
+                .flatten()
+                .map(|rel| images_dir.join(rel))
+        })
+        .collect();
+    let Ok(rd) = std::fs::read_dir(images_dir) else {
+        return;
+    };
+    for f in rd.flatten() {
+        let p = f.path();
+        if p.is_file() && !referenced.contains(&p) {
+            let _ = std::fs::remove_file(p);
+        }
     }
 }
 

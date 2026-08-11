@@ -11,6 +11,7 @@ import {
   IconFiles,
   IconImage,
   IconPin,
+  IconPlus,
   IconStar,
   IconText,
   IconTrash,
@@ -66,6 +67,8 @@ interface Props {
   isCurrent: boolean;
   selected: boolean;
   onPaste: () => void;
+  /** 顺序模式下显示"加入队列"按钮（视为重新复制一次） */
+  onEnqueue?: () => void;
 }
 
 export function ClipboardItem({
@@ -75,6 +78,7 @@ export function ClipboardItem({
   isCurrent,
   selected,
   onPaste,
+  onEnqueue,
 }: Props) {
   const { remove, toggleFavorite, togglePin, replaceText } = useClipboardStore();
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
@@ -167,6 +171,15 @@ export function ClipboardItem({
         >
           <IconStar size={14} filled={entry.favorite} />
         </button>
+        {onEnqueue && (
+          <button
+            className="icon-btn"
+            title="加入粘贴队列（视为重新复制一次；LIFO 下立即成为下一条，FIFO 下排在队尾）"
+            onClick={onEnqueue}
+          >
+            <IconPlus size={14} />
+          </button>
+        )}
         <button
           className={`icon-btn ${entry.pinned ? "active" : ""}`}
           title={entry.pinned ? "取消置顶" : "置顶"}

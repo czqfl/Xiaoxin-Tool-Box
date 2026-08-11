@@ -8,5 +8,8 @@ export {
   fetchImageData,
   writeBackEntry,
   pasteEntry,
+  consumeEntry,
+  rollbackPaste,
+  enqueueEntry,
   setPanelAlwaysOnTop,
 } from "../../core/tauri";

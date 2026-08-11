@@ -6,7 +6,13 @@ import { hideCurrentWindow, usePanelCommon } from "../../core/usePanel";
 import { EVT_CLIPBOARD_CHANGED, onEvent } from "../../core/events";
 import { useClipboardStore } from "../../stores/clipboardStore";
 import { useConfigStore } from "../../stores/configStore";
-import { pasteEntry, setPanelAlwaysOnTop } from "./api";
+import {
+  consumeEntry,
+  enqueueEntry,
+  pasteEntry,
+  rollbackPaste,
+  setPanelAlwaysOnTop,
+} from "./api";
 import {
   buildQueue,
   isSequentialMode,
@@ -19,7 +25,7 @@ import "../../styles/panel.css";
 import "./clipboard.css";
 
 export function ClipboardPanel() {
-  const { entries, loaded, refresh, remove, clearAll } = useClipboardStore();
+  const { entries, loaded, refresh, clearAll } = useClipboardStore();
   const config = useConfigStore((s) => s.config);
   const updateConfig = useConfigStore((s) => s.update);
   // 置顶开启时面板常驻：失焦不再自动隐藏
@@ -81,6 +87,11 @@ export function ClipboardPanel() {
   // 顺序模式队列；队首即下一条待粘贴（全局 Ctrl+V 带出的内容）
   const queue = useMemo(() => buildQueue(filtered, mode), [filtered, mode]);
   const sequential = isSequentialMode(mode);
+  /** 展示列表：顺序模式下整体按队列顺序（下一条在最前），普通模式保持 置顶/历史 分区 */
+  const displayList = useMemo(
+    () => (sequential ? queue : flat),
+    [sequential, queue, flat]
+  );
 
   const doPaste = useCallback(
     async (entry: ClipEntry) => {
@@ -89,15 +100,27 @@ export function ClipboardPanel() {
       } catch (err) {
         console.error("粘贴失败：", err);
       }
-      // 顺序模式：消耗已粘贴条目（收藏项保留），下一条自动成为队首
-      if (sequential && !entry.favorite) void remove(entry.id);
+      // 顺序模式：消耗已粘贴条目（收藏项保留），下一条自动成为队首；
+      // 消耗走后端 consume（记录回滚缓冲，粘贴失败可撤销恢复）
+      if (sequential && !entry.favorite) void consumeEntry(entry.id);
       // 顺序模式必须隐藏面板让目标窗口获得焦点；普通模式尊重配置
       if (sequential || config.clipboard.close_after_paste) {
         hideCurrentWindow();
       }
     },
-    [sequential, config.clipboard.close_after_paste, remove]
+    [sequential, config.clipboard.close_after_paste]
   );
+
+  /** 撤销上一次顺序粘贴消耗（Ctrl+V 没粘上 / 粘错时恢复条目） */
+  const rollback = async () => {
+    await rollbackPaste();
+    // 事件广播会触发 refresh，这里不再手动刷新
+  };
+
+  /** 把条目加入粘贴队列：视为重新复制，LIFO 下立即成为下一条 */
+  const enqueue = async (id: string) => {
+    await enqueueEntry(id);
+  };
 
   // 全局键盘：Esc / 数字快速粘贴 / 方向键导航 / Enter 粘贴
   useEffect(() => {
@@ -172,6 +195,7 @@ export function ClipboardPanel() {
       isCurrent={sequential && queue[0]?.id === entry.id}
       selected={!sequential && flatIndex === selectedIdx}
       onPaste={() => void doPaste(entry)}
+      onEnqueue={sequential ? () => void enqueue(entry.id) : undefined}
     />
   );
 
@@ -222,7 +246,7 @@ export function ClipboardPanel() {
 
         <div className="panel-body">
           {!loaded && <div className="empty-state">加载中…</div>}
-          {loaded && flat.length === 0 && (
+          {loaded && displayList.length === 0 && (
             <div className="empty-state">
               <span className="empty-icon">📋</span>
               <span>
@@ -235,16 +259,23 @@ export function ClipboardPanel() {
             </div>
           )}
 
-          {pinnedList.length > 0 && (
+          {sequential ? (
+            /* 顺序模式：整体按队列顺序展示，下一条在最前，切换模式即调整顺序 */
+            displayList.map((e) => renderItem(e, 0))
+          ) : (
             <>
-              <div className="section-label">置顶</div>
-              {pinnedList.map((e) => renderItem(e, flat.indexOf(e)))}
+              {pinnedList.length > 0 && (
+                <>
+                  <div className="section-label">置顶</div>
+                  {pinnedList.map((e) => renderItem(e, flat.indexOf(e)))}
+                </>
+              )}
+              {pinnedList.length > 0 && restList.length > 0 && (
+                <div className="section-label">历史记录</div>
+              )}
+              {restList.map((e) => renderItem(e, flat.indexOf(e)))}
             </>
           )}
-          {pinnedList.length > 0 && restList.length > 0 && (
-            <div className="section-label">历史记录</div>
-          )}
-          {restList.map((e) => renderItem(e, flat.indexOf(e)))}
         </div>
 
         <div className="panel-footer">
@@ -265,6 +296,13 @@ export function ClipboardPanel() {
               <>
                 下一条：{(queue[0]?.preview ?? "无").slice(0, 24)}
                 <span className="kbd" style={{ marginLeft: 8 }}>Ctrl+V</span> 带出
+                <button
+                  className="rollback-btn"
+                  onClick={() => void rollback()}
+                  title="撤销上一次粘贴消耗的条目（没粘上 / 粘错地方时恢复）"
+                >
+                  ↩ 撤销上次
+                </button>
               </>
             ) : (
               <>
