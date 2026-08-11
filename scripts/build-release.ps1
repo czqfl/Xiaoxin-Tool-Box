@@ -1,4 +1,4 @@
-# 小心工具箱 - 一键打包脚本（安装版 x2 + 便携版）
+﻿# 小心工具箱 - 一键打包脚本（安装版 x2 + 便携版）
 # 用法：
 #   npm run pack                                # 完整构建（前端 + Rust release + 两种安装包 + 便携版）
 #   .\scripts\build-release.ps1 -SkipBuild      # 仅打包（已执行过 tauri build 时）
@@ -61,15 +61,17 @@ if (Test-Path $releaseExe) {
     New-Item -ItemType Directory -Path (Join-Path $stage "data") -Force | Out-Null
     Copy-Item $releaseExe (Join-Path $stage "小心工具箱.exe")
 
-    @'
-小心工具箱 · 便携版说明
-========================
-1. 解压到任意有读写权限的目录（避免 C:\Program Files）。
-2. 双击「小心工具箱.exe」运行，程序常驻系统托盘。
-3. 所有数据（配置、剪贴板历史、文件夹记录）保存在本目录下的 data\ 文件夹中，
-   整体复制即可完成迁移。
-4. 默认快捷键：Alt+C 呼出剪贴板面板，Alt+F 呼出文件夹面板，可在设置中修改。
-'@ | Out-File -FilePath (Join-Path $stage "使用说明.txt") -Encoding utf8
+    # 说明文案（数组拼接，避开 here-string 结束符必须行首的缩进限制）
+    $readme = @(
+        "小心工具箱 · 便携版说明",
+        "========================",
+        "1. 解压到任意有读写权限的目录（避免 C:\Program Files）。",
+        "2. 双击「小心工具箱.exe」运行，程序常驻系统托盘。",
+        "3. 所有数据（配置、剪贴板历史、文件夹记录）保存在本目录下的 data\ 文件夹中，",
+        "   整体复制即可完成迁移。",
+        "4. 默认快捷键：Alt+C 呼出剪贴板面板，Alt+F 呼出文件夹面板，可在设置中修改。"
+    ) -join "`r`n"
+    $readme | Out-File -FilePath (Join-Path $stage "使用说明.txt") -Encoding utf8
 
     $zip = Join-Path $root "小心工具箱-便携版-v$version.zip"
     if (Test-Path $zip) { Remove-Item $zip -Force }
