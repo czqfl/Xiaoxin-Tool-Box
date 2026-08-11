@@ -12,3 +12,9 @@ src-tauri/gen
 !.vscode/extensions.json
 .idea
 .DS_Store
+
+# 打包产物（npm run pack 输出到项目根）
+小心工具箱-安装版-*.exe
+小心工具箱-安装版-*.msi
+小心工具箱-便携版-*.zip
+stage/
