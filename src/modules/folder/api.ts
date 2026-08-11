@@ -14,6 +14,7 @@ export {
   openFolderInEditor,
   setVscodePath,
   pickVscodeExecutable,
+  detectEditors,
   gitExec,
   folderGitBranches,
   copyFolderPath,

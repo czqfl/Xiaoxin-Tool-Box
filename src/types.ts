@@ -114,3 +114,10 @@ export interface AppConfig {
 
 /** 粘贴模式：普通 / 先进先出 / 后进先出 */
 export type PasteMode = "normal" | "fifo" | "lifo";
+
+/** 已安装编辑器探测结果（右键菜单动态渲染用） */
+export interface EditorInfo {
+  key: string;
+  label: string;
+  exe: string;
+}

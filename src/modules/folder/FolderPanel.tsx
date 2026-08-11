@@ -1,7 +1,7 @@
 /** 文件夹快捷面板：固定/最常访问双分区、各自分页、搜索、右键菜单、拖拽添加与排序 */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { FolderEntry, FolderLayout } from "../../types";
+import type { EditorInfo, FolderEntry, FolderLayout } from "../../types";
 import { hideCurrentWindow, usePanelCommon, withNativeDialog } from "../../core/usePanel";
 import { EVT_FOLDER_CHANGED, onEvent } from "../../core/events";
 import { useFolderStore, sortFolders } from "../../stores/folderStore";
@@ -143,6 +143,8 @@ export function FolderPanel() {
   const inputRef = useRef<HTMLInputElement>(null);
   /** 文件夹 id → Git 当前分支（非仓库无条目） */
   const [branches, setBranches] = useState<Record<string, string>>({});
+  /** 已安装编辑器列表（null = 尚未检测完成） */
+  const [editors, setEditors] = useState<EditorInfo[] | null>(null);
 
   // 列表变化时批量读取 Git 分支（读 .git/HEAD，毫秒级）
   useEffect(() => {
@@ -163,6 +165,7 @@ export function FolderPanel() {
 
   useEffect(() => {
     refresh();
+    refreshEditors();
     const cleanup: Array<() => void> = [];
 
     getCurrentWindow()
@@ -311,12 +314,17 @@ export function FolderPanel() {
     api.openFolderInTerminalWith(folder.path, shell).catch((e) => window.alert(String(e)));
   };
 
-  /** 在指定编辑器中打开（code / idea / webstorm）。
+  /** 自动检测已安装的编辑器（毫秒级磁盘探测，菜单打开前刷新） */
+  const refreshEditors = () => {
+    api
+      .detectEditors()
+      .then(setEditors)
+      .catch(() => setEditors([]));
+  };
+
+  /** 在指定编辑器中打开（code / qoder / qodercn / idea / webstorm）。
    *  VS Code 自动探测失败时引导用户手动选择 Code.exe，记住路径后自动重试一次。 */
-  const openInEditor = async (
-    folder: FolderEntry,
-    editor: "code" | "idea" | "webstorm"
-  ) => {
+  const openInEditor = async (folder: FolderEntry, editor: string) => {
     hideCurrentWindow();
     try {
       await api.openFolderInEditor(folder.path, editor);
@@ -373,23 +381,19 @@ export function FolderPanel() {
     {
       label: "用编辑器打开",
       icon: <IconCode size={14} />,
-      children: [
-        {
-          label: "VS Code",
-          icon: <IconCode size={13} />,
-          onClick: () => openInEditor(folder, "code"),
-        },
-        {
-          label: "IntelliJ IDEA",
-          icon: <IconCode size={13} />,
-          onClick: () => openInEditor(folder, "idea"),
-        },
-        {
-          label: "WebStorm",
-          icon: <IconCode size={13} />,
-          onClick: () => openInEditor(folder, "webstorm"),
-        },
-      ],
+      children: (editors ?? []).length
+        ? editors!.map((e) => ({
+            label: e.label,
+            icon: <IconCode size={13} />,
+            onClick: () => openInEditor(folder, e.key),
+          }))
+        : [
+            {
+              label: editors === null ? "正在检测…" : "未检测到已安装的编辑器",
+              icon: <IconCode size={13} />,
+              onClick: () => refreshEditors(),
+            },
+          ],
     },
     ...(branches[folder.id]
       ? [
@@ -447,6 +451,7 @@ export function FolderPanel() {
       }
       onContextMenu={(e) => {
         e.preventDefault();
+        refreshEditors();
         setMenu({ x: e.clientX, y: e.clientY, folder });
       }}
       onDragStart={() => setDraggingId(folder.id)}
@@ -497,6 +502,7 @@ export function FolderPanel() {
                     onClick={() => void openFolderItem(f)}
                     onContextMenu={(e) => {
                       e.preventDefault();
+                      refreshEditors();
                       setMenu({ x: e.clientX, y: e.clientY, folder: f });
                     }}
                   >

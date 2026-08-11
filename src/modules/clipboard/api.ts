@@ -10,6 +10,9 @@ export {
   pasteEntry,
   consumeEntry,
   rollbackPaste,
+  moveQueueEntry,
   enqueueEntry,
+  reorderQueueEntry,
+  insertQueueText,
   setPanelAlwaysOnTop,
 } from "../../core/tauri";

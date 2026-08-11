@@ -186,6 +186,12 @@ export const IconArrowUp = (p: IconProps) => (
   </svg>
 );
 
+export const IconArrowDown = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M12 5v14M5 12l7 7 7-7" />
+  </svg>
+);
+
 export const IconChevronLeft = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="m15 18-6-6 6-6" />
@@ -247,5 +253,11 @@ export const IconEdit = (p: IconProps) => (
 export const IconPlus = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M12 5v14M5 12h14" />
+  </svg>
+);
+
+export const IconClose = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M18 6 6 18M6 6l12 12" />
   </svg>
 );

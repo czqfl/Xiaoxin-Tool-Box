@@ -1,7 +1,7 @@
 /** Rust command 统一封装层：所有 invoke 调用经此收口，便于错误兜底 */
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AppConfig, ClipEntry, Credential, FolderEntry } from "../types";
+import type { AppConfig, ClipEntry, Credential, EditorInfo, FolderEntry } from "../types";
 
 /** 安全调用：Rust 侧异常转为友好文案，不抛出未处理错误 */
 async function safe<T>(promise: Promise<T>, fallback: T): Promise<T> {
@@ -40,9 +40,18 @@ export const consumeEntry = (id: string) =>
 /** 撤销上一次顺序粘贴的消耗，恢复被消耗的条目 */
 export const rollbackPaste = () =>
   safe(invoke("clipboard_rollback"), undefined);
-/** 把指定条目加入粘贴队列（视为重新复制一次） */
+/** 顺序模式下把队列中的条目上移/下移一位 */
+export const moveQueueEntry = (id: string, direction: "up" | "down") =>
+  safe(invoke("clipboard_move", { id, direction }), undefined);
+/** 把指定条目插入粘贴队列（设为下一条待粘贴） */
 export const enqueueEntry = (id: string) =>
   safe(invoke("clipboard_enqueue", { id }), undefined);
+/** 顺序模式下拖动排序：把条目移到 targetId 之前（"__end__" = 队尾） */
+export const reorderQueueEntry = (id: string, targetId: string) =>
+  safe(invoke("clipboard_reorder", { id, targetId }), undefined);
+/** 手动新增一条文本条目，插入到 beforeId 条目的上方（队列中它的前一条） */
+export const insertQueueText = (text: string, beforeId: string) =>
+  safe(invoke("clipboard_insert_text", { text, beforeId }), undefined);
 
 // ---- 文件夹 ----
 export const listFolders = () =>
@@ -75,6 +84,9 @@ export const openFolderInEditor = (path: string, editor: string) =>
 /** 记录用户手动指定的 VS Code 可执行文件路径（探测失败时引导选择后调用） */
 export const setVscodePath = (path: string) =>
   safe(invoke("folder_set_vscode_path", { path }), undefined);
+/** 自动检测已安装的编辑器（VS Code / Qoder / QoderCN / IDEA / WebStorm） */
+export const detectEditors = () =>
+  safe(invoke<EditorInfo[]>("folder_detect_editors"), []);
 /** 在默认终端中执行命令（git 等）：shell 取 "wt" | "cmd" | "powershell" */
 export const gitExec = (path: string, command: string, shell: string) =>
   invoke<void>("folder_git_exec", { path, command, shell });

@@ -1,5 +1,6 @@
 /** 剪贴板条目：预览 + 元信息 + hover 操作按钮（含智能文本转换） */
 import { useEffect, useMemo, useState } from "react";
+import type { PointerEvent } from "react";
 import type { ClipEntry } from "../../types";
 import { relativeTime } from "../../core/format";
 import { copyText } from "../../core/tauri";
@@ -7,6 +8,8 @@ import { useClipboardStore } from "../../stores/clipboardStore";
 import { ContextMenu, type MenuItem } from "../folder/ContextMenu";
 import { detectActions, type TransformAction } from "./transform";
 import {
+  IconArrowDown,
+  IconArrowUp,
   IconCopy,
   IconFiles,
   IconImage,
@@ -59,29 +62,47 @@ function ImageThumb({ entryId }: { entryId: string }) {
 
 interface Props {
   entry: ClipEntry;
-  /** 普通模式下的序号（1-9 快速粘贴），顺序模式传 0 隐藏 */
-  hotkeyIndex: number;
   /** 顺序模式下的队列序号（1 = 下一条待粘贴） */
   queueOrder?: number;
   /** 顺序模式下是否为当前待粘贴项 */
   isCurrent: boolean;
   selected: boolean;
   onPaste: () => void;
-  /** 顺序模式下显示"加入队列"按钮（视为重新复制一次） */
-  onEnqueue?: () => void;
+  /** 顺序模式下上移/下移队列位置（undefined 时隐藏按钮） */
+  onMove?: (dir: "up" | "down") => void;
+  /** 是否允许上移/下移（队首不可上移、队尾不可下移） */
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  /** 顺序模式：点击后弹出输入框，手动新增一条数据插入队列 */
+  onInsert?: () => void;
+  /** 自实现拖拽排序（HTML5 draggable 在 Tauri 透明窗口不可靠，改用 pointer 事件） */
+  dragging: boolean;
+  dragOver: boolean;
+  /** 按下时上报起点（仅顺序模式生效，按钮区不触发） */
+  onPointerDown: (e: PointerEvent) => void;
+  /** 注册条目 DOM 供面板计算悬停目标 */
+  registerRef: (el: HTMLDivElement | null) => void;
 }
 
 export function ClipboardItem({
   entry,
-  hotkeyIndex,
   queueOrder,
   isCurrent,
   selected,
   onPaste,
-  onEnqueue,
+  onMove,
+  canMoveUp,
+  canMoveDown,
+  onInsert,
+  dragging,
+  dragOver,
+  onPointerDown,
+  registerRef,
 }: Props) {
   const { remove, toggleFavorite, togglePin, replaceText } = useClipboardStore();
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  /** 顺序模式下按钮组精简：只保留队列操作 + 复制/删除 */
+  const sequential = !!onMove;
   /** 按内容类型检测可用的转换操作 */
   const actions = useMemo(() => detectActions(entry.text), [entry.text]);
 
@@ -114,11 +135,15 @@ export function ClipboardItem({
         "clip-item",
         selected ? "selected" : "",
         isCurrent ? "current" : "",
+        dragging ? "dragging" : "",
+        dragOver ? "drag-over" : "",
       ]
         .filter(Boolean)
         .join(" ")}
       onClick={onPaste}
       title={entry.text ?? entry.preview}
+      ref={registerRef}
+      onPointerDown={onPointerDown}
     >
       {queueOrder ? (
         <span
@@ -127,10 +152,7 @@ export function ClipboardItem({
         >
           {queueOrder}
         </span>
-      ) : (
-        hotkeyIndex > 0 &&
-        hotkeyIndex <= 9 && <span className="kbd clip-hotkey">{hotkeyIndex}</span>
-      )}
+      ) : null}
 
       {entry.kind === "image" ? (
         <ImageThumb entryId={entry.id} />
@@ -152,40 +174,61 @@ export function ClipboardItem({
       </div>
 
       <div className="clip-actions" onClick={(e) => e.stopPropagation()}>
-        {actions.length > 0 && (
-          <button
-            className="icon-btn"
-            title="智能转换"
-            onClick={(e) => setMenu({ x: e.clientX, y: e.clientY })}
-          >
-            <IconWand size={14} />
-          </button>
+        {sequential ? (
+          /* 顺序模式：只保留 插入 / 上移 / 下移 / 复制 / 删除，
+             普通模式才展示的智能转换、收藏、置顶放到普通模式按钮区 */
+          <>
+            {onInsert && (
+              <button
+                className="icon-btn"
+                title="新增一条粘贴数据（手动输入文本插入队列，成为下一条）"
+                onClick={onInsert}
+              >
+                <IconPlus size={14} />
+              </button>
+            )}
+            <button
+              className="icon-btn"
+              title={canMoveUp ? "队列中上移一位" : "已是队列第一条"}
+              disabled={!canMoveUp}
+              onClick={() => onMove?.("up")}
+            >
+              <IconArrowUp size={14} />
+            </button>
+            <button
+              className="icon-btn"
+              title={canMoveDown ? "队列中下移一位" : "已是队列最后一条"}
+              disabled={!canMoveDown}
+              onClick={() => onMove?.("down")}
+            >
+              <IconArrowDown size={14} />
+            </button>
+          </>
+        ) : (
+          <>
+            {actions.length > 0 && (
+              <button
+                className="icon-btn"
+                title="智能转换"
+                onClick={(e) => setMenu({ x: e.clientX, y: e.clientY })}
+              >
+                <IconWand size={14} />
+              </button>
+            )}
+            <button className="icon-btn" title="收藏" onClick={() => toggleFavorite(entry.id)}>
+              <IconStar size={14} filled={entry.favorite} />
+            </button>
+            <button
+              className={`icon-btn ${entry.pinned ? "active" : ""}`}
+              title={entry.pinned ? "取消置顶" : "置顶"}
+              onClick={() => togglePin(entry.id)}
+            >
+              <IconPin size={14} filled={entry.pinned} />
+            </button>
+          </>
         )}
         <button className="icon-btn" title="粘贴" onClick={onPaste}>
           <IconCopy size={14} />
-        </button>
-        <button
-          className={`icon-btn ${entry.favorite ? "active" : ""}`}
-          title={entry.favorite ? "取消收藏" : "收藏"}
-          onClick={() => toggleFavorite(entry.id)}
-        >
-          <IconStar size={14} filled={entry.favorite} />
-        </button>
-        {onEnqueue && (
-          <button
-            className="icon-btn"
-            title="设为下一条：点击后立即成为 Ctrl+V 带出的内容，排在队列最前"
-            onClick={onEnqueue}
-          >
-            <IconPlus size={14} />
-          </button>
-        )}
-        <button
-          className={`icon-btn ${entry.pinned ? "active" : ""}`}
-          title={entry.pinned ? "取消置顶" : "置顶"}
-          onClick={() => togglePin(entry.id)}
-        >
-          <IconPin size={14} filled={entry.pinned} />
         </button>
         <button
           className="icon-btn icon-btn-danger"

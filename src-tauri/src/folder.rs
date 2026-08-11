@@ -472,6 +472,7 @@ pub fn folder_open_in_editor(
             let configured = config.0.lock().unwrap().folder.vscode_path.clone();
             open_vscode(&path, &configured)
         }
+        "qoder" | "qodercn" => open_qoder(&path, editor.as_str()),
         "idea" => open_jetbrains(&path, "IntelliJ IDEA", "idea64.exe"),
         "webstorm" => open_jetbrains(&path, "WebStorm", "webstorm64.exe"),
         _ => Err(format!("不支持的编辑器：{editor}")),
@@ -495,23 +496,128 @@ pub fn folder_set_vscode_path(
     Ok(())
 }
 
-/// 用 VS Code 打开：依次尝试 用户手动指定路径 → PATH 中的 code 命令 →
-/// 标准安装位置 → 盘根/scoop 常见位置 → 受限全盘扫描（便携版/自定义目录）。
+/// 已安装编辑器探测结果（前端右键菜单据此动态渲染，只展示真实可用的项）
+#[derive(Debug, Clone, Serialize)]
+pub struct EditorInfo {
+    pub key: String,
+    pub label: String,
+    pub exe: String,
+}
+
+/// 自动检测已安装的编辑器（只探测不启动）：VS Code → Qoder / QoderCN → JetBrains 系。
+/// 探测顺序与 folder_open_in_editor 完全一致，菜单里显示的必然打得开。
+#[tauri::command]
+pub fn folder_detect_editors(config: State<'_, ConfigState>) -> Vec<EditorInfo> {
+    let configured = config.0.lock().unwrap().folder.vscode_path.clone();
+    let mut out = Vec::new();
+    if let Some(exe) = probe_vscode(&configured) {
+        out.push(EditorInfo {
+            key: "code".into(),
+            label: "VS Code".into(),
+            exe: exe.display().to_string(),
+        });
+    }
+    for (key, label, exe) in probe_qoder() {
+        out.push(EditorInfo {
+            key,
+            label,
+            exe: exe.display().to_string(),
+        });
+    }
+    if let Some(exe) = probe_jetbrains("idea64.exe") {
+        out.push(EditorInfo {
+            key: "idea".into(),
+            label: "IntelliJ IDEA".into(),
+            exe: exe.display().to_string(),
+        });
+    }
+    if let Some(exe) = probe_jetbrains("webstorm64.exe") {
+        out.push(EditorInfo {
+            key: "webstorm".into(),
+            label: "WebStorm".into(),
+            exe: exe.display().to_string(),
+        });
+    }
+    out
+}
+
+/// 用 Qoder / QoderCN 打开：与 folder_detect_editors 共用 probe_qoder 探测，
+/// 保证菜单里显示的就一定能打开。
+fn open_qoder(path: &str, key: &str) -> CmdResult {
+    match probe_qoder().into_iter().find(|(k, _, _)| k == key) {
+        Some((_, label, exe)) => spawn_editor(&exe, path, &label),
+        None => Err(format!("未检测到 {key}：请确认已安装")),
+    }
+}
+
+/// 用 VS Code 打开：probe_vscode 探测到可执行文件后启动。
 /// 全部失败返回特殊错误 "VSCodeNotFound"，前端据此引导用户手动选择 Code.exe 并记住路径。
 fn open_vscode(path: &str, configured: &Option<String>) -> CmdResult {
+    match probe_vscode(configured) {
+        Some(exe) => spawn_editor(&exe, path, "VS Code"),
+        None => Err("VSCodeNotFound".into()),
+    }
+}
+
+/// 启动编辑器进程：.cmd/.bat（如 PATH 中的 code.cmd）用 cmd /c 包装，
+/// CreateProcess 无法直接执行脚本文件。
+fn spawn_editor(exe: &Path, path: &str, display: &str) -> CmdResult {
+    let is_script = exe
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat"));
+    let result = if is_script {
+        // .cmd/.bat 必须经 cmd 执行：raw_arg 原样拼接命令行，避免 Rust 对引号做
+        // CommandLineToArgvW 转义，破坏 cmd /c 的嵌套引号解析（"/d /s /c \"\"exe\" \"path\"\""）
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            Command::new("cmd")
+                .raw_arg("/d /s /c ")
+                .raw_arg(&format!("\"\"{}\" \"{}\"\"", exe.display(), path))
+                .spawn()
+        }
+        #[cfg(not(windows))]
+        {
+            Command::new(exe).arg(path).spawn()
+        }
+    } else {
+        Command::new(exe).arg(path).spawn()
+    };
+    result
+        .map(|_| ())
+        .map_err(|e| format!("启动 {display} 失败：{e}"))
+}
+
+/// 探测 VS Code 可执行文件（不启动）：用户手动指定路径 → PATH 中的 code 命令 →
+/// 标准安装位置 → 受限全盘扫描（便携版/自定义目录）。
+fn probe_vscode(configured: &Option<String>) -> Option<PathBuf> {
     // 1. 用户手动指定过的路径（最优先）
     if let Some(exe) = configured.as_deref() {
         if Path::new(exe).is_file() {
-            return Command::new(exe)
-                .arg(path)
-                .spawn()
-                .map(|_| ())
-                .map_err(|e| format!("启动 VS Code 失败：{e}"));
+            return Some(PathBuf::from(exe));
         }
     }
-    // 2. PATH 中的 code 命令（无窗口闪动）
-    if Command::new("code").arg(path).spawn().is_ok() {
-        return Ok(());
+    // 2. PATH 中的 code 命令（VS Code 安装时创建的 code.cmd / code.exe）
+    if let Ok(out) = Command::new("where.exe").arg("code").output() {
+        if out.status.success() {
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                let p = PathBuf::from(line.trim());
+                // 只接受带 .exe/.cmd/.bat 扩展名的文件：where 可能先返回无扩展名的
+                // shell 脚本（bin\code），直接启动会报 os error 193（不是有效的 Win32 程序）
+                let valid = p
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| {
+                        e.eq_ignore_ascii_case("exe")
+                            || e.eq_ignore_ascii_case("cmd")
+                            || e.eq_ignore_ascii_case("bat")
+                    });
+                if valid && p.is_file() {
+                    return Some(p);
+                }
+            }
+        }
     }
     // 3. 标准安装位置 + 盘根/scoop 常见位置
     let mut roots: Vec<PathBuf> = Vec::new();
@@ -524,7 +630,7 @@ fn open_vscode(path: &str, configured: &Option<String>) -> CmdResult {
         }
     }
     for drive in b'C'..=b'Z' {
-        let root = PathBuf::from(format!("{}\\", drive as char));
+        let root = PathBuf::from(format!("{}:\\", drive as char));
         if root.is_dir() {
             roots.push(root.join("Microsoft VS Code"));
         }
@@ -537,29 +643,74 @@ fn open_vscode(path: &str, configured: &Option<String>) -> CmdResult {
     for root in roots {
         let exe = root.join("Code.exe");
         if exe.is_file() {
-            return Command::new(exe)
-                .arg(path)
-                .spawn()
-                .map(|_| ())
-                .map_err(|e| format!("启动 VS Code 失败：{e}"));
+            return Some(exe);
         }
     }
-    // 4. 受限全盘扫描（便携版/自定义目录）：只深入名字像 VS Code 的目录
+    // 4. 受限全盘扫描（便携版/自定义目录）
     let mut found: Option<PathBuf> = None;
     for drive in b'C'..=b'Z' {
-        let root = PathBuf::from(format!("{}\\", drive as char));
+        let root = PathBuf::from(format!("{}:\\", drive as char));
         if root.is_dir() && find_vscode_exe(&root, 0, &mut found) {
             break;
         }
     }
-    if let Some(exe) = found {
-        return Command::new(exe)
-            .arg(path)
-            .spawn()
-            .map(|_| ())
-            .map_err(|e| format!("启动 VS Code 失败：{e}"));
+    found
+}
+
+/// 探测 Qoder / QoderCN（coder.cn 出品的 VS Code 系 IDE）：盘根、Program Files、
+/// LOCALAPPDATA\Programs 顶层目录名以 qoder 开头，exe 位于目录根（Qoder.exe / QoderCN.exe）。
+fn probe_qoder() -> Vec<(String, String, PathBuf)> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+    for drive in b'A'..=b'Z' {
+        let root = PathBuf::from(format!("{}:\\", drive as char));
+        if root.is_dir() {
+            roots.push(root);
+        }
     }
-    Err("VSCodeNotFound".into())
+    for var in ["ProgramFiles", "ProgramFiles(x86)"] {
+        if let Ok(pf) = std::env::var(var) {
+            roots.push(PathBuf::from(pf));
+        }
+    }
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        roots.push(PathBuf::from(format!("{local}\\Programs")));
+    }
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for root in roots {
+        let Ok(entries) = std::fs::read_dir(&root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if !p.is_dir() {
+                continue;
+            }
+            let Some(name) = p.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if !name.to_ascii_lowercase().starts_with("qoder") {
+                continue;
+            }
+            for exe_name in ["Qoder.exe", "QoderCN.exe"] {
+                let exe = p.join(exe_name);
+                if exe.is_file() && seen.insert(exe.display().to_string()) {
+                    let key = exe_name
+                        .to_ascii_lowercase()
+                        .trim_end_matches(".exe")
+                        .to_string();
+                    let label = if key == "qodercn" {
+                        "Qoder（国内版）".to_string()
+                    } else {
+                        "Qoder".to_string()
+                    };
+                    out.push((key, label, exe));
+                    break;
+                }
+            }
+        }
+    }
+    out
 }
 
 /// 受限查找 Code.exe：只深入名字像 VS Code 的目录（code/vscode/microsoft/tools 等），
@@ -605,6 +756,24 @@ fn find_vscode_exe(dir: &Path, depth: usize, out: &mut Option<PathBuf>) -> bool 
 /// - Toolbox 安装：%LOCALAPPDATA%\JetBrains\Toolbox\apps\IDEA-U\ch-0\242.x\bin\idea64.exe
 /// - 自定义盘符：D:\JetBrains\...（任意非系统盘根下的 JetBrains 目录）
 fn open_jetbrains(path: &str, display: &str, exe_name: &str) -> CmdResult {
+    match probe_jetbrains(exe_name) {
+        Some(exe) => Command::new(exe)
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("启动 {display} 失败：{e}")),
+        None => Err(format!(
+            "未检测到 {display}：请确认已安装（支持 Toolbox 与自定义安装目录）"
+        )),
+    }
+}
+
+/// 探测 JetBrains 系 IDE 的可执行文件（不启动）：常见安装根 + 固定盘 JetBrains 目录，
+/// 深度受限探测。兼容三种安装形态：
+/// - 传统安装：Program Files\JetBrains\IntelliJ IDEA 2024.1\bin\idea64.exe
+/// - Toolbox 安装：%LOCALAPPDATA%\JetBrains\Toolbox\apps\IDEA-U\ch-0\242.x\bin\idea64.exe
+/// - 自定义盘符：D:\IntelliJ IDEA 2023.2.8 或 D:\JetBrains\...（任意非系统盘根）
+fn probe_jetbrains(exe_name: &str) -> Option<PathBuf> {
     let mut roots: Vec<PathBuf> = vec![
         std::env::var("ProgramFiles").unwrap_or_default().into(),
         std::env::var("ProgramFiles(x86)").unwrap_or_default().into(),
@@ -615,7 +784,7 @@ fn open_jetbrains(path: &str, display: &str, exe_name: &str) -> CmdResult {
     }
     // 固定盘根：直接装在盘根（D:\IntelliJ IDEA 2023.2.8）、D:\JetBrains 或 D:\Program Files 下
     for drive in b'A'..=b'Z' {
-        let root = PathBuf::from(format!("{}\\", drive as char));
+        let root = PathBuf::from(format!("{}:\\", drive as char));
         if root.is_dir() {
             roots.push(root.clone());
             roots.push(root.join("JetBrains"));
@@ -627,16 +796,7 @@ fn open_jetbrains(path: &str, display: &str, exe_name: &str) -> CmdResult {
             break;
         }
     }
-    match found {
-        Some(exe) => Command::new(exe)
-            .arg(path)
-            .spawn()
-            .map(|_| ())
-            .map_err(|e| format!("启动 {display} 失败：{e}")),
-        None => Err(format!(
-            "未检测到 {display}：请确认已安装（支持 Toolbox 与自定义安装目录）"
-        )),
-    }
+    found
 }
 
 /// 深度受限查找 bin/{exe_name}：只深入 JetBrains 家族 / Toolbox 渠道 / 版本号目录，
@@ -713,5 +873,24 @@ fn git_branch_of(path: &str) -> Option<String> {
         Some(line.chars().take(8).collect())
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod detect_tests {
+    use super::*;
+
+    #[test]
+    fn qoder_detected() {
+        let found = probe_qoder();
+        eprintln!("probe_qoder => {found:?}");
+        assert!(!found.is_empty(), "probe_qoder 应至少找到 Qoder/QoderCN");
+    }
+
+    #[test]
+    fn idea_detected() {
+        let found = probe_jetbrains("idea64.exe");
+        eprintln!("probe_jetbrains(idea64.exe) => {found:?}");
+        assert!(found.is_some(), "probe_jetbrains 应找到 idea64.exe");
     }
 }

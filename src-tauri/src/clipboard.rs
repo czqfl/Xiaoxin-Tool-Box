@@ -19,9 +19,9 @@ pub const EVT_CHANGED: &str = "clipboard://changed";
 /// 主动写回剪贴板时置位，监听线程跳过本次变化，避免重复记录
 pub static SUPPRESS_WATCH: AtomicBool = AtomicBool::new(false);
 
-/// 最近一次被顺序粘贴（全局 Ctrl+V / 面板手动粘贴）消耗的条目，供"撤销粘贴"恢复。
-/// 收藏项不会被消耗，不进入此缓冲。
-static LAST_CONSUMED: Mutex<Option<ClipEntry>> = Mutex::new(None);
+/// 顺序粘贴（全局 Ctrl+V / 面板手动粘贴）消耗的条目栈，供"撤销粘贴"逐条恢复。
+/// 后进先出，可连续多次撤销；收藏项不会被消耗，不进入此缓冲。
+static LAST_CONSUMED: Mutex<Vec<ClipEntry>> = Mutex::new(Vec::new());
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -586,6 +586,8 @@ pub fn clipboard_clear(
     paths: State<'_, AppPaths>,
 ) -> Result<(), String> {
     let mut entries = store.0.lock().unwrap();
+    // 清空后不应再能撤销回已被清掉的条目，回滚栈一并清空
+    LAST_CONSUMED.lock().unwrap().clear();
     // 清空全部（保留收藏项），并清理对应缩略图文件
     for e in entries.iter().filter(|e| !e.favorite) {
         remove_image_file(e, &paths.images_dir);
@@ -744,9 +746,9 @@ pub fn sequential_paste<R: Runtime>(app: &AppHandle<R>) {
         let mut entries = store.0.lock().unwrap();
         if let Some(pos) = entries.iter().position(|e| e.id == entry.id) {
             let removed = entries.remove(pos);
-            // 记录到回滚缓冲（撤销粘贴可恢复）；图片文件保留不删——
+            // 压入回滚栈（撤销粘贴可恢复，支持连续多次）；图片文件保留不删——
             // 否则回滚时文件已不存在无法完整恢复。孤儿文件由清空时统一清理。
-            *LAST_CONSUMED.lock().unwrap() = Some(removed);
+            LAST_CONSUMED.lock().unwrap().push(removed);
         }
         let _ = save_json(&paths.clipboard_file, &*entries);
         sync_seq_availability(&entries);
@@ -768,7 +770,8 @@ pub fn clipboard_consume(
     let mut entries = store.0.lock().unwrap();
     if let Some(pos) = entries.iter().position(|e| e.id == id) {
         let removed = entries.remove(pos);
-        *LAST_CONSUMED.lock().unwrap() = Some(removed);
+        // 压入回滚栈（支持连续多次撤销）
+        LAST_CONSUMED.lock().unwrap().push(removed);
         save_json(&paths.clipboard_file, &*entries).map_err(|e| format!("保存失败：{e}"))?;
         sync_seq_availability(&entries);
     }
@@ -777,8 +780,9 @@ pub fn clipboard_consume(
     Ok(())
 }
 
-/// 撤销上一次顺序粘贴的消耗：把条目按原 created_at 插回队列的正确位置
+/// 撤销最近一次顺序粘贴的消耗：把条目按原 created_at 插回队列的正确位置
 /// （FIFO 下回到队首附近，LIFO 下回到队尾附近，语义一致）。
+/// 回滚栈支持连续多次撤销：每次撤销最近一条，已不在栈（重新入队等）的跳过。
 /// 用于"按了 Ctrl+V 却没粘贴上 / 粘贴错地方"时恢复内容。
 #[tauri::command]
 pub fn clipboard_rollback(
@@ -786,24 +790,27 @@ pub fn clipboard_rollback(
     store: State<'_, ClipboardStore>,
     paths: State<'_, AppPaths>,
 ) -> Result<(), String> {
-    let Some(entry) = LAST_CONSUMED.lock().unwrap().take() else {
-        return Ok(());
-    };
     let mut entries = store.0.lock().unwrap();
-    // 已在队列（收藏项等）则幂等跳过
-    if entries.iter().any(|e| e.id == entry.id) {
+    loop {
+        // 弹出最近一次消耗的条目（锁在表达式内即刻释放，避免与消费路径锁序交叉）
+        let Some(entry) = LAST_CONSUMED.lock().unwrap().pop() else {
+            return Ok(());
+        };
+        // 条目已在队列（收藏项 / 重新入队等）则跳过，继续撤销更早的
+        if entries.iter().any(|e| e.id == entry.id) {
+            continue;
+        }
+        let pos = entries
+            .iter()
+            .position(|e| e.created_at > entry.created_at)
+            .unwrap_or(entries.len());
+        entries.insert(pos, entry);
+        save_json(&paths.clipboard_file, &*entries).map_err(|e| format!("保存失败：{e}"))?;
+        sync_seq_availability(&entries);
+        drop(entries);
+        let _ = app.emit(EVT_CHANGED, ());
         return Ok(());
     }
-    let pos = entries
-        .iter()
-        .position(|e| e.created_at > entry.created_at)
-        .unwrap_or(entries.len());
-    entries.insert(pos, entry);
-    save_json(&paths.clipboard_file, &*entries).map_err(|e| format!("保存失败：{e}"))?;
-    sync_seq_availability(&entries);
-    drop(entries);
-    let _ = app.emit(EVT_CHANGED, ());
-    Ok(())
 }
 
 /// 把指定条目设为"下一条待粘贴"：无论当前是 FIFO 还是 LIFO，点击后它立即成为
@@ -834,6 +841,230 @@ pub fn clipboard_enqueue(
     };
     entries.insert(0, entry);
     save_json(&paths.clipboard_file, &*entries).map_err(|e| format!("保存失败：{e}"))?;
+    drop(entries);
+    let _ = app.emit(EVT_CHANGED, ());
+    Ok(())
+}
+
+/// 在粘贴队列中把条目上移/下移一位（仅顺序模式 FIFO / LIFO）。
+/// 实现与 clipboard_enqueue 一致：改写 created_at 到邻居条目的前/后——
+/// FIFO（旧→新）上移=比前一条更旧、下移=比后一条更新；LIFO（新→旧）反向。
+/// 队首不可上移、队尾不可下移，由前端禁用按钮，后端同样防御。
+#[tauri::command]
+pub fn clipboard_move(
+    app: AppHandle,
+    id: String,
+    direction: String,
+    store: State<'_, ClipboardStore>,
+    paths: State<'_, AppPaths>,
+    config: State<'_, ConfigState>,
+) -> Result<(), String> {
+    let mode = config.0.lock().unwrap().clipboard.paste_mode;
+    if mode == PasteMode::Normal {
+        return Err("顺序模式下才可调整队列顺序".into());
+    }
+    let mut entries = store.0.lock().unwrap();
+    let Some(pos) = entries.iter().position(|e| e.id == id) else {
+        return Err("记录不存在".into());
+    };
+    // 当前队列顺序（与面板 buildQueue 一致），定位目标条目及相邻条目
+    let mut order: Vec<usize> = (0..entries.len()).collect();
+    match mode {
+        PasteMode::Fifo => order.sort_by_key(|&i| entries[i].created_at),
+        PasteMode::Lifo => order.sort_by_key(|&i| std::cmp::Reverse(entries[i].created_at)),
+        PasteMode::Normal => unreachable!(),
+    }
+    let cur = order.iter().position(|&i| i == pos).unwrap();
+    let neighbor = match direction.as_str() {
+        "up" if cur > 0 => order[cur - 1],
+        "down" if cur + 1 < order.len() => order[cur + 1],
+        _ => return Err("已在队首或队尾，无法移动".into()),
+    };
+    let neighbor_ts = entries[neighbor].created_at;
+    // FIFO 升序、LIFO 降序；与邻居交换相对位置（±1ms 保证严格前/后）
+    let is_fifo = mode == PasteMode::Fifo;
+    let move_up = direction == "up";
+    entries[pos].created_at = if is_fifo == move_up {
+        neighbor_ts.saturating_sub(1)
+    } else {
+        neighbor_ts.saturating_add(1)
+    };
+    save_json(&paths.clipboard_file, &*entries).map_err(|e| format!("保存失败：{e}"))?;
+    drop(entries);
+    let _ = app.emit(EVT_CHANGED, ());
+    Ok(())
+}
+
+/// 计算把新条目插到队列位置 t（即 order[t] 之前）所需的 created_at。
+/// FIFO 升序 / LIFO 降序；与相邻条目无空隙时，把 order[t..]（目标及其后）整体
+/// 偏移 1ms 腾出位置（±1ms 不影响相对时间显示）。order 不包含新条目自身。
+fn created_at_at(
+    entries: &mut [ClipEntry],
+    order: &[usize],
+    t: usize,
+    is_fifo: bool,
+) -> i64 {
+    if t == 0 {
+        // 队首：FIFO 比原队首更旧，LIFO 比原队首更新
+        let n = entries[order[0]].created_at;
+        return if is_fifo {
+            n.saturating_sub(1)
+        } else {
+            n.saturating_add(1)
+        };
+    }
+    let p = entries[order[t - 1]].created_at;
+    let n = entries[order[t]].created_at;
+    if is_fifo {
+        // 需要 p < new < n；无空隙时目标及其后整体后移 1ms 腾位
+        if n > p && n - p > 1 {
+            p + 1
+        } else {
+            for &i in &order[t..] {
+                entries[i].created_at = entries[i].created_at.saturating_add(1);
+            }
+            p.saturating_add(1)
+        }
+    } else {
+        // LIFO 降序：需要 p > new > n；无空隙时目标及其后整体前移 1ms
+        if p > n && p - n > 1 {
+            p - 1
+        } else {
+            for &i in &order[t..] {
+                entries[i].created_at = entries[i].created_at.saturating_sub(1);
+            }
+            p.saturating_sub(1)
+        }
+    }
+}
+
+/// 顺序模式下拖动排序：把条目移动到 target_id 之前（target_id 为 "__end__" 时移到队尾）。
+/// 队列顺序由 created_at 派生，因此通过改写 created_at 实现：
+/// 取插入位置前后邻居的时间插到两者中间；前后相邻无空隙时，把插入点之后的条目
+/// 整体偏移 1ms 腾出位置（±1ms 不影响相对时间显示）。
+#[tauri::command]
+pub fn clipboard_reorder(
+    app: AppHandle,
+    id: String,
+    target_id: String,
+    store: State<'_, ClipboardStore>,
+    paths: State<'_, AppPaths>,
+    config: State<'_, ConfigState>,
+) -> Result<(), String> {
+    let mode = config.0.lock().unwrap().clipboard.paste_mode;
+    if mode == PasteMode::Normal {
+        return Err("顺序模式下才可调整队列顺序".into());
+    }
+    let mut entries = store.0.lock().unwrap();
+    let Some(pos) = entries.iter().position(|e| e.id == id) else {
+        return Err("记录不存在".into());
+    };
+    if entries.len() < 2 || id == target_id {
+        return Ok(());
+    }
+    // 当前队列顺序；移除被拖条目后定位插入点（目标之前 / 队尾）
+    let mut order: Vec<usize> = (0..entries.len()).collect();
+    match mode {
+        PasteMode::Fifo => order.sort_by_key(|&i| entries[i].created_at),
+        PasteMode::Lifo => order.sort_by_key(|&i| std::cmp::Reverse(entries[i].created_at)),
+        PasteMode::Normal => unreachable!(),
+    }
+    let original = order.clone();
+    let cur = order.iter().position(|&i| i == pos).unwrap();
+    order.remove(cur);
+    let t = if target_id == "__end__" {
+        order.len()
+    } else {
+        order
+            .iter()
+            .position(|&i| entries[i].id == target_id)
+            .ok_or_else(|| "目标记录不存在".to_string())?
+    };
+    // 拖回原位则无需改动
+    let mut check = order.clone();
+    check.insert(t, pos);
+    if check == original {
+        return Ok(());
+    }
+    let is_fifo = mode == PasteMode::Fifo;
+    let new_ts = if t == order.len() {
+        // 队尾：FIFO 比原队尾更新，LIFO 比原队尾更旧
+        let p = entries[order[t - 1]].created_at;
+        if is_fifo {
+            p.saturating_add(1)
+        } else {
+            p.saturating_sub(1)
+        }
+    } else {
+        // 插到 order[t]（原目标）之前；order 此时不含被拖条目
+        created_at_at(&mut entries, &order, t, is_fifo)
+    };
+    entries[pos].created_at = new_ts;
+    save_json(&paths.clipboard_file, &*entries).map_err(|e| format!("保存失败：{e}"))?;
+    drop(entries);
+    let _ = app.emit(EVT_CHANGED, ());
+    Ok(())
+}
+
+/// 手动新增一条文本条目，插入到 before_id 条目上方（队列中它的前一条）。
+/// 实现：把新条目的 created_at 放到目标条目的紧前位置（FIFO 升序 / LIFO 降序），
+/// 立即成为目标条目的前一条。与监听记录不同：手动新增不去重，每条输入都会
+/// 作为独立条目追加（"在原有基础上再加一条"）。
+#[tauri::command]
+pub fn clipboard_insert_text(
+    app: AppHandle,
+    text: String,
+    before_id: String,
+    store: State<'_, ClipboardStore>,
+    paths: State<'_, AppPaths>,
+    config: State<'_, ConfigState>,
+) -> Result<(), String> {
+    let (mode, max_history) = {
+        let guard = config.0.lock().unwrap();
+        (guard.clipboard.paste_mode, guard.clipboard.max_history)
+    };
+    let mut entries = store.0.lock().unwrap();
+    let now = chrono::Utc::now().timestamp_millis();
+    // 目标条目的队列位置：新条目插到它之前（目标本身仍是下一条之后那条）
+    let created_at = if mode == PasteMode::Normal || entries.is_empty() {
+        now
+    } else {
+        let mut order: Vec<usize> = (0..entries.len()).collect();
+        match mode {
+            PasteMode::Fifo => order.sort_by_key(|&i| entries[i].created_at),
+            PasteMode::Lifo => order.sort_by_key(|&i| std::cmp::Reverse(entries[i].created_at)),
+            PasteMode::Normal => {}
+        }
+        let t = order
+            .iter()
+            .position(|&i| entries[i].id == before_id)
+            .ok_or_else(|| "目标记录不存在".to_string())?;
+        created_at_at(&mut entries, &order, t, mode == PasteMode::Fifo)
+    };
+    let preview: String = text.chars().take(100).collect();
+    let mut h = DefaultHasher::new();
+    "text".hash(&mut h);
+    text.hash(&mut h);
+    entries.insert(
+        0,
+        ClipEntry {
+            id: uuid::Uuid::new_v4().to_string(),
+            kind: EntryKind::Text,
+            text: Some(text),
+            preview,
+            image_path: None,
+            image_thumb_path: None,
+            files: None,
+            source_app: None,
+            created_at,
+            favorite: false,
+            pinned: false,
+            content_hash: h.finish().to_string(),
+        },
+    );
+    trim_entries(&mut entries, max_history as usize);
+    save_json(&paths.clipboard_file, &*entries).map_err(|e| format!("保存失败：{e}"))?;
+    sync_seq_availability(&entries);
     drop(entries);
     let _ = app.emit(EVT_CHANGED, ());
     Ok(())
