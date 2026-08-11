@@ -20,11 +20,26 @@ interface Props {
 }
 
 export function ContextMenu({ x, y, items, onClose }: Props) {
-  // 视口边界防溢出
+  // 视口边界防溢出：菜单本体不超出右下角
+  const menuW = 180;
+  const menuH = items.length * 36 + 20;
+  const menuLeft = Math.min(x, window.innerWidth - menuW);
+  const menuTop = Math.min(y, window.innerHeight - menuH);
+  // 子菜单展开方向的估算：向右约 210px、向下约 300px；
+  // 空间不足时反向展开，避免子菜单伸出面板窗口被裁剪（悬停看不到内容）
+  const flipX = menuLeft + menuW + 210 > window.innerWidth;
+  const flipY = menuTop + menuH + 300 > window.innerHeight;
   const style = {
-    left: Math.min(x, window.innerWidth - 180),
-    top: Math.min(y, window.innerHeight - items.length * 36 - 20),
+    left: menuLeft,
+    top: menuTop,
   };
+  const cls = [
+    "context-menu",
+    flipX ? "submenu-left" : "",
+    flipY ? "submenu-top" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -88,7 +103,7 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
         }}
       />
       <div
-        className="context-menu"
+        className={cls}
         style={style}
         onClick={(e) => e.stopPropagation()}
       >

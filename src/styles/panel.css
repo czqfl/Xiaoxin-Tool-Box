@@ -260,3 +260,17 @@ html[data-window="panel"] body {
 .has-submenu:hover {
   background: var(--bg-item-hover);
 }
+/* 子菜单横向/纵向空间不足时反向展开（由 ContextMenu 按菜单位置计算 class） */
+.context-menu.submenu-left .context-submenu {
+  left: auto;
+  right: calc(100% - 4px);
+}
+.context-menu.submenu-top .context-submenu {
+  top: auto;
+  bottom: -6px;
+}
+/* 子菜单超高时内部滚动，兜底防溢出面板窗口 */
+.context-submenu {
+  max-height: 300px;
+  overflow-y: auto;
+}
