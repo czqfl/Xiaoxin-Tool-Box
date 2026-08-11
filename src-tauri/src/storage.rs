@@ -3,7 +3,6 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
-use tauri::{Manager, Runtime};
 
 /// 应用所有数据文件的路径集合，启动时解析一次。
 #[derive(Debug, Clone)]
@@ -21,15 +20,21 @@ pub struct AppPaths {
 impl AppPaths {
     /// 便携版检测：若 exe 同级存在 `data/` 目录（或可创建），则数据保存在其中；
     /// 否则使用系统应用数据目录。
-    pub fn resolve<R: Runtime>(app: &tauri::AppHandle<R>) -> Self {
+    ///
+    /// 注意：不依赖 AppHandle——系统目录直接用 %APPDATA%/{identifier}（与 Tauri
+    /// app_data_dir 的 RoamingAppData + identifier 一致）。这样解析可以在
+    /// Builder 构建（窗口创建）之前完成，配合 Builder::manage 提前注册所有
+    /// state，避免"state() called before manage()"的偶发 panic。
+    pub fn resolve() -> Self {
         let portable = std::env::current_exe()
             .ok()
             .and_then(|exe| exe.parent().map(|p| p.join("data")))
             .filter(|dir| dir.is_dir() || fs::create_dir_all(dir).is_ok());
 
         let data_dir = portable.unwrap_or_else(|| {
-            app.path()
-                .app_data_dir()
+            std::env::var("APPDATA")
+                .map(PathBuf::from)
+                .map(|d| d.join("com.xiaoxin.toolbox.app"))
                 .unwrap_or_else(|_| PathBuf::from("."))
         });
         let _ = fs::create_dir_all(&data_dir);

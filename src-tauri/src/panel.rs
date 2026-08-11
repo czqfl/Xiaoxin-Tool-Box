@@ -33,14 +33,12 @@ pub fn panel_set_always_on_top(window: WebviewWindow, on: bool) -> Result<(), St
     window.set_always_on_top(on).map_err(|e| e.to_string())?;
     #[cfg(windows)]
     {
+        // try_state + 兜底：即使 state 尚未注册（启动竞态）也不会 panic
         let acrylic = window
             .app_handle()
-            .state::<ConfigState>()
-            .0
-            .lock()
-            .unwrap()
-            .general
-            .acrylic_enabled;
+            .try_state::<ConfigState>()
+            .map(|s| s.0.lock().unwrap().general.acrylic_enabled)
+            .unwrap_or(true);
         crate::apply_panel_effects_for(&window, acrylic);
     }
     Ok(())
@@ -91,12 +89,9 @@ pub fn toggle_panel<R: Runtime>(app: &AppHandle<R>, label: &str) {
         #[cfg(windows)]
         {
             let acrylic = app
-                .state::<ConfigState>()
-                .0
-                .lock()
-                .unwrap()
-                .general
-                .acrylic_enabled;
+                .try_state::<ConfigState>()
+                .map(|s| s.0.lock().unwrap().general.acrylic_enabled)
+                .unwrap_or(true);
             crate::apply_panel_effects_for(&window, acrylic);
         }
     }

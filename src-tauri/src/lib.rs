@@ -84,6 +84,20 @@ fn apply_panel_acrylic<R: tauri::Runtime>(app: &tauri::AppHandle<R>, acrylic: bo
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 在 Builder 构建（创建窗口）之前解析数据目录并加载持久化数据。
+    // 配合下方 Builder::manage 把 state 注册提前到窗口创建之前——窗口创建时
+    // webview 的 IPC 初始化会访问 state，若 manage 仍在 setup 回调里执行，
+    // 会和页面加载形成竞态，偶发触发 "state() called before manage()" panic
+    // （启动即崩，STATUS_STACK_BUFFER_OVERRUN）。
+    let paths = storage::AppPaths::resolve();
+    let config: AppConfig = storage::load_json(&paths.config_file, AppConfig::default());
+    let history: Vec<clipboard::ClipEntry> =
+        storage::load_json(&paths.clipboard_file, vec![]);
+    let folders: Vec<folder::FolderEntry> =
+        storage::load_json(&paths.folders_file, vec![]);
+    let creds: Vec<credentials::Credential> =
+        storage::load_json(&paths.creds_file, vec![]);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -101,26 +115,16 @@ pub fn run() {
                 })
                 .build(),
         )
-        .setup(|app| {
+        // 窗口创建前注册所有 state（Builder::manage 在 App 构建阶段生效，
+        // 早于配置窗口的创建），彻底消除启动期 state 竞态 panic
+        .manage(ConfigState(Mutex::new(config.clone())))
+        .manage(ClipboardStore(Mutex::new(history)))
+        .manage(FolderStore(Mutex::new(folders)))
+        .manage(CredentialStore(Mutex::new(creds)))
+        .manage(ShortcutBindings::default())
+        .manage(paths)
+        .setup(move |app| {
             let handle = app.handle().clone();
-
-            // 解析数据目录（便携版优先 exe 同级 data/），加载持久化数据
-            let paths = storage::AppPaths::resolve(&handle);
-            let config: AppConfig =
-                storage::load_json(&paths.config_file, AppConfig::default());
-            let history: Vec<clipboard::ClipEntry> =
-                storage::load_json(&paths.clipboard_file, vec![]);
-            let folders: Vec<folder::FolderEntry> =
-                storage::load_json(&paths.folders_file, vec![]);
-            let creds: Vec<credentials::Credential> =
-                storage::load_json(&paths.creds_file, vec![]);
-
-            app.manage(ConfigState(Mutex::new(config.clone())));
-            app.manage(ClipboardStore(Mutex::new(history)));
-            app.manage(FolderStore(Mutex::new(folders)));
-            app.manage(CredentialStore(Mutex::new(creds)));
-            app.manage(ShortcutBindings::default());
-            app.manage(paths);
 
             tray::setup_tray(&handle).ok();
             #[cfg(windows)]
