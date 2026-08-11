@@ -85,6 +85,8 @@ pub struct FolderConfig {
     pub track_explorer: bool,
     /// 卡片快捷按钮默认打开的终端类型
     pub terminal_shell: TerminalShell,
+    /// 用户手动指定的 VS Code 可执行文件路径（自动探测失败时由前端引导选择并记录）
+    pub vscode_path: Option<String>,
 }
 
 impl Default for FolderConfig {
@@ -97,6 +99,7 @@ impl Default for FolderConfig {
             always_on_top: true,
             track_explorer: true,
             terminal_shell: TerminalShell::Powershell,
+            vscode_path: None,
         }
     }
 }

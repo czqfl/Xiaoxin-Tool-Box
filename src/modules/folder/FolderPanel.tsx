@@ -30,8 +30,13 @@ import {
 import "../../styles/panel.css";
 import "./folder.css";
 
-/** 常用 Git 命令模板（右键在默认终端中执行，仅 Git 仓库展示） */
+/** 常用 Git 命令模板（右键在默认终端中执行，仅 Git 仓库展示）。
+ *  多命令用换行分隔，后端按当前 shell 拼成一行执行（cmd 用 &，PowerShell 用 ;）。 */
 const GIT_COMMANDS: Array<{ label: string; cmd: string }> = [
+  {
+    label: "一键提交并推送",
+    cmd: "git add .\ngit commit -m \"update\"\ngit push",
+  },
   { label: "git status", cmd: "git status" },
   { label: "git add .", cmd: "git add ." },
   { label: "git commit -m \"update\"", cmd: "git commit -m \"update\"" },
@@ -306,13 +311,28 @@ export function FolderPanel() {
     api.openFolderInTerminalWith(folder.path, shell).catch((e) => window.alert(String(e)));
   };
 
-  /** 在指定编辑器中打开（code / idea / webstorm） */
-  const openInEditor = (
+  /** 在指定编辑器中打开（code / idea / webstorm）。
+   *  VS Code 自动探测失败时引导用户手动选择 Code.exe，记住路径后自动重试一次。 */
+  const openInEditor = async (
     folder: FolderEntry,
     editor: "code" | "idea" | "webstorm"
   ) => {
     hideCurrentWindow();
-    api.openFolderInEditor(folder.path, editor).catch((e) => window.alert(String(e)));
+    try {
+      await api.openFolderInEditor(folder.path, editor);
+    } catch (err) {
+      const msg = String(err);
+      if (editor === "code" && msg.includes("VSCodeNotFound")) {
+        const exe = await withNativeDialog(() => api.pickVscodeExecutable());
+        if (!exe) return;
+        await api.setVscodePath(exe);
+        await api
+          .openFolderInEditor(folder.path, "code")
+          .catch((e2) => window.alert(String(e2)));
+        return;
+      }
+      window.alert(msg);
+    }
   };
 
   /** 在默认终端中执行 Git 命令：终端窗口保留，命令输出直接可见 */

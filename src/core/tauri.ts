@@ -63,6 +63,9 @@ export const copyFolderPath = (path: string) =>
 /** 在指定编辑器中打开文件夹：editor 取 "code" | "idea" | "webstorm" */
 export const openFolderInEditor = (path: string, editor: string) =>
   invoke<void>("folder_open_in_editor", { path, editor });
+/** 记录用户手动指定的 VS Code 可执行文件路径（探测失败时引导选择后调用） */
+export const setVscodePath = (path: string) =>
+  safe(invoke("folder_set_vscode_path", { path }), undefined);
 /** 在默认终端中执行命令（git 等）：shell 取 "wt" | "cmd" | "powershell" */
 export const gitExec = (path: string, command: string, shell: string) =>
   invoke<void>("folder_git_exec", { path, command, shell });
@@ -92,6 +95,17 @@ export const pickFolder = async (): Promise<string | null> => {
     directory: true,
     multiple: false,
     title: "选择要添加的文件夹",
+  });
+  return typeof selected === "string" ? selected : null;
+};
+
+/** 调起系统文件选择器定位 VS Code 可执行文件，取消时返回 null */
+export const pickVscodeExecutable = async (): Promise<string | null> => {
+  const selected = await open({
+    directory: false,
+    multiple: false,
+    title: "请选择 VS Code 的 Code.exe",
+    filters: [{ name: "可执行文件", extensions: ["exe"] }],
   });
   return typeof selected === "string" ? selected : null;
 };

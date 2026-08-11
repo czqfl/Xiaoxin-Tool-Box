@@ -12,6 +12,8 @@ export {
   openFolderInTerminal,
   openFolderInTerminalWith,
   openFolderInEditor,
+  setVscodePath,
+  pickVscodeExecutable,
   gitExec,
   folderGitBranches,
   copyFolderPath,

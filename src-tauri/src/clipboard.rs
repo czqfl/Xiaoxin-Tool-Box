@@ -274,22 +274,38 @@ pub fn start_watcher<R: Runtime>(app: AppHandle<R>) {
     clipboard_listener::start(app.clone(), tx);
     std::thread::spawn(move || {
         let mut last_hash: u64 = 0;
+        // 连续读取失败的次数：剪贴板被占用 / 源应用延迟渲染时快速重试，避免漏记。
+        // 连续失败超过上限后回落到正常轮询间隔，避免空转。
+        let mut fail_streak: u32 = 0;
         loop {
-            // 事件到达立即返回；否则 500ms 超时触发一次兜底轮询
-            let _ = rx.recv_timeout(Duration::from_millis(500));
+            // 读取失败期间用短超时快速重试（源应用延迟渲染或剪贴板被占用时，
+            // 一次读不到不代表没复制；快速重试能覆盖这个窗口）
+            let timeout = if fail_streak > 0 && fail_streak < 8 {
+                Duration::from_millis(120)
+            } else {
+                Duration::from_millis(500)
+            };
+            // 事件到达立即返回；否则超时触发一次兜底轮询
+            let _ = rx.recv_timeout(timeout);
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                watcher_tick(&app, &mut last_hash);
+                watcher_tick(&app, &mut last_hash)
             }));
-            if result.is_err() {
-                eprintln!("[clipboard] watcher panic, restarting...");
-                std::thread::sleep(Duration::from_millis(1000));
+            match result {
+                Ok(true) => fail_streak = 0,
+                Ok(false) => fail_streak = fail_streak.saturating_add(1),
+                Err(_) => {
+                    eprintln!("[clipboard] watcher panic, restarting...");
+                    fail_streak = 0;
+                    std::thread::sleep(Duration::from_millis(1000));
+                }
             }
         }
     });
 }
 
-/// 单次轮询：读剪贴板，内容变化时记录并广播（panic 时由 start_watcher 重启线程）
-fn watcher_tick<R: Runtime>(app: &AppHandle<R>, last_hash: &mut u64) {
+/// 单次轮询：读剪贴板，内容变化时记录并广播（panic 时由 start_watcher 重启线程）。
+/// 返回是否成功读到剪贴板快照：读不到（占用/延迟渲染）时调用方进入快速重试。
+fn watcher_tick<R: Runtime>(app: &AppHandle<R>, last_hash: &mut u64) -> bool {
     // 首轮先同步一次队列可用性（历史数据可能非空）
     if *last_hash == 0 {
         if let Some(store) = app.try_state::<ClipboardStore>() {
@@ -300,7 +316,7 @@ fn watcher_tick<R: Runtime>(app: &AppHandle<R>, last_hash: &mut u64) {
 
     let (watch_images, watch_files, max_history) = {
         let Some(cfg) = app.try_state::<ConfigState>() else {
-            return;
+            return false;
         };
         let guard = cfg.0.lock().unwrap();
         (
@@ -311,27 +327,33 @@ fn watcher_tick<R: Runtime>(app: &AppHandle<R>, last_hash: &mut u64) {
     };
 
     let Some(snap) = read_clipboard(watch_images, watch_files) else {
-        return;
+        return false;
     };
     let hash = snap.hash();
+
+    // 先消费主动写回标记（SUPPRESS_WATCH）：即使本次快照与上次相同（hash 相等提前
+    // return），标记也必须被消费，否则会残留到下一次外部复制被误吞——这正是
+    // "偶尔在其他应用复制的内容进不了剪贴板历史"的根因（例如从面板复制过账号密码、
+    // 文件夹路径等写回操作后，紧接着的第一次外部复制会被当成写回跳过）。
+    let suppress = SUPPRESS_WATCH.swap(false, Ordering::SeqCst);
     if hash == *last_hash {
-        return;
+        return true;
     }
     *last_hash = hash;
 
     // 主动写回引起的变化：跳过记录
-    if SUPPRESS_WATCH.swap(false, Ordering::SeqCst) {
-        return;
+    if suppress {
+        return true;
     }
 
     let Some(paths) = app.try_state::<AppPaths>() else {
-        return;
+        return true;
     };
     let Some(store) = app.try_state::<ClipboardStore>() else {
-        return;
+        return true;
     };
     let Some(entry) = build_entry(&snap, hash, &paths.images_dir) else {
-        return;
+        return true;
     };
 
     let mut entries = store.0.lock().unwrap();
@@ -349,6 +371,7 @@ fn watcher_tick<R: Runtime>(app: &AppHandle<R>, last_hash: &mut u64) {
     drop(entries);
 
     let _ = app.emit(EVT_CHANGED, ());
+    true
 }
 
 /// 超出容量时删除最旧的未收藏记录；若全部已收藏则删除最旧记录

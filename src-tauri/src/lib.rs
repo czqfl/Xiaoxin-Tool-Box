@@ -166,6 +166,7 @@ pub fn run() {
             folder::folder_open_in_terminal,
             folder::folder_open_in_terminal_with,
             folder::folder_open_in_editor,
+            folder::folder_set_vscode_path,
             folder::folder_git_exec,
             folder::folder_git_branches,
             folder::folder_copy_path,

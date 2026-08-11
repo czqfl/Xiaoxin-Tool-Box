@@ -76,6 +76,8 @@ export interface FolderConfig {
   track_explorer: boolean;
   /** 卡片快捷按钮默认打开的终端类型 */
   terminal_shell: TerminalShell;
+  /** 用户手动指定的 VS Code 可执行文件路径（自动探测失败时引导选择后记录） */
+  vscode_path?: string | null;
 }
 
 export interface ShortcutsConfig {

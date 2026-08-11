@@ -22,6 +22,7 @@ const defaultConfig: AppConfig = {
     always_on_top: true,
     track_explorer: true,
     terminal_shell: "powershell",
+    vscode_path: null,
   },
   credentials: {
     always_on_top: true,

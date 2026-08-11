@@ -1,5 +1,6 @@
 //! 文件夹快捷访问：固定列表、访问统计、打开/终端打开/复制路径。
 use crate::clipboard::SUPPRESS_WATCH;
+use crate::config::ConfigState;
 use crate::storage::{save_json, AppPaths};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -348,17 +349,40 @@ pub fn folder_git_exec(path: String, command: String, shell: String) -> CmdResul
 
 /// 拉起终端并执行命令：复用 open_in_shell 的壳，进入目录后追加命令。
 /// 命令执行失败时错误信息同样显示在终端窗口内，反馈天然可见。
+///
+/// 两条体验设计（用户反馈）：
+/// - 先弹窗后执行：打开终端、停在目录、清屏，延迟约 1 秒后再执行命令，
+///   输出从第一行开始呈现，而不是窗口弹出时已经刷到末尾；
+/// - 单行整洁显示：cmd 用 @echo off + cls 抑制启动回显，只显示一行
+///   `$ git xxx` 再执行，命令与输出一目了然，不换行不杂乱。
+///
+/// 命令支持用换行符 `\n` 分隔多条（如 add+commit+push 一条龙），
+/// 按当前 shell 的正确分隔符拼接：cmd 用 `&`，PowerShell 用 `;`（兼容 5.1，
+/// 5.1 不支持 `&&`）。
 #[cfg(windows)]
 fn exec_in_shell(path: &str, shell: &str, command: &str) -> CmdResult {
     use std::os::windows::process::CommandExt;
     const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
 
+    // 多命令：按 \n 拆开去空行；显示与执行都用当前 shell 的分隔符拼成一行
+    let parts: Vec<&str> = command
+        .split('\n')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+    if parts.is_empty() {
+        return Err("命令为空".into());
+    }
+    let (sep, join) = if shell == "cmd" { (" & ", " & ") } else { ("; ", "; ") };
+    let exec_line = parts.join(join);
+    let shown_line = format!("$ {}", parts.join(sep));
+
     match shell {
         "cmd" => {
-            // /d 忽略自动运行命令，/s 保持引号原样，/k 执行后保留窗口；
-            // 先用 mode con 撑大屏幕缓冲（150x9999），输出多时可滚动看全
+            // @echo off：整行因 @ 前缀不回显；cls 清掉启动痕迹；timeout 1 秒让窗口
+            // 先停在目录，再执行命令，输出从头滚动（缓冲已扩到 9999 行可回看全量）
             let cmd_line = format!(
-                "mode con: cols=150 lines=9999 & cd /d \"{}\" & {command}",
+                "@echo off & mode con: cols=150 lines=9999 & cls & cd /d \"{}\" & echo. & echo {shown_line} & timeout /t 1 /nobreak >nul & {exec_line}",
                 path.replace('"', "\"\"")
             );
             Command::new("cmd")
@@ -368,10 +392,9 @@ fn exec_in_shell(path: &str, shell: &str, command: &str) -> CmdResult {
                 .map_err(|e| format!("打开命令提示符失败：{e}"))?;
         }
         "powershell" => {
-            // 单引号内按 PowerShell 转义规则将 ' 翻倍；
-            // 先撑大缓冲（150x9999），再进入目录执行命令
+            // Clear-Host 清屏；Write-Host 先显示一行命令；Start-Sleep 给窗口建立时间
             let cmd_line = format!(
-                "$Host.UI.RawUI.BufferSize = New-Object System.Management.Automation.Host.Size(150,9999); Set-Location -LiteralPath '{}'; {command}",
+                "$Host.UI.RawUI.BufferSize = New-Object System.Management.Automation.Host.Size(150,9999); Clear-Host; Set-Location -LiteralPath '{}'; Write-Host ''; Write-Host '{shown_line}'; Start-Sleep -Milliseconds 800; {exec_line}",
                 path.replace('\'', "''")
             );
             Command::new("powershell")
@@ -383,7 +406,7 @@ fn exec_in_shell(path: &str, shell: &str, command: &str) -> CmdResult {
         _ => {
             // Windows Terminal；未安装时回退 cmd。wt 窗口较宽，命令执行沿用 PowerShell 分支逻辑
             let cmd_line = format!(
-                "$Host.UI.RawUI.BufferSize = New-Object System.Management.Automation.Host.Size(150,9999); Set-Location -LiteralPath '{}'; {command}",
+                "$Host.UI.RawUI.BufferSize = New-Object System.Management.Automation.Host.Size(150,9999); Clear-Host; Set-Location -LiteralPath '{}'; Write-Host ''; Write-Host '{shown_line}'; Start-Sleep -Milliseconds 800; {exec_line}",
                 path.replace('\'', "''")
             );
             if Command::new("wt")
@@ -392,8 +415,10 @@ fn exec_in_shell(path: &str, shell: &str, command: &str) -> CmdResult {
                 .spawn()
                 .is_err()
             {
-                let cmd_line =
-                    format!("cd /d \"{}\" && {command}", path.replace('"', "\"\""));
+                let cmd_line = format!(
+                    "@echo off & cls & cd /d \"{}\" & echo. & echo {shown_line} & timeout /t 1 /nobreak >nul & {exec_line}",
+                    path.replace('"', "\"\"")
+                );
                 Command::new("cmd")
                     .args(["/d", "/s", "/k", &cmd_line])
                     .creation_flags(CREATE_NEW_CONSOLE)
@@ -431,6 +456,7 @@ pub fn folder_open_in_editor(
     editor: String,
     store: State<'_, FolderStore>,
     paths: State<'_, AppPaths>,
+    config: State<'_, ConfigState>,
 ) -> CmdResult {
     if !Path::new(&path).is_dir() {
         return Err("文件夹不存在或已被移动".into());
@@ -442,29 +468,74 @@ pub fn folder_open_in_editor(
         }
     }
     match editor.as_str() {
-        "code" => open_vscode(&path),
+        "code" => {
+            let configured = config.0.lock().unwrap().folder.vscode_path.clone();
+            open_vscode(&path, &configured)
+        }
         "idea" => open_jetbrains(&path, "IntelliJ IDEA", "idea64.exe"),
         "webstorm" => open_jetbrains(&path, "WebStorm", "webstorm64.exe"),
         _ => Err(format!("不支持的编辑器：{editor}")),
     }
 }
 
-/// 用 VS Code 打开：PATH 中的 code 命令优先，回退安装目录里的 Code.exe
-fn open_vscode(path: &str) -> CmdResult {
+/// 记录用户手动指定的 VS Code 可执行文件路径（自动探测失败时前端引导选择后调用），
+/// 持久化到配置，下次打开直接使用，不再需要重新定位。
+#[tauri::command]
+pub fn folder_set_vscode_path(
+    path: String,
+    paths: State<'_, AppPaths>,
+    state: State<'_, ConfigState>,
+) -> CmdResult {
+    if !Path::new(&path).is_file() {
+        return Err("指定的文件不存在".into());
+    }
+    let mut guard = state.0.lock().unwrap();
+    guard.folder.vscode_path = Some(path);
+    save_json(&paths.config_file, &*guard).map_err(|e| format!("保存配置失败：{e}"))?;
+    Ok(())
+}
+
+/// 用 VS Code 打开：依次尝试 用户手动指定路径 → PATH 中的 code 命令 →
+/// 标准安装位置 → 盘根/scoop 常见位置 → 受限全盘扫描（便携版/自定义目录）。
+/// 全部失败返回特殊错误 "VSCodeNotFound"，前端据此引导用户手动选择 Code.exe 并记住路径。
+fn open_vscode(path: &str, configured: &Option<String>) -> CmdResult {
+    // 1. 用户手动指定过的路径（最优先）
+    if let Some(exe) = configured.as_deref() {
+        if Path::new(exe).is_file() {
+            return Command::new(exe)
+                .arg(path)
+                .spawn()
+                .map(|_| ())
+                .map_err(|e| format!("启动 VS Code 失败：{e}"));
+        }
+    }
+    // 2. PATH 中的 code 命令（无窗口闪动）
     if Command::new("code").arg(path).spawn().is_ok() {
         return Ok(());
     }
-    // 回退：标准安装位置（LOCALAPPDATA 优先，Program Files 次之）
-    let roots = [
-        std::env::var("LOCALAPPDATA")
-            .map(|d| format!("{d}\\Programs\\Microsoft VS Code"))
-            .ok(),
-        std::env::var("ProgramFiles")
-            .map(|d| format!("{d}\\Microsoft VS Code"))
-            .ok(),
-    ];
-    for root in roots.into_iter().flatten() {
-        let exe = Path::new(&root).join("Code.exe");
+    // 3. 标准安装位置 + 盘根/scoop 常见位置
+    let mut roots: Vec<PathBuf> = Vec::new();
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        roots.push(PathBuf::from(format!("{local}\\Programs\\Microsoft VS Code")));
+    }
+    for var in ["ProgramFiles", "ProgramFiles(x86)"] {
+        if let Ok(pf) = std::env::var(var) {
+            roots.push(PathBuf::from(format!("{pf}\\Microsoft VS Code")));
+        }
+    }
+    for drive in b'C'..=b'Z' {
+        let root = PathBuf::from(format!("{}\\", drive as char));
+        if root.is_dir() {
+            roots.push(root.join("Microsoft VS Code"));
+        }
+    }
+    if let Ok(home) = std::env::var("USERPROFILE") {
+        roots.push(PathBuf::from(format!(
+            "{home}\\scoop\\apps\\vscode\\current"
+        )));
+    }
+    for root in roots {
+        let exe = root.join("Code.exe");
         if exe.is_file() {
             return Command::new(exe)
                 .arg(path)
@@ -473,7 +544,59 @@ fn open_vscode(path: &str) -> CmdResult {
                 .map_err(|e| format!("启动 VS Code 失败：{e}"));
         }
     }
-    Err("未检测到 VS Code：请确认已安装，并在 VS Code 中执行「Command Palette → Shell 命令: 在 PATH 中安装 code 命令」".into())
+    // 4. 受限全盘扫描（便携版/自定义目录）：只深入名字像 VS Code 的目录
+    let mut found: Option<PathBuf> = None;
+    for drive in b'C'..=b'Z' {
+        let root = PathBuf::from(format!("{}\\", drive as char));
+        if root.is_dir() && find_vscode_exe(&root, 0, &mut found) {
+            break;
+        }
+    }
+    if let Some(exe) = found {
+        return Command::new(exe)
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("启动 VS Code 失败：{e}"));
+    }
+    Err("VSCodeNotFound".into())
+}
+
+/// 受限查找 Code.exe：只深入名字像 VS Code 的目录（code/vscode/microsoft/tools 等），
+/// 避免全盘无谓扫描；找到即停止。
+fn find_vscode_exe(dir: &Path, depth: usize, out: &mut Option<PathBuf>) -> bool {
+    if depth > 4 || out.is_some() {
+        return false;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if !p.is_dir() {
+            continue;
+        }
+        if p.join("Code.exe").is_file() {
+            *out = Some(p.join("Code.exe"));
+            return true;
+        }
+        let Some(name) = p.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let lower = name.to_ascii_lowercase();
+        let promising = lower.contains("vscode")
+            || lower.contains("vs code")
+            || lower.contains("visual studio")
+            || lower.contains("microsoft")
+            || lower.contains("code")
+            || lower.contains("tools")
+            || lower.contains("software")
+            || lower.contains("apps");
+        if promising && find_vscode_exe(&p, depth + 1, out) {
+            return true;
+        }
+    }
+    false
 }
 
 /// 在 JetBrains 系 IDE 中打开：常见安装根 + 固定盘 JetBrains 目录，深度受限探测。
