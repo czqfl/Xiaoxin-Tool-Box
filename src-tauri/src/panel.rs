@@ -1,7 +1,7 @@
 //! 悬浮面板的显示/隐藏与定位逻辑（两个面板共用）。
 use crate::config::ConfigState;
 use crate::storage::{save_json, AppPaths};
-use tauri::{AppHandle, LogicalPosition, Manager, Runtime, WebviewWindow};
+use tauri::{AppHandle, LogicalPosition, Manager, Runtime, WebviewWindow, WebviewWindowBuilder};
 use windows::Win32::Foundation::HWND;
 
 /// 可靠置前窗口：绕过 Win32 前景锁，让托盘/热键呼出的面板能正常接收输入。
@@ -35,7 +35,8 @@ pub const ALL_PANELS: &[&str] = &[
     PORT_PANEL,
 ];
 
-/// 工具栏呼出面板：工具栏前端点击图标切换对应面板。
+/// 工具栏呼出面板：工具栏前端点击图标切换对应面板（「可见且聚焦」才关闭，
+/// 否则呼出置前——置顶常驻面板失焦被盖住时点击会带回前台而不是误关）。
 /// "settings" 打开设置窗口；"translation" 触发划词翻译（有选中带出原文，
 /// 无选中打开空翻译面板）。
 #[tauri::command]
@@ -147,7 +148,46 @@ pub fn hide_focused_panel<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
-/// 切换面板：已显示则隐藏；否则定位到光标所在显示器上方居中，然后显示并聚焦
+/// 获取面板窗口；若已被销毁（旧版本/异常状态）则按 tauri.conf.json 配置自动重建。
+/// URL 跟随运行模式：dev 用 devUrl（vite dev server），生产用打包资源。
+/// 重建后重新应用亚克力效果，避免"面板窗口消失后所有入口静默失效"。
+fn ensure_panel_window<R: Runtime>(
+    app: &AppHandle<R>,
+    label: &str,
+) -> Option<WebviewWindow<R>> {
+    if let Some(w) = app.get_webview_window(label) {
+        return Some(w);
+    }
+    crate::storage::diag_write(&format!("panel window {label} missing, rebuilding"));
+    let url = match app.config().build.dev_url.clone() {
+        Some(u) => tauri::WebviewUrl::External(u),
+        None => tauri::WebviewUrl::App("index.html".into()),
+    };
+    let _ = WebviewWindowBuilder::new(app, label, url)
+        .title(label)
+        .inner_size(640.0, 480.0)
+        .decorations(false)
+        .transparent(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .visible(false)
+        .build();
+    let w = app.get_webview_window(label)?;
+    #[cfg(windows)]
+    {
+        let acrylic = app
+            .try_state::<ConfigState>()
+            .map(|s| s.0.lock().unwrap().general.acrylic_enabled)
+            .unwrap_or(true);
+        crate::apply_panel_effects_for(&w, acrylic);
+    }
+    Some(w)
+}
+
+/// 切换面板：已显示【且持有焦点】则隐藏；否则呼出（恢复上次位置/居中）+ 可靠置前。
+/// 关闭判定用「可见且聚焦」——置顶常驻面板（always_on_top）失焦不隐藏，可能一直
+/// 可见但被其它窗口盖住；此时再触发应把面板【带回前台】而不是误判"已打开"而隐藏，
+/// 这正是"点工具栏图标面板出不来"的根因（面板开着却被 toggle 成关闭）。
 pub fn toggle_panel<R: Runtime>(app: &AppHandle<R>, label: &str) {
     // 同一时间只展示一个面板：先隐藏其它所有面板
     for other in ALL_PANELS {
@@ -163,10 +203,16 @@ pub fn toggle_panel<R: Runtime>(app: &AppHandle<R>, label: &str) {
         let _ = w.hide();
     }
 
-    let Some(window) = app.get_webview_window(label) else {
+    // 窗口可能已被销毁（旧版本点 X）→ 自动重建，避免"以后都打不开"
+    let Some(window) = ensure_panel_window(app, label) else {
         return;
     };
-    if window.is_visible().unwrap_or(false) {
+    let visible = window.is_visible().unwrap_or(false);
+    let focused = window.is_focused().unwrap_or(false);
+    crate::storage::diag_write(&format!(
+        "[toggle_panel] {label} visible={visible} focused={focused}"
+    ));
+    if visible && focused {
         // 关闭前记住窗口位置（持久化到配置），下次呼出恢复上次位置
         remember_position(app, &window, label);
         let _ = window.hide();

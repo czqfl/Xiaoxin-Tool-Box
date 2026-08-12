@@ -13,7 +13,7 @@ import { useConfigStore } from "../../stores/configStore";
 import {
   IconClipboard,
   IconFolder,
-  IconLock,
+  IconKey,
   IconPort,
   IconSettings,
   IconTranslate,
@@ -36,7 +36,7 @@ export const TOOLS: Record<ToolKey, { label: string; color: string; icon: React.
   credentials: {
     label: "账号密码",
     color: "#34d399",
-    icon: <IconLock size={18} />,
+    icon: <IconKey size={18} />,
   },
   translation: {
     label: "划词翻译",
@@ -50,7 +50,7 @@ export const TOOLS: Record<ToolKey, { label: string; color: string; icon: React.
   },
   settings: {
     label: "打开设置",
-    color: "#94a3b8",
+    color: "#818cf8",
     icon: <IconSettings size={18} />,
   },
 };

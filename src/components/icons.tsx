@@ -236,13 +236,10 @@ export const IconLock = (p: IconProps) => (
   </svg>
 );
 
-/** 网络端口（RJ45 网口 + 触点 + 网线）：端口工具（查端口占用 / 杀进程） */
+/** 端口工具：#（端口号即号码，最直白；查端口占用 / 杀进程） */
 export const IconPort = (p: IconProps) => (
   <svg {...base(p)}>
-    <rect x="3.5" y="2.5" width="17" height="12" rx="2" />
-    <path d="M7 6.2h2M11 6.2h2M15 6.2h2" />
-    <path d="M12 14.5V20" />
-    <path d="M8 20h8" />
+    <path d="M5 9h14M5 15h14M10 3l-2 18M16 3l-2 18" />
   </svg>
 );
 
@@ -281,10 +278,11 @@ export const IconClose = (p: IconProps) => (
   </svg>
 );
 
-/** 翻译：聊天气泡 + 文字行（比抽象语言符号更直观） */
+/** 翻译：地球（多语言/全球语言，最直观的翻译隐喻） */
 export const IconTranslate = (p: IconProps) => (
   <svg {...base(p)}>
-    <path d="M21 14.5a2 2 0 0 1-2 2H8l-4.5 4V5a2 2 0 0 1 2-2h13.5a2 2 0 0 1 2 2Z" />
-    <path d="M8 9h8.5M8 12.2h5.5" />
+    <circle cx="12" cy="12" r="9" />
+    <path d="M3 12h18" />
+    <path d="M12 3c2.5 2.6 4 5.6 4 9s-1.5 6.4-4 9c-2.5-2.6-4-5.6-4-9s1.5-6.4 4-9Z" />
   </svg>
 );
