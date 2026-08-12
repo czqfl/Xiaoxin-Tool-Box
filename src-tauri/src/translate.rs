@@ -149,10 +149,12 @@ fn show_popup<R: Runtime>(app: &AppHandle<R>) {
     if let Ok(cursor) = app.cursor_position() {
         let _ = w.set_position(tauri::LogicalPosition::new(cursor.x + 14.0, cursor.y + 14.0));
     }
-    // 置前方式必须与其它面板一致（acrylic::force_foreground，激活窗口）：
-    // 之前用 force_topmost_foreground（SetWindowPos 带 SWP_NOACTIVATE，明确不激活）
-    // → 弹窗从不获得焦点 → webview 交互（拖动/点击/Esc）全部失效。
+    // 顺序必须与其它面板一致：先 show 再置前激活！
+    // 之前 force_foreground 在 show 之前调用——SetForegroundWindow 对隐藏窗口无效，
+    // 窗口显示后从未被激活 → 鼠标事件进不了 webview（diag.log 显示无任何交互记录）。
     // force_foreground 对已 TOPMOST 的窗口直接 SetForegroundWindow，能正常激活。
+    let _ = w.unminimize();
+    let _ = w.show();
     #[cfg(windows)]
     {
         use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -163,8 +165,6 @@ fn show_popup<R: Runtime>(app: &AppHandle<R>) {
             }
         }
     }
-    let _ = w.unminimize();
-    let _ = w.show();
     // 系统级 Esc 关闭兜底：标记弹窗打开（webview 无焦点时由键盘钩子关闭）
     #[cfg(windows)]
     crate::keyhook::set_translate_popup_open(true);
