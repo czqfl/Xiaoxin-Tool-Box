@@ -28,8 +28,8 @@ export function usePanelCommon(stayVisible = false) {
   const load = useConfigStore((s) => s.load);
   const sync = useConfigStore((s) => s.sync);
   /** 拖动守卫：点击/拖动 data-tauri-drag-region 头部启动原生窗口拖动时，
-   *  WebView2 会瞬时失焦触发 window blur——若没有守卫会把面板误关
-   *  （"一点击拖动区域面板就关闭"）。按下置位、松开后短暂延时清除。 */
+   *  WebView2 会瞬时失焦触发 DOM blur——失焦隐藏不能监听 DOM blur（会把面板
+   *  误关，见 onFocusChanged 注释），守卫仅作窗口级焦点的额外兜底。 */
   const dragGuardRef = useRef(false);
 
   useEffect(() => {
@@ -61,15 +61,21 @@ export function usePanelCommon(stayVisible = false) {
     cleanup.push(() => document.removeEventListener("mousedown", onMouseDown));
     cleanup.push(() => document.removeEventListener("mouseup", onMouseUp));
 
-    // 失焦自动隐藏（不占任务栏，Esc 由面板组件处理）；置顶常驻、原生对话框
-    // 与拖动头部期间例外。模糊走 SWCA BLURBEHIND，与窗口是否激活无关。
-    const onBlur = () => {
+    // 失焦自动隐藏：用窗口级 onFocusChanged 判断"焦点真正离开本窗口（点到别的
+    // 程序）"才隐藏，【不要用 DOM window blur】——点击/拖动 data-tauri-drag-region
+    // 头部触发原生拖动时，WebView2 会瞬时失焦触发 blur，误把面板关掉（这正是
+    // "一点击拖动区域面板就关闭"的根因）。窗口级焦点在内部点击/拖动时不会改变，
+    // 仅当焦点离开本窗口（点其他程序）才隐藏；置顶常驻与原生对话框期间例外。
+    let wasFocused = false;
+    const focusUn = getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+      const prev = wasFocused;
+      wasFocused = focused;
+      if (!prev || focused) return;
       if (nativeDialogOpen || stayVisible) return;
       if (dragGuardRef.current) return;
       hideCurrentWindow();
-    };
-    window.addEventListener("blur", onBlur);
-    cleanup.push(() => window.removeEventListener("blur", onBlur));
+    });
+    cleanup.push(() => focusUn.then((un) => un()));
 
     // 鼠标悬停/点击面板即请求聚焦：WebView2 在窗口非活动（失焦）时不响应滚轮，
     // 导致"呼出后面板滚不动、要点一下才行"。鼠标一进面板就补一次 setFocus，
