@@ -16,7 +16,8 @@ use windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
 use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
-    KEYEVENTF_KEYUP, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT, VK_V, VIRTUAL_KEY,
+    KEYEVENTF_KEYUP, VK_CONTROL, VK_LCONTROL, VK_LMENU, VK_LWIN, VK_MENU, VK_RCONTROL, VK_RMENU,
+    VK_RWIN, VK_SHIFT, VK_V, VIRTUAL_KEY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetGUIThreadInfo, GetMessageW,
@@ -296,14 +297,19 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
         return CallNextHookEx(None, code, wparam, lparam);
     }
 
-    // Alt 键自身：只跟踪状态（Alt 组合热键精确匹配用），不吞键
-    if vk == VK_MENU.0 as u32 {
+    // Alt 键自身：只跟踪状态（Alt 组合热键精确匹配用），不吞键。
+    // 低级键盘钩子对左右 Alt 报的是 VK_LMENU(0xA4)/VK_RMENU(0xA5) 而非
+    // 通用 VK_MENU(0x12)，必须全部识别，否则 ALT_HELD 恒为 false
+    // （这正是"Alt 组合热键全部失效"的终极根因）
+    if vk == VK_MENU.0 as u32 || vk == VK_LMENU.0 as u32 || vk == VK_RMENU.0 as u32 {
         ALT_HELD.store(is_down, Ordering::SeqCst);
         return CallNextHookEx(None, code, wparam, lparam);
     }
 
-    // Ctrl 键自身：只跟踪状态（顺序粘贴 Ctrl+V 连发判断用），不吞键
-    if vk == VK_CONTROL.0 as u32 {
+    // Ctrl 键自身：只跟踪状态（顺序粘贴 Ctrl+V 连发判断用），不吞键。
+    // 同样要认 VK_LCONTROL(0xA2)/VK_RCONTROL(0xA3)，否则用户按 Ctrl 时
+    // CTRL_HELD 不置位 → 顺序粘贴失效、Ctrl+V 变成普通粘贴
+    if vk == VK_CONTROL.0 as u32 || vk == VK_LCONTROL.0 as u32 || vk == VK_RCONTROL.0 as u32 {
         CTRL_HELD.store(is_down, Ordering::SeqCst);
         return CallNextHookEx(None, code, wparam, lparam);
     }
