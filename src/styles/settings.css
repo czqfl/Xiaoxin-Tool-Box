@@ -362,3 +362,42 @@
   color: var(--accent);
   font-weight: 700;
 }
+
+/* ---- 彩色点缀：导航 active 渐变 + 分组左侧色条 + 标题 ---- */
+.settings-nav-item.active {
+  /* 天蓝淡底渐变 + 左侧靛蓝色条，比纯色块更有层次 */
+  background: linear-gradient(
+    90deg,
+    var(--accent-soft),
+    rgba(var(--accent-rgb), 0.04)
+  );
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+/* 分组卡片：左侧柔和靛蓝细条，视觉上"编组" */
+.setting-group {
+  position: relative;
+}
+.setting-group::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 2px;
+  background: linear-gradient(
+    180deg,
+    var(--c-indigo),
+    var(--c-teal)
+  );
+  opacity: 0.55;
+}
+/* 设置页大标题：渐变色文字（克制的品牌感） */
+.settings-page h2 {
+  background: linear-gradient(120deg, var(--accent), var(--c-violet));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}

@@ -207,7 +207,7 @@ export function CredentialPanel() {
                   <div className="cred-card" key={c.id}>
                     <div className="cred-card-head">
                       <span className="cred-label">
-                        <IconKey size={14} />
+                        <IconKey size={14} className="cred-ic" />
                         {c.label}
                       </span>
                       <div className="cred-actions">

@@ -23,6 +23,26 @@
   --success: #27a567;
   --warning: #f5a524;
 
+  /* 柔和多彩色板（低饱和，丰富但不刺眼）：图标/徽标/渐变/点缀用。
+     主色 accent（天蓝）之外，用靛蓝/紫/青/绿/琥珀/玫红做功能色区分，
+     大面积背景仍保持中性——只做"点彩"，不做"浓墨"。 */
+  --c-indigo: #6d74d8;
+  --c-violet: #9a7bd4;
+  --c-cyan: #3ea8c9;
+  --c-teal: #2fa89d;
+  --c-green: #4ca674;
+  --c-amber: #d99a2b;
+  --c-rose: #d96f8e;
+  --c-indigo-soft: rgba(109, 116, 216, 0.13);
+  --c-violet-soft: rgba(154, 123, 212, 0.13);
+  --c-cyan-soft: rgba(62, 168, 201, 0.13);
+  --c-teal-soft: rgba(47, 168, 157, 0.13);
+  --c-green-soft: rgba(76, 166, 116, 0.13);
+  --c-amber-soft: rgba(217, 154, 43, 0.14);
+  --c-rose-soft: rgba(217, 111, 142, 0.13);
+  /* 品牌色 RGB（供轻渐变/半透明叠加使用） */
+  --accent-rgb: 47, 128, 237;
+
   /* 背景：通透冷白 */
   --bg-app: #f4f6f9;
   --bg-panel: rgba(251, 252, 254, 0.78);
@@ -88,6 +108,23 @@
   --success: #3dd68c;
   --warning: #f7b955;
 
+  /* 柔和多彩色板（深色提亮一档，保持低饱和） */
+  --c-indigo: #8b93f0;
+  --c-violet: #b79ae0;
+  --c-cyan: #55b6d8;
+  --c-teal: #4fc4bb;
+  --c-green: #6cd4a0;
+  --c-amber: #e8b558;
+  --c-rose: #e58aa5;
+  --c-indigo-soft: rgba(139, 147, 240, 0.16);
+  --c-violet-soft: rgba(183, 154, 224, 0.16);
+  --c-cyan-soft: rgba(85, 182, 216, 0.16);
+  --c-teal-soft: rgba(79, 196, 187, 0.16);
+  --c-green-soft: rgba(108, 212, 160, 0.16);
+  --c-amber-soft: rgba(232, 181, 88, 0.17);
+  --c-rose-soft: rgba(229, 138, 165, 0.16);
+  --accent-rgb: 76, 158, 255;
+
   /* 背景：纯净石墨黑（无紫调） */
   --bg-app: #16181c;
   --bg-panel: rgba(30, 32, 37, 0.75);
@@ -129,6 +166,23 @@
     --danger-soft: rgba(242, 85, 90, 0.16);
     --success: #3dd68c;
     --warning: #f7b955;
+
+    /* 柔和多彩色板（深色提亮一档，保持低饱和） */
+    --c-indigo: #8b93f0;
+    --c-violet: #b79ae0;
+    --c-cyan: #55b6d8;
+    --c-teal: #4fc4bb;
+    --c-green: #6cd4a0;
+    --c-amber: #e8b558;
+    --c-rose: #e58aa5;
+    --c-indigo-soft: rgba(139, 147, 240, 0.16);
+    --c-violet-soft: rgba(183, 154, 224, 0.16);
+    --c-cyan-soft: rgba(85, 182, 216, 0.16);
+    --c-teal-soft: rgba(79, 196, 187, 0.16);
+    --c-green-soft: rgba(108, 212, 160, 0.16);
+    --c-amber-soft: rgba(232, 181, 88, 0.17);
+    --c-rose-soft: rgba(229, 138, 165, 0.16);
+    --accent-rgb: 76, 158, 255;
 
     --bg-app: #16181c;
     --bg-panel: rgba(30, 32, 37, 0.75);

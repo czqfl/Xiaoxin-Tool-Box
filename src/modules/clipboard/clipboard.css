@@ -315,3 +315,33 @@
   color: var(--text-primary);
   background: var(--bg-item-active);
 }
+
+/* ---- 彩色点缀（柔和色板）：类型图标 / 收藏徽标 / 来源 chip ---- */
+/* 类型图标：文本=青、图片=绿、文件=琥珀，扫一眼区分内容类型 */
+.clip-ic-text {
+  color: var(--c-cyan);
+}
+.clip-ic-image {
+  color: var(--c-green);
+}
+.clip-ic-files {
+  color: var(--c-amber);
+}
+/* 收藏徽标：琥珀星（收藏=金色更直觉） */
+.clip-fav-badge {
+  color: var(--c-amber);
+  background: var(--c-amber-soft);
+}
+/* 来源应用：靛蓝淡底，比纯灰更有识别度 */
+.clip-source {
+  color: var(--c-indigo);
+  background: var(--c-indigo-soft);
+  padding: 1px 6px;
+  border-radius: 5px;
+}
+/* 队列序号（非下一条）：靛蓝数字 */
+.clip-order {
+  color: var(--c-indigo);
+  background: var(--c-indigo-soft);
+  font-weight: 600;
+}

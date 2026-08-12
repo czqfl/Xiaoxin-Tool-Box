@@ -32,6 +32,7 @@ html[data-window="panel"] body {
    模糊透过透明区域显示；这里只负责可配置透明度的暗色底色 + 圆角 + 边框，
    圆角用 --radius-panel（与窗口 DWM 原生圆角一致），底色透明度由
    --panel-opacity 控制（设置里的"面板底色不透明度"）。
+   顶部叠一层极轻的品牌色渐变（≈4%），给整体一点色彩层次，不抢内容。
    勿加 backdrop-filter，它只能模糊 webview 内容且可能干扰后端模糊合成 */
 .panel-shell {
   display: flex;
@@ -39,7 +40,13 @@ html[data-window="panel"] body {
   height: 100%;
   border-radius: var(--radius-panel);
   border: 1px solid var(--border-subtle);
-  background: rgba(var(--bg-panel-rgb), var(--panel-opacity));
+  background: linear-gradient(
+      180deg,
+      rgba(var(--accent-rgb), 0.045),
+      rgba(var(--accent-rgb), 0.012) 42%,
+      transparent 78%
+    ),
+    rgba(var(--bg-panel-rgb), var(--panel-opacity));
   overflow: hidden;
 }
 
@@ -50,6 +57,12 @@ html[data-window="panel"] body {
   gap: 8px;
   padding: 12px 14px;
   border-bottom: 1px solid var(--border-subtle);
+  /* 头部微彩：品牌色 6% 渐变，分隔线上方更明显一点 */
+  background: linear-gradient(
+    180deg,
+    rgba(var(--accent-rgb), 0.06),
+    rgba(var(--accent-rgb), 0.015) 85%
+  );
 }
 
 .panel-search {

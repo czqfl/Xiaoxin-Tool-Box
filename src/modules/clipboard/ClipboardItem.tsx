@@ -137,11 +137,11 @@ export function ClipboardItem({
 
   const kindIcon =
     entry.kind === "image" ? (
-      <IconImage size={15} />
+      <IconImage size={15} className="clip-ic-image" />
     ) : entry.kind === "files" ? (
-      <IconFiles size={15} />
+      <IconFiles size={15} className="clip-ic-files" />
     ) : (
-      <IconText size={15} />
+      <IconText size={15} className="clip-ic-text" />
     );
 
   return (
@@ -221,7 +221,7 @@ export function ClipboardItem({
               <span>{relativeTime(entry.created_at)}</span>
               {entry.source_app && <span className="clip-source">{entry.source_app}</span>}
               {entry.favorite && (
-                <span className="badge badge-accent">
+                <span className="badge clip-fav-badge">
                   <IconStar size={10} filled />
                 </span>
               )}
