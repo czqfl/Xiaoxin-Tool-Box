@@ -14,6 +14,7 @@ import {
   IconBranch,
   IconChevronLeft,
   IconChevronRight,
+  IconClose,
   IconCode,
   IconCopy,
   IconExternal,
@@ -621,6 +622,9 @@ export function FolderPanel() {
             onClick={toggleAlwaysOnTop}
           >
             <IconPin size={16} filled={alwaysOnTop} />
+          </button>
+          <button className="icon-btn" title="关闭（Esc）" onClick={() => hideCurrentWindow()}>
+            <IconClose size={16} />
           </button>
         </div>
 

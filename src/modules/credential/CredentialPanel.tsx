@@ -6,6 +6,7 @@ import { hideCurrentWindow, usePanelCommon } from "../../core/usePanel";
 import { useConfigStore } from "../../stores/configStore";
 import * as api from "./api";
 import {
+  IconClose,
   IconCopy,
   IconEdit,
   IconEye,
@@ -184,6 +185,9 @@ export function CredentialPanel() {
             onClick={toggleAlwaysOnTop}
           >
             <IconPin size={16} filled={alwaysOnTop} />
+          </button>
+          <button className="icon-btn" title="关闭（Esc）" onClick={() => hideCurrentWindow()}>
+            <IconClose size={16} />
           </button>
         </div>
 

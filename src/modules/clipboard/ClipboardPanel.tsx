@@ -475,6 +475,13 @@ export function ClipboardPanel() {
           >
             <IconTrash size={15} />
           </button>
+          <button
+            className="icon-btn"
+            title="关闭（Esc）"
+            onClick={() => hideCurrentWindow()}
+          >
+            <IconClose size={15} />
+          </button>
         </div>
 
         <div
