@@ -124,6 +124,9 @@ pub fn set_panel_hotkey(target: &str, is_alt: bool, vk: u16) {
         _ => return,
     };
     slot.store(vk, Ordering::SeqCst);
+    crate::storage::diag_write(&format!(
+        "[keyhook] hotkey set: {target} alt={is_alt} vk=0x{vk:X}"
+    ));
 }
 
 /// 组合键主键（keyboard Code）转虚拟键码；不支持的键返回 None
@@ -350,6 +353,9 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                 None
             };
             if let Some(action) = action {
+                crate::storage::diag_write(&format!(
+                    "[keyhook] alt hotkey matched vk=0x{vk:X}"
+                ));
                 SWALLOWED_VK.store(vk as u16, Ordering::SeqCst);
                 post(action);
                 return LRESULT(1);
