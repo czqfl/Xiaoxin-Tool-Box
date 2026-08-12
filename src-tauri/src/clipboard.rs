@@ -362,13 +362,9 @@ fn watcher_tick<R: Runtime>(app: &AppHandle<R>, last_hash: &mut u64) -> bool {
     };
 
     let mut entries = store.0.lock().unwrap();
-    // 去重：相同内容已有记录则移到最前并更新时间
-    if let Some(pos) = entries
-        .iter()
-        .position(|e| e.content_hash == entry.content_hash)
-    {
-        entries.remove(pos);
-    }
+    // 不去重：重复复制的内容各自保留一条记录（用户需求）。
+    // 顺序粘贴模式下"复制几次就能贴几次"，与队列语义一致；
+    // 主动写回/复制密码等路径已由 SUPPRESS_WATCH 跳过，不会重复记录。
     entries.insert(0, entry);
     trim_entries(&mut entries, max_history as usize);
     let _ = save_json(&paths.clipboard_file, &*entries);
