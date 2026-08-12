@@ -11,7 +11,7 @@
   height: 36px;
   padding: 0 8px 0 12px;
   border-radius: var(--radius-md);
-  background: var(--bg-input);
+  background: var(--bg-input-glass);
   border: 1px solid transparent;
   transition: border-color var(--dur-fast) var(--ease-out),
     box-shadow var(--dur-fast) var(--ease-out);

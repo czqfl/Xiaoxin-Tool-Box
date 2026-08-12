@@ -36,7 +36,7 @@
   padding: 5px 10px;
   border-radius: 9px;
   border: 1px solid var(--border-subtle);
-  background: var(--bg-input);
+  background: var(--bg-input-glass);
   color: var(--text-primary);
   font-size: 12px;
   outline: none;
@@ -88,14 +88,15 @@
 .translate-src {
   flex: 1.1;
   margin: 4px 16px 6px;
-  background: var(--bg-input);
+  /* 玻璃输入底：透出亚克力模糊（毛玻璃质感） */
+  background: var(--bg-input-glass);
 }
 .translate-dst-input {
   flex: 1;
   margin: 0;
   /* 右侧预留浮动复制按钮的空间 */
   padding-right: 40px;
-  background: var(--bg-input);
+  background: var(--bg-input-glass);
 }
 .translate-src:focus,
 .translate-dst-input:focus {
