@@ -7,7 +7,7 @@ import { onEvent } from "../../core/events";
 import { hideCurrentWindow } from "../../core/usePanel";
 import { copyText, diagLog, lastTranslateResult, translateText } from "../../core/tauri";
 import { IconClose, IconCopy } from "../../components/icons";
-import { LANG_OPTIONS, langLabel } from "./langs";
+import { LANG_OPTIONS } from "./langs";
 import "../../styles/panel.css";
 import "./translate.css";
 
@@ -194,14 +194,44 @@ export function TranslatePopup() {
   return (
     <div className="panel">
       <div className="panel-shell translate-shell">
+        {/* 顶部：标题 + 语言选择 + 翻译按钮（紧凑排列，回车即可翻译） */}
         <div className="translate-head" data-tauri-drag-region>
           <span className="translate-title">翻译</span>
-          {result?.from && (
-            <span className="badge badge-accent">
-              {langLabel(result.from)} → {langLabel(result.to)}
-            </span>
-          )}
-          {/* 关闭按钮（JS 拖动手柄已避开按钮，点击正常触发） */}
+          <div className="translate-langs">
+            <select
+              className="lang-select"
+              value={fromLang}
+              title="源语言"
+              onChange={(e) => setFromLang(e.target.value)}
+            >
+              {LANG_OPTIONS.map((l) => (
+                <option key={l.value} value={l.value}>
+                  {l.value === "auto" ? "自动检测" : l.label}
+                </option>
+              ))}
+            </select>
+            <span className="lang-arrow">→</span>
+            <select
+              className="lang-select"
+              value={toLang}
+              title="目标语言"
+              onChange={(e) => setToLang(e.target.value)}
+            >
+              {LANG_OPTIONS.filter((l) => l.value !== "auto").map((l) => (
+                <option key={l.value} value={l.value}>
+                  {l.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button
+            className="btn btn-primary btn-sm translate-btn"
+            disabled={translating || !text.trim()}
+            onClick={() => void doTranslate()}
+          >
+            {translating ? "翻译中…" : "翻译"}
+          </button>
+          {/* 关闭按钮（data-tauri-drag-region 会自动排除按钮，点击正常触发） */}
           <button
             className="icon-btn translate-close"
             title="关闭（Esc）"
@@ -214,13 +244,19 @@ export function TranslatePopup() {
           </button>
         </div>
 
-        {/* 上方：原始内容（可编辑） */}
+        {/* 上方：原始内容（可编辑）；Enter 翻译，Shift+Enter 换行 */}
         <textarea
           ref={inputRef}
           className="translate-src"
           value={text}
-          placeholder="输入或粘贴要翻译的内容…"
+          placeholder="输入或粘贴要翻译的内容…（Enter 翻译）"
           onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              if (text.trim()) void doTranslate();
+            }
+          }}
         />
 
         {/* 下方：翻译内容，复制按钮浮在结果框内 */}
@@ -242,42 +278,10 @@ export function TranslatePopup() {
           )}
         </div>
 
-        {/* 底部：源语言 / 目标语言 / 操作 */}
+        {/* 底部：状态提示 */}
         <div className="translate-bar">
-          <select
-            className="lang-select"
-            value={fromLang}
-            title="源语言"
-            onChange={(e) => setFromLang(e.target.value)}
-          >
-            {LANG_OPTIONS.map((l) => (
-              <option key={l.value} value={l.value}>
-                {l.value === "auto" ? "源语言：自动检测" : `源语言：${l.label}`}
-              </option>
-            ))}
-          </select>
-          <span className="lang-arrow">→</span>
-          <select
-            className="lang-select"
-            value={toLang}
-            title="目标语言"
-            onChange={(e) => setToLang(e.target.value)}
-          >
-            {LANG_OPTIONS.filter((l) => l.value !== "auto").map((l) => (
-              <option key={l.value} value={l.value}>
-                {`目标语言：${l.label}`}
-              </option>
-            ))}
-          </select>
-          <button
-            className="btn btn-primary btn-sm translate-btn"
-            disabled={translating || !text.trim()}
-            onClick={() => void doTranslate()}
-          >
-            {translating ? "翻译中…" : "翻译"}
-          </button>
           <span className="translate-status">
-            {copied ? "已复制" : "Esc 关闭"}
+            {copied ? "已复制" : "Enter 翻译 · Shift+Enter 换行 · Esc 关闭"}
           </span>
         </div>
       </div>
