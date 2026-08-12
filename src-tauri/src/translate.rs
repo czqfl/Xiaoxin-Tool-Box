@@ -86,6 +86,16 @@ pub fn trigger_selection_translate<R: Runtime>(app: &AppHandle<R>) {
     #[cfg(windows)]
     let src_raw: Option<usize> = crate::keyhook::foreground_hwnd().map(|h| h.0 as usize);
 
+    // 【提速】立即清空 store 并弹出空面板（不抢焦点、不激活）——弹窗与普通
+    // 面板一样瞬间出现；选中文本随后由后台线程读回并填充。此前先读完选中再
+    // 显示，剪贴板兜底（无选中时轮询剪贴板）可能耗时数百 ms，弹窗明显慢。
+    // 显示不激活：源应用仍持焦点，剪贴板复制兜底不受干扰。
+    if let Some(store) = app.try_state::<TranslateStore>() {
+        *store.0.lock().unwrap() = None;
+    }
+    let _ = app.emit("translate://start", StartPayload { text: String::new() });
+    show_popup_instant(&app);
+
     // 读取选中文本是同步的 Win32/UIA 操作（含 COM 初始化与剪贴板轮询），放独立线程执行，
     // 不阻塞事件循环。优先 UIA；UIA 读不到再走带保护的剪贴板复制兜底。
     std::thread::spawn(move || {
@@ -99,7 +109,7 @@ pub fn trigger_selection_translate<R: Runtime>(app: &AppHandle<R>) {
         #[cfg(not(windows))]
         let selected: Option<String> = None;
 
-        // ---------- 阶段 2：显示并【激活】面板（带出原文）----------
+        // ---------- 阶段 2：激活面板（抢焦点，可交互）+ 带出原文 ----------
         match selected {
             Some(text) if !text.trim().is_empty() => {
                 let text = text.trim().to_string();
@@ -115,7 +125,9 @@ pub fn trigger_selection_translate<R: Runtime>(app: &AppHandle<R>) {
                         provider: String::new(),
                     });
                 }
-                show_popup_activated(&app, &text);
+                // 先激活（抢焦点），再 emit 带出原文——前端填充并异步翻译
+                activate_popup(&app);
+                let _ = app.emit("translate://start", StartPayload { text: text.clone() });
 
                 // ---------- 阶段 3：翻译（智能方向：含中文→英文，否则→中文）----------
                 let Some(cfg) = app
@@ -144,16 +156,66 @@ pub fn trigger_selection_translate<R: Runtime>(app: &AppHandle<R>) {
                 });
             }
             _ => {
-                // 无选中文本：直接呼出空面板，不进行翻译、不碰剪贴板，
-                // 用户可手动输入/粘贴后自行点击"翻译"。
-                crate::storage::diag_write("[translate] no selection -> open empty panel");
+                // 无选中文本：空面板已显示，仅激活（可手动输入），不翻译、不碰剪贴板
+                crate::storage::diag_write("[translate] no selection -> empty panel");
                 if let Some(store) = app.try_state::<TranslateStore>() {
                     *store.0.lock().unwrap() = None;
                 }
-                show_popup_activated(&app, "");
+                activate_popup(&app);
             }
         }
     });
+}
+
+/// 立即弹出空面板（不抢焦点、不激活）：居中定位 + show。
+/// 不激活是为了让源应用继续持有焦点——剪贴板复制兜底需要源应用在前台。
+fn show_popup_instant<R: Runtime>(app: &AppHandle<R>) {
+    let Some(w) = app.get_webview_window(TRANSLATE_PANEL) else {
+        return;
+    };
+    center_popup(app, &w);
+    let _ = w.unminimize();
+    let _ = w.show();
+    // 系统级 Esc 关闭兜底（webview 万一没拿到焦点时由键盘钩子关闭）
+    #[cfg(windows)]
+    crate::keyhook::set_translate_popup_open(true);
+}
+
+/// 激活翻译弹窗：抢焦点置前（force_foreground_robust 不受前台锁限制），
+/// 120ms 后后台补一次（前台锁偶发拒绝时兜底）。空面板/带原文共用。
+fn activate_popup<R: Runtime>(app: &AppHandle<R>) {
+    let Some(w) = app.get_webview_window(TRANSLATE_PANEL) else {
+        return;
+    };
+    #[cfg(windows)]
+    {
+        if let Some(hwnd) = get_hwnd(&w) {
+            crate::acrylic::force_foreground_robust(hwnd);
+        }
+    }
+    let _ = w.set_focus();
+    let w2 = w.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(120));
+        #[cfg(windows)]
+        if let Some(hwnd) = get_hwnd(&w2) {
+            crate::acrylic::force_foreground_robust(hwnd);
+        }
+        let _ = w2.set_focus();
+    });
+}
+
+/// 翻译弹窗居中定位（物理像素，避免缩放歧义）
+fn center_popup<R: Runtime>(app: &AppHandle<R>, w: &tauri::WebviewWindow<R>) {
+    if let (Ok(win), Ok(Some(monitor))) = (w.outer_size(), app.primary_monitor()) {
+        let m = monitor.position();
+        let s = monitor.size();
+        if win.width > 0 && win.height > 0 && s.width > 0 && s.height > 0 {
+            let x = m.x as f64 + (s.width as f64 - win.width as f64) / 2.0;
+            let y = m.y as f64 + (s.height as f64 - win.height as f64) / 2.0;
+            let _ = w.set_position(tauri::PhysicalPosition::new(x, y));
+        }
+    }
 }
 
 /// 读取源窗口选中文本：优先 UI Automation（无副作用），UIA 读不到（不标准暴露选区的
@@ -311,59 +373,6 @@ fn read_selection_clipboard(src_raw: Option<usize>) -> Option<String> {
     } else {
         None
     }
-}
-
-/// 显示翻译面板并【可靠激活】，同时把原文（可能为空）带给前端。
-///
-/// 无论有无选中文本都会调用——抢前台此时不会再干扰任何复制（复制阶段已完全省略），
-/// 所以可以正常 `show()` + `force_foreground_robust()` 拿到真实焦点，面板才能拖动 /
-/// 点 × / 按 Esc。空文本表示"无选中"，前端据此仅呼出空面板、不翻译。
-fn show_popup_activated<R: Runtime>(app: &AppHandle<R>, text: &str) {
-    let Some(w) = app.get_webview_window(TRANSLATE_PANEL) else {
-        return;
-    };
-    // 居中呼出：用窗口尺寸与主显示器尺寸计算居中坐标（物理像素，避免缩放歧义）
-    if let (Ok(win), Ok(Some(monitor))) = (w.outer_size(), app.primary_monitor()) {
-        let m = monitor.position();
-        let s = monitor.size();
-        if win.width > 0 && win.height > 0 && s.width > 0 && s.height > 0 {
-            let x = m.x as f64 + (s.width as f64 - win.width as f64) / 2.0;
-            let y = m.y as f64 + (s.height as f64 - win.height as f64) / 2.0;
-            let _ = w.set_position(tauri::PhysicalPosition::new(x, y));
-        }
-    }
-    let _ = w.unminimize();
-    let _ = w.show();
-    // 已超出系统前台锁输入窗口，普通 SetForegroundWindow 会被拒 →
-    // 用 AttachThreadInput 兜底的 force_foreground_robust
-    #[cfg(windows)]
-    {
-        if let Some(hwnd) = get_hwnd(&w) {
-            crate::acrylic::force_foreground_robust(hwnd);
-        }
-        // 系统级 Esc 关闭兜底（webview 万一没拿到焦点时由键盘钩子关闭）
-        crate::keyhook::set_translate_popup_open(true);
-    }
-    let _ = w.set_focus();
-    // 通知前端：呼出面板，带出原文（为空表示无选中，前端据此仅展示空面板、不翻译）
-    let _ = app.emit(
-        "translate://start",
-        StartPayload {
-            text: text.to_string(),
-        },
-    );
-    // 前台锁偶发拒绝时补一次激活
-    let w2 = w.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(120));
-        #[cfg(windows)]
-        {
-            if let Some(hwnd) = get_hwnd(&w2) {
-                crate::acrylic::force_foreground_robust(hwnd);
-            }
-        }
-        let _ = w2.set_focus();
-    });
 }
 
 /// 取 webview 所属顶层窗口 HWND（用于 Win32 置前/激活）
