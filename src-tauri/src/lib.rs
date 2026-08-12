@@ -9,6 +9,7 @@ mod credentials;
 #[cfg(windows)]
 mod keyhook;
 mod panel;
+mod port;
 mod shortcut;
 mod storage;
 mod translate;
@@ -203,6 +204,8 @@ pub fn run() {
             shortcut::shortcut_capture_begin,
             shortcut::shortcut_capture_end,
             panel::panel_set_always_on_top,
+            port::port_query,
+            port::port_kill,
         ])
         .run(tauri::generate_context!())
         .expect("应用启动失败");

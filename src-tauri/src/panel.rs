@@ -22,9 +22,16 @@ fn force_foreground_window<R: Runtime>(window: &WebviewWindow<R>) {
 pub const CLIPBOARD_PANEL: &str = "clipboard-panel";
 pub const FOLDER_PANEL: &str = "folder-panel";
 pub const CREDENTIAL_PANEL: &str = "credential-panel";
+/// 端口工具面板（查询端口占用 / 一键杀进程）
+pub const PORT_PANEL: &str = "port-panel";
 
 /// 所有悬浮面板标签（同一时间只展示一个）
-pub const ALL_PANELS: &[&str] = &[CLIPBOARD_PANEL, FOLDER_PANEL, CREDENTIAL_PANEL];
+pub const ALL_PANELS: &[&str] = &[
+    CLIPBOARD_PANEL,
+    FOLDER_PANEL,
+    CREDENTIAL_PANEL,
+    PORT_PANEL,
+];
 
 /// 切换面板置顶状态。
 /// 透明窗口 z-order 变化可能使亚克力层失效，切换后补刷一次。

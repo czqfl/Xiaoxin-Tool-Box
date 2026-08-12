@@ -152,6 +152,7 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         MenuItem::with_id(app, "toggle_folder", "文件夹面板", true, None::<&str>)?;
     let cred_item =
         MenuItem::with_id(app, "toggle_credential", "账号密码面板", true, None::<&str>)?;
+    let port_item = MenuItem::with_id(app, "toggle_port", "端口工具", true, None::<&str>)?;
     let open_item = MenuItem::with_id(app, "open_settings", "打开设置", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
     let menu = Menu::with_items(
@@ -160,6 +161,7 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
             &clipboard_item,
             &folder_item,
             &cred_item,
+            &port_item,
             &open_item,
             &quit_item,
         ],
@@ -183,6 +185,7 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
             "toggle_credential" => {
                 crate::panel::toggle_panel(app, crate::panel::CREDENTIAL_PANEL)
             }
+            "toggle_port" => crate::panel::toggle_panel(app, crate::panel::PORT_PANEL),
             "open_settings" => show_settings_window(app),
             "quit" => app.exit(0),
             _ => {}

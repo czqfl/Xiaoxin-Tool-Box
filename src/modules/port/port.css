@@ -1,0 +1,118 @@
+/* 端口工具面板：查询输入 + 进程结果列表 */
+.port-query {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 8px 0 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+  border: 1px solid transparent;
+  transition: border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+.port-query:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.port-query .search-icon {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  display: flex;
+}
+.port-query input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.port-query input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.port-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+.port-empty .empty-icon {
+  font-size: 28px;
+}
+
+/* 结果条目 */
+.port-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-item-hover);
+  margin-bottom: 6px;
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.port-item:hover {
+  border-color: var(--border-strong);
+}
+.port-proto {
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--bg-badge);
+  color: var(--text-secondary);
+}
+.port-proto.tcp,
+.port-proto.tcp6 {
+  color: var(--accent);
+}
+.port-proto.udp,
+.port-proto.udp6 {
+  color: #10b981;
+}
+.port-main {
+  flex: 1;
+  min-width: 0;
+}
+.port-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.port-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.port-state {
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--bg-badge);
+}
+.port-state.ESTABLISHED {
+  color: #10b981;
+}
+.port-state.LISTENING {
+  color: var(--accent);
+}
+.port-kill {
+  flex-shrink: 0;
+}

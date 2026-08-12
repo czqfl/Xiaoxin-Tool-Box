@@ -69,6 +69,21 @@
         "visible": false
       },
       {
+        "label": "port-panel",
+        "title": "端口工具",
+        "width": 580,
+        "height": 420,
+        "resizable": false,
+        "fullscreen": false,
+        "maximized": false,
+        "decorations": false,
+        "transparent": false,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false
+      },
+      {
         "label": "translate-popup",
         "title": "翻译",
         "width": 580,

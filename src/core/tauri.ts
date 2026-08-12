@@ -7,6 +7,7 @@ import type {
   Credential,
   EditorInfo,
   FolderEntry,
+  PortProcess,
   TranslateResult,
 } from "../types";
 
@@ -164,6 +165,14 @@ export const pickVscodeExecutable = async (): Promise<string | null> => {
 /** 切换面板置顶（后端实现：切换后重新应用毛玻璃，避免 Windows 黑屏） */
 export const setPanelAlwaysOnTop = (on: boolean) =>
   invoke<void>("panel_set_always_on_top", { on });
+
+// ---- 端口工具 ----
+/** 查询占用指定端口的进程列表 */
+export const queryPort = (port: number) =>
+  safe(invoke<PortProcess[]>("port_query", { port }), []);
+/** 结束指定 PID 的进程 */
+export const killPort = (pid: number) =>
+  safe(invoke("port_kill", { pid }), undefined);
 
 // ---- 快捷键 ----
 export const testShortcut = (shortcut: string) =>

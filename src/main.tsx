@@ -10,6 +10,7 @@ const panelLabels = [
   "clipboard-panel",
   "folder-panel",
   "credential-panel",
+  "port-panel",
   "translate-popup",
 ];
 if (panelLabels.includes(getCurrentWindow().label)) {

@@ -152,3 +152,14 @@ export interface EditorInfo {
   label: string;
   exe: string;
 }
+
+/** 端口工具：占用指定端口的进程信息 */
+export interface PortProcess {
+  pid: number;
+  /** 进程名（如 node.exe、Code.exe） */
+  name: string;
+  /** 监听状态（LISTENING / ESTABLISHED / TIME_WAIT 等，UDP 为空） */
+  state: string;
+  /** 协议（TCP / TCP6 / UDP / UDP6） */
+  proto: string;
+}
