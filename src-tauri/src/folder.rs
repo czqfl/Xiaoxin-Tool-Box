@@ -365,6 +365,11 @@ pub struct GitRunResult {
 /// 【面板内】逐条执行命令（git 等）并捕获输出，返回每条结果——
 /// 替代"开新终端看输出"：终端方式多条命令拼一行滚动太快只能看到末尾，
 /// 面板内逐条执行、每条独立展示结果，看得更清楚（用户反馈）。
+///
+/// 执行 shell 用 **PowerShell（加载用户 $PROFILE）** 而非 cmd：用户自己的
+/// 代理/SSH 等网络配置常在 PowerShell 环境（$PROFILE 或会话变量）生效，
+/// cmd 子进程继承不到 → git push 直连 GitHub 失败（"连接不上"）；用
+/// PowerShell 与用户手动执行的环境一致，能连则这里也能连。
 #[tauri::command]
 pub fn folder_git_run(path: String, commands: Vec<String>) -> Result<Vec<GitRunResult>, String> {
     if !Path::new(&path).is_dir() {
@@ -376,10 +381,10 @@ pub fn folder_git_run(path: String, commands: Vec<String>) -> Result<Vec<GitRunR
         if line.is_empty() {
             continue;
         }
-        // cmd /d /c <command>：当前目录执行并捕获输出
-        let out = Command::new("cmd")
-            .args(["/d", "/c"])
-            .arg(line)
+        // PowerShell -NoLogo -Command <line>：当前目录执行并捕获输出。
+        // 不传 -NoProfile：加载用户 $PROFILE（代理等网络配置随环境生效）
+        let out = Command::new("powershell")
+            .args(["-NoLogo", "-Command", line])
             .current_dir(&path)
             .output();
         match out {
