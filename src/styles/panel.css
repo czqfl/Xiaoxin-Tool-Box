@@ -229,10 +229,12 @@ html[data-window="panel"] body {
   background: var(--border-subtle);
 }
 
-/* 子菜单：hover 展开在右侧，父项容器相对定位 */
+/* 子菜单：hover 展开在右侧，父项容器相对定位。
+   有子菜单的项整体靠右对齐（图标+文字+箭头右端排布），
+   普通项保持左对齐——视觉上区分"展开入口"与"普通操作" */
 .context-menu-item.has-submenu {
   position: relative;
-  justify-content: space-between;
+  justify-content: flex-end;
   cursor: default;
 }
 .submenu-arrow {

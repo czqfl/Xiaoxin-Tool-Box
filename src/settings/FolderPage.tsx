@@ -1,16 +1,16 @@
-/** 文件夹设置页：固定列表管理（增删改色）、显示选项、布局模式 */
+/** 文件夹设置页：固定列表管理（增删改）、显示选项、布局模式。
+ *  颜色标签在文件夹面板右键菜单设置，设置页不再提供颜色选择。 */
 import { useEffect, useState } from "react";
 import { useConfigStore } from "../stores/configStore";
 import { sortFolders, useFolderStore } from "../stores/folderStore";
 import * as api from "../modules/folder/api";
-import { FOLDER_COLORS } from "../modules/folder/colors";
 import { Segmented, SettingGroup, SettingRow, Switch } from "./components";
 import { IconTrash } from "../components/icons";
 
 export function FolderPage() {
   const config = useConfigStore((s) => s.config);
   const update = useConfigStore((s) => s.update);
-  const { folders, loaded, refresh, add, remove, setColor } = useFolderStore();
+  const { folders, loaded, refresh, add, remove } = useFolderStore();
   const [newPath, setNewPath] = useState("");
   const [error, setError] = useState("");
 
@@ -100,6 +100,7 @@ export function FolderPage() {
             <span
               className="folder-color-dot"
               style={{ background: f.color ?? "var(--accent)" }}
+              title={f.color ?? "无颜色"}
             />
             <button
               className="folder-name"
@@ -112,23 +113,6 @@ export function FolderPage() {
             <span className="folder-path" title={f.path}>
               {f.path}
             </span>
-            {/* 可视化色块选择：当前色高亮，点击即设置 */}
-            <div className="folder-color-picker" title="设置颜色标签">
-              <button
-                className={`color-swatch ${!f.color ? "active" : ""}`}
-                title="无颜色"
-                onClick={() => void setColor(f.id, null)}
-              />
-              {FOLDER_COLORS.map((c) => (
-                <button
-                  key={c.value}
-                  className={`color-swatch ${f.color === c.value ? "active" : ""}`}
-                  style={{ background: c.value }}
-                  title={c.name}
-                  onClick={() => void setColor(f.id, c.value)}
-                />
-              ))}
-            </div>
             <button
               className="icon-btn"
               title="删除"
