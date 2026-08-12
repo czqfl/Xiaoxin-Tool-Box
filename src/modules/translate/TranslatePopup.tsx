@@ -53,30 +53,44 @@ export function TranslatePopup() {
 
   useEffect(() => {
     void diagLog("TranslatePopup mounted");
-    // 挂载兜底：快捷键触发后窗口先 show、事件可能早于监听，先拉一次最近结果
+    // 挂载兜底：快捷键触发后窗口先 show、事件可能早于监听，先拉一次最近结果。
+    // store 为 None 表示本次是"空面板呼出"（无选中），直接解除 loading，避免卡"翻译中"。
     void lastTranslateResult().then((r) => {
       if (r) applyResult(r);
+      else {
+        loadingRef.current = false;
+        setLoading(false);
+      }
     });
     const cleanup: Array<() => void> = [];
     onEvent<TranslateResult>(EVT_RESULT, applyResult).then((un) =>
       cleanup.push(un)
     );
-    // 呼出：后端已完成复制，事件带出原文；进入"翻译中"等译文到达
+    // 呼出：后端已读取选中文本（仅 UI Automation，不碰剪贴板），事件带出原文。
+    // 有原文 → 进入"翻译中"等译文；无原文（用户没选中）→ 仅呼出空面板，不翻译、
+    // 立即可手动输入/粘贴后点击"翻译"。
     onEvent<{ text?: string }>("translate://start", (p) => {
-      loadingRef.current = true;
-      setLoading(true);
+      const t = p?.text ?? "";
+      setText(t);
       setResult(null);
-      // 立刻显示划词得到的原文（不再等译文，也不会残留上一次内容）
-      setText(p?.text ?? "");
       lastStartAt.current = Date.now();
-      // 兜底：若 14s 内结果仍未到达（如网络异常/超时），强制解除"翻译中"，
-      // 避免界面卡死。后端 reqwest 已带 12s 超时，正常情况下此兜底不应触发。
-      window.setTimeout(() => {
-        if (loadingRef.current) {
-          loadingRef.current = false;
-          setLoading(false);
-        }
-      }, 14000);
+      if (t.trim()) {
+        // 有原文：进入"翻译中"，等后端异步 emit 的译文到达
+        loadingRef.current = true;
+        setLoading(true);
+        // 兜底：若 14s 内结果仍未到达（如网络异常/超时），强制解除"翻译中"，
+        // 避免界面卡死。后端 reqwest 已带 12s 超时，正常情况下此兜底不应触发。
+        window.setTimeout(() => {
+          if (loadingRef.current) {
+            loadingRef.current = false;
+            setLoading(false);
+          }
+        }, 14000);
+      } else {
+        // 无选中内容：仅呼出空面板，不进行翻译，立即可手动输入
+        loadingRef.current = false;
+        setLoading(false);
+      }
     }).then((un) => cleanup.push(un));
     // 失焦自动隐藏：用窗口级 onFocusChanged 判断"焦点真正离开本窗口（点到别的程序）"
     // 才隐藏，不要用 DOM window blur——点击 data-tauri-drag-region 头部触发原生拖动时，
