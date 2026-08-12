@@ -59,6 +59,18 @@
   font-size: 28px;
 }
 
+/* 敏感端口警告条：系统关键服务端口查询时提示 */
+.port-warn {
+  margin: 10px 14px 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(245, 165, 36, 0.4);
+  background: var(--c-amber-soft);
+  color: var(--warning);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 /* 结果条目 */
 .port-item {
   display: flex;

@@ -20,6 +20,26 @@ const STATE_HINT: Record<string, string> = {
   CLOSE_WAIT: "关闭等待",
 };
 
+/** 系统关键服务端口：占用者多为系统服务，结束进程可能影响系统/网络/安全功能。
+ *  查询到这些端口时顶部显示黄色警告提示（不阻止查询，只提醒）。 */
+const SENSITIVE_PORTS = new Set<number>([
+  22, // SSH
+  53, // DNS
+  135, // RPC
+  137, 138, 139, // NetBIOS
+  389, // LDAP
+  445, // SMB
+  636, // LDAPS
+  1433, // MSSQL
+  1521, // Oracle
+  3306, // MySQL
+  3389, // 远程桌面 RDP
+  5432, // PostgreSQL
+  6379, // Redis
+  9200, // Elasticsearch
+  27017, // MongoDB
+]);
+
 export function PortPanel() {
   const config = useConfigStore((s) => s.config);
   const updateConfig = useConfigStore((s) => s.update);
@@ -149,6 +169,12 @@ export function PortPanel() {
         </div>
 
         <div className="panel-body">
+          {SENSITIVE_PORTS.has(Number(port)) && (
+            <div className="port-warn">
+              ⚠️ 端口 {port} 是系统关键服务端口，占用进程多为系统组件；
+              结束其进程可能影响系统/网络/安全功能，请谨慎操作。
+            </div>
+          )}
           {error && <div className="port-empty">{error}</div>}
           {items.length === 0 && !error && (
             <div className="port-empty">

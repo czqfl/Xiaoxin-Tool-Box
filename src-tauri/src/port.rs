@@ -74,8 +74,17 @@ pub fn port_query(port: u16) -> Result<Vec<PortProcess>, String> {
 }
 
 /// 结束指定 PID 的进程（TerminateProcess）。权限不足（如目标是管理员进程）时返回错误。
+/// 安全控制：系统关键进程（services/lsass/svchost 等）一律拒绝结束，防止
+/// 误杀影响系统功能/安全。
 #[tauri::command]
 pub fn port_kill(pid: u32) -> Result<(), String> {
+    // 先查进程名做保护判定（普通权限即可查询映像名）
+    let name = process_name(pid).to_lowercase();
+    if SYSTEM_PROTECTED.contains(&name.as_str()) {
+        return Err(format!(
+            "「{name}」是系统关键进程，为安全起见已拒绝结束"
+        ));
+    }
     #[cfg(windows)]
     unsafe {
         use windows::Win32::System::Threading::{
@@ -93,6 +102,30 @@ pub fn port_kill(pid: u32) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// 系统关键进程名（小写）：结束它们会中断系统服务/安全/桌面等功能。
+/// 注意 svchost.exe 是大量服务（含远程桌面等）的宿主进程，一并保护。
+const SYSTEM_PROTECTED: &[&str] = &[
+    "system",
+    "registry",
+    "smss.exe",
+    "csrss.exe",
+    "wininit.exe",
+    "winlogon.exe",
+    "services.exe",
+    "lsass.exe",
+    "lsm.exe",
+    "svchost.exe",
+    "dwm.exe",
+    "fontdrvhost.exe",
+    "sihost.exe",
+    "taskhostw.exe",
+    "explorer.exe",
+    "spoolsv.exe",
+    "msmpeng.exe",
+    "wininit.exe",
+    "conhost.exe",
+];
 
 /// 根据 PID 取进程名（进程映像文件名）；失败回退 "PID <pid>"
 #[cfg(windows)]
