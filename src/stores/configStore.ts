@@ -32,6 +32,7 @@ const defaultConfig: AppConfig = {
     clipboard: "Alt+C",
     folder: "Alt+F",
     credentials: "Alt+A",
+    translation: "Ctrl+Alt+T",
   },
   general: {
     theme: "system",
@@ -40,6 +41,15 @@ const defaultConfig: AppConfig = {
     acrylic_enabled: true,
     acrylic_opacity: 60,
   },
+  translator: {
+    provider: "youdao",
+    youdao_key: "",
+    youdao_secret: "",
+    baidu_appid: "",
+    baidu_secret: "",
+    target_lang: "zh",
+  },
+  panel_positions: {},
 };
 
 interface ConfigStore {

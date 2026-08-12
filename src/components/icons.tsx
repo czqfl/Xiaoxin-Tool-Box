@@ -261,3 +261,10 @@ export const IconClose = (p: IconProps) => (
     <path d="M18 6 6 18M6 6l12 12" />
   </svg>
 );
+
+export const IconTranslate = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M4 7h9M8.5 4v3M8.5 7c0 4 2.5 7 6 8.5M14 5c0 4-2.5 7-6 8.5" />
+    <path d="M5 13c2.5 1 4 3 4.5 6M19 13c-2.5 1-4 3-4.5 6" />
+  </svg>
+);

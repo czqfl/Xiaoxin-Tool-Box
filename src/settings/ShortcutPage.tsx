@@ -10,7 +10,7 @@ import {
 import { EVT_SHORTCUT_WIN_CAPTURED, onEvent } from "../core/events";
 import { SettingGroup, SettingRow } from "./components";
 
-type Target = "clipboard" | "folder" | "credentials";
+type Target = "clipboard" | "folder" | "credentials" | "translation";
 
 /** 将键盘事件转换为 global-shortcut 可解析的组合键字符串，如 "Ctrl+Alt+C" */
 function comboFromEvent(e: KeyboardEvent): string | null {
@@ -137,6 +137,7 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
     clipboard: idleRow,
     folder: idleRow,
     credentials: idleRow,
+    translation: idleRow,
   });
   const [saving, setSaving] = useState<Target | null>(null);
 
@@ -148,9 +149,9 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
   /** 保存单个快捷键：先冲突检测，通过后注册并同步配置 */
   const saveOne = async (target: Target) => {
     const combo = draft[target];
-    const others: Target[] = (["clipboard", "folder", "credentials"] as Target[]).filter(
-      (t) => t !== target
-    );
+    const others: Target[] = (
+      ["clipboard", "folder", "credentials", "translation"] as Target[]
+    ).filter((t) => t !== target);
     if (others.some((t) => combo === draft[t])) {
       setRows((r) => ({
         ...r,
@@ -228,6 +229,11 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
         {renderRow("clipboard", "呼出剪贴板面板", "点击快捷键后按下新组合，例如 Ctrl+Alt+C")}
         {renderRow("folder", "呼出文件夹面板", "点击快捷键后按下新组合，例如 Ctrl+Alt+F")}
         {renderRow("credentials", "呼出账号密码面板", "点击快捷键后按下新组合，例如 Alt+A")}
+        {renderRow(
+          "translation",
+          "划词翻译",
+          "选中文本后按下快捷键，自动复制并翻译，例如 Ctrl+Alt+T"
+        )}
       </SettingGroup>
 
       <div className="shortcut-hint">

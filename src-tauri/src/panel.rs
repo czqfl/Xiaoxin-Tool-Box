@@ -1,8 +1,8 @@
 //! 悬浮面板的显示/隐藏与定位逻辑（两个面板共用）。
+use crate::config::ConfigState;
+use crate::storage::{save_json, AppPaths};
 use tauri::{AppHandle, LogicalPosition, Manager, Runtime, WebviewWindow};
 use windows::Win32::Foundation::HWND;
-
-use crate::config::ConfigState;
 
 /// 可靠置前窗口：绕过 Win32 前景锁，让托盘/热键呼出的面板能正常接收输入。
 /// 背景进程直接 set_focus 常被系统拒绝，窗口可见却未真正置前、无法交互。
@@ -75,9 +75,14 @@ pub fn toggle_panel<R: Runtime>(app: &AppHandle<R>, label: &str) {
         return;
     };
     if window.is_visible().unwrap_or(false) {
+        // 关闭前记住窗口位置（持久化到配置），下次呼出恢复上次位置
+        remember_position(app, &window, label);
         let _ = window.hide();
     } else {
-        position_near_cursor(app, &window);
+        // 优先恢复上次关闭位置；记录缺失或位置失效（换屏/分辨率变化）时回退居中
+        if !restore_position(app, &window, label) {
+            position_near_cursor(app, &window);
+        }
         let _ = window.show();
         // 可靠置前（绕过 Win32 前景锁），保证面板可正常交互/接收输入
         #[cfg(windows)]
@@ -123,4 +128,53 @@ fn position_near_cursor<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R
     let x = mx + (mw - ww) / 2.0;
     let y = my + mh * 0.16;
     let _ = window.set_position(LogicalPosition::new(x, y));
+}
+
+/// 记住面板关闭时的窗口位置（物理坐标），持久化到 config.json 的 panel_positions。
+/// 这样重装应用、重启进程后再次呼出仍回到上次位置。
+fn remember_position<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>, label: &str) {
+    let Ok(pos) = window.outer_position() else {
+        return;
+    };
+    let (Some(cfg), Some(paths)) = (
+        app.try_state::<ConfigState>(),
+        app.try_state::<AppPaths>(),
+    ) else {
+        return;
+    };
+    let mut guard = cfg.0.lock().unwrap();
+    guard
+        .panel_positions
+        .insert(label.to_string(), (pos.x, pos.y));
+    let snapshot = guard.clone();
+    drop(guard);
+    let _ = save_json(&paths.config_file, &snapshot);
+}
+
+/// 恢复面板上次关闭位置。位置记录缺失，或该点已不在任何显示器内
+/// （换屏/分辨率变化/拔屏）时返回 false，由调用方回退居中定位。
+fn restore_position<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>, label: &str) -> bool {
+    let Some(cfg) = app.try_state::<ConfigState>() else {
+        return false;
+    };
+    let Some(&(x, y)) = cfg.0.lock().unwrap().panel_positions.get(label) else {
+        return false;
+    };
+    // 物理坐标 -> 逻辑坐标（用主屏缩放近似），校验该点仍在某个显示器内
+    let scale = app
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .map(|m| m.scale_factor())
+        .unwrap_or(1.0);
+    if scale <= 0.0 {
+        return false;
+    }
+    let (lx, ly) = (x as f64 / scale, y as f64 / scale);
+    if app.monitor_from_point(lx, ly).ok().flatten().is_none() {
+        return false;
+    }
+    window
+        .set_position(tauri::PhysicalPosition::new(x, y))
+        .is_ok()
 }

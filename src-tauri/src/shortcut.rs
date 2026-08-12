@@ -20,6 +20,8 @@ pub struct ShortcutBindingsInner {
     pub clipboard: Option<Shortcut>,
     pub folder: Option<Shortcut>,
     pub credentials: Option<Shortcut>,
+    /// 划词翻译（非面板，触发翻译动作）
+    pub translation: Option<Shortcut>,
 }
 
 pub fn parse(shortcut: &str) -> Result<Shortcut, String> {
@@ -90,6 +92,7 @@ pub fn shortcut_test(
         if inner.clipboard == Some(parsed)
             || inner.folder == Some(parsed)
             || inner.credentials == Some(parsed)
+            || inner.translation == Some(parsed)
         {
             return Ok(());
         }
@@ -130,7 +133,8 @@ pub fn shortcut_apply(
     paths: State<'_, AppPaths>,
     config_state: State<'_, ConfigState>,
 ) -> Result<(), String> {
-    if target != "clipboard" && target != "folder" && target != "credentials" {
+    if target != "clipboard" && target != "folder" && target != "credentials" && target != "translation"
+    {
         return Err("未知的快捷键目标".into());
     }
     let parsed = parse(&shortcut)?;
@@ -139,8 +143,10 @@ pub fn shortcut_apply(
         inner.clipboard
     } else if target == "folder" {
         inner.folder
-    } else {
+    } else if target == "credentials" {
         inner.credentials
+    } else {
+        inner.translation
     };
     if current == Some(parsed) {
         return Ok(());
@@ -154,8 +160,10 @@ pub fn shortcut_apply(
         inner.clipboard = Some(parsed);
     } else if target == "folder" {
         inner.folder = Some(parsed);
-    } else {
+    } else if target == "credentials" {
         inner.credentials = Some(parsed);
+    } else {
+        inner.translation = Some(parsed);
     }
     drop(inner);
 
@@ -165,8 +173,10 @@ pub fn shortcut_apply(
         config.shortcuts.clipboard = shortcut;
     } else if target == "folder" {
         config.shortcuts.folder = shortcut;
-    } else {
+    } else if target == "credentials" {
         config.shortcuts.credentials = shortcut;
+    } else {
+        config.shortcuts.translation = shortcut;
     }
     let _ = save_json(&paths.config_file, &config);
     *config_state.0.lock().unwrap() = config;
@@ -178,6 +188,7 @@ pub fn register_initial<R: Runtime>(app: &AppHandle<R>, config: &AppConfig) {
     register_one(app, "clipboard", &config.shortcuts.clipboard);
     register_one(app, "folder", &config.shortcuts.folder);
     register_one(app, "credentials", &config.shortcuts.credentials);
+    register_one(app, "translation", &config.shortcuts.translation);
     sync_seq_shortcut(app, config.clipboard.paste_mode);
 }
 
@@ -204,8 +215,10 @@ fn register_one<R: Runtime>(app: &AppHandle<R>, target: &str, shortcut_str: &str
                     inner.clipboard = Some(parsed);
                 } else if target == "folder" {
                     inner.folder = Some(parsed);
-                } else {
+                } else if target == "credentials" {
                     inner.credentials = Some(parsed);
+                } else {
+                    inner.translation = Some(parsed);
                 }
             }
         }
@@ -239,6 +252,15 @@ pub fn handle_shortcut_pressed<R: Runtime>(app: &AppHandle<R>, shortcut: &Shortc
     let Some(bindings) = app.try_state::<ShortcutBindings>() else {
         return;
     };
+    // 翻译快捷键：触发划词翻译动作，不切换面板
+    let is_translate = {
+        let inner = bindings.0.lock().unwrap();
+        inner.translation == Some(*shortcut)
+    };
+    if is_translate {
+        crate::translate::trigger_selection_translate(app);
+        return;
+    }
     let label = {
         let inner = bindings.0.lock().unwrap();
         panel_label_for(&inner, shortcut)

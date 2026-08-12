@@ -11,6 +11,7 @@ mod keyhook;
 mod panel;
 mod shortcut;
 mod storage;
+mod translate;
 mod tray;
 
 use crate::clipboard::ClipboardStore;
@@ -18,6 +19,7 @@ use crate::config::{AppConfig, ConfigState};
 use crate::credentials::CredentialStore;
 use crate::folder::FolderStore;
 use crate::shortcut::ShortcutBindings;
+use crate::translate::TranslateStore;
 use std::sync::Mutex;
 use tauri::Manager;
 use tauri_plugin_global_shortcut::ShortcutState;
@@ -59,6 +61,7 @@ fn apply_panel_acrylic<R: tauri::Runtime>(app: &tauri::AppHandle<R>, acrylic: bo
         panel::CLIPBOARD_PANEL,
         panel::FOLDER_PANEL,
         panel::CREDENTIAL_PANEL,
+        translate::TRANSLATE_PANEL,
     ] {
         if let Some(w) = app.get_webview_window(label) {
             apply_panel_effects_for(&w, acrylic);
@@ -122,6 +125,7 @@ pub fn run() {
         .manage(FolderStore(Mutex::new(folders)))
         .manage(CredentialStore(Mutex::new(creds)))
         .manage(ShortcutBindings::default())
+        .manage(TranslateStore(Mutex::new(None)))
         .manage(paths)
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -157,6 +161,8 @@ pub fn run() {
             clipboard::clipboard_consume,
             clipboard::clipboard_rollback,
             clipboard::clipboard_enqueue,
+            translate::translate,
+            translate::translate_last_result,
             clipboard::clipboard_move,
             clipboard::clipboard_reorder,
             clipboard::clipboard_insert_text,

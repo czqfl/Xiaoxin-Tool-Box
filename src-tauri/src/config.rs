@@ -113,6 +113,8 @@ pub struct ShortcutsConfig {
     pub folder: String,
     /// 呼出账号密码面板
     pub credentials: String,
+    /// 划词翻译
+    pub translation: String,
 }
 
 impl Default for ShortcutsConfig {
@@ -121,6 +123,7 @@ impl Default for ShortcutsConfig {
             clipboard: "Alt+C".into(),
             folder: "Alt+F".into(),
             credentials: "Alt+A".into(),
+            translation: "Ctrl+Alt+T".into(),
         }
     }
 }
@@ -178,6 +181,37 @@ impl Default for GeneralConfig {
     }
 }
 
+/// 划词翻译配置（有道智云 / 百度翻译开放平台，需用户自行申请 key）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TranslatorConfig {
+    /// 翻译服务商："youdao" | "baidu"
+    pub provider: String,
+    /// 有道智云 APP Key
+    pub youdao_key: String,
+    /// 有道智云 APP Secret
+    pub youdao_secret: String,
+    /// 百度翻译开放平台 APPID
+    pub baidu_appid: String,
+    /// 百度翻译开放平台密钥
+    pub baidu_secret: String,
+    /// 目标语言（通用代码 zh/en/ja/ko/fr/de/ru/es…），源语言由服务商自动检测
+    pub target_lang: String,
+}
+
+impl Default for TranslatorConfig {
+    fn default() -> Self {
+        Self {
+            provider: "youdao".into(),
+            youdao_key: String::new(),
+            youdao_secret: String::new(),
+            baidu_appid: String::new(),
+            baidu_secret: String::new(),
+            target_lang: "zh".into(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct AppConfig {
@@ -186,6 +220,10 @@ pub struct AppConfig {
     pub credentials: CredentialConfig,
     pub shortcuts: ShortcutsConfig,
     pub general: GeneralConfig,
+    /// 划词翻译配置（含各服务商凭据，全部持久化在 config.json）
+    pub translator: TranslatorConfig,
+    /// 各面板上次关闭时的窗口位置（标签 -> 屏幕坐标），下次呼出恢复（记忆位置）
+    pub panel_positions: std::collections::HashMap<String, (i32, i32)>,
 }
 
 /// 运行时共享的配置状态，供剪贴板监听线程等读取。

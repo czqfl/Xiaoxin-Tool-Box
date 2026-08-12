@@ -7,21 +7,30 @@ import { FolderPage } from "./FolderPage";
 import { ShortcutPage } from "./ShortcutPage";
 import { GeneralPage } from "./GeneralPage";
 import { AboutPage } from "./AboutPage";
+import { TranslationPage } from "./TranslationPage";
 import {
   IconClipboard,
   IconFolder,
   IconInfo,
   IconKeyboard,
   IconSettings,
+  IconTranslate,
 } from "../components/icons";
 import "../styles/settings.css";
 
-type Page = "clipboard" | "folder" | "shortcut" | "general" | "about";
+type Page =
+  | "clipboard"
+  | "folder"
+  | "shortcut"
+  | "general"
+  | "translation"
+  | "about";
 
 const NAV_ITEMS: Array<{ key: Page; label: string; icon: React.ReactNode }> = [
   { key: "clipboard", label: "剪贴板设置", icon: <IconClipboard size={15} /> },
   { key: "folder", label: "文件夹设置", icon: <IconFolder size={15} /> },
   { key: "shortcut", label: "快捷键设置", icon: <IconKeyboard size={15} /> },
+  { key: "translation", label: "翻译设置", icon: <IconTranslate size={15} /> },
   { key: "general", label: "通用设置", icon: <IconSettings size={15} /> },
   { key: "about", label: "关于", icon: <IconInfo size={15} /> },
 ];
@@ -87,6 +96,7 @@ export function SettingsApp() {
           <ShortcutPage onResolved={() => setShortcutFailed(null)} />
         )}
         {page === "general" && <GeneralPage />}
+        {page === "translation" && <TranslationPage />}
         {page === "about" && <AboutPage />}
       </main>
     </div>

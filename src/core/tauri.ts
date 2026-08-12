@@ -1,7 +1,14 @@
 /** Rust command 统一封装层：所有 invoke 调用经此收口，便于错误兜底 */
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AppConfig, ClipEntry, Credential, EditorInfo, FolderEntry } from "../types";
+import type {
+  AppConfig,
+  ClipEntry,
+  Credential,
+  EditorInfo,
+  FolderEntry,
+  TranslateResult,
+} from "../types";
 
 /** 安全调用：Rust 侧异常转为友好文案，不抛出未处理错误 */
 async function safe<T>(promise: Promise<T>, fallback: T): Promise<T> {
@@ -106,6 +113,14 @@ export const updateCredential = (
 export const deleteCredential = (id: string) =>
   safe(invoke("cred_delete", { id }), undefined);
 
+// ---- 翻译 ----
+/** 翻译文本（走配置的服务商与凭据，源语言自动检测） */
+export const translateText = (text: string) =>
+  invoke<TranslateResult>("translate", { text });
+/** 弹窗挂载时拉取最近一次翻译结果 */
+export const lastTranslateResult = () =>
+  safe(invoke<TranslateResult | null>("translate_last_result"), null);
+
 /** 复制任意文本到剪贴板（不触发监听重复记录，避免密码泄露到剪贴板历史） */
 export const copyText = (text: string) =>
   invoke<void>("clipboard_copy_text", { text });
@@ -140,7 +155,7 @@ export const setPanelAlwaysOnTop = (on: boolean) =>
 export const testShortcut = (shortcut: string) =>
   invoke<void>("shortcut_test", { shortcut });
 export const applyShortcut = (
-  target: "clipboard" | "folder" | "credentials",
+  target: "clipboard" | "folder" | "credentials" | "translation",
   shortcut: string
 ) => invoke<void>("shortcut_apply", { target, shortcut });
 /** 录入捕获：钩子接管 Win 组合，避免系统功能抢先（与 capture_end 成对使用） */

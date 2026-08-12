@@ -1,0 +1,168 @@
+/** 翻译设置页：服务商、凭据、目标语言（全部持久化到 config.json） */
+import { useState } from "react";
+import { useConfigStore } from "../stores/configStore";
+import type { TranslateProvider } from "../types";
+import { translateText } from "../core/tauri";
+import { SettingGroup, SettingRow, Segmented } from "./components";
+
+const LANGS = [
+  { value: "zh", label: "中文" },
+  { value: "en", label: "英文" },
+  { value: "ja", label: "日文" },
+  { value: "ko", label: "韩文" },
+  { value: "fr", label: "法文" },
+  { value: "de", label: "德文" },
+  { value: "ru", label: "俄文" },
+  { value: "es", label: "西文" },
+];
+
+export function TranslationPage() {
+  const config = useConfigStore((s) => s.config);
+  const update = useConfigStore((s) => s.update);
+  const t = config.translator;
+  const [saving, setSaving] = useState(false);
+  const [testText, setTestText] = useState("");
+  const [testOut, setTestOut] = useState<string | null>(null);
+  const [testErr, setTestErr] = useState<string | null>(null);
+
+  const patch = (p: Partial<typeof t>) => {
+    void update({ ...config, translator: { ...t, ...p } });
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await update({ ...config });
+      setTestOut(null);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const doTest = async () => {
+    if (!testText.trim()) return;
+    setTestErr(null);
+    setTestOut(null);
+    try {
+      const r = await translateText(testText.trim());
+      setTestOut(r.translation);
+    } catch (err) {
+      setTestErr(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  return (
+    <div className="settings-page">
+      <h2>划词翻译设置</h2>
+      <p className="page-desc">
+        选中文本后按快捷键（默认 Ctrl+Alt+T）自动复制并翻译弹窗；源语言自动检测
+      </p>
+
+      <SettingGroup>
+        <SettingRow title="翻译服务商" desc="需要先在对应开放平台申请免费 Key">
+          <Segmented<TranslateProvider>
+            value={t.provider}
+            options={[
+              { value: "youdao", label: "有道智云" },
+              { value: "baidu", label: "百度翻译" },
+            ]}
+            onChange={(v) => patch({ provider: v })}
+          />
+        </SettingRow>
+
+        {t.provider === "youdao" ? (
+          <>
+            <SettingRow
+              title="有道 APP Key"
+              desc="有道智云 AI 开放平台 → 自然语言翻译服务 → 应用管理"
+            >
+              <input
+                className="text-input"
+                type="text"
+                value={t.youdao_key}
+                placeholder="申请的 Key"
+                onChange={(e) => patch({ youdao_key: e.target.value })}
+              />
+            </SettingRow>
+            <SettingRow title="有道 APP Secret" desc="与 Key 配对，用于接口签名">
+              <input
+                className="text-input"
+                type="password"
+                value={t.youdao_secret}
+                placeholder="申请的 Secret"
+                onChange={(e) => patch({ youdao_secret: e.target.value })}
+              />
+            </SettingRow>
+          </>
+        ) : (
+          <>
+            <SettingRow
+              title="百度 APPID"
+              desc="百度翻译开放平台 → 管理控制台 → 开发者信息"
+            >
+              <input
+                className="text-input"
+                type="text"
+                value={t.baidu_appid}
+                placeholder="APPID"
+                onChange={(e) => patch({ baidu_appid: e.target.value })}
+              />
+            </SettingRow>
+            <SettingRow title="百度密钥" desc="与 APPID 配对，用于接口签名">
+              <input
+                className="text-input"
+                type="password"
+                value={t.baidu_secret}
+                placeholder="密钥"
+                onChange={(e) => patch({ baidu_secret: e.target.value })}
+              />
+            </SettingRow>
+          </>
+        )}
+
+        <SettingRow title="目标语言" desc="源语言由服务商自动检测，无需配置">
+          <Segmented
+            value={t.target_lang}
+            options={LANGS}
+            onChange={(v) => patch({ target_lang: v })}
+          />
+        </SettingRow>
+      </SettingGroup>
+
+      <SettingGroup>
+        <SettingRow title="保存配置" desc="凭据与目标语言持久化到配置文件，重装应用不丢失">
+          <button
+            className="btn btn-primary"
+            disabled={saving}
+            onClick={() => void save()}
+          >
+            {saving ? "保存中…" : "保存"}
+          </button>
+        </SettingRow>
+      </SettingGroup>
+
+      <SettingGroup>
+        <SettingRow title="测试翻译" desc="填好凭据后输入文本验证是否可用">
+          <div style={{ display: "flex", gap: 8, width: "100%" }}>
+            <input
+              className="text-input"
+              type="text"
+              style={{ flex: 1 }}
+              value={testText}
+              placeholder="hello world"
+              onChange={(e) => setTestText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void doTest();
+              }}
+            />
+            <button className="btn" onClick={() => void doTest()}>
+              翻译
+            </button>
+          </div>
+        </SettingRow>
+        {testOut && <div className="shortcut-hint ok">✓ {testOut}</div>}
+        {testErr && <div className="shortcut-hint error">✕ {testErr}</div>}
+      </SettingGroup>
+    </div>
+  );
+}

@@ -85,6 +85,8 @@ export interface ShortcutsConfig {
   folder: string;
   /** 呼出账号密码面板的快捷键 */
   credentials: string;
+  /** 划词翻译快捷键 */
+  translation: string;
 }
 
 export interface GeneralConfig {
@@ -104,12 +106,39 @@ export interface CredentialConfig {
   show_passwords: boolean;
 }
 
+/** 翻译服务商："youdao" | "baidu" */
+export type TranslateProvider = "youdao" | "baidu";
+
+/** 划词翻译配置（凭据与目标语言，持久化到 config.json） */
+export interface TranslatorConfig {
+  provider: TranslateProvider;
+  youdao_key: string;
+  youdao_secret: string;
+  baidu_appid: string;
+  baidu_secret: string;
+  /** 目标语言通用代码：zh/en/ja/ko/fr/de/ru/es */
+  target_lang: string;
+}
+
+/** 翻译结果（含服务商检测出的源语言） */
+export interface TranslateResult {
+  text: string;
+  translation: string;
+  from: string;
+  to: string;
+  provider: string;
+}
+
 export interface AppConfig {
   clipboard: ClipboardConfig;
   folder: FolderConfig;
   credentials: CredentialConfig;
   shortcuts: ShortcutsConfig;
   general: GeneralConfig;
+  /** 划词翻译配置 */
+  translator: TranslatorConfig;
+  /** 各面板上次关闭位置（窗口标签 -> 屏幕坐标），持久化，呼出时恢复 */
+  panel_positions: Record<string, [number, number]>;
 }
 
 /** 粘贴模式：普通 / 先进先出 / 后进先出 */

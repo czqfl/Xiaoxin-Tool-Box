@@ -332,3 +332,35 @@ pub fn send_ctrl_v() {
     }
 }
 
+/// 模拟 Ctrl+C：划词翻译取选中文本用（带魔数标记，钩子不拦截自身注入）。
+/// 注入后调用方需延迟片刻再读剪贴板，等目标应用完成复制。
+pub fn send_ctrl_c() {
+    fn mk(vk: VIRTUAL_KEY, up: bool) -> INPUT {
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk,
+                    wScan: 0,
+                    dwFlags: if up {
+                        KEYEVENTF_KEYUP
+                    } else {
+                        KEYBD_EVENT_FLAGS(0)
+                    },
+                    time: 0,
+                    dwExtraInfo: INJECTED_MAGIC,
+                },
+            },
+        }
+    }
+    let inputs = [
+        mk(VK_CONTROL, false),
+        mk(VIRTUAL_KEY(0x43), false), // VK_C
+        mk(VIRTUAL_KEY(0x43), true),
+        mk(VK_CONTROL, true),
+    ];
+    unsafe {
+        SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+    }
+}
+
