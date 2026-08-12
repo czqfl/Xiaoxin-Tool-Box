@@ -31,10 +31,13 @@ pub fn parse(shortcut: &str) -> Result<Shortcut, String> {
 }
 
 /// Win 组合键被系统 shell 保留，RegisterHotKey 无法注册，
-/// 改由低级键盘钩子（keyhook）在事件到达系统前接管
+/// 改由低级键盘钩子（keyhook）在事件到达系统前接管。
+/// 纯 Alt 组合也交给钩子主动吞键：RegisterHotKey 对 Alt 组合在部分应用
+/// （VS Code 的 Alt 菜单模式等）吞键不彻底，主键 keydown 会泄漏进编辑器
+/// 把选中文字替换掉（"Alt+S 呼出翻译却把选中的字替换成 S"）。
 #[cfg(windows)]
 fn is_hook_combo(s: &Shortcut) -> bool {
-    s.mods == Modifiers::SUPER
+    s.mods == Modifiers::SUPER || s.mods == Modifiers::ALT
 }
 
 #[cfg(not(windows))]
@@ -49,7 +52,7 @@ fn hook_vk(s: &Shortcut) -> Result<u16, String> {
         .ok_or_else(|| "Win 组合仅支持字母、数字与 F 键".to_string())
 }
 
-/// 注册单个面板热键：Win 组合交给低级钩子接管，其余走全局热键插件
+/// 注册单个面板热键：Win/纯 Alt 组合交给低级钩子接管，其余走全局热键插件
 fn register_combo<R: Runtime>(
     app: &AppHandle<R>,
     target: &str,
@@ -58,11 +61,11 @@ fn register_combo<R: Runtime>(
     if is_hook_combo(&s) {
         #[cfg(windows)]
         {
-            crate::keyhook::set_panel_hotkey(target, hook_vk(&s)?);
+            crate::keyhook::set_panel_hotkey(target, s.mods == Modifiers::ALT, hook_vk(&s)?);
             return Ok(());
         }
         #[cfg(not(windows))]
-        return Err("当前平台不支持 Win 组合键".into());
+        return Err("当前平台不支持 Win/Alt 组合键".into());
     }
     app.global_shortcut()
         .register(s)
@@ -73,7 +76,7 @@ fn register_combo<R: Runtime>(
 fn unregister_combo<R: Runtime>(app: &AppHandle<R>, target: &str, s: Shortcut) {
     if is_hook_combo(&s) {
         #[cfg(windows)]
-        crate::keyhook::set_panel_hotkey(target, 0);
+        crate::keyhook::set_panel_hotkey(target, s.mods == Modifiers::ALT, 0);
         return;
     }
     let _ = app.global_shortcut().unregister(s);
@@ -99,7 +102,7 @@ pub fn shortcut_test(
     }
     #[cfg(windows)]
     if is_hook_combo(&parsed) {
-        // 钩子总是能拦截 Win 组合（Win+L 等系统直取组合除外），无需试注册
+        // 钩子总是能拦截 Win/纯 Alt 组合（Win+L 等系统直取组合除外），无需试注册
         return hook_vk(&parsed).map(|_| ());
     }
     let gs = app.global_shortcut();

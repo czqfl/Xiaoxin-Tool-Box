@@ -43,6 +43,8 @@ enum Action {
     ToggleFolder,
     /// 呼出/隐藏账号密码面板
     ToggleCredential,
+    /// 触发划词翻译（Alt 组合热键也由钩子接管，主动吞键）
+    ToggleTranslate,
     /// 关闭翻译弹窗（系统级兜底：弹窗无焦点时 webview 收不到 Esc）
     CloseTranslate,
     /// 捕获模式：设置页录入 Win 组合键（payload 为虚拟键码）
@@ -59,12 +61,24 @@ static CAPTURE_MODE: AtomicBool = AtomicBool::new(false);
 static CLIPBOARD_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
 static FOLDER_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
 static CREDENTIAL_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
+/// 钩子接管的 Alt 组合面板/翻译热键虚拟键码；0 表示未启用。
+/// Alt 组合必须也走钩子主动吞键：RegisterHotKey 对纯 Alt 组合在部分应用
+/// （如 VS Code 的 Alt 菜单模式）吞键不彻底，主键会泄漏进编辑器把选中文字
+/// 替换掉（"Alt+S 呼出翻译却把选中的字替换成 S"）。钩子拦截并吞掉 keydown/keyup，
+/// 从根上杜绝按键泄漏。
+static CLIPBOARD_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
+static FOLDER_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
+static CREDENTIAL_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
+static TRANSLATE_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
+static TRANSLATE_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
 /// 翻译弹窗是否打开：打开时按 Esc 系统级关闭（弹窗 webview 可能无焦点收不到键）
 static TRANSLATE_POPUP_OPEN: AtomicBool = AtomicBool::new(false);
 static SENDER: OnceLock<Sender<Action>> = OnceLock::new();
 
 // ---- 仅钩子线程（回调与消息循环同线程）读写 ----
 static WIN_HELD: AtomicBool = AtomicBool::new(false);
+/// Alt（左/右）当前是否按住：Alt 组合热键精确匹配用
+static ALT_HELD: AtomicBool = AtomicBool::new(false);
 /// 本次 Win 按下期间是否消费过组合键（Win 抬起时需阻止开始菜单）
 static WIN_CONSUMED: AtomicBool = AtomicBool::new(false);
 /// 已吞掉 keydown 的按键，对应 keyup 也要吞掉
@@ -95,12 +109,18 @@ pub fn set_capture_mode(on: bool) {
     }
 }
 
-/// 设置钩子接管的 Win 组合面板热键；vk 为 0 时取消接管
-pub fn set_panel_hotkey(target: &str, vk: u16) {
-    let slot = match target {
-        "clipboard" => &CLIPBOARD_HOTKEY_VK,
-        "folder" => &FOLDER_HOTKEY_VK,
-        "credentials" => &CREDENTIAL_HOTKEY_VK,
+/// 设置钩子接管的组合热键主键；vk 为 0 时取消接管。
+/// `is_alt`：true 表示 Alt 组合（钩子主动吞键），false 表示 Win 组合。
+pub fn set_panel_hotkey(target: &str, is_alt: bool, vk: u16) {
+    let slot = match (target, is_alt) {
+        ("clipboard", false) => &CLIPBOARD_HOTKEY_VK,
+        ("folder", false) => &FOLDER_HOTKEY_VK,
+        ("credentials", false) => &CREDENTIAL_HOTKEY_VK,
+        ("translation", false) => &TRANSLATE_HOTKEY_VK,
+        ("clipboard", true) => &CLIPBOARD_HOTKEY_ALT_VK,
+        ("folder", true) => &FOLDER_HOTKEY_ALT_VK,
+        ("credentials", true) => &CREDENTIAL_HOTKEY_ALT_VK,
+        ("translation", true) => &TRANSLATE_HOTKEY_ALT_VK,
         _ => return,
     };
     slot.store(vk, Ordering::SeqCst);
@@ -210,6 +230,10 @@ fn run_action<R: Runtime>(app: &AppHandle<R>, action: Action) {
         Action::ToggleCredential => {
             crate::panel::toggle_panel(app, crate::panel::CREDENTIAL_PANEL)
         }
+        Action::ToggleTranslate => {
+            crate::storage::diag_write("[keyhook] translate hotkey pressed");
+            crate::translate::trigger_selection_translate(app)
+        }
         Action::CloseTranslate => {
             // 系统级关闭翻译弹窗（webview 无焦点时前端收不到 Esc 的兜底）
             set_translate_popup_open(false);
@@ -265,12 +289,19 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
         return CallNextHookEx(None, code, wparam, lparam);
     }
 
+    // Alt 键自身：只跟踪状态（Alt 组合热键精确匹配用），不吞键
+    if vk == VK_MENU.0 as u32 {
+        ALT_HELD.store(is_down, Ordering::SeqCst);
+        return CallNextHookEx(None, code, wparam, lparam);
+    }
+
     if is_down {
         // 与已吞按键的自动重复：继续吞掉，不重复触发动作
         if SWALLOWED_VK.load(Ordering::SeqCst) == vk as u16 {
             return LRESULT(1);
         }
         let win_held = WIN_HELD.load(Ordering::SeqCst);
+        let alt_held = ALT_HELD.load(Ordering::SeqCst);
         if win_held {
             // 捕获模式优先：设置页录入期间接管所有可录入的 Win 组合，
             // 否则系统功能（剪贴板历史、听写等）会抢先触发导致按键到不了录入框
@@ -282,13 +313,15 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                     return LRESULT(1);
                 }
             }
-            // Win 组合面板热键：先于顺序粘贴判断，允许 Win+V 覆盖 Ctrl+V 语义
+            // Win 组合面板/翻译热键：先于顺序粘贴判断，允许 Win+V 覆盖 Ctrl+V 语义
             let action = if vk == CLIPBOARD_HOTKEY_VK.load(Ordering::SeqCst) as u32 {
                 Some(Action::ToggleClipboard)
             } else if vk == FOLDER_HOTKEY_VK.load(Ordering::SeqCst) as u32 {
                 Some(Action::ToggleFolder)
             } else if vk == CREDENTIAL_HOTKEY_VK.load(Ordering::SeqCst) as u32 {
                 Some(Action::ToggleCredential)
+            } else if vk == TRANSLATE_HOTKEY_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::ToggleTranslate)
             } else {
                 None
             };
@@ -298,7 +331,30 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                 post(action);
                 return LRESULT(1);
             }
-        } else if SEQ_ENABLED.load(Ordering::SeqCst)
+        }
+        // Alt 组合面板/翻译热键：精确匹配（Ctrl/Shift 未同时按下，
+        // 避免误吞 Alt+Ctrl+X / Alt+Shift+X 等输入法或应用快捷键）。
+        // RegisterHotKey 对纯 Alt 组合在部分应用吞键不彻底（主键泄漏进编辑器
+        // 替换选中文字），这里由钩子主动吞掉 keydown/keyup 根治。
+        if alt_held && !ctrl_held() && !shift_held() {
+            let action = if vk == CLIPBOARD_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::ToggleClipboard)
+            } else if vk == FOLDER_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::ToggleFolder)
+            } else if vk == CREDENTIAL_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::ToggleCredential)
+            } else if vk == TRANSLATE_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::ToggleTranslate)
+            } else {
+                None
+            };
+            if let Some(action) = action {
+                SWALLOWED_VK.store(vk as u16, Ordering::SeqCst);
+                post(action);
+                return LRESULT(1);
+            }
+        }
+        if SEQ_ENABLED.load(Ordering::SeqCst)
             && SEQ_AVAILABLE.load(Ordering::SeqCst)
             && vk == VK_V.0 as u32
             && ctrl_held()
@@ -321,6 +377,10 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
 
 fn ctrl_held() -> bool {
     unsafe { GetAsyncKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000 != 0 }
+}
+
+fn shift_held() -> bool {
+    unsafe { GetAsyncKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000 != 0 }
 }
 
 /// 注入一次 Ctrl+V 模拟粘贴（带魔数标记，钩子会放行）

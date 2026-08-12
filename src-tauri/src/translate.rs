@@ -271,7 +271,9 @@ fn read_selection_clipboard(src_raw: Option<usize>) -> Option<String> {
     let seq_before = crate::keyhook::clipboard_seq();
 
     crate::keyhook::send_ctrl_c();
-    // 第 2 次补发 WM_COPY：原生编辑控件对 WM_COPY 比模拟按键更稳
+    // 等 Ctrl+C 被目标应用处理完（复制是异步的），再补发 WM_COPY：
+    // 立即发可能与 Ctrl+C 抢时序被忽略；延时后原生编辑控件对 WM_COPY 响应更稳
+    std::thread::sleep(std::time::Duration::from_millis(40));
     if let Some(r) = src_raw {
         crate::keyhook::send_wm_copy(HWND(r as *mut std::ffi::c_void));
     }
