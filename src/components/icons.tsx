@@ -227,6 +227,24 @@ export const IconKey = (p: IconProps) => (
   </svg>
 );
 
+/** 锁：账号密码 / 凭据（比钥匙更直观） */
+export const IconLock = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="4.5" y="10.5" width="15" height="10" rx="2.5" />
+    <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+    <circle cx="12" cy="15.5" r="1.6" />
+  </svg>
+);
+
+/** 网络插头：端口工具（查端口占用 / 杀进程） */
+export const IconPort = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M12 21v-4.5" />
+    <path d="M9 3v5M15 3v5" />
+    <path d="M6.5 8h11v3.5a5.5 5.5 0 0 1-11 0V8Z" />
+  </svg>
+);
+
 export const IconEye = (p: IconProps & { filled?: boolean }) => {
   const { filled, ...rest } = p;
   return (

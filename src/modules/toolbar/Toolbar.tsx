@@ -1,7 +1,8 @@
 /** 悬浮工具栏：常驻小工具条（类似输入法工具栏），点击图标快速呼出各面板。
  *  工具列表由配置 toolbar.tools 决定（设置页可勾选）；窗口常驻置顶、
  *  失焦不隐藏（不用 usePanelCommon 的失焦隐藏）。
- *  拖动：按住任意图标轻微移动即进入窗口拖动（未移动松开 = 点击呼出面板）。 */
+ *  交互：按下不移动松开 = 点击呼出（100% 可靠，不走 click 事件）；
+ *  按下移动超过阈值 = 拖动窗口位置。 */
 import { useEffect, useRef } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize } from "@tauri-apps/api/dpi";
@@ -12,35 +13,40 @@ import { useConfigStore } from "../../stores/configStore";
 import {
   IconClipboard,
   IconFolder,
-  IconKey,
+  IconLock,
+  IconPort,
   IconSettings,
-  IconTerminal,
   IconTranslate,
 } from "../../components/icons";
 import "./toolbar.css";
 
 /** 工具定义：图标 + 提示文案（顺序即设置页勾选顺序） */
 export const TOOLS: Record<ToolKey, { label: string; icon: React.ReactNode }> = {
-  clipboard: { label: "剪贴板", icon: <IconClipboard size={16} /> },
-  folder: { label: "文件夹", icon: <IconFolder size={16} /> },
-  credentials: { label: "账号密码", icon: <IconKey size={16} /> },
-  translation: { label: "划词翻译", icon: <IconTranslate size={16} /> },
-  port: { label: "端口工具", icon: <IconTerminal size={16} /> },
-  settings: { label: "打开设置", icon: <IconSettings size={16} /> },
+  clipboard: { label: "剪贴板", icon: <IconClipboard size={18} /> },
+  folder: { label: "文件夹", icon: <IconFolder size={18} /> },
+  credentials: { label: "账号密码", icon: <IconLock size={18} /> },
+  translation: { label: "划词翻译", icon: <IconTranslate size={18} /> },
+  port: { label: "端口工具", icon: <IconPort size={18} /> },
+  settings: { label: "打开设置", icon: <IconSettings size={18} /> },
 };
 
 /** 可用工具列表（设置页勾选用） */
 export const TOOL_KEYS = Object.keys(TOOLS) as ToolKey[];
 
-const DRAG_THRESHOLD = 5;
+/** 拖动判定阈值（px）：超过视为拖动窗口，否则视为点击 */
+const DRAG_THRESHOLD = 6;
 
 export function Toolbar() {
   const config = useConfigStore((s) => s.config);
   const load = useConfigStore((s) => s.load);
   const sync = useConfigStore((s) => s.sync);
-  /** 按下起点与是否已进入拖动（供按钮"按住拖动/点击"区分） */
-  const pressRef = useRef<{ x: number; y: number } | null>(null);
-  const draggingRef = useRef(false);
+  /** 按下状态：起点、目标工具、是否已进入拖动 */
+  const pressRef = useRef<{
+    x: number;
+    y: number;
+    key: ToolKey | null;
+    dragged: boolean;
+  } | null>(null);
 
   // 初始加载 + 配置广播同步（其他窗口改了工具栏配置即时生效）
   useEffect(() => {
@@ -60,12 +66,12 @@ export function Toolbar() {
     };
   }, [load, sync]);
 
-  // 按配置的工具数量调整窗口宽度（图标 42px/个 + 两端 padding）
+  // 按配置的工具数量调整窗口宽度（36px 按钮 + 3px 间距 + 两端 5px padding）
   const tools = config?.toolbar?.tools ?? [];
   useEffect(() => {
     if (!tools.length) return;
     getCurrentWindow()
-      .setSize(new LogicalSize(tools.length * 42 + 10, 46))
+      .setSize(new LogicalSize(tools.length * 39 + 7, 46))
       .catch(() => undefined);
   }, [tools.length]);
 
@@ -73,7 +79,7 @@ export function Toolbar() {
   if (!tools.length) return null;
 
   const startDrag = () => {
-    draggingRef.current = true;
+    if (pressRef.current) pressRef.current.dragged = true;
     getCurrentWindow().startDragging().catch(() => undefined);
   };
 
@@ -82,28 +88,35 @@ export function Toolbar() {
       className="toolbar"
       onMouseDown={(e) => {
         // 空白处按下：直接进入窗口拖动
-        if (!(e.target as HTMLElement).closest("button")) {
+        const btn = (e.target as HTMLElement).closest("button");
+        if (!btn) {
           pressRef.current = null;
-          startDrag();
+          getCurrentWindow().startDragging().catch(() => undefined);
           return;
         }
-        // 按钮上按下：记录起点，移动超阈值进入拖动（未移动松开 = 点击）
-        pressRef.current = { x: e.clientX, y: e.clientY };
-        draggingRef.current = false;
+        // 图标按钮按下：记录起点，等待 移动（拖动）/ 松开（点击）判定
+        pressRef.current = {
+          x: e.clientX,
+          y: e.clientY,
+          key: (btn.dataset.key as ToolKey | undefined) ?? null,
+          dragged: false,
+        };
       }}
       onMouseMove={(e) => {
         const p = pressRef.current;
-        if (!p || draggingRef.current) return;
+        if (!p || p.dragged) return;
         if (Math.abs(e.clientX - p.x) + Math.abs(e.clientY - p.y) > DRAG_THRESHOLD) {
           startDrag();
         }
       }}
-      onMouseUp={() => {
+      onMouseUp={(e) => {
+        const p = pressRef.current;
         pressRef.current = null;
-        // 拖动结束后短暂抑制紧随的 click，避免误触呼出面板
-        setTimeout(() => {
-          draggingRef.current = false;
-        }, 80);
+        // 未拖动 = 点击：手动触发呼出（不走 click 事件，避免拖动误触/事件丢失）
+        if (p && !p.dragged && p.key) {
+          e.preventDefault();
+          void panelToggle(p.key);
+        }
       }}
     >
       {tools.map((key) => {
@@ -112,16 +125,10 @@ export function Toolbar() {
         return (
           <button
             key={key}
+            type="button"
             className="toolbar-btn"
+            data-key={key}
             title={tool.label}
-            onClick={(e) => {
-              if (draggingRef.current) {
-                e.preventDefault();
-                e.stopPropagation();
-                return;
-              }
-              void panelToggle(key);
-            }}
           >
             {tool.icon}
           </button>
