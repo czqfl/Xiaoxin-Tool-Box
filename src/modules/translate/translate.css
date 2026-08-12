@@ -34,8 +34,9 @@
   color: var(--text-primary);
   font-family: inherit;
 }
-/* 译文区：下方，视觉上更醒目 */
+/* 译文区：下方，视觉上更醒目；复制按钮浮在结果框右上角 */
 .translate-dst {
+  position: relative;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -46,6 +47,15 @@
   color: var(--text-primary);
   word-break: break-all;
   white-space: pre-wrap;
+  padding-right: 40px;
+}
+.translate-dst-copy {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  background: var(--bg-badge);
 }
 /* 底部设置栏：源/目标语言 + 操作 */
 .translate-bar {

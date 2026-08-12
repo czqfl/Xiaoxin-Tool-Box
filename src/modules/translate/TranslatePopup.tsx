@@ -103,17 +103,24 @@ export function TranslatePopup() {
     }
   };
 
+  /** 头部拖动（JS 手柄）：不用 data-tauri-drag-region——它会抢占头部所有
+   *  mousedown，导致关闭按钮点击失效；这里避开按钮后调 startDragging */
+  const onHeadMouseDown = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest("button")) return;
+    getCurrentWindow().startDragging().catch(() => undefined);
+  };
+
   return (
     <div className="panel">
       <div className="panel-shell translate-shell">
-        <div className="translate-head" data-tauri-drag-region>
+        <div className="translate-head" onMouseDown={onHeadMouseDown}>
           <span className="translate-title">翻译</span>
           {result?.from && (
             <span className="badge badge-accent">
               {langLabel(result.from)} → {langLabel(result.to)}
             </span>
           )}
-          {/* 不依赖焦点的关闭按钮：弹窗无焦点时 Esc/失焦均可能失效 */}
+          {/* 关闭按钮（JS 拖动手柄已避开按钮，点击正常触发） */}
           <button
             className="icon-btn translate-close"
             title="关闭（Esc）"
@@ -132,12 +139,22 @@ export function TranslatePopup() {
           onChange={(e) => setText(e.target.value)}
         />
 
-        {/* 下方：翻译内容 */}
+        {/* 下方：翻译内容，复制按钮浮在结果框内 */}
         <div className="translate-dst">
           {translating ? (
             "翻译中…"
           ) : (
-            (result?.translation ?? "划词或输入内容后翻译")
+            <>{result?.translation ?? "划词或输入内容后翻译"}</>
+          )}
+          {result && (
+            <button
+              className="icon-btn translate-dst-copy"
+              title="复制译文"
+              disabled={translating}
+              onClick={() => void doCopy()}
+            >
+              <IconCopy size={14} />
+            </button>
           )}
         </div>
 
@@ -174,14 +191,6 @@ export function TranslatePopup() {
             onClick={() => void doTranslate()}
           >
             {translating ? "翻译中…" : "翻译"}
-          </button>
-          <button
-            className="icon-btn"
-            title="复制译文"
-            disabled={!result}
-            onClick={() => void doCopy()}
-          >
-            <IconCopy size={14} />
           </button>
           <span className="translate-status">
             {copied ? "已复制" : "Esc 关闭"}
