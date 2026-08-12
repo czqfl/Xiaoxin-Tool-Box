@@ -341,6 +341,15 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
         // 状态会让 !ctrl_held() 恒为 false，导致所有 Alt 组合热键永久失效。
         // 副作用可接受：Alt+Ctrl+X 也会命中（若 X 是热键主键），纯 Alt 是主流用法。
         if !CAPTURE_MODE.load(Ordering::SeqCst) && alt_held {
+            // 诊断：Alt 按住时每次按键都记录状态（低频），用于定位
+            // "Alt 组合不触发"——能区分 alt_held 未置位 / 槽位未注册 / 匹配失败
+            crate::storage::diag_write(&format!(
+                "[keyhook] alt+key vk=0x{vk:X} slots=cb:0x{:X}/fd:0x{:X}/cr:0x{:X}/tr:0x{:X}",
+                CLIPBOARD_HOTKEY_ALT_VK.load(Ordering::SeqCst),
+                FOLDER_HOTKEY_ALT_VK.load(Ordering::SeqCst),
+                CREDENTIAL_HOTKEY_ALT_VK.load(Ordering::SeqCst),
+                TRANSLATE_HOTKEY_ALT_VK.load(Ordering::SeqCst),
+            ));
             let action = if vk == CLIPBOARD_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
                 Some(Action::ToggleClipboard)
             } else if vk == FOLDER_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
