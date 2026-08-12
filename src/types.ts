@@ -191,4 +191,6 @@ export interface PortProcess {
   state: string;
   /** 协议（TCP / TCP6 / UDP / UDP6） */
   proto: string;
+  /** 是否系统关键进程（受保护，拒绝结束） */
+  protected: boolean;
 }

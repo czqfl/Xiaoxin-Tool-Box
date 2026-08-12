@@ -12,6 +12,8 @@ pub struct PortProcess {
     pub state: String,
     /// 协议（TCP / TCP6 / UDP / UDP6）
     pub proto: String,
+    /// 是否系统关键进程（受保护，拒绝结束）——前端据此不展示终止按钮
+    pub protected: bool,
 }
 
 /// 查询占用指定端口的进程列表（按 PID 去重）。
@@ -63,9 +65,11 @@ pub fn port_query(port: u16) -> Result<Vec<PortProcess>, String> {
         } else {
             String::new()
         };
+        let name = process_name(pid);
         result.push(PortProcess {
             pid,
-            name: process_name(pid),
+            protected: SYSTEM_PROTECTED.contains(&name.to_lowercase().as_str()),
+            name,
             state,
             proto,
         });

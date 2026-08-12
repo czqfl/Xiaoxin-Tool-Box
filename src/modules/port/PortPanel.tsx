@@ -7,7 +7,7 @@ import type { PortProcess } from "../../types";
 import { hideCurrentWindow, usePanelCommon } from "../../core/usePanel";
 import { useConfigStore } from "../../stores/configStore";
 import { killPort, queryPort, setPanelAlwaysOnTop } from "../../core/tauri";
-import { IconClose, IconPin, IconSearch, IconTrash } from "../../components/icons";
+import { IconClose, IconPin, IconSearch } from "../../components/icons";
 import "../../styles/panel.css";
 import "./port.css";
 
@@ -169,12 +169,6 @@ export function PortPanel() {
         </div>
 
         <div className="panel-body">
-          {SENSITIVE_PORTS.has(Number(port)) && (
-            <div className="port-warn">
-              ⚠️ 端口 {port} 是系统关键服务端口，占用进程多为系统组件；
-              结束其进程可能影响系统/网络/安全功能，请谨慎操作。
-            </div>
-          )}
           {error && <div className="port-empty">{error}</div>}
           {items.length === 0 && !error && (
             <div className="port-empty">
@@ -182,30 +176,52 @@ export function PortPanel() {
               <span>输入端口号查询占用该端口的进程</span>
             </div>
           )}
-          {items.map((proc) => (
-            <div className="port-item" key={proc.pid}>
-              <span className={`port-proto ${proc.proto.toLowerCase()}`}>{proc.proto}</span>
-              <div className="port-main">
-                <div className="port-name">{proc.name}</div>
-                <div className="port-meta">
-                  <span>PID {proc.pid}</span>
-                  {proc.state && (
-                    <span className={`port-state ${proc.state}`}>
-                      {STATE_HINT[proc.state] ?? proc.state}
-                    </span>
-                  )}
+          {items.map((proc) => {
+            // 安全信息内嵌到条目里展示（不再单独顶部提示条）
+            const sensitive = SENSITIVE_PORTS.has(Number(port));
+            return (
+              <div className="port-item" key={proc.pid}>
+                <span className={`port-proto ${proc.proto.toLowerCase()}`}>{proc.proto}</span>
+                <div className="port-main">
+                  <div className="port-name">
+                    {proc.name}
+                    {proc.protected && (
+                      <span className="port-protected" title="系统关键进程，已保护不可终止">
+                        系统进程
+                      </span>
+                    )}
+                  </div>
+                  <div className="port-meta">
+                    <span>PID {proc.pid}</span>
+                    {proc.state && (
+                      <span className={`port-state ${proc.state}`}>
+                        {STATE_HINT[proc.state] ?? proc.state}
+                      </span>
+                    )}
+                    {sensitive && (
+                      <span className="port-sens-tag" title="该端口为系统关键服务端口，结束其进程可能影响系统/网络功能">
+                        ⚠ 敏感端口
+                      </span>
+                    )}
+                  </div>
                 </div>
+                {proc.protected ? (
+                  <span className="port-kill-lock" title="系统关键进程，已保护不可终止">
+                    🔒
+                  </span>
+                ) : (
+                  <button
+                    className="port-kill-btn"
+                    title={`终止进程 ${proc.name}（PID ${proc.pid}）`}
+                    disabled={killing === proc.pid}
+                    onClick={() => void handleKill(proc)}
+                  >
+                    {killing === proc.pid ? "终止中…" : "终止"}
+                  </button>
+                )}
               </div>
-              <button
-                className="icon-btn icon-btn-danger port-kill"
-                title={`结束进程 ${proc.name}（PID ${proc.pid}）`}
-                disabled={killing === proc.pid}
-                onClick={() => void handleKill(proc)}
-              >
-                <IconTrash size={14} />
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="panel-footer">

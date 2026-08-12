@@ -59,16 +59,51 @@
   font-size: 28px;
 }
 
-/* 敏感端口警告条：系统关键服务端口查询时提示 */
-.port-warn {
-  margin: 10px 14px 0;
-  padding: 8px 12px;
-  border-radius: var(--radius-md);
-  border: 1px solid rgba(245, 165, 36, 0.4);
+/* 系统进程徽标：受保护不可终止 */
+.port-protected {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  vertical-align: 2px;
+  color: var(--c-amber);
   background: var(--c-amber-soft);
+}
+/* 敏感端口小标签（内嵌条目元信息） */
+.port-sens-tag {
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-size: 10px;
   color: var(--warning);
+  background: var(--c-amber-soft);
+}
+/* 文字"终止"按钮（替代图标，语义更明确） */
+.port-kill-btn {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(229, 72, 77, 0.35);
+  background: var(--danger-soft);
+  color: var(--danger);
   font-size: 12px;
-  line-height: 1.6;
+  font-weight: 600;
+  transition: background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+.port-kill-btn:hover {
+  border-color: var(--danger);
+  background: rgba(229, 72, 77, 0.2);
+}
+.port-kill-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* 受保护进程的锁标识 */
+.port-kill-lock {
+  flex-shrink: 0;
+  font-size: 14px;
+  opacity: 0.55;
 }
 
 /* 结果条目 */
@@ -133,7 +168,4 @@
 }
 .port-state.LISTENING {
   color: var(--accent);
-}
-.port-kill {
-  flex-shrink: 0;
 }
