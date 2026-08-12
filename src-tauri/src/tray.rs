@@ -2,9 +2,52 @@
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, Runtime,
+    AppHandle, Manager, Runtime, WebviewWindowBuilder,
 };
 use windows::Win32::Foundation::HWND;
+
+/// 设置窗口点击关闭（X）→ 隐藏而非销毁。
+/// Tauri 默认关闭即销毁窗口；销毁后 get_webview_window("settings") 返回 None，
+/// 托盘/快捷键所有"打开设置"入口都会静默失效（show_settings_window 先收起面板
+/// 再取窗口，取不到直接 return → 面板被收走、设置也不出现），表现为
+/// "设置打不开，以后也都打不开"。窗口创建/重建后都必须调用本函数挂上拦截。
+pub fn protect_settings_window<R: Runtime>(app: &AppHandle<R>) {
+    let Some(w) = app.get_webview_window("settings") else {
+        return;
+    };
+    let win = w.clone();
+    w.on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = win.hide();
+        }
+    });
+}
+
+/// 获取设置窗口；若已被销毁（旧版本点 X 会销毁）则按 tauri.conf.json 配置自动重建。
+fn ensure_settings_window<R: Runtime>(app: &AppHandle<R>) -> Option<tauri::WebviewWindow<R>> {
+    if let Some(w) = app.get_webview_window("settings") {
+        return Some(w);
+    }
+    crate::storage::diag_write("settings window missing, rebuilding");
+    // URL 跟随运行模式：dev 用 devUrl（vite dev server），生产用打包资源
+    let url = match app.config().build.dev_url.clone() {
+        Some(u) => tauri::WebviewUrl::External(u),
+        None => tauri::WebviewUrl::App("index.html".into()),
+    };
+    let _ = WebviewWindowBuilder::new(app, "settings", url)
+        .title("小心工具箱 - 设置")
+        .inner_size(920.0, 640.0)
+        .min_inner_size(760.0, 520.0)
+        .center()
+        .resizable(true)
+        .always_on_top(true)
+        .visible(false)
+        .build();
+    // 重建的窗口同样要挂上"关闭=隐藏"拦截，防止再次被销毁
+    protect_settings_window(app);
+    app.get_webview_window("settings")
+}
 
 /// 显示并聚焦设置窗口。
 /// 呼出前先收起所有悬浮面板（面板 alwaysOnTop 会盖住设置窗口）。
@@ -17,13 +60,35 @@ pub fn show_settings_window<R: Runtime>(app: &AppHandle<R>) {
             let _ = w.hide();
         }
     }
-    let Some(w) = app.get_webview_window("settings") else {
+    // 窗口可能已被销毁（旧版本点 X）→ 自动重建，避免"以后都打不开"
+    let Some(w) = ensure_settings_window(app) else {
+        crate::storage::diag_write("show_settings_window: settings window unavailable");
         return;
     };
+    crate::storage::diag_write(&format!(
+        "show_settings_window: visible={:?} focused={:?}",
+        w.is_visible().unwrap_or(false),
+        w.is_focused().unwrap_or(false)
+    ));
     // 确保置顶样式在位（同步生效），再显示
     let _ = w.set_always_on_top(true);
     let _ = w.unminimize();
     let _ = w.show();
+    // 兜底：极端状态（最小化+隐藏）下 unminimize/show 可能仍未真正显示，
+    // 用 Win32 SW_SHOWNORMAL 强制激活显示 + 恢复
+    #[cfg(windows)]
+    if !w.is_visible().unwrap_or(false) {
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        if let Ok(handle) = w.window_handle() {
+            if let RawWindowHandle::Win32(h) = handle.as_raw() {
+                use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNORMAL};
+                unsafe {
+                    let hwnd = HWND(h.hwnd.get() as *mut _);
+                    let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+                }
+            }
+        }
+    }
 
     // 后台线程：延时后置前聚焦 + 失败兜底重试（WebviewWindow 可跨线程调用）
     let w2 = w.clone();
@@ -66,14 +131,17 @@ pub fn show_settings_window<R: Runtime>(app: &AppHandle<R>) {
 /// 打不开"的根因：面板盖住设置窗口后 is_visible 仍为 true，左键点击反而
 /// 把设置窗口藏了。
 fn toggle_settings_window<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(w) = app.get_webview_window("settings") {
-        let visible = w.is_visible().unwrap_or(false);
-        let focused = w.is_focused().unwrap_or(false);
-        if visible && focused {
-            let _ = w.hide();
-        } else {
-            show_settings_window(app);
-        }
+    let Some(w) = app.get_webview_window("settings") else {
+        // 窗口不存在（旧版本点 X 已销毁）→ 直接重建并显示
+        show_settings_window(app);
+        return;
+    };
+    let visible = w.is_visible().unwrap_or(false);
+    let focused = w.is_focused().unwrap_or(false);
+    if visible && focused {
+        let _ = w.hide();
+    } else {
+        show_settings_window(app);
     }
 }
 

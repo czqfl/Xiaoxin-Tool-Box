@@ -130,6 +130,13 @@ pub fn run() {
         .setup(move |app| {
             let handle = app.handle().clone();
 
+            // 设置窗口点击关闭（X）→ 隐藏而非销毁。
+            // Tauri 默认关闭即销毁窗口；销毁后 get_webview_window("settings") 返回 None，
+            // 托盘/快捷键所有"打开设置"入口都会静默失效（show_settings_window 先收起面板
+            // 再取窗口，取不到直接 return → 面板被收走、设置也不出现），
+            // 表现为"设置打不开，以后也都打不开"。拦截 CloseRequested 从根上杜绝销毁。
+            tray::protect_settings_window(&handle);
+
             tray::setup_tray(&handle).ok();
             #[cfg(windows)]
             apply_panel_acrylic(&handle, config.general.acrylic_enabled);

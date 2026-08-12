@@ -9,6 +9,7 @@ import { ShortcutPage } from "./ShortcutPage";
 import { GeneralPage } from "./GeneralPage";
 import { AboutPage } from "./AboutPage";
 import { TranslationPage } from "./TranslationPage";
+import { SettingsErrorBoundary } from "./ErrorBoundary";
 import {
   IconClipboard,
   IconFolder,
@@ -63,7 +64,8 @@ export function SettingsApp() {
   if (!loaded) return null;
 
   return (
-    <div className="settings">
+    <SettingsErrorBoundary>
+      <div className="settings">
       <aside className="settings-sidebar">
         <div className="settings-brand">
           <span className="brand-dot">⚡</span>
@@ -107,6 +109,7 @@ export function SettingsApp() {
         {page === "translation" && <TranslationPage />}
         {page === "about" && <AboutPage />}
       </main>
-    </div>
+      </div>
+    </SettingsErrorBoundary>
   );
 }
