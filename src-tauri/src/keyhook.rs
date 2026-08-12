@@ -332,13 +332,12 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                 return LRESULT(1);
             }
         }
-        // Alt 组合面板/翻译热键：精确匹配（Ctrl/Shift 未同时按下，
-        // 避免误吞 Alt+Ctrl+X / Alt+Shift+X 等输入法或应用快捷键）。
-        // RegisterHotKey 对纯 Alt 组合在部分应用吞键不彻底（主键泄漏进编辑器
-        // 替换选中文字），这里由钩子主动吞掉 keydown/keyup 根治。
-        // 捕获模式下放行：设置页录入期间即使该 Alt 组合已是注册热键，
-        // 也必须到达前端录入框，否则"想改回/重新设置 Alt+字母"会录不进去。
-        if !CAPTURE_MODE.load(Ordering::SeqCst) && alt_held && !ctrl_held() && !shift_held() {
+        // Alt 组合面板/翻译热键：只要求 Alt 按住（ALT_HELD 由钩子自行维护，
+        // 可靠）。不要用 GetAsyncKeyState 检查 Ctrl/Shift——它在钩子线程里
+        // 只在消息循环处理时刷新快照，用户之前按过 Ctrl（如复制粘贴）的陈旧
+        // 状态会让 !ctrl_held() 恒为 false，导致所有 Alt 组合热键永久失效。
+        // 副作用可接受：Alt+Ctrl+X 也会命中（若 X 是热键主键），纯 Alt 是主流用法。
+        if !CAPTURE_MODE.load(Ordering::SeqCst) && alt_held {
             let action = if vk == CLIPBOARD_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
                 Some(Action::ToggleClipboard)
             } else if vk == FOLDER_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
@@ -379,10 +378,6 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
 
 fn ctrl_held() -> bool {
     unsafe { GetAsyncKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000 != 0 }
-}
-
-fn shift_held() -> bool {
-    unsafe { GetAsyncKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000 != 0 }
 }
 
 /// 注入一次 Ctrl+V 模拟粘贴（带魔数标记，钩子会放行）
