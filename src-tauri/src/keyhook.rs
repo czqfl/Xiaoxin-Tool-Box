@@ -79,6 +79,10 @@ static SENDER: OnceLock<Sender<Action>> = OnceLock::new();
 static WIN_HELD: AtomicBool = AtomicBool::new(false);
 /// Alt（左/右）当前是否按住：Alt 组合热键精确匹配用
 static ALT_HELD: AtomicBool = AtomicBool::new(false);
+/// Ctrl 当前是否按住：顺序粘贴（Ctrl+V 连发）判断用。
+/// 不用 GetAsyncKeyState——它在钩子线程只按消息循环刷新快照，用户按住 Ctrl
+/// 连点 V 时会误判"Ctrl 已松开"导致 V 泄漏成普通输入（"只能点一次 V"）。
+static CTRL_HELD: AtomicBool = AtomicBool::new(false);
 /// 本次 Win 按下期间是否消费过组合键（Win 抬起时需阻止开始菜单）
 static WIN_CONSUMED: AtomicBool = AtomicBool::new(false);
 /// 已吞掉 keydown 的按键，对应 keyup 也要吞掉
@@ -298,6 +302,12 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
         return CallNextHookEx(None, code, wparam, lparam);
     }
 
+    // Ctrl 键自身：只跟踪状态（顺序粘贴 Ctrl+V 连发判断用），不吞键
+    if vk == VK_CONTROL.0 as u32 {
+        CTRL_HELD.store(is_down, Ordering::SeqCst);
+        return CallNextHookEx(None, code, wparam, lparam);
+    }
+
     if is_down {
         // 与已吞按键的自动重复：继续吞掉，不重复触发动作
         if SWALLOWED_VK.load(Ordering::SeqCst) == vk as u16 {
@@ -373,9 +383,11 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
         if SEQ_ENABLED.load(Ordering::SeqCst)
             && SEQ_AVAILABLE.load(Ordering::SeqCst)
             && vk == VK_V.0 as u32
-            && ctrl_held()
+            && CTRL_HELD.load(Ordering::SeqCst)
         {
-            // 顺序粘贴 Ctrl+V：吞掉物理按键，稍后发送一次干净的模拟粘贴
+            // 顺序粘贴 Ctrl+V：吞掉物理按键，稍后发送一次干净的模拟粘贴。
+            // Ctrl 状态用钩子自维护的 CTRL_HELD（GetAsyncKeyState 会因陈旧
+            // 快照误判"Ctrl 已松开"，导致按住 Ctrl 连点 V 只有第一次生效）
             SWALLOWED_VK.store(vk as u16, Ordering::SeqCst);
             post(Action::SeqPaste);
             return LRESULT(1);
@@ -389,10 +401,6 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
     }
 
     CallNextHookEx(None, code, wparam, lparam)
-}
-
-fn ctrl_held() -> bool {
-    unsafe { GetAsyncKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000 != 0 }
 }
 
 /// 注入一次 Ctrl+V 模拟粘贴（带魔数标记，钩子会放行）

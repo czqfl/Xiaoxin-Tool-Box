@@ -718,10 +718,15 @@ pub fn sequential_paste<R: Runtime>(app: &AppHandle<R>) {
     let Some(paths) = app.try_state::<AppPaths>() else {
         return;
     };
-    // 队首 = 按模式排序后的第一条（与面板队列顺序一致）
+    // 队首 = 按模式排序后的第一条（与面板队列顺序一致；收藏项不参与顺序队列，
+    // 与面板过滤一致——否则粘贴到收藏项不消耗会卡住后续内容）
     let entry = {
         let entries = store.0.lock().unwrap();
-        let mut queue: Vec<ClipEntry> = entries.clone();
+        let mut queue: Vec<ClipEntry> = entries
+            .iter()
+            .filter(|e| !e.favorite)
+            .cloned()
+            .collect();
         match mode {
             PasteMode::Fifo => queue.sort_by_key(|e| e.created_at),
             PasteMode::Lifo => queue.sort_by_key(|e| std::cmp::Reverse(e.created_at)),

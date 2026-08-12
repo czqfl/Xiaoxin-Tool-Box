@@ -116,10 +116,12 @@ export function ClipboardPanel() {
     return () => cleanup.forEach((fn) => fn());
   }, [refresh]);
 
-  // 搜索 + 收藏过滤
+  // 搜索 + 收藏过滤；顺序模式（FIFO/LIFO）下收藏项不参与粘贴队列，
+  // 仅在普通模式展示（避免粘贴到收藏项不消耗、卡住后续内容）
   const filtered = useMemo(() => {
     let list = entries;
     if (favOnly) list = list.filter((e) => e.favorite);
+    if (isSequentialMode(mode)) list = list.filter((e) => !e.favorite);
     const q = query.trim().toLowerCase();
     if (!q) return list;
     return list.filter(
@@ -128,7 +130,7 @@ export function ClipboardPanel() {
         (e.text ?? "").toLowerCase().includes(q) ||
         (e.files ?? []).join(" ").toLowerCase().includes(q)
     );
-  }, [entries, query, favOnly]);
+  }, [entries, query, favOnly, mode]);
 
   const pinnedList = useMemo(() => filtered.filter((e) => e.pinned), [filtered]);
   const restList = useMemo(() => filtered.filter((e) => !e.pinned), [filtered]);
