@@ -276,7 +276,9 @@
   gap: 1px;
 }
 .tree-group-head {
-  /* 不吸顶：随内容滚动离开视线（用户期望），避免固定时与下方行重叠 */
+  position: sticky;
+  top: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -284,7 +286,11 @@
   font-size: 11px;
   font-weight: 700;
   color: var(--accent);
-  background: var(--accent-soft);
+  /* 吸顶须盖住下方滚过的行：先铺一层面板实底色（不透明），再叠主题色，
+     半透明 accent-soft 单独用会与滚动内容重叠看不清 */
+  background:
+    rgba(var(--bg-panel-rgb), 0.96),
+    var(--accent-soft);
   border-bottom: 1px solid
     color-mix(in srgb, var(--accent) 28%, transparent);
   cursor: default;

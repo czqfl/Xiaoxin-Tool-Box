@@ -598,28 +598,7 @@ fn probe_vscode(configured: &Option<String>) -> Option<PathBuf> {
             return Some(PathBuf::from(exe));
         }
     }
-    // 2. PATH 中的 code 命令（VS Code 安装时创建的 code.cmd / code.exe）
-    if let Ok(out) = Command::new("where.exe").arg("code").output() {
-        if out.status.success() {
-            for line in String::from_utf8_lossy(&out.stdout).lines() {
-                let p = PathBuf::from(line.trim());
-                // 只接受带 .exe/.cmd/.bat 扩展名的文件：where 可能先返回无扩展名的
-                // shell 脚本（bin\code），直接启动会报 os error 193（不是有效的 Win32 程序）
-                let valid = p
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .is_some_and(|e| {
-                        e.eq_ignore_ascii_case("exe")
-                            || e.eq_ignore_ascii_case("cmd")
-                            || e.eq_ignore_ascii_case("bat")
-                    });
-                if valid && p.is_file() {
-                    return Some(p);
-                }
-            }
-        }
-    }
-    // 3. 标准安装位置 + 盘根/scoop 常见位置
+    // 2. 标准安装位置 + 盘根/scoop 常见位置（真实 VS Code 的 Code.exe）
     let mut roots: Vec<PathBuf> = Vec::new();
     if let Ok(local) = std::env::var("LOCALAPPDATA") {
         roots.push(PathBuf::from(format!("{local}\\Programs\\Microsoft VS Code")));
@@ -644,6 +623,37 @@ fn probe_vscode(configured: &Option<String>) -> Option<PathBuf> {
         let exe = root.join("Code.exe");
         if exe.is_file() {
             return Some(exe);
+        }
+    }
+    // 3. PATH 中的 code 命令（VS Code 安装时创建的 code.cmd / code.exe）兜底。
+    //    注意：Qoder 等 VS Code 系 IDE 也会注册同名 code.cmd 且常排在 VS Code 前面，
+    //    必须排除，否则"选 VS Code 打开"会实际启动 Qoder（用户已遇到）。
+    if let Ok(out) = Command::new("where.exe").arg("code").output() {
+        if out.status.success() {
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                let p = PathBuf::from(line.trim());
+                // 跳过被其它编辑器抢占的 code 命令
+                let lower = p.display().to_string().to_ascii_lowercase();
+                if lower.contains("qoder")
+                    || lower.contains("windsurf")
+                    || lower.contains("cursor")
+                {
+                    continue;
+                }
+                // 只接受带 .exe/.cmd/.bat 扩展名的文件：where 可能先返回无扩展名的
+                // shell 脚本（bin\code），直接启动会报 os error 193（不是有效的 Win32 程序）
+                let valid = p
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| {
+                        e.eq_ignore_ascii_case("exe")
+                            || e.eq_ignore_ascii_case("cmd")
+                            || e.eq_ignore_ascii_case("bat")
+                    });
+                if valid && p.is_file() {
+                    return Some(p);
+                }
+            }
         }
     }
     // 4. 受限全盘扫描（便携版/自定义目录）
