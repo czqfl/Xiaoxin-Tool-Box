@@ -188,3 +188,43 @@ pub fn force_topmost_foreground(hwnd: HWND) {
         let _ = SetForegroundWindow(hwnd);
     }
 }
+
+/// 可靠置前（后台线程也生效，不受前台锁输入窗口限制）。
+///
+/// 划词翻译需先做"存剪贴板→等修饰键释放→模拟 Ctrl+C 复制→翻译 API"，
+/// 耗时数百毫秒，远超用户最后一次输入后的约 200ms 前台锁输入窗口；此时普通
+/// `SetForegroundWindow` 会被系统拒绝，窗口显示在最前却从未获得焦点 →
+/// 不能拖动/点击/Esc。普通面板用 `force_foreground` 即可，是因为它们在热键后
+/// 同步、即时激活，落在输入窗口内。
+///
+/// 本函数在直接 `SetForegroundWindow` 失败后，用 `AttachThreadInput` 把本线程
+/// 输入附加到当前前台线程，再抢前台——这是从后台线程可靠抢前台的标准做法，
+/// 不受前台锁超时影响。务必在 `AttachThreadInput(.., false)` 解除附加，避免残留。
+pub fn force_foreground_robust(hwnd: HWND) {
+    use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowThreadProcessId, SetForegroundWindow,
+    };
+    unsafe {
+        if GetForegroundWindow() == hwnd {
+            return;
+        }
+        // 1) 直接尝试（落在输入窗口内常能成功）
+        let _ = SetForegroundWindow(hwnd);
+        if GetForegroundWindow() == hwnd {
+            return;
+        }
+        // 2) 附加到当前前台线程后再抢前台
+        let fg = GetForegroundWindow();
+        if fg.is_invalid() {
+            return;
+        }
+        let fg_thread = GetWindowThreadProcessId(fg, None);
+        let cur = GetCurrentThreadId();
+        if fg_thread != 0 && fg_thread != cur {
+            let _ = AttachThreadInput(cur, fg_thread, true);
+            let _ = SetForegroundWindow(hwnd);
+            let _ = AttachThreadInput(cur, fg_thread, false);
+        }
+    }
+}

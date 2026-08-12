@@ -87,3 +87,17 @@ pub fn diag_log(msg: String, paths: State<'_, AppPaths>) {
         let _ = f.write_all(line.as_bytes());
     }
 }
+
+/// 后端诊断日志（Rust 侧调用）：追加写 data/diag.log，记录复制/激活时序等。
+/// 与前端 diag_log 写到同一文件、同一目录解析方式，便于在一处对照排查。
+pub fn diag_write(msg: &str) {
+    use std::io::Write;
+    let dir = AppPaths::resolve().data_dir;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("diag.log"))
+    {
+        let _ = f.write_all(format!("{} {}\n", chrono::Utc::now().to_rfc3339(), msg).as_bytes());
+    }
+}

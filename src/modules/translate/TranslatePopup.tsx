@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { TranslateResult } from "../../types";
 import { onEvent } from "../../core/events";
+import { hideCurrentWindow } from "../../core/usePanel";
 import { copyText, diagLog, lastTranslateResult, translateText } from "../../core/tauri";
 import { IconClose, IconCopy } from "../../components/icons";
 import { LANG_OPTIONS, langLabel } from "./langs";
@@ -14,7 +15,7 @@ const EVT_RESULT = "translate://result";
 
 /** 关闭弹窗（按钮/Esc/失焦共用） */
 function closePopup() {
-  getCurrentWindow().hide().catch(() => undefined);
+  hideCurrentWindow();
 }
 
 export function TranslatePopup() {
@@ -25,17 +26,21 @@ export function TranslatePopup() {
   const [toLang, setToLang] = useState("zh");
   const [translating, setTranslating] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [loading, setLoading] = useState(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  /** loading 镜像（供事件回调读取最新值，避免闭包捕获旧值） */
+  const loadingRef = useRef(true);
 
   // 划词触发的结果：填充原文与译文（保留用户已选的源/目标语言，仅更新内容）
   const applyResult = (r: TranslateResult) => {
     setResult(r);
+    loadingRef.current = false;
+    setLoading(false);
     if (r.text) setText(r.text);
   };
 
   useEffect(() => {
     void diagLog("TranslatePopup mounted");
-    getCurrentWindow().setFocus().catch(() => undefined);
     // 挂载兜底：快捷键触发后窗口先 show、事件可能早于监听，先拉一次最近结果
     void lastTranslateResult().then((r) => {
       if (r) applyResult(r);
@@ -44,12 +49,28 @@ export function TranslatePopup() {
     onEvent<TranslateResult>(EVT_RESULT, applyResult).then((un) =>
       cleanup.push(un)
     );
+    // 呼出进入"翻译中"加载态（复制/翻译期间显示，结果到达后解除）
+    onEvent("translate://start", () => {
+      loadingRef.current = true;
+      setLoading(true);
+    }).then((un) => cleanup.push(un));
     // 失焦自动隐藏（与其它面板一致）
-    const onBlur = () => {
-      getCurrentWindow().hide().catch(() => undefined);
-    };
+    const onBlur = () => hideCurrentWindow();
     window.addEventListener("blur", onBlur);
     cleanup.push(() => window.removeEventListener("blur", onBlur));
+    // 鼠标移入/点击即请求聚焦（与面板一致）：后台置前偶尔被前台锁拒绝时，
+    // 用户一交互就补一次 setFocus。但【复制/翻译进行中(loading)绝不抢焦点】，
+    // 否则鼠标移到刚弹出的窗口上会抢走源应用焦点，导致 Ctrl+C 复制失败。
+    const onMouseActivate = () => {
+      if (loadingRef.current) return;
+      if (!document.hasFocus()) {
+        getCurrentWindow().setFocus().catch(() => undefined);
+      }
+    };
+    document.addEventListener("mouseover", onMouseActivate);
+    document.addEventListener("mousedown", onMouseActivate);
+    cleanup.push(() => document.removeEventListener("mouseover", onMouseActivate));
+    cleanup.push(() => document.removeEventListener("mousedown", onMouseActivate));
     // Esc 关闭（窗口有焦点后生效）
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -59,15 +80,6 @@ export function TranslatePopup() {
     };
     window.addEventListener("keydown", onKey);
     cleanup.push(() => window.removeEventListener("keydown", onKey));
-    // 点击弹窗任意处即请求聚焦：后台置前被前台锁拒绝时弹窗无焦点，
-    // 导致 Esc 无效、失焦不触发、无法拖动；点击后一切恢复正常
-    const onPointerDown = () => {
-      if (!document.hasFocus()) {
-        getCurrentWindow().setFocus().catch(() => undefined);
-      }
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    cleanup.push(() => document.removeEventListener("pointerdown", onPointerDown));
     return () => cleanup.forEach((fn) => fn());
   }, []);
 
@@ -141,7 +153,7 @@ export function TranslatePopup() {
 
         {/* 下方：翻译内容，复制按钮浮在结果框内 */}
         <div className="translate-dst">
-          {translating ? (
+          {translating || loading ? (
             "翻译中…"
           ) : (
             <>{result?.translation ?? "划词或输入内容后翻译"}</>

@@ -47,38 +47,71 @@ pub fn translate_last_result(store: State<'_, TranslateStore>) -> Option<Transla
     store.0.lock().unwrap().clone()
 }
 
-/// 快捷键触发划词翻译：整体流程放异步任务，不阻塞事件循环
+/// 快捷键触发划词翻译：整体流程放异步任务，不阻塞事件循环。
+///
+/// 与文件夹/账号等面板的关键差异：面板只是"显示已有内容"，可在热键后同步、
+/// 即时（落在系统前台锁输入窗口内）激活；而翻译必须先"复制源应用选中文本"，
+/// 这要求源应用保持前台，所以复制完成前绝不能抢焦点，激活必然延迟到数百毫秒
+/// 之后——此时普通 SetForegroundWindow 已被前台锁拒绝。因此：
+///   1) 立即 show（置顶+可见，但不抢焦点）给用户视觉反馈；
+///   2) 复制期间用 ensure_foreground 锁住源应用前台，等修饰键释放再注入 Ctrl+C；
+///   3) 复制/翻译完成后，用 force_foreground_robust（AttachThreadInput 兜底）
+///      可靠激活弹窗，不受前台锁超时限制 → 能拖动/点击/Esc。
 pub fn trigger_selection_translate<R: Runtime>(app: &AppHandle<R>) {
     // AppHandle 是 Clone 的；async 闭包需 'static，先克隆再 move 进去
     let app = app.clone();
+    // 立即显示弹窗（置顶+可见，但【不】抢焦点——源应用须保持前台才能复制）
+    reveal_popup(&app);
     tauri::async_runtime::spawn(async move {
+        // 记录源应用前台窗口：复制选中文本期间必须保持它前台
+        #[cfg(windows)]
+        let src_hwnd = crate::keyhook::foreground_hwnd();
+
         // 1. 保存当前剪贴板文本（用于恢复，避免划词破坏用户复制内容）
         let prev = arboard::Clipboard::new()
             .ok()
             .and_then(|mut c| c.get_text().ok());
+        let prev_default = prev.clone().unwrap_or_default();
+        crate::storage::diag_write(&format!(
+            "[translate] start: prev_clip_len={}",
+            prev_default.len()
+        ));
 
-        // 2-4. 模拟 Ctrl+C 复制选中文本并读取，最多重试 3 次：
+        // 2-4. 模拟 Ctrl+C 复制选中文本并读取，最多重试 4 次：
         //      有些应用复制异步完成/较慢，一次读不到不代表没选中；
         //      通过"剪贴板内容是否变化"判断复制是否真的生效。
         let mut selected = String::new();
-        for _ in 0..3 {
+        for attempt in 0..4 {
+            // 复制前确保源应用仍在前台（否则 Ctrl+C 会发给本工具自身）
+            #[cfg(windows)]
+            crate::keyhook::ensure_foreground(src_hwnd);
             // 关键：先等修饰键释放再注入 Ctrl+C——否则注入的 C 与用户按住的
             // Alt 组合成 Alt+C，命中 QQ 等截图工具热键（"无论设什么热键都截屏"根因）
             #[cfg(windows)]
             crate::keyhook::wait_modifiers_released();
             #[cfg(windows)]
             crate::keyhook::send_ctrl_c();
-            std::thread::sleep(std::time::Duration::from_millis(120));
+            std::thread::sleep(std::time::Duration::from_millis(150));
             let cur = arboard::Clipboard::new()
                 .ok()
                 .and_then(|mut c| c.get_text().ok())
                 .unwrap_or_default();
+            crate::storage::diag_write(&format!(
+                "[translate] attempt {}: cur_clip_len={} changed={}",
+                attempt,
+                cur.len(),
+                cur != prev_default
+            ));
             // 内容相对原剪贴板发生了变化 → 复制成功
-            if cur != prev.clone().unwrap_or_default() {
+            if cur != prev_default {
                 selected = cur.trim().to_string();
                 break;
             }
         }
+        crate::storage::diag_write(&format!(
+            "[translate] selected_len={}",
+            selected.len()
+        ));
 
         // 5. 恢复原剪贴板（SUPPRESS_WATCH 置位，不触发历史记录）
         if let Some(prev_text) = &prev {
@@ -101,7 +134,7 @@ pub fn trigger_selection_translate<R: Runtime>(app: &AppHandle<R>) {
                 *store.0.lock().unwrap() = Some(hint.clone());
             }
             let _ = app.emit(EVT_TRANSLATE_RESULT, hint);
-            show_popup(&app);
+            focus_popup(&app);
             return;
         }
 
@@ -120,7 +153,7 @@ pub fn trigger_selection_translate<R: Runtime>(app: &AppHandle<R>) {
                     *store.0.lock().unwrap() = Some(result.clone());
                 }
                 let _ = app.emit(EVT_TRANSLATE_RESULT, result);
-                show_popup(&app);
+                focus_popup(&app);
             }
             Err(e) => {
                 // 把错误也广播给弹窗展示
@@ -135,57 +168,66 @@ pub fn trigger_selection_translate<R: Runtime>(app: &AppHandle<R>) {
                     *store.0.lock().unwrap() = Some(err.clone());
                 }
                 let _ = app.emit(EVT_TRANSLATE_RESULT, err);
-                show_popup(&app);
+                focus_popup(&app);
             }
         }
     });
 }
 
-/// 显示翻译弹窗：定位到鼠标附近（跟随划词位置）
-fn show_popup<R: Runtime>(app: &AppHandle<R>) {
+/// 仅显示翻译弹窗（置顶+可见，不抢焦点）：用于呼出瞬时给视觉反馈。
+/// 复制/翻译完成后由 focus_popup 再可靠激活。
+fn reveal_popup<R: Runtime>(app: &AppHandle<R>) {
     let Some(w) = app.get_webview_window(TRANSLATE_PANEL) else {
         return;
     };
     if let Ok(cursor) = app.cursor_position() {
         let _ = w.set_position(tauri::LogicalPosition::new(cursor.x + 14.0, cursor.y + 14.0));
     }
-    // 顺序必须与其它面板一致：先 show 再置前激活！
-    // 之前 force_foreground 在 show 之前调用——SetForegroundWindow 对隐藏窗口无效，
-    // 窗口显示后从未被激活 → 鼠标事件进不了 webview（diag.log 显示无任何交互记录）。
-    // force_foreground 对已 TOPMOST 的窗口直接 SetForegroundWindow，能正常激活。
     let _ = w.unminimize();
     let _ = w.show();
-    #[cfg(windows)]
-    {
-        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-        if let Ok(handle) = w.window_handle() {
-            if let RawWindowHandle::Win32(h) = handle.as_raw() {
-                let hwnd = windows::Win32::Foundation::HWND(h.hwnd.get() as *mut _);
-                crate::acrylic::force_foreground(hwnd);
-            }
-        }
-    }
     // 系统级 Esc 关闭兜底：标记弹窗打开（webview 无焦点时由键盘钩子关闭）
     #[cfg(windows)]
     crate::keyhook::set_translate_popup_open(true);
-    // 确保弹窗获得键盘焦点：后台 SetForegroundWindow 常被前台锁拒绝，
-    // 延时到后台线程再补一次（落入用户输入窗口期成功率更高）。
+    // 通知前端进入"翻译中"加载态
+    let _ = app.emit("translate://start", ());
+}
+
+/// 可靠激活翻译弹窗（复制/翻译完成后调用）：必须在后台任务里、已超出前台锁
+/// 输入窗口之后抢前台，故用 force_foreground_robust（AttachThreadInput 兜底），
+/// 否则窗口显示却无焦点 → 不能拖动/点击/Esc。前台线程再补一次提高成功率。
+fn focus_popup<R: Runtime>(app: &AppHandle<R>) {
+    let Some(w) = app.get_webview_window(TRANSLATE_PANEL) else {
+        return;
+    };
+    #[cfg(windows)]
+    {
+        if let Some(hwnd) = get_hwnd(&w) {
+            crate::acrylic::force_foreground_robust(hwnd);
+        }
+    }
     let w2 = w.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(150));
         #[cfg(windows)]
         {
-            use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-            if let Ok(handle) = w2.window_handle() {
-                if let RawWindowHandle::Win32(h) = handle.as_raw() {
-                    crate::acrylic::force_foreground(windows::Win32::Foundation::HWND(
-                        h.hwnd.get() as *mut _,
-                    ));
-                }
+            if let Some(hwnd) = get_hwnd(&w2) {
+                crate::acrylic::force_foreground_robust(hwnd);
             }
         }
         let _ = w2.set_focus();
     });
+}
+
+/// 取 webview 所属顶层窗口 HWND（用于 Win32 置前/激活）
+#[cfg(windows)]
+fn get_hwnd<R: Runtime>(w: &tauri::WebviewWindow<R>) -> Option<windows::Win32::Foundation::HWND> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    if let Ok(handle) = w.window_handle() {
+        if let RawWindowHandle::Win32(h) = handle.as_raw() {
+            return Some(windows::Win32::Foundation::HWND(h.hwnd.get() as *mut _));
+        }
+    }
+    None
 }
 
 /// 按服务商调用对应翻译 API

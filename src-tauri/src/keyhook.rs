@@ -11,14 +11,15 @@ use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
+use windows::Win32::Foundation::HWND;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
     KEYEVENTF_KEYUP, VK_CONTROL, VK_LWIN, VK_RWIN, VK_V, VIRTUAL_KEY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetMessageW, SetWindowsHookExW, TranslateMessage, HC_ACTION,
-    KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL,
+    CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetMessageW, SetForegroundWindow,
+    SetWindowsHookExW, TranslateMessage, HC_ACTION, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL,
 };
 
 const WM_KEYDOWN: usize = 0x0100;
@@ -80,6 +81,31 @@ pub fn set_seq_queue_available(on: bool) {
 /// 翻译弹窗打开状态：显示时置 true，Esc 系统级关闭时复位
 pub fn set_translate_popup_open(on: bool) {
     TRANSLATE_POPUP_OPEN.store(on, Ordering::SeqCst);
+}
+
+/// 当前前台窗口句柄（划词翻译复制前记录源应用，复制期间需保持它前台，
+/// 否则 SendInput 的 Ctrl+C 会发到本工具自身而非源应用 → 复制不到选中文本）
+pub fn foreground_hwnd() -> Option<HWND> {
+    unsafe {
+        let h = GetForegroundWindow();
+        if h.is_invalid() {
+            None
+        } else {
+            Some(h)
+        }
+    }
+}
+
+/// 复制选中文本前确保源应用仍在前台：若当前前台已不是源应用则尝试置前它。
+/// 通常源应用本就前台（我们尚未抢焦点），此调用作为兜底防止焦点被意外抢占。
+pub fn ensure_foreground(src: Option<HWND>) {
+    if let Some(hwnd) = src {
+        unsafe {
+            if GetForegroundWindow() != hwnd {
+                let _ = SetForegroundWindow(hwnd);
+            }
+        }
+    }
 }
 
 /// 等待 Ctrl/Alt/Shift/Win 修饰键全部释放（最多 600ms）。
