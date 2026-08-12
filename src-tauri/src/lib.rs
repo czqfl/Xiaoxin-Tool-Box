@@ -149,6 +149,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             config::config_load,
             config::config_save,
+            config::config_export_to,
+            config::config_import_from,
             clipboard::clipboard_list,
             clipboard::clipboard_delete,
             clipboard::clipboard_clear,

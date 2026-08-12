@@ -10,23 +10,12 @@ export function TranslationPage() {
   const config = useConfigStore((s) => s.config);
   const update = useConfigStore((s) => s.update);
   const t = config.translator;
-  const [saving, setSaving] = useState(false);
   const [testText, setTestText] = useState("");
   const [testOut, setTestOut] = useState<string | null>(null);
   const [testErr, setTestErr] = useState<string | null>(null);
 
   const patch = (p: Partial<typeof t>) => {
     void update({ ...config, translator: { ...t, ...p } });
-  };
-
-  const save = async () => {
-    setSaving(true);
-    try {
-      await update({ ...config });
-      setTestOut(null);
-    } finally {
-      setSaving(false);
-    }
   };
 
   const doTest = async () => {
@@ -112,19 +101,10 @@ export function TranslationPage() {
       </SettingGroup>
 
       <SettingGroup>
-        <SettingRow title="保存配置" desc="凭据持久化到配置文件，重装应用不丢失">
-          <button
-            className="btn btn-primary"
-            disabled={saving}
-            onClick={() => void save()}
-          >
-            {saving ? "保存中…" : "保存"}
-          </button>
-        </SettingRow>
-      </SettingGroup>
-
-      <SettingGroup>
-        <SettingRow title="测试翻译" desc="填好凭据后输入文本验证是否可用">
+        <SettingRow
+          title="测试翻译"
+          desc="填好凭据后输入文本验证是否可用（配置改动自动保存，无需手动保存）"
+        >
           <div style={{ display: "flex", gap: 8, width: "100%" }}>
             <input
               className="text-input"

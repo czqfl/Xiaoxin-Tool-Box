@@ -24,6 +24,12 @@ async function safe<T>(promise: Promise<T>, fallback: T): Promise<T> {
 export const loadConfig = () => invoke<AppConfig>("config_load");
 export const saveConfig = (config: AppConfig) =>
   safe(invoke("config_save", { config }), undefined);
+/** 导出配置到指定路径（备份/迁移） */
+export const exportConfigTo = (path: string) =>
+  invoke<void>("config_export_to", { path });
+/** 从备份文件导入配置（恢复后需重新加载） */
+export const importConfigFrom = (path: string) =>
+  invoke<void>("config_import_from", { path });
 
 // ---- 剪贴板 ----
 export const listClipboard = () =>

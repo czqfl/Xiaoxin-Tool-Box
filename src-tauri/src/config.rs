@@ -258,3 +258,29 @@ pub fn config_save(
     }
     Ok(())
 }
+
+/// 导出配置：把 config.json 复制到用户指定位置（备份/迁移）
+#[tauri::command]
+pub fn config_export_to(
+    path: String,
+    paths: State<'_, AppPaths>,
+) -> Result<(), String> {
+    std::fs::copy(&paths.config_file, &path).map_err(|e| format!("导出失败：{e}"))?;
+    Ok(())
+}
+
+/// 导入配置：从备份文件恢复（校验 JSON 后写回 data 目录并更新运行时状态）。
+/// 导入成功后由前端触发全量重载（load + 广播），快捷键等即时生效。
+#[tauri::command]
+pub fn config_import_from(
+    path: String,
+    paths: State<'_, AppPaths>,
+    state: State<'_, ConfigState>,
+) -> Result<(), String> {
+    let content = std::fs::read_to_string(&path).map_err(|e| format!("读取失败：{e}"))?;
+    let config: AppConfig =
+        serde_json::from_str(&content).map_err(|e| format!("配置格式不正确：{e}"))?;
+    save_json(&paths.config_file, &config).map_err(|e| format!("保存失败：{e}"))?;
+    *state.0.lock().unwrap() = config;
+    Ok(())
+}

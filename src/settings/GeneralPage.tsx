@@ -1,7 +1,13 @@
-/** 通用设置页：开机自启、静默启动、语言、主题、面板外观 */
+/** 通用设置页：开机自启、静默启动、语言、主题、面板外观、配置备份 */
 import { useEffect, useState } from "react";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { useConfigStore } from "../stores/configStore";
+import {
+  exportConfigTo,
+  importConfigFrom,
+} from "../core/tauri";
+import { broadcastConfigChanged } from "../core/events";
 import {
   Segmented,
   SettingGroup,
@@ -14,8 +20,10 @@ import type { ThemeMode } from "../types";
 export function GeneralPage() {
   const config = useConfigStore((s) => s.config);
   const update = useConfigStore((s) => s.update);
+  const load = useConfigStore((s) => s.load);
   const [autostart, setAutostart] = useState(false);
   const [autostartBusy, setAutostartBusy] = useState(false);
+  const [configMsg, setConfigMsg] = useState<string | null>(null);
 
   useEffect(() => {
     isEnabled()
@@ -25,6 +33,41 @@ export function GeneralPage() {
 
   const patchGeneral = (patched: Partial<typeof config.general>) => {
     void update({ ...config, general: { ...config.general, ...patched } });
+  };
+
+  /** 导出全部配置到用户选择的位置 */
+  const doExport = async () => {
+    try {
+      const target = await save({
+        title: "导出配置备份",
+        defaultPath: "小心工具箱-配置备份.json",
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (!target) return;
+      await exportConfigTo(target);
+      setConfigMsg(`已导出到 ${target}`);
+    } catch (err) {
+      setConfigMsg(`导出失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  /** 从备份文件恢复全部配置（含快捷键、翻译凭据、面板位置） */
+  const doImport = async () => {
+    try {
+      const picked = await open({
+        title: "选择配置备份文件",
+        multiple: false,
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (!picked) return;
+      await importConfigFrom(picked as string);
+      // 重载配置并广播给所有窗口，快捷键等立即生效
+      await load();
+      await broadcastConfigChanged(config);
+      setConfigMsg("已恢复配置，部分设置需重启应用完全生效（如快捷键）");
+    } catch (err) {
+      setConfigMsg(`导入失败：${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   const toggleAutostart = async (next: boolean) => {
@@ -120,6 +163,23 @@ export function GeneralPage() {
             </span>
           </div>
         </SettingRow>
+      </SettingGroup>
+
+      <SettingGroup>
+        <SettingRow
+          title="配置备份"
+          desc="全部设置（快捷键、剪贴板、翻译凭据、面板位置等）均自动保存到配置文件；可导出备份用于重装/迁移"
+        >
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn" onClick={() => void doExport()}>
+              导出配置
+            </button>
+            <button className="btn" onClick={() => void doImport()}>
+              导入配置
+            </button>
+          </div>
+        </SettingRow>
+        {configMsg && <div className="shortcut-hint">{configMsg}</div>}
       </SettingGroup>
     </div>
   );
