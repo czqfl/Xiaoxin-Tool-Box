@@ -1,5 +1,5 @@
 /** 悬浮面板公共行为：加载配置与主题、响应配置广播、失焦自动隐藏 */
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useConfigStore } from "../stores/configStore";
 import { EVT_CONFIG_CHANGED, onEvent } from "./events";
@@ -27,6 +27,10 @@ export async function withNativeDialog<T>(fn: () => Promise<T>): Promise<T> {
 export function usePanelCommon(stayVisible = false) {
   const load = useConfigStore((s) => s.load);
   const sync = useConfigStore((s) => s.sync);
+  /** 拖动守卫：点击/拖动 data-tauri-drag-region 头部启动原生窗口拖动时，
+   *  WebView2 会瞬时失焦触发 window blur——若没有守卫会把面板误关
+   *  （"一点击拖动区域面板就关闭"）。按下置位、松开后短暂延时清除。 */
+  const dragGuardRef = useRef(false);
 
   useEffect(() => {
     load();
@@ -39,10 +43,29 @@ export function usePanelCommon(stayVisible = false) {
       else void load();
     }).then((un) => cleanup.push(un));
 
-    // 失焦自动隐藏（不占任务栏，Esc 由面板组件处理）；置顶常驻与原生对话框期间例外。
-    // 模糊走 SWCA BLURBEHIND，与窗口是否激活无关，失焦也保持，无需调整外观。
+    // 点击/拖动头部期间：置位拖动守卫（原生拖动导致瞬时失焦，期间不许隐藏）
+    const onMouseDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.("[data-tauri-drag-region]")) {
+        dragGuardRef.current = true;
+      }
+    };
+    const onMouseUp = () => {
+      // 松开后短暂延时解除守卫（覆盖原生拖动期间/之后的瞬时失焦）
+      window.setTimeout(() => {
+        dragGuardRef.current = false;
+      }, 250);
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("mouseup", onMouseUp);
+    cleanup.push(() => document.removeEventListener("mousedown", onMouseDown));
+    cleanup.push(() => document.removeEventListener("mouseup", onMouseUp));
+
+    // 失焦自动隐藏（不占任务栏，Esc 由面板组件处理）；置顶常驻、原生对话框
+    // 与拖动头部期间例外。模糊走 SWCA BLURBEHIND，与窗口是否激活无关。
     const onBlur = () => {
       if (nativeDialogOpen || stayVisible) return;
+      if (dragGuardRef.current) return;
       hideCurrentWindow();
     };
     window.addEventListener("blur", onBlur);
