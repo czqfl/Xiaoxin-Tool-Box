@@ -232,7 +232,7 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
         {renderRow(
           "translation",
           "划词翻译",
-          "选中文本后按下快捷键，自动复制并翻译，例如 Ctrl+Alt+T"
+          "选中文本后按下快捷键，自动复制并翻译，例如 Ctrl+Alt+E（避免与截图工具冲突）"
         )}
       </SettingGroup>
 

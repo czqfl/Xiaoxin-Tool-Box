@@ -123,7 +123,8 @@ impl Default for ShortcutsConfig {
             clipboard: "Alt+C".into(),
             folder: "Alt+F".into(),
             credentials: "Alt+A".into(),
-            translation: "Ctrl+Alt+T".into(),
+            // Ctrl+Alt+T 常被截图/录屏工具占用（同键触发截屏），默认改用 Ctrl+Alt+E
+            translation: "Ctrl+Alt+E".into(),
         }
     }
 }

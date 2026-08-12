@@ -32,7 +32,7 @@ const defaultConfig: AppConfig = {
     clipboard: "Alt+C",
     folder: "Alt+F",
     credentials: "Alt+A",
-    translation: "Ctrl+Alt+T",
+    translation: "Ctrl+Alt+E",
   },
   general: {
     theme: "system",
