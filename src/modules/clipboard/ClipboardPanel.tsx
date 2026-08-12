@@ -277,14 +277,14 @@ export function ClipboardPanel() {
     });
   };
 
-  /** 拖动结束：执行排序（悬停目标为空则不排） */
+  /** 拖动结束：执行排序（悬停目标为空则不排）。
+   *  释放瞬间不立刻清掉视觉顺序——先等后端重排完成并刷新列表（此时队列顺序已与
+   *  视觉顺序一致）再清除，避免"先跳回原位、再跳到新位"的闪烁。 */
   const finishDrag = () => {
     if (!dragState) return;
     pressRef.current = null;
     dragActiveRef.current = false;
     overIdRef.current = null;
-    visualOrderRef.current = null;
-    setVisualOrder(null);
     setDragGhost(null);
     const { id, overId } = dragState;
     // 复位被拖条目的内联样式（.dragging 类移除后恢复显示）
@@ -294,13 +294,26 @@ export function ClipboardPanel() {
       el.style.transform = "";
       el.style.zIndex = "";
     }
-    setDragState(null);
     // 拖动松手后的同一次 click 需忽略，防止误触发粘贴
     suppressClickRef.current = true;
     setTimeout(() => {
       suppressClickRef.current = false;
     }, 100);
-    if (overId && overId !== id) void reorderQueueEntry(id, overId);
+    const needReorder = !!overId && overId !== id;
+    if (needReorder) {
+      void reorderQueueEntry(id, overId)
+        .then(() => refresh())
+        .then(() => {
+          // 后端确认后队列顺序 == 视觉顺序，此时清除不会产生位置跳变
+          visualOrderRef.current = null;
+          setVisualOrder(null);
+          setDragState(null);
+        });
+    } else {
+      visualOrderRef.current = null;
+      setVisualOrder(null);
+      setDragState(null);
+    }
   };
 
   // 拖动期间监听全局 pointerup 收尾（可能拖出条目区域才松手）
