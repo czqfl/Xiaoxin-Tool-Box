@@ -145,13 +145,17 @@ fn show_popup<R: Runtime>(app: &AppHandle<R>) {
     if let Ok(cursor) = app.cursor_position() {
         let _ = w.set_position(tauri::LogicalPosition::new(cursor.x + 14.0, cursor.y + 14.0));
     }
+    // 置前方式必须与其它面板一致（acrylic::force_foreground，激活窗口）：
+    // 之前用 force_topmost_foreground（SetWindowPos 带 SWP_NOACTIVATE，明确不激活）
+    // → 弹窗从不获得焦点 → webview 交互（拖动/点击/Esc）全部失效。
+    // force_foreground 对已 TOPMOST 的窗口直接 SetForegroundWindow，能正常激活。
     #[cfg(windows)]
     {
         use raw_window_handle::{HasWindowHandle, RawWindowHandle};
         if let Ok(handle) = w.window_handle() {
             if let RawWindowHandle::Win32(h) = handle.as_raw() {
                 let hwnd = windows::Win32::Foundation::HWND(h.hwnd.get() as *mut _);
-                crate::acrylic::force_topmost_foreground(hwnd);
+                crate::acrylic::force_foreground(hwnd);
             }
         }
     }
@@ -160,9 +164,8 @@ fn show_popup<R: Runtime>(app: &AppHandle<R>) {
     // 系统级 Esc 关闭兜底：标记弹窗打开（webview 无焦点时由键盘钩子关闭）
     #[cfg(windows)]
     crate::keyhook::set_translate_popup_open(true);
-    // 确保弹窗获得键盘焦点：否则 Esc/输入框/拖动不可用。
-    // 后台 SetForegroundWindow 常被前台锁拒绝，延时到后台线程再补一次（落入
-    // 用户输入窗口期成功率更高），仍失败则由前端"点击即聚焦"兜底。
+    // 确保弹窗获得键盘焦点：后台 SetForegroundWindow 常被前台锁拒绝，
+    // 延时到后台线程再补一次（落入用户输入窗口期成功率更高）。
     let w2 = w.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(150));
@@ -171,7 +174,7 @@ fn show_popup<R: Runtime>(app: &AppHandle<R>) {
             use raw_window_handle::{HasWindowHandle, RawWindowHandle};
             if let Ok(handle) = w2.window_handle() {
                 if let RawWindowHandle::Win32(h) = handle.as_raw() {
-                    crate::acrylic::force_topmost_foreground(windows::Win32::Foundation::HWND(
+                    crate::acrylic::force_foreground(windows::Win32::Foundation::HWND(
                         h.hwnd.get() as *mut _,
                     ));
                 }

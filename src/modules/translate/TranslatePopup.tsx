@@ -104,18 +104,13 @@ export function TranslatePopup() {
     }
   };
 
-  /** 头部拖动（JS 手柄）：不用 data-tauri-drag-region——它会抢占头部所有
-   *  mousedown，导致关闭按钮点击失效；这里避开按钮后调 startDragging */
-  const onHeadMouseDown = (e: React.MouseEvent) => {
-    void diagLog("head mousedown");
-    if ((e.target as HTMLElement).closest("button")) return;
-    getCurrentWindow().startDragging().catch(() => undefined);
-  };
+  /** 头部拖动：与其他面板一致用 data-tauri-drag-region（激活窗口下
+   *  Tauri 会自动排除按钮等交互元素，× 点击不受影响） */
 
   return (
     <div className="panel">
       <div className="panel-shell translate-shell">
-        <div className="translate-head" onMouseDown={onHeadMouseDown}>
+        <div className="translate-head" data-tauri-drag-region>
           <span className="translate-title">翻译</span>
           {result?.from && (
             <span className="badge badge-accent">
