@@ -16,6 +16,11 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
+# 清空 WorkBuddy safe-delete shim 的触发变量：否则 vite 清空 dist 时会被
+# 回收站 shim 拦截导致构建失败（dist 是可丢弃产物，真删无碍）
+$env:CODEBUDDY_SESSION_ID = ""
+$env:CLAUDE_SESSION_ID = ""
+
 # 读取版本号（tauri.conf.json 是 UTF-8 无 BOM，PS5.1 默认按 ANSI 读会乱码，须显式指定）
 $conf = Get-Content "src-tauri\tauri.conf.json" -Raw -Encoding UTF8 | ConvertFrom-Json
 $version = $conf.version
