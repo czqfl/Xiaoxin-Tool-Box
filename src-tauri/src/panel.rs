@@ -24,6 +24,8 @@ pub const FOLDER_PANEL: &str = "folder-panel";
 pub const CREDENTIAL_PANEL: &str = "credential-panel";
 /// 端口工具面板（查询端口占用 / 一键杀进程）
 pub const PORT_PANEL: &str = "port-panel";
+/// 悬浮工具栏窗口（常驻小工具条，不参与面板互斥，独立显隐）
+pub const TOOLBAR_WINDOW: &str = "toolbar";
 
 /// 所有悬浮面板标签（同一时间只展示一个）
 pub const ALL_PANELS: &[&str] = &[
@@ -32,6 +34,89 @@ pub const ALL_PANELS: &[&str] = &[
     CREDENTIAL_PANEL,
     PORT_PANEL,
 ];
+
+/// 工具栏呼出面板：工具栏前端点击图标切换对应面板。
+/// "settings" 打开设置窗口；"translation" 触发划词翻译（有选中带出原文，
+/// 无选中打开空翻译面板）。
+#[tauri::command]
+pub fn panel_toggle(app: tauri::AppHandle, label: String) -> Result<(), String> {
+    if label == "settings" {
+        crate::tray::show_settings_window(&app);
+        return Ok(());
+    }
+    if label == "translation" {
+        crate::translate::trigger_selection_translate(&app);
+        return Ok(());
+    }
+    if !ALL_PANELS.contains(&label.as_str()) {
+        return Err("未知面板".into());
+    }
+    toggle_panel(&app, &label);
+    Ok(())
+}
+
+/// 工具栏显示/隐藏（设置页开关 / 托盘菜单共用，泛型实现）。
+/// 显示时恢复上次位置（记录缺失回退到光标所在屏幕右边缘中部），
+/// 隐藏时记住位置；不抢焦点（常驻工具条，避免打断用户当前输入）。
+pub fn set_toolbar_visible_impl<R: Runtime>(app: &AppHandle<R>, on: bool) {
+    let Some(window) = app.get_webview_window(TOOLBAR_WINDOW) else {
+        return;
+    };
+    if on {
+        if !restore_position(app, &window, TOOLBAR_WINDOW) {
+            position_toolbar_default(app, &window);
+        }
+        let _ = window.show();
+    } else {
+        remember_position(app, &window, TOOLBAR_WINDOW);
+        let _ = window.hide();
+    }
+}
+
+/// 工具栏显示/隐藏命令（前端调用）
+#[tauri::command]
+pub fn toolbar_set_visible(app: tauri::AppHandle, on: bool) -> Result<(), String> {
+    set_toolbar_visible_impl(&app, on);
+    Ok(())
+}
+
+/// 托盘菜单切换工具栏显隐
+pub fn toggle_toolbar<R: Runtime>(app: &AppHandle<R>) {
+    let visible = app
+        .get_webview_window(TOOLBAR_WINDOW)
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(false);
+    set_toolbar_visible_impl(app, !visible);
+}
+
+/// 工具栏默认位置：光标所在屏幕右边缘中部（贴边悬浮，类似输入法工具栏）
+fn position_toolbar_default<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) {
+    let Ok(cursor) = app.cursor_position() else {
+        return;
+    };
+    let Ok(Some(monitor)) = window.monitor_from_point(cursor.x, cursor.y) else {
+        return;
+    };
+    let Ok(wsize) = window.outer_size() else {
+        return;
+    };
+    let scale = monitor.scale_factor();
+    let mpos = monitor.position();
+    let msize = monitor.size();
+    if scale <= 0.0 {
+        return;
+    }
+    let mw = msize.width as f64 / scale;
+    let mh = msize.height as f64 / scale;
+    let mx = mpos.x as f64 / scale;
+    let my = mpos.y as f64 / scale;
+    let ww = wsize.width as f64 / scale;
+    let wh = wsize.height as f64 / scale;
+
+    let x = mx + mw - ww - 16.0;
+    let y = my + (mh - wh) / 2.0;
+    let _ = window.set_position(LogicalPosition::new(x, y));
+}
 
 /// 切换面板置顶状态。
 /// 透明窗口 z-order 变化可能使亚克力层失效，切换后补刷一次。

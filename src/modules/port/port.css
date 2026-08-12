@@ -1,6 +1,10 @@
 /* 端口工具面板：查询输入 + 进程结果列表 */
+.port-header {
+  /* 输入框占满剩余空间，查询/置顶/关闭按钮依次排在右侧（输入框外边） */
+}
 .port-query {
   flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -32,6 +36,11 @@
 }
 .port-query input::placeholder {
   color: var(--text-tertiary);
+}
+/* 查询按钮独立在输入框外边（紧凑不占输入行） */
+.port-query-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .port-empty {

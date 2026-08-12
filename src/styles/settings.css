@@ -318,3 +318,47 @@
   box-shadow: 0 0 0 2px var(--accent-soft);
   transform: scale(1.1);
 }
+
+/* 悬浮工具栏设置：工具勾选网格 */
+.toolbar-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 520px;
+}
+.toolbar-tool {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-item-hover);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  transition: border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+.toolbar-tool:hover {
+  border-color: var(--border-strong);
+}
+.toolbar-tool.checked {
+  border-color: var(--accent);
+  color: var(--text-primary);
+  background: var(--accent-soft);
+}
+.toolbar-tool-icon {
+  display: flex;
+  color: var(--text-secondary);
+}
+.toolbar-tool.checked .toolbar-tool-icon {
+  color: var(--accent);
+}
+.toolbar-tool-check {
+  width: 16px;
+  text-align: center;
+  color: var(--accent);
+  font-weight: 700;
+}

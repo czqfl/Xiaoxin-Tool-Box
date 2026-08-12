@@ -166,6 +166,14 @@ export const pickVscodeExecutable = async (): Promise<string | null> => {
 export const setPanelAlwaysOnTop = (on: boolean) =>
   invoke<void>("panel_set_always_on_top", { on });
 
+/** 切换指定面板（工具栏图标点击呼出用；"settings" 打开设置窗口） */
+export const panelToggle = (label: string) =>
+  safe(invoke<void>("panel_toggle", { label }), undefined);
+
+/** 悬浮工具栏显示/隐藏（设置页开关 / 托盘菜单共用） */
+export const setToolbarVisible = (on: boolean) =>
+  safe(invoke<void>("toolbar_set_visible", { on }), undefined);
+
 // ---- 端口工具 ----
 /** 查询占用指定端口的进程列表 */
 export const queryPort = (port: number) =>
@@ -178,7 +186,7 @@ export const killPort = (pid: number) =>
 export const testShortcut = (shortcut: string) =>
   invoke<void>("shortcut_test", { shortcut });
 export const applyShortcut = (
-  target: "clipboard" | "folder" | "credentials" | "translation",
+  target: "clipboard" | "folder" | "credentials" | "translation" | "port",
   shortcut: string
 ) => invoke<void>("shortcut_apply", { target, shortcut });
 /** 录入捕获：钩子接管 Win 组合，避免系统功能抢先（与 capture_end 成对使用） */

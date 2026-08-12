@@ -1,0 +1,36 @@
+/* 悬浮工具栏：横向胶囊小工具条，常驻置顶、可拖动、点击图标呼出面板 */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 5px;
+  border-radius: 23px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-item);
+  user-select: none;
+  cursor: default;
+}
+
+.toolbar-btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 18px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+.toolbar-btn:hover {
+  background: var(--bg-item-hover);
+  color: var(--text-primary);
+}
+.toolbar-btn:active {
+  transform: scale(0.92);
+}

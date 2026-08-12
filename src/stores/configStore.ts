@@ -33,6 +33,7 @@ const defaultConfig: AppConfig = {
     folder: "Alt+F",
     credentials: "Alt+A",
     translation: "Alt+S",
+    port: "Alt+P",
   },
   general: {
     theme: "system",
@@ -48,6 +49,13 @@ const defaultConfig: AppConfig = {
     baidu_appid: "",
     baidu_secret: "",
     target_lang: "zh",
+  },
+  port: {
+    always_on_top: true,
+  },
+  toolbar: {
+    enabled: true,
+    tools: ["clipboard", "folder", "credentials", "translation", "port", "settings"],
   },
   panel_positions: {},
 };

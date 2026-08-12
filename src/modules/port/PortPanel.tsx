@@ -1,9 +1,13 @@
-/** 端口工具面板：输入端口号查询占用进程，一键结束（开发者高频工具） */
+/** 端口工具面板：输入端口号查询占用进程，一键结束（开发者高频工具）。
+ *  头部 = 输入框 + 查询按钮 + 置顶 + 关闭；头部空白处可拖动窗口（JS 手柄，
+ *  自动跳过按钮/输入框）；置顶开启时面板常驻（失焦不自动隐藏）。 */
 import { useEffect, useRef, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { PortProcess } from "../../types";
 import { hideCurrentWindow, usePanelCommon } from "../../core/usePanel";
-import { killPort, queryPort } from "../../core/tauri";
-import { IconClose, IconSearch, IconTrash } from "../../components/icons";
+import { useConfigStore } from "../../stores/configStore";
+import { killPort, queryPort, setPanelAlwaysOnTop } from "../../core/tauri";
+import { IconClose, IconPin, IconSearch, IconTrash } from "../../components/icons";
 import "../../styles/panel.css";
 import "./port.css";
 
@@ -17,7 +21,11 @@ const STATE_HINT: Record<string, string> = {
 };
 
 export function PortPanel() {
-  usePanelCommon(false);
+  const config = useConfigStore((s) => s.config);
+  const updateConfig = useConfigStore((s) => s.update);
+  // 置顶开启时面板常驻：失焦不再自动隐藏
+  usePanelCommon(config.port.always_on_top);
+
   const [port, setPort] = useState("");
   const [items, setItems] = useState<PortProcess[]>([]);
   const [loading, setLoading] = useState(false);
@@ -25,10 +33,23 @@ export function PortPanel() {
   const [killing, setKilling] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // 面板置顶状态跟随配置生效（经后端命令切换，避免透明窗口黑屏）
+  const alwaysOnTop = config.port.always_on_top;
+  useEffect(() => {
+    setPanelAlwaysOnTop(alwaysOnTop).catch(console.error);
+  }, [alwaysOnTop]);
+
   // 聚焦时自动聚焦输入框（面板 show 后）
   useEffect(() => {
     setTimeout(() => inputRef.current?.focus(), 60);
   }, []);
+
+  const toggleAlwaysOnTop = () => {
+    void updateConfig({
+      ...config,
+      port: { ...config.port, always_on_top: !alwaysOnTop },
+    });
+  };
 
   const runQuery = async (p: number) => {
     setLoading(true);
@@ -80,8 +101,18 @@ export function PortPanel() {
   return (
     <div className="panel">
       <div className="panel-shell">
-        <div className="panel-header" data-tauri-drag-region>
-          <div className="port-query" data-tauri-drag-region>
+        {/* 头部：输入框 + 查询按钮 + 置顶 + 关闭。
+            查询按钮独立在输入框外边；头部空白处可拖动窗口（JS 手柄，
+            自动跳过按钮/输入框等交互元素） */}
+        <div
+          className="panel-header port-header"
+          onMouseDown={(e) => {
+            const t = e.target as HTMLElement;
+            if (t.closest("button, select, input, textarea")) return;
+            getCurrentWindow().startDragging().catch(() => undefined);
+          }}
+        >
+          <div className="port-query">
             <span className="search-icon">
               <IconSearch size={15} />
             </span>
@@ -93,14 +124,21 @@ export function PortPanel() {
               onChange={(e) => setPort(e.target.value.replace(/\D/g, ""))}
               onKeyDown={(e) => e.key === "Enter" && handleQuery()}
             />
-            <button
-              className="btn btn-primary btn-sm"
-              disabled={loading}
-              onClick={handleQuery}
-            >
-              {loading ? "查询中…" : "查询"}
-            </button>
           </div>
+          <button
+            className="btn btn-primary btn-sm port-query-btn"
+            disabled={loading}
+            onClick={handleQuery}
+          >
+            {loading ? "查询中…" : "查询"}
+          </button>
+          <button
+            className={`icon-btn${alwaysOnTop ? " active" : ""}`}
+            title={alwaysOnTop ? "取消置顶（失焦自动隐藏）" : "置顶显示（常驻）"}
+            onClick={toggleAlwaysOnTop}
+          >
+            <IconPin size={15} filled={alwaysOnTop} />
+          </button>
           <button
             className="icon-btn"
             title="关闭（Esc）"
@@ -147,7 +185,7 @@ export function PortPanel() {
         <div className="panel-footer">
           <span>端口工具 · 查询 netstat 实时结果</span>
           <span>
-            <span className="kbd">Esc</span> 关闭
+            <span className="kbd">Enter</span> 查询 · <span className="kbd">Esc</span> 关闭
           </span>
         </div>
       </div>

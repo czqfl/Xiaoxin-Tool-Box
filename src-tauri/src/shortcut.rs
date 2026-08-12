@@ -1,6 +1,6 @@
 //! 全局快捷键：注册/冲突检测/运行时切换。
 use crate::config::{AppConfig, ConfigState, PasteMode};
-use crate::panel::{self, CLIPBOARD_PANEL, CREDENTIAL_PANEL, FOLDER_PANEL};
+use crate::panel::{self, CLIPBOARD_PANEL, CREDENTIAL_PANEL, FOLDER_PANEL, PORT_PANEL};
 use crate::storage::{save_json, AppPaths};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
@@ -22,6 +22,8 @@ pub struct ShortcutBindingsInner {
     pub credentials: Option<Shortcut>,
     /// 划词翻译（非面板，触发翻译动作）
     pub translation: Option<Shortcut>,
+    /// 呼出端口工具面板
+    pub port: Option<Shortcut>,
 }
 
 pub fn parse(shortcut: &str) -> Result<Shortcut, String> {
@@ -111,6 +113,7 @@ pub fn shortcut_test(
             || inner.folder == Some(parsed)
             || inner.credentials == Some(parsed)
             || inner.translation == Some(parsed)
+            || inner.port == Some(parsed)
         {
             return Ok(());
         }
@@ -161,7 +164,11 @@ pub fn shortcut_apply(
     paths: State<'_, AppPaths>,
     config_state: State<'_, ConfigState>,
 ) -> Result<(), String> {
-    if target != "clipboard" && target != "folder" && target != "credentials" && target != "translation"
+    if target != "clipboard"
+        && target != "folder"
+        && target != "credentials"
+        && target != "translation"
+        && target != "port"
     {
         return Err("未知的快捷键目标".into());
     }
@@ -173,8 +180,10 @@ pub fn shortcut_apply(
         inner.folder
     } else if target == "credentials" {
         inner.credentials
-    } else {
+    } else if target == "translation" {
         inner.translation
+    } else {
+        inner.port
     };
     if current == Some(parsed) {
         return Ok(());
@@ -190,8 +199,10 @@ pub fn shortcut_apply(
         inner.folder = Some(parsed);
     } else if target == "credentials" {
         inner.credentials = Some(parsed);
-    } else {
+    } else if target == "translation" {
         inner.translation = Some(parsed);
+    } else {
+        inner.port = Some(parsed);
     }
     drop(inner);
 
@@ -203,8 +214,10 @@ pub fn shortcut_apply(
         config.shortcuts.folder = shortcut;
     } else if target == "credentials" {
         config.shortcuts.credentials = shortcut;
-    } else {
+    } else if target == "translation" {
         config.shortcuts.translation = shortcut;
+    } else {
+        config.shortcuts.port = shortcut;
     }
     let _ = save_json(&paths.config_file, &config);
     *config_state.0.lock().unwrap() = config;
@@ -217,6 +230,7 @@ pub fn register_initial<R: Runtime>(app: &AppHandle<R>, config: &AppConfig) {
     register_one(app, "folder", &config.shortcuts.folder);
     register_one(app, "credentials", &config.shortcuts.credentials);
     register_one(app, "translation", &config.shortcuts.translation);
+    register_one(app, "port", &config.shortcuts.port);
     sync_seq_shortcut(app, config.clipboard.paste_mode);
 }
 
@@ -245,8 +259,10 @@ fn register_one<R: Runtime>(app: &AppHandle<R>, target: &str, shortcut_str: &str
                     inner.folder = Some(parsed);
                 } else if target == "credentials" {
                     inner.credentials = Some(parsed);
-                } else {
+                } else if target == "translation" {
                     inner.translation = Some(parsed);
+                } else {
+                    inner.port = Some(parsed);
                 }
             }
         }
@@ -270,6 +286,8 @@ pub fn panel_label_for(
         Some(FOLDER_PANEL)
     } else if bindings.credentials == Some(*shortcut) {
         Some(CREDENTIAL_PANEL)
+    } else if bindings.port == Some(*shortcut) {
+        Some(PORT_PANEL)
     } else {
         None
     }

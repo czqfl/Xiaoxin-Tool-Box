@@ -9,10 +9,12 @@ import { ShortcutPage } from "./ShortcutPage";
 import { GeneralPage } from "./GeneralPage";
 import { AboutPage } from "./AboutPage";
 import { TranslationPage } from "./TranslationPage";
+import { ToolbarPage } from "./ToolbarPage";
 import { SettingsErrorBoundary } from "./ErrorBoundary";
 import {
   IconClipboard,
   IconFolder,
+  IconGrid,
   IconInfo,
   IconKeyboard,
   IconSettings,
@@ -26,6 +28,7 @@ type Page =
   | "shortcut"
   | "general"
   | "translation"
+  | "toolbar"
   | "about";
 
 const NAV_ITEMS: Array<{ key: Page; label: string; icon: React.ReactNode }> = [
@@ -33,6 +36,7 @@ const NAV_ITEMS: Array<{ key: Page; label: string; icon: React.ReactNode }> = [
   { key: "folder", label: "文件夹设置", icon: <IconFolder size={15} /> },
   { key: "shortcut", label: "快捷键设置", icon: <IconKeyboard size={15} /> },
   { key: "translation", label: "翻译设置", icon: <IconTranslate size={15} /> },
+  { key: "toolbar", label: "悬浮工具栏", icon: <IconGrid size={15} /> },
   { key: "general", label: "通用设置", icon: <IconSettings size={15} /> },
   { key: "about", label: "关于", icon: <IconInfo size={15} /> },
 ];
@@ -107,6 +111,7 @@ export function SettingsApp() {
         )}
         {page === "general" && <GeneralPage />}
         {page === "translation" && <TranslationPage />}
+        {page === "toolbar" && <ToolbarPage />}
         {page === "about" && <AboutPage />}
       </main>
       </div>

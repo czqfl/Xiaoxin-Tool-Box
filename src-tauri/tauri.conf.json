@@ -84,6 +84,21 @@
         "visible": false
       },
       {
+        "label": "toolbar",
+        "title": "悬浮工具栏",
+        "width": 272,
+        "height": 44,
+        "resizable": false,
+        "fullscreen": false,
+        "maximized": false,
+        "decorations": false,
+        "transparent": false,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false
+      },
+      {
         "label": "translate-popup",
         "title": "翻译",
         "width": 580,

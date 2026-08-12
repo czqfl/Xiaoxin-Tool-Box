@@ -62,6 +62,8 @@ fn apply_panel_acrylic<R: tauri::Runtime>(app: &tauri::AppHandle<R>, acrylic: bo
         panel::CLIPBOARD_PANEL,
         panel::FOLDER_PANEL,
         panel::CREDENTIAL_PANEL,
+        panel::PORT_PANEL,
+        panel::TOOLBAR_WINDOW,
         translate::TRANSLATE_PANEL,
     ] {
         if let Some(w) = app.get_webview_window(label) {
@@ -148,6 +150,11 @@ pub fn run() {
             #[cfg(windows)]
             explorer::start_explorer_watcher(handle.clone());
 
+            // 悬浮工具栏启用时启动即显示（常驻工具条，配置开关可随时收起）
+            if config.toolbar.enabled {
+                let _ = panel::toolbar_set_visible(handle.clone(), true);
+            }
+
             // 非静默启动时直接打开设置窗口
             if !config.general.silent_start {
                 tray::show_settings_window(&handle);
@@ -204,6 +211,8 @@ pub fn run() {
             shortcut::shortcut_capture_begin,
             shortcut::shortcut_capture_end,
             panel::panel_set_always_on_top,
+            panel::panel_toggle,
+            panel::toolbar_set_visible,
             port::port_query,
             port::port_kill,
         ])

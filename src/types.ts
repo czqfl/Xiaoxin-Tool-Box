@@ -89,6 +89,31 @@ export interface ShortcutsConfig {
   credentials: string;
   /** 划词翻译快捷键 */
   translation: string;
+  /** 呼出端口工具面板的快捷键 */
+  port: string;
+}
+
+/** 端口工具面板配置 */
+export interface PortConfig {
+  /** 端口工具面板是否置顶显示（置顶时常驻，失焦不自动隐藏） */
+  always_on_top: boolean;
+}
+
+/** 悬浮工具栏可展示的工具 */
+export type ToolKey =
+  | "clipboard"
+  | "folder"
+  | "credentials"
+  | "translation"
+  | "port"
+  | "settings";
+
+/** 悬浮工具栏配置：常驻小工具条，快速呼出各面板 */
+export interface ToolbarConfig {
+  /** 是否启用（显示）悬浮工具栏 */
+  enabled: boolean;
+  /** 工具栏上显示的工具（顺序即排列顺序） */
+  tools: ToolKey[];
 }
 
 export interface GeneralConfig {
@@ -139,6 +164,10 @@ export interface AppConfig {
   general: GeneralConfig;
   /** 划词翻译配置 */
   translator: TranslatorConfig;
+  /** 端口工具面板配置 */
+  port: PortConfig;
+  /** 悬浮工具栏配置 */
+  toolbar: ToolbarConfig;
   /** 各面板上次关闭位置（窗口标签 -> 屏幕坐标），持久化，呼出时恢复 */
   panel_positions: Record<string, [number, number]>;
 }

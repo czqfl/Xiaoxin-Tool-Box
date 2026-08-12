@@ -12,6 +12,7 @@ const panelLabels = [
   "credential-panel",
   "port-panel",
   "translate-popup",
+  "toolbar",
 ];
 if (panelLabels.includes(getCurrentWindow().label)) {
   document.documentElement.dataset.window = "panel";

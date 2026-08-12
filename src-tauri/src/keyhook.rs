@@ -46,6 +46,8 @@ enum Action {
     ToggleCredential,
     /// 触发划词翻译（Alt 组合热键也由钩子接管，主动吞键）
     ToggleTranslate,
+    /// 呼出/隐藏端口工具面板
+    TogglePort,
     /// 关闭翻译弹窗（系统级兜底：弹窗无焦点时 webview 收不到 Esc）
     CloseTranslate,
     /// 捕获模式：设置页录入 Win 组合键（payload 为虚拟键码）
@@ -72,6 +74,9 @@ static FOLDER_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
 static CREDENTIAL_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
 static TRANSLATE_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
 static TRANSLATE_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
+/// 端口工具面板热键（Win/Alt 组合）
+static PORT_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
+static PORT_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
 /// 翻译弹窗是否打开：打开时按 Esc 系统级关闭（弹窗 webview 可能无焦点收不到键）
 static TRANSLATE_POPUP_OPEN: AtomicBool = AtomicBool::new(false);
 static SENDER: OnceLock<Sender<Action>> = OnceLock::new();
@@ -124,10 +129,12 @@ pub fn set_panel_hotkey(target: &str, is_alt: bool, vk: u16) {
         ("folder", false) => &FOLDER_HOTKEY_VK,
         ("credentials", false) => &CREDENTIAL_HOTKEY_VK,
         ("translation", false) => &TRANSLATE_HOTKEY_VK,
+        ("port", false) => &PORT_HOTKEY_VK,
         ("clipboard", true) => &CLIPBOARD_HOTKEY_ALT_VK,
         ("folder", true) => &FOLDER_HOTKEY_ALT_VK,
         ("credentials", true) => &CREDENTIAL_HOTKEY_ALT_VK,
         ("translation", true) => &TRANSLATE_HOTKEY_ALT_VK,
+        ("port", true) => &PORT_HOTKEY_ALT_VK,
         _ => return,
     };
     slot.store(vk, Ordering::SeqCst);
@@ -244,6 +251,10 @@ fn run_action<R: Runtime>(app: &AppHandle<R>, action: Action) {
             crate::storage::diag_write("[keyhook] translate hotkey pressed");
             crate::translate::trigger_selection_translate(app)
         }
+        Action::TogglePort => {
+            crate::storage::diag_write("[keyhook] port hotkey pressed");
+            crate::panel::toggle_panel(app, crate::panel::PORT_PANEL)
+        }
         Action::CloseTranslate => {
             // 系统级关闭翻译弹窗（webview 无焦点时前端收不到 Esc 的兜底）
             set_translate_popup_open(false);
@@ -349,6 +360,8 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                 Some(Action::ToggleCredential)
             } else if vk == TRANSLATE_HOTKEY_VK.load(Ordering::SeqCst) as u32 {
                 Some(Action::ToggleTranslate)
+            } else if vk == PORT_HOTKEY_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::TogglePort)
             } else {
                 None
             };
@@ -371,11 +384,12 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
             // 诊断：Alt 按住时每次按键都记录状态（低频），用于定位
             // "Alt 组合不触发"——能区分 alt_held 未置位 / 槽位未注册 / 匹配失败
             crate::storage::diag_write(&format!(
-                "[keyhook] alt+key vk=0x{vk:X} slots=cb:0x{:X}/fd:0x{:X}/cr:0x{:X}/tr:0x{:X}",
+                "[keyhook] alt+key vk=0x{vk:X} slots=cb:0x{:X}/fd:0x{:X}/cr:0x{:X}/tr:0x{:X}/pt:0x{:X}",
                 CLIPBOARD_HOTKEY_ALT_VK.load(Ordering::SeqCst),
                 FOLDER_HOTKEY_ALT_VK.load(Ordering::SeqCst),
                 CREDENTIAL_HOTKEY_ALT_VK.load(Ordering::SeqCst),
                 TRANSLATE_HOTKEY_ALT_VK.load(Ordering::SeqCst),
+                PORT_HOTKEY_ALT_VK.load(Ordering::SeqCst),
             ));
             let action = if vk == CLIPBOARD_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
                 Some(Action::ToggleClipboard)
@@ -385,6 +399,8 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                 Some(Action::ToggleCredential)
             } else if vk == TRANSLATE_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
                 Some(Action::ToggleTranslate)
+            } else if vk == PORT_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::TogglePort)
             } else {
                 None
             };

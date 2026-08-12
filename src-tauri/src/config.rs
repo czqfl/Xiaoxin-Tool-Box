@@ -115,6 +115,8 @@ pub struct ShortcutsConfig {
     pub credentials: String,
     /// 划词翻译
     pub translation: String,
+    /// 呼出端口工具面板
+    pub port: String,
 }
 
 impl Default for ShortcutsConfig {
@@ -126,6 +128,50 @@ impl Default for ShortcutsConfig {
             // 默认 Alt+S：单个功能键+字母（用户偏好）。纯 Alt 组合由键盘钩子
             // 主动吞键（不依赖 RegisterHotKey），不会泄漏进编辑器替换选中文字。
             translation: "Alt+S".into(),
+            // 端口工具：Alt+P（Port）
+            port: "Alt+P".into(),
+        }
+    }
+}
+
+/// 端口工具面板配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PortConfig {
+    /// 端口工具面板是否置顶显示（置顶时常驻，失焦不自动隐藏）
+    pub always_on_top: bool,
+}
+
+impl Default for PortConfig {
+    fn default() -> Self {
+        Self {
+            always_on_top: true,
+        }
+    }
+}
+
+/// 悬浮工具栏配置：常驻小工具条，快速呼出各面板
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ToolbarConfig {
+    /// 是否启用（显示）悬浮工具栏
+    pub enabled: bool,
+    /// 工具栏上显示的工具图标（顺序即排列顺序）
+    pub tools: Vec<String>,
+}
+
+impl Default for ToolbarConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            tools: vec![
+                "clipboard".into(),
+                "folder".into(),
+                "credentials".into(),
+                "translation".into(),
+                "port".into(),
+                "settings".into(),
+            ],
         }
     }
 }
@@ -224,6 +270,10 @@ pub struct AppConfig {
     pub general: GeneralConfig,
     /// 划词翻译配置（含各服务商凭据，全部持久化在 config.json）
     pub translator: TranslatorConfig,
+    /// 端口工具面板配置
+    pub port: PortConfig,
+    /// 悬浮工具栏配置
+    pub toolbar: ToolbarConfig,
     /// 各面板上次关闭时的窗口位置（标签 -> 屏幕坐标），下次呼出恢复（记忆位置）
     pub panel_positions: std::collections::HashMap<String, (i32, i32)>,
 }
@@ -253,6 +303,8 @@ pub fn config_save(
         crate::panel::CLIPBOARD_PANEL,
         crate::panel::FOLDER_PANEL,
         crate::panel::CREDENTIAL_PANEL,
+        crate::panel::PORT_PANEL,
+        crate::panel::TOOLBAR_WINDOW,
     ] {
         if let Some(w) = app.get_webview_window(label) {
             crate::apply_panel_effects_for(&w, config.general.acrylic_enabled);

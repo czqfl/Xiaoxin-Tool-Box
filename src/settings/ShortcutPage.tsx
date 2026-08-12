@@ -10,7 +10,7 @@ import {
 import { EVT_SHORTCUT_WIN_CAPTURED, onEvent } from "../core/events";
 import { SettingGroup, SettingRow } from "./components";
 
-type Target = "clipboard" | "folder" | "credentials" | "translation";
+type Target = "clipboard" | "folder" | "credentials" | "translation" | "port";
 
 /** 将键盘事件转换为 global-shortcut 可解析的组合键字符串，如 "Ctrl+Alt+C" */
 function comboFromEvent(e: KeyboardEvent): string | null {
@@ -138,6 +138,7 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
     folder: idleRow,
     credentials: idleRow,
     translation: idleRow,
+    port: idleRow,
   });
   const [saving, setSaving] = useState<Target | null>(null);
 
@@ -150,7 +151,7 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
   const saveOne = async (target: Target) => {
     const combo = draft[target];
     const others: Target[] = (
-      ["clipboard", "folder", "credentials", "translation"] as Target[]
+      ["clipboard", "folder", "credentials", "translation", "port"] as Target[]
     ).filter((t) => t !== target);
     if (others.some((t) => combo === draft[t])) {
       setRows((r) => ({
@@ -233,6 +234,11 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
           "translation",
           "划词翻译",
           "选中文本后按下快捷键，自动复制并翻译，例如 Alt+S（单个功能键+字母即可）"
+        )}
+        {renderRow(
+          "port",
+          "呼出端口工具面板",
+          "点击快捷键后按下新组合，例如 Alt+P（查询端口占用 / 一键杀进程）"
         )}
       </SettingGroup>
 
