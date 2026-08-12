@@ -96,8 +96,10 @@ pub const ALL_PANELS: &[&str] = &[
 /// 工具栏呼出面板：工具栏前端点击图标呼出对应面板。
 /// "settings" 打开设置窗口；"translation" 触发划词翻译（有选中带出原文，
 /// 无选中打开空翻译面板）。
-/// 【关键】面板呼出与 keyhook 快捷键**完全同路径**（同函数、同步调用）——
-/// 快捷键能开则这里必能开；不引入任何独立逻辑，避免"快捷键行、鼠标不行"。
+/// 【关键】前端传的是短名（clipboard/folder/credentials/port），必须映射到
+/// 窗口标签（clipboard-panel/...）再调 toggle_panel——此前直接用短名查
+/// ALL_PANELS 永远匹配不上，返回"未知面板"，正是"工具栏点不开"的全部原因
+/// （翻译/设置恰好有硬编码分支所以能开；快捷键传完整标签所以能开）。
 #[tauri::command]
 pub fn panel_toggle(app: tauri::AppHandle, label: String) -> Result<(), String> {
     if label == "settings" {
@@ -108,10 +110,14 @@ pub fn panel_toggle(app: tauri::AppHandle, label: String) -> Result<(), String> 
         crate::translate::trigger_selection_translate(&app);
         return Ok(());
     }
-    if !ALL_PANELS.contains(&label.as_str()) {
-        return Err("未知面板".into());
-    }
-    crate::panel::toggle_panel(&app, &label);
+    let full = match label.as_str() {
+        "clipboard" => CLIPBOARD_PANEL,
+        "folder" => FOLDER_PANEL,
+        "credentials" => CREDENTIAL_PANEL,
+        "port" => PORT_PANEL,
+        _ => return Err("未知面板".into()),
+    };
+    crate::panel::toggle_panel(&app, full);
     Ok(())
 }
 
