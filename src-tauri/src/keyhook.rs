@@ -336,7 +336,9 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
         // 避免误吞 Alt+Ctrl+X / Alt+Shift+X 等输入法或应用快捷键）。
         // RegisterHotKey 对纯 Alt 组合在部分应用吞键不彻底（主键泄漏进编辑器
         // 替换选中文字），这里由钩子主动吞掉 keydown/keyup 根治。
-        if alt_held && !ctrl_held() && !shift_held() {
+        // 捕获模式下放行：设置页录入期间即使该 Alt 组合已是注册热键，
+        // 也必须到达前端录入框，否则"想改回/重新设置 Alt+字母"会录不进去。
+        if !CAPTURE_MODE.load(Ordering::SeqCst) && alt_held && !ctrl_held() && !shift_held() {
             let action = if vk == CLIPBOARD_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
                 Some(Action::ToggleClipboard)
             } else if vk == FOLDER_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {

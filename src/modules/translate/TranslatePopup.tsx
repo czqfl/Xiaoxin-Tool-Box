@@ -131,12 +131,12 @@ export function TranslatePopup() {
         getCurrentWindow().setFocus().catch(() => undefined);
       }
     };
-    // 鼠标按下：若落在拖动区，先置位拖动守卫（原生拖动会瞬时失焦，期间不许隐藏）。
+    // 鼠标按下：若落在头部（拖动区），先置位拖动守卫（原生拖动会瞬时失焦，期间不许隐藏）。
     // 注意守卫必须在任何 return 之前置位——否则"翻译中"点头部时守卫没生效，
     // 一旦翻译超过 lastStartAt 守卫窗口，点头部就会把面板关掉。
     const onMouseDown = (e: Event) => {
       const t = e.target as HTMLElement | null;
-      if (t?.closest?.("[data-tauri-drag-region]")) {
+      if (t?.closest?.(".translate-head")) {
         dragGuardRef.current = true;
         return;
       }
@@ -218,8 +218,17 @@ export function TranslatePopup() {
   return (
     <div className="panel">
       <div className="panel-shell translate-shell">
-        {/* 顶部：标题 + 语言选择 + 翻译按钮（紧凑排列，回车即可翻译） */}
-        <div className="translate-head" data-tauri-drag-region>
+        {/* 顶部：标题 + 语言选择 + 翻译按钮（紧凑排列，回车即可翻译）。
+            头部空白处可拖动窗口（JS 手柄，自动跳过按钮/下拉等交互元素） */}
+        <div
+          className="translate-head"
+          onMouseDown={(e) => {
+            const t = e.target as HTMLElement;
+            if (t.closest("button, select, input, textarea")) return;
+            dragGuardRef.current = true;
+            getCurrentWindow().startDragging().catch(() => undefined);
+          }}
+        >
           <span className="translate-title">翻译</span>
           <div className="translate-langs">
             <select

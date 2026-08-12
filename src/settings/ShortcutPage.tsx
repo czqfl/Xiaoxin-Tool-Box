@@ -232,14 +232,14 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
         {renderRow(
           "translation",
           "划词翻译",
-          "选中文本后按下快捷键，自动复制并翻译，例如 Ctrl+Alt+E（避免与截图工具冲突）"
+          "选中文本后按下快捷键，自动复制并翻译，例如 Alt+S（单个功能键+字母即可）"
         )}
       </SettingGroup>
 
       <div className="shortcut-hint">
         支持 Ctrl / Alt / Shift / Win（Super）与字母、数字、F 键的组合；
-        Win 组合由应用内核接管，保存后会替代其原有系统功能（如 Win+V
-        剪贴板历史）；若提示被占用，说明该组合已被系统或其他应用注册。
+        Win 与纯 Alt 组合由应用内核接管，保存后会替代其原有系统功能（如
+        Win+V 剪贴板历史）；若提示被占用，说明该组合已被系统或其他应用注册。
       </div>
     </div>
   );
