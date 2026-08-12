@@ -251,23 +251,10 @@ fn ensure_panel_window<R: Runtime>(
 
 /// 切换面板：已显示【且持有焦点】则隐藏；否则呼出（恢复上次位置/居中）+ 可靠置前。
 /// 关闭判定用「可见且聚焦」——置顶常驻面板（always_on_top）失焦不隐藏，可能一直
-/// 可见但被其它窗口盖住；此时再触发应把面板【带回前台】而不是误判"已打开"而隐藏，
-/// 这正是"点工具栏图标面板出不来"的根因（面板开着却被 toggle 成关闭）。
+/// 可见但被其它窗口盖住；此时再触发应把面板【带回前台】而不是误判"已打开"而隐藏。
+/// 【互不影响】不再隐藏其他面板/设置窗口——各面板独立开合（用户需求：
+/// 打开 A 时 B 保持，再点一次自己的图标才关闭自己）。
 pub fn toggle_panel<R: Runtime>(app: &AppHandle<R>, label: &str) {
-    // 同一时间只展示一个面板：先隐藏其它所有面板
-    for other in ALL_PANELS {
-        if *other != label {
-            if let Some(w) = app.get_webview_window(other) {
-                let _ = w.hide();
-            }
-        }
-    }
-    // 设置窗口一并收起：它与面板同为置顶窗口，若仍显示会被面板盖住，
-    // 且会让托盘左键的可见性判断失真（见 tray.rs toggle_settings_window）
-    if let Some(w) = app.get_webview_window("settings") {
-        let _ = w.hide();
-    }
-
     // 窗口可能已被销毁（旧版本点 X）→ 自动重建，避免"以后都打不开"
     let Some(window) = ensure_panel_window(app, label) else {
         return;

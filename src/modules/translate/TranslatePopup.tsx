@@ -1,7 +1,7 @@
 /** 翻译面板（双向翻译）：上方原文可编辑（Enter 正向翻译），下方译文可编辑
  *  （Enter 反向翻译回原文），顶部语言选择 + 翻译按钮，划词结果经事件推送。 */
 import { useEffect, useRef, useState } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getAllWindows, getCurrentWindow } from "@tauri-apps/api/window";
 import type { TranslateResult } from "../../types";
 import { onEvent } from "../../core/events";
 import { hideCurrentWindow } from "../../core/usePanel";
@@ -115,12 +115,25 @@ export function TranslatePopup() {
     const focusUn = getCurrentWindow().onFocusChanged(({ payload: focused }) => {
       const prev = wasFocused;
       wasFocused = focused;
-      if (prev && !focused) {
-        const sinceStart = Date.now() - lastStartAt.current;
-        if (dragGuardRef.current || sinceStart < 1000) return;
-        void diagLog("translate hide: focus lost to other window");
-        hideCurrentWindow();
-      }
+      if (!prev || focused) return;
+      const sinceStart = Date.now() - lastStartAt.current;
+      if (dragGuardRef.current || sinceStart < 1000) return;
+      // 【互不影响】本应用内窗口之间切换焦点（如点开剪贴板面板）不关闭——
+      // 仅当焦点离开整个应用（没有任何本应用窗口持有焦点）才关闭。
+      window.setTimeout(() => {
+        void getAllWindows()
+          .then((wins) => Promise.all(wins.map((w) => w.isFocused())))
+          .then((states) => {
+            if (!states.some(Boolean)) {
+              void diagLog("translate hide: focus left app");
+              hideCurrentWindow();
+            }
+          })
+          .catch(() => {
+            void diagLog("translate hide: focus lost to other window");
+            hideCurrentWindow();
+          });
+      }, 80);
     });
     cleanup.push(() => focusUn.then((u) => u()));
     // 鼠标移入即补一次聚焦：后端置前偶被前台锁拒绝时，用户一交互就能拿到焦点。

@@ -1,6 +1,6 @@
 /** 悬浮面板公共行为：加载配置与主题、响应配置广播、失焦自动隐藏 */
 import { useEffect, useRef } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getAllWindows, getCurrentWindow } from "@tauri-apps/api/window";
 import { useConfigStore } from "../stores/configStore";
 import { EVT_CONFIG_CHANGED, onEvent } from "./events";
 import type { AppConfig } from "../types";
@@ -65,7 +65,9 @@ export function usePanelCommon(stayVisible = false) {
     // 程序）"才隐藏，【不要用 DOM window blur】——点击/拖动 data-tauri-drag-region
     // 头部触发原生拖动时，WebView2 会瞬时失焦触发 blur，误把面板关掉（这正是
     // "一点击拖动区域面板就关闭"的根因）。窗口级焦点在内部点击/拖动时不会改变，
-    // 仅当焦点离开本窗口（点其他程序）才隐藏；置顶常驻与原生对话框期间例外。
+    // 仅当焦点离开本窗口才隐藏；置顶常驻与原生对话框期间例外。
+    // 【互不影响】本应用内窗口之间切换焦点（如点开另一个面板）不隐藏——
+    // 仅当焦点离开整个应用（没有任何本应用窗口持有焦点）才隐藏。
     let wasFocused = false;
     const focusUn = getCurrentWindow().onFocusChanged(({ payload: focused }) => {
       const prev = wasFocused;
@@ -73,7 +75,15 @@ export function usePanelCommon(stayVisible = false) {
       if (!prev || focused) return;
       if (nativeDialogOpen || stayVisible) return;
       if (dragGuardRef.current) return;
-      hideCurrentWindow();
+      // 延时再查：目标窗口刚夺焦时 isFocused 可能尚未刷新（IPC 异步竞态）
+      window.setTimeout(() => {
+        void getAllWindows()
+          .then((wins) => Promise.all(wins.map((w) => w.isFocused())))
+          .then((states) => {
+            if (!states.some(Boolean)) hideCurrentWindow();
+          })
+          .catch(() => hideCurrentWindow());
+      }, 80);
     });
     cleanup.push(() => focusUn.then((un) => un()));
 

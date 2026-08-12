@@ -50,16 +50,11 @@ fn ensure_settings_window<R: Runtime>(app: &AppHandle<R>) -> Option<tauri::Webvi
 }
 
 /// 显示并聚焦设置窗口。
-/// 呼出前先收起所有悬浮面板（面板 alwaysOnTop 会盖住设置窗口）。
+/// 各面板互不影响（用户需求），设置窗口不再收起已开面板。
 /// 置前分两阶段：先 show（同步 SetWindowPos 置顶），再延时到后台线程置前聚焦——
 /// 后台 SetForegroundWindow 常被前台锁拒绝，延时到"用户输入窗口期"后调用成功率更高；
 /// 若仍失败（is_focused=false）再补一次。彻底避免"窗口可见却未置前/无焦点"的打不开。
 pub fn show_settings_window<R: Runtime>(app: &AppHandle<R>) {
-    for label in crate::panel::ALL_PANELS {
-        if let Some(w) = app.get_webview_window(label) {
-            let _ = w.hide();
-        }
-    }
     // 窗口可能已被销毁（旧版本点 X）→ 自动重建，避免"以后都打不开"
     let Some(w) = ensure_settings_window(app) else {
         crate::storage::diag_write("show_settings_window: settings window unavailable");
