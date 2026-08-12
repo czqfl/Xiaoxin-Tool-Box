@@ -30,13 +30,25 @@ export function TranslatePopup() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   /** loading 镜像（供事件回调读取最新值，避免闭包捕获旧值） */
   const loadingRef = useRef(true);
+  /** 拖动区按下守卫：点击/拖动 data-tauri-drag-region 头部会触发原生窗口拖动，
+   *  期间 WebView2 瞬时失焦；该窗口内不隐藏面板、也不抢焦点，避免"点头部就关掉"。 */
+  const dragGuardRef = useRef(false);
+  /** 最近一次呼出时间戳：再次呼出时 reveal_popup 会让已聚焦的窗口短暂失焦，
+   *  造成"刚弹出就被关"的误判，故呼出后一小段时间内忽略失焦隐藏。 */
+  const lastStartAt = useRef(0);
 
   // 划词触发的结果：填充原文与译文（保留用户已选的源/目标语言，仅更新内容）
   const applyResult = (r: TranslateResult) => {
+    if (r.text) setText(r.text);
+    // translation 为空 = 后端只是先把【原文】就位（译文仍在路上），
+    // 此时保持"翻译中"，不要当成一次完成的结果渲染。
+    if (!r.translation) {
+      setResult(null);
+      return;
+    }
     setResult(r);
     loadingRef.current = false;
     setLoading(false);
-    if (r.text) setText(r.text);
   };
 
   useEffect(() => {
@@ -49,28 +61,74 @@ export function TranslatePopup() {
     onEvent<TranslateResult>(EVT_RESULT, applyResult).then((un) =>
       cleanup.push(un)
     );
-    // 呼出进入"翻译中"加载态（复制/翻译期间显示，结果到达后解除）
-    onEvent("translate://start", () => {
+    // 呼出：后端已完成复制，事件带出原文；进入"翻译中"等译文到达
+    onEvent<{ text?: string }>("translate://start", (p) => {
       loadingRef.current = true;
       setLoading(true);
+      setResult(null);
+      // 立刻显示划词得到的原文（不再等译文，也不会残留上一次内容）
+      setText(p?.text ?? "");
+      lastStartAt.current = Date.now();
+      // 兜底：若 14s 内结果仍未到达（如网络异常/超时），强制解除"翻译中"，
+      // 避免界面卡死。后端 reqwest 已带 12s 超时，正常情况下此兜底不应触发。
+      window.setTimeout(() => {
+        if (loadingRef.current) {
+          loadingRef.current = false;
+          setLoading(false);
+        }
+      }, 14000);
     }).then((un) => cleanup.push(un));
-    // 失焦自动隐藏（与其它面板一致）
-    const onBlur = () => hideCurrentWindow();
-    window.addEventListener("blur", onBlur);
-    cleanup.push(() => window.removeEventListener("blur", onBlur));
-    // 鼠标移入/点击即请求聚焦（与面板一致）：后台置前偶尔被前台锁拒绝时，
-    // 用户一交互就补一次 setFocus。但【复制/翻译进行中(loading)绝不抢焦点】，
-    // 否则鼠标移到刚弹出的窗口上会抢走源应用焦点，导致 Ctrl+C 复制失败。
-    const onMouseActivate = () => {
-      if (loadingRef.current) return;
+    // 失焦自动隐藏：用窗口级 onFocusChanged 判断"焦点真正离开本窗口（点到别的程序）"
+    // 才隐藏，不要用 DOM window blur——点击 data-tauri-drag-region 头部触发原生拖动时，
+    // WebView2 会瞬时失焦并触发 blur，误把面板关掉（这正是"一点击就消失"的根因）。
+    // 窗口级焦点在内部点击/拖动时不会改变，故不会误触发；仅当焦点离开本窗口才隐藏。
+    // 双守卫避免误关：
+    //   1) dragGuardRef —— 点/拖头部期间（原生拖动导致瞬时失焦）不关；
+    //   2) lastStartAt —— 刚呼出（reveal_popup 让已聚焦窗口短暂失焦）的 1s 内不关；
+    //   3) prev —— reveal_popup 以未聚焦方式显示时不关。
+    let wasFocused = false;
+    const focusUn = getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+      const prev = wasFocused;
+      wasFocused = focused;
+      if (prev && !focused) {
+        const sinceStart = Date.now() - lastStartAt.current;
+        if (dragGuardRef.current || sinceStart < 1000) return;
+        void diagLog("translate hide: focus lost to other window");
+        hideCurrentWindow();
+      }
+    });
+    cleanup.push(() => focusUn.then((u) => u()));
+    // 鼠标移入即补一次聚焦：后端置前偶被前台锁拒绝时，用户一交互就能拿到焦点。
+    // 复制在面板显示【之前】就已完成，所以这里不再需要"loading 期间不抢焦点"，
+    // 抢焦点绝不会再影响复制。
+    const requestFocus = () => {
       if (!document.hasFocus()) {
         getCurrentWindow().setFocus().catch(() => undefined);
       }
     };
-    document.addEventListener("mouseover", onMouseActivate);
-    document.addEventListener("mousedown", onMouseActivate);
-    cleanup.push(() => document.removeEventListener("mouseover", onMouseActivate));
-    cleanup.push(() => document.removeEventListener("mousedown", onMouseActivate));
+    // 鼠标按下：若落在拖动区，先置位拖动守卫（原生拖动会瞬时失焦，期间不许隐藏）。
+    // 注意守卫必须在任何 return 之前置位——否则"翻译中"点头部时守卫没生效，
+    // 一旦翻译超过 lastStartAt 守卫窗口，点头部就会把面板关掉。
+    const onMouseDown = (e: Event) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.("[data-tauri-drag-region]")) {
+        dragGuardRef.current = true;
+        return;
+      }
+      requestFocus();
+    };
+    document.addEventListener("mouseover", requestFocus);
+    document.addEventListener("mousedown", onMouseDown);
+    cleanup.push(() => document.removeEventListener("mouseover", requestFocus));
+    cleanup.push(() => document.removeEventListener("mousedown", onMouseDown));
+    // 松开后短暂延时解除拖动守卫（覆盖原生拖动期间/之后的瞬时失焦）
+    const onDocMouseUp = () => {
+      window.setTimeout(() => {
+        dragGuardRef.current = false;
+      }, 250);
+    };
+    document.addEventListener("mouseup", onDocMouseUp);
+    cleanup.push(() => document.removeEventListener("mouseup", onDocMouseUp));
     // Esc 关闭（窗口有焦点后生效）
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
