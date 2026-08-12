@@ -1,5 +1,6 @@
 /** 设置中心：左侧边栏导航 + 右侧内容区 */
 import { useEffect, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useConfigStore } from "../stores/configStore";
 import { EVT_SHORTCUT_FAILED, onEvent } from "../core/events";
 import { ClipboardPage } from "./ClipboardPage";
@@ -43,8 +44,15 @@ export function SettingsApp() {
 
   useEffect(() => {
     load();
-    // 启动时热键注册失败：跳转快捷键页并提示
+    // 兜底：窗口 hide/show 切换后偶发"渲染了但状态未就绪"（表现为打不开/空白），
+    // 每次获得焦点时若配置尚未加载则补一次加载
     const cleanup: Array<() => void> = [];
+    getCurrentWindow()
+      .onFocusChanged(({ payload: focused }) => {
+        if (focused && !useConfigStore.getState().loaded) void load();
+      })
+      .then((un) => cleanup.push(un));
+    // 启动时热键注册失败：跳转快捷键页并提示
     onEvent<string>(EVT_SHORTCUT_FAILED, (target) => {
       setShortcutFailed(target === "clipboard" ? "呼出剪贴板" : "呼出文件夹");
       setPage("shortcut");

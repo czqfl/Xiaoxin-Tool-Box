@@ -7,33 +7,57 @@ use tauri::{
 use windows::Win32::Foundation::HWND;
 
 /// 显示并聚焦设置窗口。
-/// 呼出前先收起所有悬浮面板：面板默认 alwaysOnTop，若正显示在前面会盖住
-/// 设置窗口，表现为"偶尔打不开设置"；随后用同步置顶 + 可靠置前让设置窗口
-/// 始终位于最上层。不用 Tauri 异步 set_always_on_top——它与 force_foreground
-/// 的 Win32 样式读取存在时序差，可能把设置窗口降成普通窗口被其它窗口盖住。
+/// 呼出前先收起所有悬浮面板（面板 alwaysOnTop 会盖住设置窗口）。
+/// 置前分两阶段：先 show（同步 SetWindowPos 置顶），再延时到后台线程置前聚焦——
+/// 后台 SetForegroundWindow 常被前台锁拒绝，延时到"用户输入窗口期"后调用成功率更高；
+/// 若仍失败（is_focused=false）再补一次。彻底避免"窗口可见却未置前/无焦点"的打不开。
 pub fn show_settings_window<R: Runtime>(app: &AppHandle<R>) {
     for label in crate::panel::ALL_PANELS {
         if let Some(w) = app.get_webview_window(label) {
             let _ = w.hide();
         }
     }
-    if let Some(w) = app.get_webview_window("settings") {
-        let _ = w.unminimize();
-        let _ = w.show();
-        #[cfg(windows)]
-        {
-            use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-            if let Ok(handle) = w.window_handle() {
-                if let RawWindowHandle::Win32(h) = handle.as_raw() {
-                    let hwnd = HWND(h.hwnd.get() as *mut _);
-                    // 同步置顶 + 置前：SetWindowPos(TOPMOST) 立即生效，不依赖异步 IPC
-                    crate::acrylic::force_topmost_foreground(hwnd);
+    let Some(w) = app.get_webview_window("settings") else {
+        return;
+    };
+    // 确保置顶样式在位（同步生效），再显示
+    let _ = w.set_always_on_top(true);
+    let _ = w.unminimize();
+    let _ = w.show();
+
+    // 后台线程：延时后置前聚焦 + 失败兜底重试（WebviewWindow 可跨线程调用）
+    let w2 = w.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(120));
+        let hwnd_of = |win: &tauri::WebviewWindow<R>| -> Option<HWND> {
+            #[cfg(windows)]
+            {
+                use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+                if let Ok(handle) = win.window_handle() {
+                    if let RawWindowHandle::Win32(h) = handle.as_raw() {
+                        return Some(HWND(h.hwnd.get() as *mut _));
+                    }
                 }
             }
+            #[cfg(not(windows))]
+            {
+                let _ = win;
+            }
+            None
+        };
+        if let Some(hwnd) = hwnd_of(&w2) {
+            crate::acrylic::force_topmost_foreground(hwnd);
         }
-        #[cfg(not(windows))]
-        let _ = w.set_focus();
-    }
+        let _ = w2.set_focus();
+        // 兜底：若仍未获得焦点（前台锁再次拒绝），稍后再补一次置前
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        if !w2.is_focused().unwrap_or(false) {
+            if let Some(hwnd) = hwnd_of(&w2) {
+                crate::acrylic::force_topmost_foreground(hwnd);
+            }
+            let _ = w2.set_focus();
+        }
+    });
 }
 
 /// 切换设置窗口显隐（托盘左键）。
