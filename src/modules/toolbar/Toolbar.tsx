@@ -9,6 +9,7 @@ import { LogicalSize } from "@tauri-apps/api/dpi";
 import type { AppConfig, ToolKey } from "../../types";
 import { panelToggle } from "../../core/tauri";
 import { EVT_CONFIG_CHANGED, onEvent } from "../../core/events";
+import { diagLog } from "../../core/tauri";
 import { useConfigStore } from "../../stores/configStore";
 import {
   IconClipboard,
@@ -58,8 +59,9 @@ export const TOOLS: Record<ToolKey, { label: string; color: string; icon: React.
 /** 可用工具列表（设置页勾选用） */
 export const TOOL_KEYS = Object.keys(TOOLS) as ToolKey[];
 
-/** 拖动判定阈值（px）：超过视为拖动窗口，否则视为点击 */
-const DRAG_THRESHOLD = 6;
+/** 拖动判定阈值（px）：超过视为拖动窗口，否则视为点击。
+ *  阈值适当放宽，避免点击时轻微手抖被误判成拖动（"点了没反应"）。 */
+const DRAG_THRESHOLD = 10;
 
 export function Toolbar() {
   const config = useConfigStore((s) => s.config);
@@ -140,6 +142,7 @@ export function Toolbar() {
         // 未拖动 = 点击：手动触发呼出（不走 click 事件，避免拖动误触/事件丢失）
         if (p && !p.dragged && p.key) {
           e.preventDefault();
+          void diagLog(`[toolbar] click ${p.key}`);
           void panelToggle(p.key);
         }
       }}

@@ -41,6 +41,14 @@ fn show_and_activate<R: Runtime>(window: &WebviewWindow<R>) {
         crate::acrylic::force_foreground_robust(hwnd);
     }
     let _ = window.set_focus();
+    // 仍未聚焦（极端前台锁/被置顶窗口压住）→ 同步强制置顶 + 置前
+    // （force_topmost_foreground 为设置窗口验证过的方案，同步生效）
+    if !window.is_focused().unwrap_or(false) {
+        if let Some(hwnd) = hwnd_of(window) {
+            crate::acrylic::force_topmost_foreground(hwnd);
+        }
+        let _ = window.set_focus();
+    }
     // 前台锁偶发拒绝时补一次（与翻译弹窗一致）
     let w2 = window.clone();
     std::thread::spawn(move || {
@@ -85,50 +93,15 @@ pub const ALL_PANELS: &[&str] = &[
     PORT_PANEL,
 ];
 
-/// 总是呼出面板并置前（工具栏专用）：不判断可见性——面板没开就打开，
-/// 开着被盖住就带回前台，开着且聚焦也保持。工具栏是"快速入口"，
-/// 不承担开关语义（关闭用 Esc / 点外部 / 快捷键）。
-pub fn show_panel_foreground<R: Runtime>(app: &AppHandle<R>, label: &str) {
-    // 同一时间只展示一个面板：先隐藏其它所有面板
-    for other in ALL_PANELS {
-        if *other != label {
-            if let Some(w) = app.get_webview_window(other) {
-                let _ = w.hide();
-            }
-        }
-    }
-    if let Some(w) = app.get_webview_window("settings") {
-        let _ = w.hide();
-    }
-
-    // 窗口可能已被销毁 → 自动重建，避免"以后都打不开"
-    let Some(window) = ensure_panel_window(app, label) else {
-        crate::storage::diag_write(&format!("show_panel_foreground: {label} unavailable"));
-        return;
-    };
-    // 优先恢复上次位置；记录缺失或位置失效时回退居中
-    if !restore_position(app, &window, label) {
-        position_near_cursor(app, &window);
-    }
-    show_and_activate(&window);
-    refresh_panel_acrylic(app, &window);
-    crate::storage::diag_write(&format!(
-        "[show_panel_foreground] {label} shown visible={:?}",
-        window.is_visible().unwrap_or(false)
-    ));
-}
-
-/// 工具栏呼出面板：工具栏前端点击图标呼出对应面板（总是置前显示，
-/// 不关闭——面板被盖住时点击会带回前台）。
+/// 工具栏呼出面板：工具栏前端点击图标呼出对应面板。
 /// "settings" 打开设置窗口；"translation" 触发划词翻译（有选中带出原文，
 /// 无选中打开空翻译面板）。
-/// 在后台线程执行窗口显示：与 keyhook 快捷键路径同构，且工具栏点击经 IPC
-/// 往返已超出前台锁输入窗口，同步 force_foreground 会被系统拒绝——后台
-/// 线程 + force_foreground_robust 不受输入窗口限制（翻译弹窗同款方案）。
+/// 【关键】面板呼出与 keyhook 快捷键**完全同路径**（同函数、同步调用）——
+/// 快捷键能开则这里必能开；不引入任何独立逻辑，避免"快捷键行、鼠标不行"。
 #[tauri::command]
 pub fn panel_toggle(app: tauri::AppHandle, label: String) -> Result<(), String> {
     if label == "settings" {
-        std::thread::spawn(move || crate::tray::show_settings_window(&app));
+        crate::tray::show_settings_window(&app);
         return Ok(());
     }
     if label == "translation" {
@@ -138,7 +111,7 @@ pub fn panel_toggle(app: tauri::AppHandle, label: String) -> Result<(), String> 
     if !ALL_PANELS.contains(&label.as_str()) {
         return Err("未知面板".into());
     }
-    std::thread::spawn(move || show_panel_foreground(&app, &label));
+    crate::panel::toggle_panel(&app, &label);
     Ok(())
 }
 
