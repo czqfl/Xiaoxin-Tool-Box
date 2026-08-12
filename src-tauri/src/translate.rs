@@ -27,14 +27,18 @@ pub struct TranslateResult {
     pub provider: String,
 }
 
-/// 翻译命令（设置页"测试"与前端直接调用）
+/// 翻译命令（翻译面板手动翻译 / 设置页测试）。from/to 缺省时用配置（源默认 auto 自动检测）。
 #[tauri::command]
 pub async fn translate(
     text: String,
     config: State<'_, ConfigState>,
+    from: Option<String>,
+    to: Option<String>,
 ) -> Result<TranslateResult, String> {
     let cfg = config.0.lock().unwrap().translator.clone();
-    translate_text(&text, &cfg).await
+    let from = from.unwrap_or_else(|| "auto".to_string());
+    let to = to.unwrap_or(cfg.target_lang.clone());
+    translate_text(&text, &from, &to, &cfg).await
 }
 
 /// 弹窗挂载时拉取最近一次结果
@@ -53,20 +57,24 @@ pub fn trigger_selection_translate<R: Runtime>(app: &AppHandle<R>) {
             .ok()
             .and_then(|mut c| c.get_text().ok());
 
-        // 2. 模拟 Ctrl+C 复制当前选中文本
-        #[cfg(windows)]
-        crate::keyhook::send_ctrl_c();
-
-        // 3. 等目标应用完成复制
-        std::thread::sleep(std::time::Duration::from_millis(180));
-
-        // 4. 读取选中文本
-        let selected = arboard::Clipboard::new()
-            .ok()
-            .and_then(|mut c| c.get_text().ok())
-            .unwrap_or_default()
-            .trim()
-            .to_string();
+        // 2-4. 模拟 Ctrl+C 复制选中文本并读取，最多重试 3 次：
+        //      有些应用复制异步完成/较慢，一次读不到不代表没选中；
+        //      通过"剪贴板内容是否变化"判断复制是否真的生效。
+        let mut selected = String::new();
+        for _ in 0..3 {
+            #[cfg(windows)]
+            crate::keyhook::send_ctrl_c();
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            let cur = arboard::Clipboard::new()
+                .ok()
+                .and_then(|mut c| c.get_text().ok())
+                .unwrap_or_default();
+            // 内容相对原剪贴板发生了变化 → 复制成功
+            if cur != prev.clone().unwrap_or_default() {
+                selected = cur.trim().to_string();
+                break;
+            }
+        }
 
         // 5. 恢复原剪贴板（SUPPRESS_WATCH 置位，不触发历史记录）
         if let Some(prev_text) = &prev {
@@ -77,10 +85,19 @@ pub fn trigger_selection_translate<R: Runtime>(app: &AppHandle<R>) {
         }
 
         if selected.is_empty() {
-            // 没有选中文本：隐藏弹窗（若正显示）
-            if let Some(w) = app.get_webview_window(TRANSLATE_PANEL) {
-                let _ = w.hide();
+            // 没有选中文本：弹窗提示（常见原因：当前窗口以管理员运行，模拟按键被系统拦截）
+            let hint = TranslateResult {
+                text: String::new(),
+                translation: "未检测到选中文本：请先选中文字再按快捷键。\n若当前应用以管理员运行，本工具也需以管理员启动才能模拟复制。".into(),
+                from: String::new(),
+                to: String::new(),
+                provider: String::new(),
+            };
+            if let Some(store) = app.try_state::<TranslateStore>() {
+                *store.0.lock().unwrap() = Some(hint.clone());
             }
+            let _ = app.emit(EVT_TRANSLATE_RESULT, hint);
+            show_popup(&app);
             return;
         }
 
@@ -92,7 +109,8 @@ pub fn trigger_selection_translate<R: Runtime>(app: &AppHandle<R>) {
             let guard = c.0.lock().unwrap();
             guard.translator.clone()
         };
-        match translate_text(&selected, &cfg).await {
+        let to = cfg.target_lang.clone();
+        match translate_text(&selected, "auto", &to, &cfg).await {
             Ok(result) => {
                 if let Some(store) = app.try_state::<TranslateStore>() {
                     *store.0.lock().unwrap() = Some(result.clone());
@@ -139,20 +157,30 @@ fn show_popup<R: Runtime>(app: &AppHandle<R>) {
     }
     let _ = w.unminimize();
     let _ = w.show();
-    #[cfg(not(windows))]
+    // 确保弹窗获得键盘焦点：否则 Esc/输入框不可用（后台 SetForegroundWindow 可能被前景锁拒绝）
     let _ = w.set_focus();
 }
 
 /// 按服务商调用对应翻译 API
-async fn translate_text(text: &str, cfg: &TranslatorConfig) -> Result<TranslateResult, String> {
+async fn translate_text(
+    text: &str,
+    from: &str,
+    to: &str,
+    cfg: &TranslatorConfig,
+) -> Result<TranslateResult, String> {
     match cfg.provider.as_str() {
-        "baidu" => baidu_translate(text, cfg).await,
-        _ => youdao_translate(text, cfg).await,
+        "baidu" => baidu_translate(text, from, to, cfg).await,
+        _ => youdao_translate(text, from, to, cfg).await,
     }
 }
 
 /// 有道智云（v3 签名）：sha256(appKey + input + salt + curtime + appSecret)
-async fn youdao_translate(text: &str, cfg: &TranslatorConfig) -> Result<TranslateResult, String> {
+async fn youdao_translate(
+    text: &str,
+    from: &str,
+    to: &str,
+    cfg: &TranslatorConfig,
+) -> Result<TranslateResult, String> {
     use sha2::{Digest, Sha256};
     if cfg.youdao_key.is_empty() || cfg.youdao_secret.is_empty() {
         return Err("未配置有道翻译 Key/Secret，请在设置中填写".into());
@@ -177,8 +205,8 @@ async fn youdao_translate(text: &str, cfg: &TranslatorConfig) -> Result<Translat
     };
     let params = [
         ("q", text.to_string()),
-        ("from", "auto".to_string()),
-        ("to", target_code("youdao", &cfg.target_lang)),
+        ("from", from.to_string()),
+        ("to", target_code("youdao", to)),
         ("appKey", cfg.youdao_key.clone()),
         ("salt", salt),
         ("sign", sign),
@@ -215,13 +243,18 @@ async fn youdao_translate(text: &str, cfg: &TranslatorConfig) -> Result<Translat
         text: text.to_string(),
         translation,
         from,
-        to: cfg.target_lang.clone(),
+        to: to.to_string(),
         provider: "youdao".into(),
     })
 }
 
 /// 百度翻译开放平台：md5(appid + q + salt + 密钥)
-async fn baidu_translate(text: &str, cfg: &TranslatorConfig) -> Result<TranslateResult, String> {
+async fn baidu_translate(
+    text: &str,
+    from: &str,
+    to: &str,
+    cfg: &TranslatorConfig,
+) -> Result<TranslateResult, String> {
     use md5::{Digest, Md5};
     if cfg.baidu_appid.is_empty() || cfg.baidu_secret.is_empty() {
         return Err("未配置百度翻译 APPID/密钥，请在设置中填写".into());
@@ -237,8 +270,8 @@ async fn baidu_translate(text: &str, cfg: &TranslatorConfig) -> Result<Translate
     };
     let params = [
         ("q", text.to_string()),
-        ("from", "auto".to_string()),
-        ("to", target_code("baidu", &cfg.target_lang)),
+        ("from", from.to_string()),
+        ("to", target_code("baidu", to)),
         ("appid", cfg.baidu_appid.clone()),
         ("salt", salt),
         ("sign", sign),
@@ -274,7 +307,7 @@ async fn baidu_translate(text: &str, cfg: &TranslatorConfig) -> Result<Translate
         text: text.to_string(),
         translation,
         from,
-        to: cfg.target_lang.clone(),
+        to: to.to_string(),
         provider: "baidu".into(),
     })
 }

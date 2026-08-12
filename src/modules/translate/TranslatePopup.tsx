@@ -1,48 +1,41 @@
-/** 划词翻译弹窗：显示原文/译文，一键复制，失焦或 Esc 关闭。
- *  结果由快捷键触发后端翻译后通过事件推送；挂载时先拉取最近一次结果兜底。 */
-import { useEffect, useState } from "react";
+/** 翻译面板（类网页版翻译布局）：上方原文可编辑，下方译文，底部源/目标语言设置。
+ *  划词触发后结果经事件推送；面板内可改语言、重新翻译、一键复制。 */
+import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { TranslateResult } from "../../types";
 import { onEvent } from "../../core/events";
-import { copyText, lastTranslateResult } from "../../core/tauri";
+import { copyText, lastTranslateResult, translateText } from "../../core/tauri";
 import { IconCopy } from "../../components/icons";
+import { LANG_OPTIONS, langLabel } from "./langs";
 import "../../styles/panel.css";
 import "./translate.css";
 
 const EVT_RESULT = "translate://result";
 
-/** 服务商语言代码 -> 中文标签（有道/百度编码不同，统一映射） */
-function langLabel(code: string): string {
-  const map: Record<string, string> = {
-    auto: "自动",
-    zh: "中文",
-    "zh-CHS": "中文",
-    en: "英文",
-    ja: "日文",
-    jp: "日文",
-    ko: "韩文",
-    kor: "韩文",
-    fr: "法文",
-    fra: "法文",
-    de: "德文",
-    ru: "俄文",
-    es: "西文",
-    spa: "西文",
-  };
-  return map[code] ?? code;
-}
-
 export function TranslatePopup() {
   const [result, setResult] = useState<TranslateResult | null>(null);
+  /** 原文输入（可编辑，翻译面板内修改后重新翻译） */
+  const [text, setText] = useState("");
+  const [fromLang, setFromLang] = useState("auto");
+  const [toLang, setToLang] = useState("zh");
+  const [translating, setTranslating] = useState(false);
   const [copied, setCopied] = useState(false);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // 划词触发的结果：填充原文与译文（保留用户已选的源/目标语言，仅更新内容）
+  const applyResult = (r: TranslateResult) => {
+    setResult(r);
+    if (r.text) setText(r.text);
+  };
 
   useEffect(() => {
+    getCurrentWindow().setFocus().catch(() => undefined);
     // 挂载兜底：快捷键触发后窗口先 show、事件可能早于监听，先拉一次最近结果
     void lastTranslateResult().then((r) => {
-      if (r) setResult(r);
+      if (r) applyResult(r);
     });
     const cleanup: Array<() => void> = [];
-    onEvent<TranslateResult>(EVT_RESULT, setResult).then((un) =>
+    onEvent<TranslateResult>(EVT_RESULT, applyResult).then((un) =>
       cleanup.push(un)
     );
     // 失焦自动隐藏（与其它面板一致）
@@ -51,7 +44,7 @@ export function TranslatePopup() {
     };
     window.addEventListener("blur", onBlur);
     cleanup.push(() => window.removeEventListener("blur", onBlur));
-    // Esc 关闭
+    // Esc 关闭（窗口有焦点后生效）
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -62,6 +55,27 @@ export function TranslatePopup() {
     cleanup.push(() => window.removeEventListener("keydown", onKey));
     return () => cleanup.forEach((fn) => fn());
   }, []);
+
+  /** 面板内手动翻译：用当前原文与所选语言 */
+  const doTranslate = async () => {
+    const t = text.trim();
+    if (!t) return;
+    setTranslating(true);
+    try {
+      const r = await translateText(t, fromLang, toLang);
+      setResult(r);
+    } catch (err) {
+      setResult({
+        text: t,
+        translation: `翻译失败：${err instanceof Error ? err.message : String(err)}`,
+        from: fromLang,
+        to: toLang,
+        provider: "",
+      });
+    } finally {
+      setTranslating(false);
+    }
+  };
 
   const doCopy = async () => {
     if (!result) return;
@@ -79,28 +93,66 @@ export function TranslatePopup() {
     <div className="panel">
       <div className="panel-shell translate-shell">
         <div className="translate-head" data-tauri-drag-region>
-          <span className="translate-title">划词翻译</span>
+          <span className="translate-title">翻译</span>
           {result?.from && (
             <span className="badge badge-accent">
               {langLabel(result.from)} → {langLabel(result.to)}
             </span>
           )}
         </div>
-        <div className="translate-body">
-          {!result ? (
-            <div className="empty-state">未选中文本</div>
+
+        {/* 上方：原始内容（可编辑） */}
+        <textarea
+          ref={inputRef}
+          className="translate-src"
+          value={text}
+          placeholder="输入或粘贴要翻译的内容…"
+          onChange={(e) => setText(e.target.value)}
+        />
+
+        {/* 下方：翻译内容 */}
+        <div className="translate-dst">
+          {translating ? (
+            "翻译中…"
           ) : (
-            <>
-              <div className="translate-src" title={result.text}>
-                {result.text}
-              </div>
-              <div className="translate-dst" title={result.translation}>
-                {result.translation}
-              </div>
-            </>
+            (result?.translation ?? "划词或输入内容后翻译")
           )}
         </div>
-        <div className="translate-footer">
+
+        {/* 底部：源语言 / 目标语言 / 操作 */}
+        <div className="translate-bar">
+          <select
+            className="lang-select"
+            value={fromLang}
+            title="源语言"
+            onChange={(e) => setFromLang(e.target.value)}
+          >
+            {LANG_OPTIONS.map((l) => (
+              <option key={l.value} value={l.value}>
+                {l.value === "auto" ? "源语言：自动检测" : `源语言：${l.label}`}
+              </option>
+            ))}
+          </select>
+          <span className="lang-arrow">→</span>
+          <select
+            className="lang-select"
+            value={toLang}
+            title="目标语言"
+            onChange={(e) => setToLang(e.target.value)}
+          >
+            {LANG_OPTIONS.filter((l) => l.value !== "auto").map((l) => (
+              <option key={l.value} value={l.value}>
+                {`目标语言：${l.label}`}
+              </option>
+            ))}
+          </select>
+          <button
+            className="btn btn-primary btn-sm translate-btn"
+            disabled={translating || !text.trim()}
+            onClick={() => void doTranslate()}
+          >
+            {translating ? "翻译中…" : "翻译"}
+          </button>
           <button
             className="icon-btn"
             title="复制译文"
@@ -110,7 +162,7 @@ export function TranslatePopup() {
             <IconCopy size={14} />
           </button>
           <span className="translate-status">
-            {copied ? "已复制" : result ? "Esc 关闭" : "…"}
+            {copied ? "已复制" : "Esc 关闭"}
           </span>
         </div>
       </div>

@@ -114,9 +114,9 @@ export const deleteCredential = (id: string) =>
   safe(invoke("cred_delete", { id }), undefined);
 
 // ---- 翻译 ----
-/** 翻译文本（走配置的服务商与凭据，源语言自动检测） */
-export const translateText = (text: string) =>
-  invoke<TranslateResult>("translate", { text });
+/** 翻译文本（走配置的服务商与凭据）；from/to 缺省用配置（源默认 auto 自动检测） */
+export const translateText = (text: string, from?: string, to?: string) =>
+  invoke<TranslateResult>("translate", { text, from, to });
 /** 弹窗挂载时拉取最近一次翻译结果 */
 export const lastTranslateResult = () =>
   safe(invoke<TranslateResult | null>("translate_last_result"), null);

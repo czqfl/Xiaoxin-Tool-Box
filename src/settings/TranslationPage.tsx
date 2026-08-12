@@ -1,20 +1,10 @@
-/** 翻译设置页：服务商、凭据、目标语言（全部持久化到 config.json） */
+/** 翻译设置页：仅 API 凭据等关键信息（服务商、key）。
+ *  源语言/目标语言在翻译面板中直接选择（类网页版翻译布局）。 */
 import { useState } from "react";
 import { useConfigStore } from "../stores/configStore";
 import type { TranslateProvider } from "../types";
 import { translateText } from "../core/tauri";
 import { SettingGroup, SettingRow, Segmented } from "./components";
-
-const LANGS = [
-  { value: "zh", label: "中文" },
-  { value: "en", label: "英文" },
-  { value: "ja", label: "日文" },
-  { value: "ko", label: "韩文" },
-  { value: "fr", label: "法文" },
-  { value: "de", label: "德文" },
-  { value: "ru", label: "俄文" },
-  { value: "es", label: "西文" },
-];
 
 export function TranslationPage() {
   const config = useConfigStore((s) => s.config);
@@ -53,9 +43,9 @@ export function TranslationPage() {
 
   return (
     <div className="settings-page">
-      <h2>划词翻译设置</h2>
+      <h2>翻译设置</h2>
       <p className="page-desc">
-        选中文本后按快捷键（默认 Ctrl+Alt+T）自动复制并翻译弹窗；源语言自动检测
+        选中文本按快捷键（默认 Ctrl+Alt+T）即译；源/目标语言在翻译面板中直接选择
       </p>
 
       <SettingGroup>
@@ -119,18 +109,10 @@ export function TranslationPage() {
             </SettingRow>
           </>
         )}
-
-        <SettingRow title="目标语言" desc="源语言由服务商自动检测，无需配置">
-          <Segmented
-            value={t.target_lang}
-            options={LANGS}
-            onChange={(v) => patch({ target_lang: v })}
-          />
-        </SettingRow>
       </SettingGroup>
 
       <SettingGroup>
-        <SettingRow title="保存配置" desc="凭据与目标语言持久化到配置文件，重装应用不丢失">
+        <SettingRow title="保存配置" desc="凭据持久化到配置文件，重装应用不丢失">
           <button
             className="btn btn-primary"
             disabled={saving}
