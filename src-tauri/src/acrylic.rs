@@ -128,6 +128,9 @@ pub fn apply_rounded_corners(hwnd: HWND) -> bool {
 /// 背景进程（托盘菜单 / 全局热键）直接 set_focus 常被系统拒绝，导致窗口可见却
 /// 未真正置前、无法接收键盘输入。用本函数替代单纯的 show + set_focus。
 /// 注：本路径模糊与激活无关，置前仅用于保证面板可正常交互，不再影响模糊绘制。
+/// 现面板呼出统一走 force_foreground_robust（不受前台锁输入窗口限制），
+/// 本函数保留备用（同步、落在输入窗口内时更轻量）。
+#[cfg_attr(windows, allow(dead_code))]
 pub fn force_foreground(hwnd: HWND) {
     use windows::Win32::UI::WindowsAndMessaging::{
         GetWindowLongPtrW, SetForegroundWindow, SetWindowPos, GWL_EXSTYLE, HWND_NOTOPMOST,

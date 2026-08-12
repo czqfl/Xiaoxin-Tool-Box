@@ -4,19 +4,69 @@ use crate::storage::{save_json, AppPaths};
 use tauri::{AppHandle, LogicalPosition, Manager, Runtime, WebviewWindow, WebviewWindowBuilder};
 use windows::Win32::Foundation::HWND;
 
-/// 可靠置前窗口：绕过 Win32 前景锁，让托盘/热键呼出的面板能正常接收输入。
-/// 背景进程直接 set_focus 常被系统拒绝，窗口可见却未真正置前、无法交互。
-/// 顶到最前再降回 + SetForegroundWindow 可破此锁。模糊绘制已与激活无关
-/// （走 SWCA BLURBEHIND），此处置前仅为保证交互，不再影响模糊是否出现。
+/// 取 webview 所属顶层窗口 HWND（用于 Win32 置前/激活/强制显示）
 #[cfg(windows)]
-fn force_foreground_window<R: Runtime>(window: &WebviewWindow<R>) {
+fn hwnd_of<R: Runtime>(window: &WebviewWindow<R>) -> Option<HWND> {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     if let Ok(handle) = window.window_handle() {
         if let RawWindowHandle::Win32(h) = handle.as_raw() {
-            let hwnd = HWND(h.hwnd.get() as *mut _);
-            crate::acrylic::force_foreground(hwnd);
+            return Some(HWND(h.hwnd.get() as *mut _));
         }
     }
+    None
+}
+
+/// 显示面板并可靠激活（快捷键/托盘/工具栏共用，后台线程也生效）。
+/// 与翻译弹窗 show_popup_activated 同一套验证过的可靠模式：
+///   show → Win32 SW_SHOWNORMAL 兜底强制显示 → force_foreground_robust
+///   （AttachThreadInput 抢前台，不受前台锁输入窗口超时限制）→ set_focus
+///   → 120ms 后后台补一次置前（前台锁偶发拒绝时兜底）。
+/// 注：工具栏点击经 IPC 往返已超出前台锁输入窗口，普通 force_foreground
+/// 的 SetForegroundWindow 会被系统拒绝（窗口显示但无焦点）——这正是
+/// "快捷键能开、工具栏点不开"的根因；robust 版不受此限制。
+#[cfg(windows)]
+fn show_and_activate<R: Runtime>(window: &WebviewWindow<R>) {
+    let _ = window.unminimize();
+    let _ = window.show();
+    // 极端状态（最小化+隐藏）下 show 可能仍未真正显示 → Win32 强制激活显示
+    if !window.is_visible().unwrap_or(false) {
+        if let Some(hwnd) = hwnd_of(window) {
+            use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNORMAL};
+            unsafe {
+                let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+            }
+        }
+    }
+    if let Some(hwnd) = hwnd_of(window) {
+        crate::acrylic::force_foreground_robust(hwnd);
+    }
+    let _ = window.set_focus();
+    // 前台锁偶发拒绝时补一次（与翻译弹窗一致）
+    let w2 = window.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(120));
+        if let Some(hwnd) = hwnd_of(&w2) {
+            crate::acrylic::force_foreground_robust(hwnd);
+        }
+        let _ = w2.set_focus();
+    });
+}
+
+#[cfg(not(windows))]
+fn show_and_activate<R: Runtime>(window: &WebviewWindow<R>) {
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
+/// 面板窗口显示后补刷亚克力（SWCA 在可见窗口上才稳定）
+#[cfg(windows)]
+fn refresh_panel_acrylic<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) {
+    let acrylic = app
+        .try_state::<ConfigState>()
+        .map(|s| s.0.lock().unwrap().general.acrylic_enabled)
+        .unwrap_or(true);
+    crate::apply_panel_effects_for(window, acrylic);
 }
 
 pub const CLIPBOARD_PANEL: &str = "clipboard-panel";
@@ -60,31 +110,25 @@ pub fn show_panel_foreground<R: Runtime>(app: &AppHandle<R>, label: &str) {
     if !restore_position(app, &window, label) {
         position_near_cursor(app, &window);
     }
-    let _ = window.show();
-    // 可靠置前（绕过 Win32 前景锁），保证面板可正常交互/接收输入
-    #[cfg(windows)]
-    force_foreground_window(&window);
-    #[cfg(not(windows))]
-    let _ = window.set_focus();
-    #[cfg(windows)]
-    {
-        let acrylic = app
-            .try_state::<ConfigState>()
-            .map(|s| s.0.lock().unwrap().general.acrylic_enabled)
-            .unwrap_or(true);
-        crate::apply_panel_effects_for(&window, acrylic);
-    }
-    crate::storage::diag_write(&format!("[show_panel_foreground] {label} shown"));
+    show_and_activate(&window);
+    refresh_panel_acrylic(app, &window);
+    crate::storage::diag_write(&format!(
+        "[show_panel_foreground] {label} shown visible={:?}",
+        window.is_visible().unwrap_or(false)
+    ));
 }
 
 /// 工具栏呼出面板：工具栏前端点击图标呼出对应面板（总是置前显示，
 /// 不关闭——面板被盖住时点击会带回前台）。
 /// "settings" 打开设置窗口；"translation" 触发划词翻译（有选中带出原文，
 /// 无选中打开空翻译面板）。
+/// 在后台线程执行窗口显示：与 keyhook 快捷键路径同构，且工具栏点击经 IPC
+/// 往返已超出前台锁输入窗口，同步 force_foreground 会被系统拒绝——后台
+/// 线程 + force_foreground_robust 不受输入窗口限制（翻译弹窗同款方案）。
 #[tauri::command]
 pub fn panel_toggle(app: tauri::AppHandle, label: String) -> Result<(), String> {
     if label == "settings" {
-        crate::tray::show_settings_window(&app);
+        std::thread::spawn(move || crate::tray::show_settings_window(&app));
         return Ok(());
     }
     if label == "translation" {
@@ -94,7 +138,7 @@ pub fn panel_toggle(app: tauri::AppHandle, label: String) -> Result<(), String> 
     if !ALL_PANELS.contains(&label.as_str()) {
         return Err("未知面板".into());
     }
-    show_panel_foreground(&app, &label);
+    std::thread::spawn(move || show_panel_foreground(&app, &label));
     Ok(())
 }
 
@@ -263,22 +307,10 @@ pub fn toggle_panel<R: Runtime>(app: &AppHandle<R>, label: &str) {
         if !restore_position(app, &window, label) {
             position_near_cursor(app, &window);
         }
-        let _ = window.show();
-        // 可靠置前（绕过 Win32 前景锁），保证面板可正常交互/接收输入
-        #[cfg(windows)]
-        force_foreground_window(&window);
-        #[cfg(not(windows))]
-        let _ = window.set_focus();
-        // 显示在可见窗口上再应用模糊（SWCA 在可见窗口上才稳定）；
-        // BLURBEHIND 与激活无关，呼出即模糊、无需点击
-        #[cfg(windows)]
-        {
-            let acrylic = app
-                .try_state::<ConfigState>()
-                .map(|s| s.0.lock().unwrap().general.acrylic_enabled)
-                .unwrap_or(true);
-            crate::apply_panel_effects_for(&window, acrylic);
-        }
+        // 显示 + 可靠置前（force_foreground_robust 不受前台锁限制，
+        // 快捷键/托盘/工具栏路径统一可靠）
+        show_and_activate(&window);
+        refresh_panel_acrylic(app, &window);
     }
 }
 
