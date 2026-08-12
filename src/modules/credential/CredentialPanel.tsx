@@ -65,12 +65,19 @@ export function CredentialPanel() {
   useEffect(() => {
     refresh();
     const cleanup: Array<() => void> = [];
+    // 仅在"真正收起后重新呼出"时清空搜索框：拖动面板会让窗口瞬时失焦再夺回，
+    // 若每次夺回都清空，用户刚输入的搜索内容会消失。故用失焦时长（>300ms 视为
+    // 真实打开、亚 300ms 视为拖动造成的焦点闪动）区分两种情况。
+    let lastBlurAt = 0;
     getCurrentWindow()
       .onFocusChanged(({ payload: focused }) => {
-        if (focused) {
-          setQuery("");
-          refresh();
+        if (!focused) {
+          lastBlurAt = Date.now();
+          return;
         }
+        if (Date.now() - lastBlurAt < 300) return;
+        setQuery("");
+        refresh();
       })
       .then((un) => cleanup.push(un));
     return () => cleanup.forEach((fn) => fn());

@@ -168,9 +168,18 @@ export function FolderPanel() {
     refreshEditors();
     const cleanup: Array<() => void> = [];
 
+    // 记录失焦时刻，用于区分"真实打开"与"拖动面板导致的焦点短暂闪动"。
+    // 拖动时 Windows 会让窗口瞬时失焦再夺回，若每次夺回都清空搜索框，
+    // 用户刚输入的搜索内容就会消失——故仅当失焦超过阈值（真正被收起后重新呼出）
+    // 才重置搜索，拖动造成的亚 300ms 焦点闪动不触发清空。
+    let lastBlurAt = 0;
     getCurrentWindow()
       .onFocusChanged(({ payload: focused }) => {
-        if (!focused) return;
+        if (!focused) {
+          lastBlurAt = Date.now();
+          return;
+        }
+        if (Date.now() - lastBlurAt < 300) return;
         setQuery("");
         // 打开计数由后端完成，面板重新聚焦时拉取最新数据
         refresh();

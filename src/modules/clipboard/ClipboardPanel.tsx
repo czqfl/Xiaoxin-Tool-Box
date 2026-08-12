@@ -96,10 +96,18 @@ export function ClipboardPanel() {
     onEvent(EVT_CLIPBOARD_CHANGED, () => refresh()).then((un) =>
       cleanup.push(un)
     );
-    // 每次面板获得焦点（热键呼出）：聚焦搜索框并重置临时状态
+    // 每次面板获得焦点（热键呼出）：聚焦搜索框并重置临时状态。
+    // 但拖动面板时 Windows 会让窗口瞬时失焦再夺回，若每次夺回都清空搜索框，
+    // 用户刚输入的搜索内容就会消失——故仅当失焦超过阈值（真正收起后重新呼出）
+    // 才重置，拖动造成的亚 300ms 焦点闪动不触发清空。
+    let lastBlurAt = 0;
     getCurrentWindow()
       .onFocusChanged(({ payload: focused }) => {
-        if (!focused) return;
+        if (!focused) {
+          lastBlurAt = Date.now();
+          return;
+        }
+        if (Date.now() - lastBlurAt < 300) return;
         setQuery("");
         setSelectedIdx(0);
         setTimeout(() => inputRef.current?.focus(), 0);
