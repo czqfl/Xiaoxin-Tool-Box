@@ -1,10 +1,10 @@
 //! 划词翻译：有道智云 / 百度翻译开放平台。
 //!
 //! 触发流程（快捷键）：
-//!   1. 读选中：只用 **UI Automation 直接读取**源窗口的选中文本——**绝不碰剪贴板、
-//!      绝不注入按键**，因此既无"复制需源应用前台"的焦点竞争（根除"识别不到/无法
-//!      填充"），也不会因注入 Ctrl+C 误触 QQ 等截图热键。无选中 / 当前应用不支持
-//!      无障碍时返回空，不会退回剪贴板。
+//!   1. 读选中：**优先用 UI Automation 直接读取**源窗口的选中文本（不碰剪贴板、不注入
+//!      按键），无副作用、不误触 QQ 截图，覆盖绝大多数常规应用。仅当 UIA 读不到时
+//!      （如 DeepSeek 回答区、VS Code 自绘编辑器等不标准暴露文本选区的应用，或确实
+//!      无选中）才退回**带保护措施的剪贴板复制**兜底。
 //!   2. 显面板：无论有无选中，都显示并【激活】翻译面板（能拖动/点×/Esc）。
 //!      有选中 → 带出原文并异步翻译；无选中 → 直接空面板，不翻译，可手动输入/粘贴。
 //! 两个服务商均支持 from=auto 自动检测源语言；凭据在设置页配置并持久化到 config.json。
@@ -60,16 +60,17 @@ struct StartPayload {
 
 /// 快捷键触发划词翻译。
 ///
-/// **核心思路：直接读取选中文本，跳过"复制"这一步，且永不回退到剪贴板**（用户明确要求）。
-///   1. **读选中**——只用 UI Automation 直接拿源窗口的选中文本：不碰剪贴板、不注入
-///      Ctrl+C，因此既无"复制需源应用前台"的焦点竞争（根除"识别不到/无法填充"），
-///      也不会因注入按键误触 QQ 截图。无选中 / 应用不支持无障碍 → 返回空。
+/// **核心思路：优先 UI Automation 直接读选中文本（无副作用），UIA 读不到再剪贴板兜底。**
+///   1. **读选中**——优先 UIA：不碰剪贴板、不注入 Ctrl+C，无焦点竞争、不误触 QQ 截图，
+///      覆盖绝大多数常规应用。仅当 UIA 读不到（不标准暴露选区的应用，或确实无选中）
+///      才退回剪贴板复制：带【序列号判据】确认复制成功、【修饰键释放保护】避免误触 QQ、
+///      复制后立即【还原剪贴板】抹掉我们复制的那条且不进历史。
 ///   2. **显示并激活面板**——无论有无选中，面板都拿到真实焦点（可拖动/点×/Esc）。
 ///      有选中 → 立刻带出原文并异步翻译；无选中 → 直接空面板，不翻译、不碰剪贴板。
 ///
-/// 历史教训：早期"先复制后显示"偶发失败且会误触 QQ 截图；根因是只要注入 Ctrl+C 就
-/// 必然与源应用前台 / 用户仍按住的修饰键纠缠。直接读无障碍选中文本、并彻底砍掉剪贴板
-/// 回退，整条链路不再依赖复制与焦点争夺，相关问题一并消失。
+/// 历史教训：早期"先复制后显示"偶发失败且会误触 QQ 截图；后来试过"纯 UIA、彻底不碰
+/// 剪贴板"又发现 DeepSeek 回答区 / VS Code 等自绘编辑器不标准暴露文本选区，UIA 拿不到。
+/// 最终落到混合方案：UIA 覆盖常规场景零副作用，剪贴板兜底补上残差应用，二者结合最稳。
 pub fn trigger_selection_translate<R: Runtime>(app: &AppHandle<R>) {
     let app = app.clone();
 
@@ -80,16 +81,21 @@ pub fn trigger_selection_translate<R: Runtime>(app: &AppHandle<R>) {
         }
     }
 
-    // 读取选中文本是同步的 Win32/UIA 操作（含 COM 初始化），放独立线程执行，
-    // 不阻塞事件循环。读取只走 UI Automation：绝不碰剪贴板、绝不注入按键。
+    // 热键触发瞬间、面板尚未显示，前台窗口就是持有选中文本的来源应用。
+    // 记录其 hwnd，复制兜底阶段据此把源应用拉回前台（确定性，无竞态）。
+    #[cfg(windows)]
+    let src_raw: Option<usize> = crate::keyhook::foreground_hwnd().map(|h| h.0 as usize);
+
+    // 读取选中文本是同步的 Win32/UIA 操作（含 COM 初始化与剪贴板轮询），放独立线程执行，
+    // 不阻塞事件循环。优先 UIA；UIA 读不到再走带保护的剪贴板复制兜底。
     std::thread::spawn(move || {
         // 刚隐藏面板时，给 Windows 一点时间把前台交回源应用
         std::thread::sleep(std::time::Duration::from_millis(40));
 
-        // ---------- 阶段 1：读取选中文本（仅 UI Automation，无剪贴板）----------
-        // 有选中 → Some(文本)；无选中或当前应用不支持无障碍 → None。
+        // ---------- 阶段 1：读取选中文本（UIA 优先，剪贴板兜底）----------
+        // 有选中 → Some(文本)；UIA 与剪贴板都读不到（确实无选中）→ None。
         #[cfg(windows)]
-        let selected = read_selection();
+        let selected = read_selection(src_raw);
         #[cfg(not(windows))]
         let selected: Option<String> = None;
 
@@ -150,17 +156,22 @@ pub fn trigger_selection_translate<R: Runtime>(app: &AppHandle<R>) {
     });
 }
 
-/// 读取源窗口选中文本：仅用 UI Automation 直接读取（不碰剪贴板、不注入按键）。
-/// 返回 `Some(选中文本)`（已 trim）；无选中 / 当前应用不支持无障碍则返回 `None`。
+/// 读取源窗口选中文本：优先 UI Automation（无副作用），UIA 读不到（不标准暴露选区的
+/// 应用，或确实无选中）再走带保护的剪贴板复制兜底。返回 `Some(选中文本)`（已 trim）；
+/// UIA 与剪贴板都读不到则 `None`（表示无选中，上层应呼出空面板）。
 #[cfg(windows)]
-fn read_selection() -> Option<String> {
-    let t = read_selection_uia();
-    if let Some(ref s) = t {
-        crate::storage::diag_write(&format!("[translate] source=UIA len={}", s.trim().len()));
-    } else {
-        crate::storage::diag_write("[translate] source=UIA-none");
+fn read_selection(src_raw: Option<usize>) -> Option<String> {
+    // 优先 UI Automation：不碰剪贴板、不注入按键，零副作用、不误触 QQ 截图。
+    if let Some(t) = read_selection_uia() {
+        if !t.trim().is_empty() {
+            crate::storage::diag_write(&format!("[translate] source=UIA len={}", t.trim().len()));
+            return Some(t);
+        }
     }
-    t
+    // 兜底：UIA 读不到时（DeepSeek 回答区 / VS Code 自绘编辑器等不标准暴露选区的
+    // 应用，或确实无选中），用带保护措施的剪贴板复制。
+    crate::storage::diag_write("[translate] source=clipboard-fallback");
+    read_selection_clipboard(src_raw)
 }
 
 /// 通过 UI Automation 直接读取系统当前焦点元素的选中文本，无需复制到剪贴板、
@@ -223,6 +234,80 @@ fn read_selection_uia() -> Option<String> {
             CoUninitialize();
         }
         result
+    }
+}
+
+/// 剪贴板复制兜底：仅当 UI Automation 读不到选中文本时使用（如 DeepSeek 回答区、
+/// VS Code 自绘编辑器，以及确实无选中的情况）。保留【序列号判据】、【源应用前台拉回】、
+/// 【还原剪贴板】等逻辑；调用前先 `wait_modifiers_released`，避免注入 Ctrl+C 时与用户
+/// 仍按住的修饰键组合命中 QQ 等截图热键。
+///
+/// 返回 `Some(文本)` 表示复制成功并填充；`None` 表示无选中（剪贴板未变化），此时上层应
+/// 呼出空面板而非报错。复制成功后立即把原剪贴板写回，抹掉我们复制的那条、且不进历史。
+#[cfg(windows)]
+fn read_selection_clipboard(src_raw: Option<usize>) -> Option<String> {
+    use windows::Win32::Foundation::HWND;
+
+    // 仅当源应用当前不在前台（如上一次面板刚占过前台）才主动拉回。确定性操作，无竞态。
+    if let Some(r) = src_raw {
+        let src = HWND(r as *mut std::ffi::c_void);
+        for _ in 0..5 {
+            if crate::keyhook::foreground_hwnd().map(|x| x.0) == Some(src.0) {
+                break;
+            }
+            crate::keyhook::set_source_foreground(src);
+            std::thread::sleep(std::time::Duration::from_millis(30));
+        }
+    }
+
+    // 必须先等修饰键释放再注入 Ctrl+C：否则注入的 C 与用户仍按住的 Alt 组合成
+    // Alt+C，会命中 QQ 等截图工具热键（这正是早期"长按快捷键误触截图"的根因）。
+    crate::keyhook::wait_modifiers_released();
+
+    let prev_default = arboard::Clipboard::new()
+        .ok()
+        .and_then(|mut c| c.get_text().ok())
+        .unwrap_or_default();
+    let seq_before = crate::keyhook::clipboard_seq();
+
+    crate::keyhook::send_ctrl_c();
+    // 第 2 次补发 WM_COPY：原生编辑控件对 WM_COPY 比模拟按键更稳
+    if let Some(r) = src_raw {
+        crate::keyhook::send_wm_copy(HWND(r as *mut std::ffi::c_void));
+    }
+
+    // 轮询等待复制落地。判据是【序列号变化】而非"文本和原来不同"——
+    // 选中文字恰好与剪贴板已有内容相同时，内容比较会误判成"复制失败"。
+    let mut cur = String::new();
+    let mut copied = false;
+    for d in [70u64, 90, 140, 220] {
+        std::thread::sleep(std::time::Duration::from_millis(d));
+        let seq_changed = crate::keyhook::clipboard_seq() != seq_before;
+        cur = arboard::Clipboard::new()
+            .ok()
+            .and_then(|mut c| c.get_text().ok())
+            .unwrap_or_default();
+        if (seq_changed || cur != prev_default) && !cur.trim().is_empty() {
+            copied = true;
+            break;
+        }
+    }
+    crate::storage::diag_write(&format!(
+        "[translate] clipboard-fallback: clip_len={} copied={}",
+        cur.len(),
+        copied
+    ));
+
+    // 还原剪贴板（抹掉我们复制的那条，且不进历史）
+    if let Ok(mut cb) = arboard::Clipboard::new() {
+        crate::clipboard::SUPPRESS_WATCH.store(true, std::sync::atomic::Ordering::SeqCst);
+        let _ = cb.set_text(prev_default);
+    }
+
+    if copied {
+        Some(cur.trim().to_string())
+    } else {
+        None
     }
 }
 

@@ -11,14 +11,17 @@ use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
-use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
+use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
-    KEYEVENTF_KEYUP, VK_CONTROL, VK_LWIN, VK_RWIN, VK_V, VIRTUAL_KEY,
+    KEYEVENTF_KEYUP, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT, VK_V, VIRTUAL_KEY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetMessageW, SetWindowsHookExW, TranslateMessage, HC_ACTION,
-    KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL,
+    CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetGUIThreadInfo, GetMessageW,
+    GetWindowThreadProcessId, GUITHREADINFO, SendMessageW, SetForegroundWindow, SetWindowsHookExW,
+    TranslateMessage, WM_COPY, HC_ACTION, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL,
 };
 
 const WM_KEYDOWN: usize = 0x0100;
@@ -349,6 +352,134 @@ pub fn send_ctrl_v() {
     unsafe {
         SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
     }
+}
+
+/// 当前前台窗口句柄。划词翻译在热键触发、尚未显示自身窗口时调用，
+/// 拿到的是用户正在操作、持有选中文本的来源应用。
+pub fn foreground_hwnd() -> Option<HWND> {
+    unsafe {
+        let h = GetForegroundWindow();
+        if h.is_invalid() {
+            None
+        } else {
+            Some(h)
+        }
+    }
+}
+
+/// 把源应用可靠地置为前台：先直连 `SetForegroundWindow`，若被前台锁拒绝，
+/// 则附加到【当前前台线程】再抢——这是突破前台锁的标准做法。
+/// 仅当复制兜底路径需要（UIA 拿不到选中文本时）才调用。
+pub fn set_source_foreground(src: HWND) {
+    unsafe {
+        if src.is_invalid() {
+            return;
+        }
+        if GetForegroundWindow() == src {
+            return;
+        }
+        let _ = SetForegroundWindow(src);
+        if GetForegroundWindow() == src {
+            return;
+        }
+        let fg = GetForegroundWindow();
+        if fg.is_invalid() {
+            return;
+        }
+        let fg_thread = GetWindowThreadProcessId(fg, None);
+        let cur = GetCurrentThreadId();
+        if fg_thread != 0 && fg_thread != cur {
+            let _ = AttachThreadInput(cur, fg_thread, true);
+            let _ = SetForegroundWindow(src);
+            let _ = AttachThreadInput(cur, fg_thread, false);
+        }
+    }
+}
+
+/// 等待 Ctrl/Alt/Shift/Win 修饰键全部释放（最多 600ms）。
+/// 模拟复制（Ctrl+C）前必须调用：用户按翻译热键的瞬间修饰键还按着，
+/// 此时注入的 C 会与按住的 Alt 组合成 Alt+C/Ctrl+Alt+C，命中 QQ 等
+/// 截图工具的热键。等待其释放后再注入，可根除"长按快捷键误触截图"。
+pub fn wait_modifiers_released() {
+    for _ in 0..30 {
+        unsafe {
+            let pressed = [VK_CONTROL, VK_MENU, VK_SHIFT, VK_LWIN, VK_RWIN]
+                .iter()
+                .any(|&vk| (GetAsyncKeyState(vk.0 as i32) as u16) & 0x8000 != 0);
+            if !pressed {
+                return;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+/// 模拟 Ctrl+C（带魔数标记，钩子会放行）。注入后调用方需延迟再读剪贴板。
+/// 仅在 UIA 读不到选中文本时作为兜底使用，且调用前必调 `wait_modifiers_released`。
+pub fn send_ctrl_c() {
+    fn mk(vk: VIRTUAL_KEY, up: bool) -> INPUT {
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk,
+                    wScan: 0,
+                    dwFlags: if up {
+                        KEYEVENTF_KEYUP
+                    } else {
+                        KEYBD_EVENT_FLAGS(0)
+                    },
+                    time: 0,
+                    dwExtraInfo: INJECTED_MAGIC,
+                },
+            },
+        }
+    }
+    let inputs = [
+        mk(VK_CONTROL, false),
+        mk(VIRTUAL_KEY(0x43), false), // VK_C
+        mk(VIRTUAL_KEY(0x43), true),
+        mk(VK_CONTROL, true),
+    ];
+    unsafe {
+        SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+    }
+}
+
+/// 向源应用【焦点控件】发送 WM_COPY 作为 `SendInput(Ctrl+C)` 的补充：
+/// 原生编辑控件对 WM_COPY 响应比模拟按键更稳；浏览器等仍主要靠 Ctrl+C。
+/// 必须在源应用前台时调用；用 `GetGUIThreadInfo` 取源线程焦点控件。
+pub fn send_wm_copy(src: HWND) {
+    unsafe {
+        let src_thread = GetWindowThreadProcessId(src, None);
+        let cur = GetCurrentThreadId();
+        let mut attached = false;
+        if src_thread != 0 && src_thread != cur {
+            let _ = AttachThreadInput(cur, src_thread, true);
+            attached = true;
+        }
+        let mut gui: GUITHREADINFO = std::mem::zeroed();
+        gui.cbSize = std::mem::size_of::<GUITHREADINFO>() as u32;
+        let focus = if GetGUIThreadInfo(src_thread, &mut gui).is_ok() {
+            gui.hwndFocus
+        } else {
+            HWND(std::ptr::null_mut())
+        };
+        let target = if focus.is_invalid() { src } else { focus };
+        if !target.is_invalid() {
+            let _ = SendMessageW(target, WM_COPY, Some(WPARAM(0)), Some(LPARAM(0)));
+        }
+        if attached {
+            let _ = AttachThreadInput(cur, src_thread, false);
+        }
+    }
+}
+
+/// 剪贴板序列号：每次任意进程写入剪贴板都会自增。
+/// 判定"模拟 Ctrl+C 是否真的复制成功"必须用它，不能只比较文本内容——
+/// 当选中文字恰好等于剪贴板已有内容时，内容比较会误判为"复制失败"。
+pub fn clipboard_seq() -> u32 {
+    unsafe { GetClipboardSequenceNumber() }
 }
 
 
