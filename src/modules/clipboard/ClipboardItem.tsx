@@ -1,4 +1,4 @@
-/** 剪贴板条目：预览 + 元信息 + hover 操作按钮（含智能文本转换） */
+/** 剪贴板条目：预览 + 元信息 + hover 操作按钮（含智能文本转换与编辑） */
 import { useEffect, useMemo, useState } from "react";
 import type { PointerEvent } from "react";
 import type { ClipEntry } from "../../types";
@@ -11,6 +11,7 @@ import {
   IconArrowDown,
   IconArrowUp,
   IconCopy,
+  IconEdit,
   IconFiles,
   IconImage,
   IconPin,
@@ -99,12 +100,26 @@ export function ClipboardItem({
   onPointerDown,
   registerRef,
 }: Props) {
-  const { remove, toggleFavorite, togglePin, replaceText } = useClipboardStore();
+  const { remove, toggleFavorite, togglePin, replaceText, updateText } =
+    useClipboardStore();
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   /** 顺序模式下按钮组精简：只保留队列操作 + 复制/删除 */
   const sequential = !!onMove;
   /** 按内容类型检测可用的转换操作 */
   const actions = useMemo(() => detectActions(entry.text), [entry.text]);
+  /** 内联编辑状态：编辑框替换预览区，保存/取消退出 */
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  /** 仅文本类型可编辑 */
+  const editable = entry.kind === "text";
+
+  /** 保存编辑内容（后端持久化，乐观更新） */
+  const saveEdit = async () => {
+    const t = draft.trim();
+    if (!t) return;
+    setEditing(false);
+    await updateText(entry.id, t);
+  };
 
   /** 执行转换：写回系统剪贴板（不重复记录）并同步更新条目 */
   const runTransform = async (action: TransformAction) => {
@@ -140,10 +155,15 @@ export function ClipboardItem({
       ]
         .filter(Boolean)
         .join(" ")}
-      onClick={onPaste}
-      title={entry.text ?? entry.preview}
+      onClick={() => {
+        // 编辑中点击条目不视为粘贴
+        if (!editing) onPaste();
+      }}
+      title={editing ? undefined : entry.text ?? entry.preview}
       ref={registerRef}
-      onPointerDown={onPointerDown}
+      onPointerDown={(e) => {
+        if (!editing) onPointerDown(e);
+      }}
     >
       {queueOrder ? (
         <span
@@ -161,83 +181,134 @@ export function ClipboardItem({
       )}
 
       <div className="clip-main">
-        <div className="clip-preview">{entry.preview}</div>
-        <div className="clip-meta">
-          <span>{relativeTime(entry.created_at)}</span>
-          {entry.source_app && <span className="clip-source">{entry.source_app}</span>}
-          {entry.favorite && (
-            <span className="badge badge-accent">
-              <IconStar size={10} filled />
-            </span>
-          )}
-        </div>
-      </div>
-
-      <div className="clip-actions" onClick={(e) => e.stopPropagation()}>
-        {sequential ? (
-          /* 顺序模式：只保留 插入 / 上移 / 下移 / 复制 / 删除，
-             普通模式才展示的智能转换、收藏、置顶放到普通模式按钮区 */
-          <>
-            {onInsert && (
+        {editing ? (
+          <div className="clip-edit-box" onClick={(e) => e.stopPropagation()}>
+            <textarea
+              className="clip-edit-input"
+              value={draft}
+              autoFocus
+              placeholder="编辑文本内容…"
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                // 阻止冒泡：编辑框的 Enter/Esc 不触发全局粘贴/关闭面板
+                e.stopPropagation();
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void saveEdit();
+                } else if (e.key === "Escape") {
+                  setEditing(false);
+                }
+              }}
+            />
+            <div className="clip-edit-actions">
               <button
-                className="icon-btn"
-                title="新增一条粘贴数据（手动输入文本插入队列，成为下一条）"
-                onClick={onInsert}
+                className="btn btn-primary btn-sm"
+                disabled={!draft.trim()}
+                onClick={() => void saveEdit()}
               >
-                <IconPlus size={14} />
+                保存
               </button>
-            )}
-            <button
-              className="icon-btn"
-              title={canMoveUp ? "队列中上移一位" : "已是队列第一条"}
-              disabled={!canMoveUp}
-              onClick={() => onMove?.("up")}
-            >
-              <IconArrowUp size={14} />
-            </button>
-            <button
-              className="icon-btn"
-              title={canMoveDown ? "队列中下移一位" : "已是队列最后一条"}
-              disabled={!canMoveDown}
-              onClick={() => onMove?.("down")}
-            >
-              <IconArrowDown size={14} />
-            </button>
-          </>
+              <button className="btn btn-sm" onClick={() => setEditing(false)}>
+                取消
+              </button>
+              <span className="edit-hint">Enter 保存 · Esc 取消</span>
+            </div>
+          </div>
         ) : (
           <>
-            {actions.length > 0 && (
-              <button
-                className="icon-btn"
-                title="智能转换"
-                onClick={(e) => setMenu({ x: e.clientX, y: e.clientY })}
-              >
-                <IconWand size={14} />
-              </button>
-            )}
-            <button className="icon-btn" title="收藏" onClick={() => toggleFavorite(entry.id)}>
-              <IconStar size={14} filled={entry.favorite} />
-            </button>
-            <button
-              className={`icon-btn ${entry.pinned ? "active" : ""}`}
-              title={entry.pinned ? "取消置顶" : "置顶"}
-              onClick={() => togglePin(entry.id)}
-            >
-              <IconPin size={14} filled={entry.pinned} />
-            </button>
+            <div className="clip-preview">{entry.preview}</div>
+            <div className="clip-meta">
+              <span>{relativeTime(entry.created_at)}</span>
+              {entry.source_app && <span className="clip-source">{entry.source_app}</span>}
+              {entry.favorite && (
+                <span className="badge badge-accent">
+                  <IconStar size={10} filled />
+                </span>
+              )}
+            </div>
           </>
         )}
-        <button className="icon-btn" title="粘贴" onClick={onPaste}>
-          <IconCopy size={14} />
-        </button>
-        <button
-          className="icon-btn icon-btn-danger"
-          title="删除"
-          onClick={() => remove(entry.id)}
-        >
-          <IconTrash size={14} />
-        </button>
       </div>
+
+      {!editing && (
+        <div className="clip-actions" onClick={(e) => e.stopPropagation()}>
+          {sequential ? (
+            /* 顺序模式：只保留 插入 / 上移 / 下移 / 编辑 / 复制 / 删除，
+               普通模式才展示的智能转换、收藏、置顶放到普通模式按钮区 */
+            <>
+              {onInsert && (
+                <button
+                  className="icon-btn"
+                  title="新增一条粘贴数据（手动输入文本插入队列，成为下一条）"
+                  onClick={onInsert}
+                >
+                  <IconPlus size={14} />
+                </button>
+              )}
+              <button
+                className="icon-btn"
+                title={canMoveUp ? "队列中上移一位" : "已是队列第一条"}
+                disabled={!canMoveUp}
+                onClick={() => onMove?.("up")}
+              >
+                <IconArrowUp size={14} />
+              </button>
+              <button
+                className="icon-btn"
+                title={canMoveDown ? "队列中下移一位" : "已是队列最后一条"}
+                disabled={!canMoveDown}
+                onClick={() => onMove?.("down")}
+              >
+                <IconArrowDown size={14} />
+              </button>
+            </>
+          ) : (
+            <>
+              {actions.length > 0 && (
+                <button
+                  className="icon-btn"
+                  title="智能转换"
+                  onClick={(e) => setMenu({ x: e.clientX, y: e.clientY })}
+                >
+                  <IconWand size={14} />
+                </button>
+              )}
+              <button className="icon-btn" title="收藏" onClick={() => toggleFavorite(entry.id)}>
+                <IconStar size={14} filled={entry.favorite} />
+              </button>
+              <button
+                className={`icon-btn ${entry.pinned ? "active" : ""}`}
+                title={entry.pinned ? "取消置顶" : "置顶"}
+                onClick={() => togglePin(entry.id)}
+              >
+                <IconPin size={14} filled={entry.pinned} />
+              </button>
+            </>
+          )}
+          {editable && (
+            <button
+              className="icon-btn"
+              title="编辑内容"
+              onClick={() => {
+                setDraft(entry.text ?? "");
+                setEditing(true);
+              }}
+            >
+              <IconEdit size={14} />
+            </button>
+          )}
+          <button className="icon-btn" title="粘贴" onClick={onPaste}>
+            <IconCopy size={14} />
+          </button>
+          <button
+            className="icon-btn icon-btn-danger"
+            title="删除"
+            onClick={() => remove(entry.id)}
+          >
+            <IconTrash size={14} />
+          </button>
+        </div>
+      )}
 
       {menu && (
         <ContextMenu

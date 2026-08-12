@@ -70,6 +70,9 @@ export const reorderQueueEntry = (id: string, targetId: string) =>
 /** 手动新增一条文本条目，插入到 beforeId 条目的上方（队列中它的前一条） */
 export const insertQueueText = (text: string, beforeId: string) =>
   safe(invoke("clipboard_insert_text", { text, beforeId }), undefined);
+/** 编辑文本条目的内容（仅文本类型；图片/文件不可编辑） */
+export const updateClipboardText = (id: string, text: string) =>
+  safe(invoke("clipboard_update_text", { id, text }), undefined);
 
 // ---- 文件夹 ----
 export const listFolders = () =>

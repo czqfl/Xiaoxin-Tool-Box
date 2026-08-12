@@ -176,6 +176,7 @@ pub fn run() {
             clipboard::clipboard_move,
             clipboard::clipboard_reorder,
             clipboard::clipboard_insert_text,
+            clipboard::clipboard_update_text,
             credentials::cred_list,
             credentials::cred_add,
             credentials::cred_update,

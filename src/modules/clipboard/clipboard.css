@@ -210,6 +210,41 @@
   flex: 1;
   min-width: 0;
 }
+/* 内联编辑：编辑框替换预览区，条目在编辑时自然增高 */
+.clip-edit-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.clip-edit-input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 56px;
+  max-height: 120px;
+  resize: vertical;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  padding: 6px 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  font-family: inherit;
+  outline: none;
+}
+.clip-edit-input:focus {
+  border-color: var(--accent);
+}
+.clip-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.clip-edit-actions .edit-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
 .clip-preview {
   font-size: 13px;
   color: var(--text-primary);

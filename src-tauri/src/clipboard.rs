@@ -1002,6 +1002,41 @@ pub fn clipboard_reorder(
     Ok(())
 }
 
+/// 编辑文本条目的内容：更新 text 与 preview（前 100 字），并重新计算内容哈希。
+/// 仅文本类型可编辑（图片/文件条目不提供入口，后端同样防御）。
+#[tauri::command]
+pub fn clipboard_update_text(
+    app: AppHandle,
+    id: String,
+    text: String,
+    store: State<'_, ClipboardStore>,
+    paths: State<'_, AppPaths>,
+) -> Result<(), String> {
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        return Err("内容不能为空".into());
+    }
+    let mut entries = store.0.lock().unwrap();
+    let Some(entry) = entries.iter_mut().find(|e| e.id == id) else {
+        return Err("记录不存在".into());
+    };
+    if !matches!(entry.kind, EntryKind::Text) {
+        return Err("仅文本记录可编辑".into());
+    }
+    let preview: String = text.chars().take(100).collect();
+    entry.text = Some(text.clone());
+    entry.preview = preview;
+    // 重新计算内容哈希（与监听/手动插入路径的算法保持一致）
+    let mut h = DefaultHasher::new();
+    "text".hash(&mut h);
+    text.hash(&mut h);
+    entry.content_hash = h.finish().to_string();
+    save_json(&paths.clipboard_file, &*entries).map_err(|e| format!("保存失败：{e}"))?;
+    drop(entries);
+    let _ = app.emit(EVT_CHANGED, ());
+    Ok(())
+}
+
 /// 手动新增一条文本条目，插入到 before_id 条目上方（队列中它的前一条）。
 /// 实现：把新条目的 created_at 放到目标条目的紧前位置（FIFO 升序 / LIFO 降序），
 /// 立即成为目标条目的前一条。与监听记录不同：手动新增不去重，每条输入都会

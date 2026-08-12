@@ -15,6 +15,8 @@ interface ClipboardStore {
   togglePin: (id: string) => Promise<void>;
   /** 智能转换后更新条目文本（同步系统剪贴板由调用方负责） */
   replaceText: (id: string, text: string) => void;
+  /** 编辑条目文本（乐观更新 + 后端持久化，失败时刷新回滚） */
+  updateText: (id: string, text: string) => Promise<void>;
   fetchImage: (id: string) => Promise<string>;
 }
 
@@ -69,6 +71,22 @@ export const useClipboardStore = create<ClipboardStore>((set, get) => ({
           : e
       ),
     });
+  },
+
+  updateText: async (id, text) => {
+    // 乐观更新，失败时 refresh 回滚
+    set({
+      entries: get().entries.map((e) =>
+        e.id === id && e.text !== null
+          ? {
+              ...e,
+              text,
+              preview: text.length > 100 ? `${text.slice(0, 100)}…` : text,
+            }
+          : e
+      ),
+    });
+    await api.updateClipboardText(id, text);
   },
 
   fetchImage: async (id) => {
