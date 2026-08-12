@@ -16,8 +16,8 @@ use windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
 use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
-    KEYEVENTF_KEYUP, VK_CONTROL, VK_LCONTROL, VK_LMENU, VK_LWIN, VK_MENU, VK_RCONTROL, VK_RMENU,
-    VK_RWIN, VK_SHIFT, VK_V, VIRTUAL_KEY,
+    KEYEVENTF_KEYUP, VK_CONTROL, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU,
+    VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT, VK_V, VIRTUAL_KEY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetGUIThreadInfo, GetMessageW,
@@ -84,6 +84,8 @@ static ALT_HELD: AtomicBool = AtomicBool::new(false);
 /// 不用 GetAsyncKeyState——它在钩子线程只按消息循环刷新快照，用户按住 Ctrl
 /// 连点 V 时会误判"Ctrl 已松开"导致 V 泄漏成普通输入（"只能点一次 V"）。
 static CTRL_HELD: AtomicBool = AtomicBool::new(false);
+/// Shift 当前是否按住：Alt 组合热键精确匹配时排除 Shift 残留误触
+static SHIFT_HELD: AtomicBool = AtomicBool::new(false);
 /// 本次 Win 按下期间是否消费过组合键（Win 抬起时需阻止开始菜单）
 static WIN_CONSUMED: AtomicBool = AtomicBool::new(false);
 /// 已吞掉 keydown 的按键，对应 keyup 也要吞掉
@@ -314,6 +316,12 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
         return CallNextHookEx(None, code, wparam, lparam);
     }
 
+    // Shift 键自身：只跟踪状态（Alt 组合精确匹配时排除 Shift 误触），不吞键
+    if vk == VK_SHIFT.0 as u32 || vk == VK_LSHIFT.0 as u32 || vk == VK_RSHIFT.0 as u32 {
+        SHIFT_HELD.store(is_down, Ordering::SeqCst);
+        return CallNextHookEx(None, code, wparam, lparam);
+    }
+
     if is_down {
         // 与已吞按键的自动重复：继续吞掉，不重复触发动作
         if SWALLOWED_VK.load(Ordering::SeqCst) == vk as u16 {
@@ -351,12 +359,15 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                 return LRESULT(1);
             }
         }
-        // Alt 组合面板/翻译热键：只要求 Alt 按住（ALT_HELD 由钩子自行维护，
-        // 可靠）。不要用 GetAsyncKeyState 检查 Ctrl/Shift——它在钩子线程里
-        // 只在消息循环处理时刷新快照，用户之前按过 Ctrl（如复制粘贴）的陈旧
-        // 状态会让 !ctrl_held() 恒为 false，导致所有 Alt 组合热键永久失效。
-        // 副作用可接受：Alt+Ctrl+X 也会命中（若 X 是热键主键），纯 Alt 是主流用法。
-        if !CAPTURE_MODE.load(Ordering::SeqCst) && alt_held {
+        // Alt 组合面板/翻译热键：要求 Alt 按住且 Ctrl/Shift 未按住。
+        // 修饰键状态全部用钩子自维护变量（ALT_HELD/CTRL_HELD/SHIFT_HELD，
+        // 可靠实时）；不排除的话 Alt keyup 偶发丢失会残留 ALT_HELD=true，
+        // 导致 Ctrl+A 也被误判成 Alt+A（"配置 Alt+A 但 Ctrl+A 也能呼出"）。
+        if !CAPTURE_MODE.load(Ordering::SeqCst)
+            && alt_held
+            && !CTRL_HELD.load(Ordering::SeqCst)
+            && !SHIFT_HELD.load(Ordering::SeqCst)
+        {
             // 诊断：Alt 按住时每次按键都记录状态（低频），用于定位
             // "Alt 组合不触发"——能区分 alt_held 未置位 / 槽位未注册 / 匹配失败
             crate::storage::diag_write(&format!(
