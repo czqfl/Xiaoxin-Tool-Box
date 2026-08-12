@@ -1,24 +1,25 @@
-/* 翻译面板（类网页版翻译布局）：顶部语言选择 + 翻译按钮，原文/译文分区卡片化。
-   580x440 窗口下采用"卡片化"布局：原文与译文各自圆角卡片，视觉更清晰 */
+/* 翻译面板：顶部语言选择 + 翻译按钮，原文/译文双卡片（均可编辑，双向翻译）。
+   风格：大圆角、柔和边框、克制阴影，简洁优雅 */
 .translate-shell {
   display: flex;
   flex-direction: column;
   height: 100%;
 }
-/* 顶部：标题 + 语言选择 + 翻译按钮 + 关闭，紧凑单行排列 */
+
+/* 顶部：标题 + 语言选择 + 翻译按钮 + 关闭，单行紧凑排列 */
 .translate-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border-subtle);
+  padding: 12px 16px;
   cursor: default;
 }
 .translate-title {
   flex-shrink: 0;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--text-primary);
+  letter-spacing: 0.3px;
 }
 /* 语言选择组：居中自适应，宽度不足时压缩下拉框 */
 .translate-langs {
@@ -27,18 +28,28 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 5px;
 }
 .lang-select {
   min-width: 0;
-  max-width: 132px;
-  padding: 4px 6px;
-  border-radius: var(--radius-sm);
+  max-width: 136px;
+  padding: 5px 10px;
+  border-radius: 9px;
   border: 1px solid var(--border-subtle);
   background: var(--bg-input);
   color: var(--text-primary);
   font-size: 12px;
   outline: none;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+.lang-select:hover {
+  border-color: var(--border-strong);
+}
+.lang-select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .lang-arrow {
   flex-shrink: 0;
@@ -47,49 +58,75 @@
 }
 .translate-btn {
   flex-shrink: 0;
+  border-radius: 9px;
 }
 .translate-close {
   flex-shrink: 0;
   margin-left: 0;
 }
-/* 原文输入区：独立圆角卡片，聚焦有品牌色描边 */
-.translate-src {
-  flex: 1.1;
+
+/* 原文/译文统一的文本卡片 */
+.translate-src,
+.translate-dst-input {
+  width: 100%;
+  box-sizing: border-box;
   min-height: 0;
-  margin: 12px 14px 6px;
   resize: none;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
+  border-radius: 14px;
   outline: none;
-  background: var(--bg-input);
   padding: 12px 14px;
   font-size: 14px;
   line-height: 1.7;
   color: var(--text-primary);
   font-family: inherit;
+  box-shadow: var(--shadow-item);
   transition: border-color var(--dur-fast) var(--ease-out),
     box-shadow var(--dur-fast) var(--ease-out);
 }
-.translate-src:focus {
+.translate-src {
+  flex: 1.1;
+  margin: 4px 16px 6px;
+  background: var(--bg-input);
+}
+.translate-dst-input {
+  flex: 1;
+  margin: 0;
+  padding-right: 40px;
+  background: var(--accent-soft);
+  border-style: dashed;
+}
+.translate-src:focus,
+.translate-dst-input:focus {
   border-color: var(--accent);
+  border-style: solid;
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
-/* 译文区：品牌色软底卡片，视觉上更醒目；复制按钮浮在结果框右上角 */
+.translate-src::placeholder,
+.translate-dst-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+/* 译文卡片容器：相对定位承载浮动复制按钮 */
 .translate-dst {
   position: relative;
   flex: 1;
   min-height: 0;
-  margin: 0 14px 12px;
-  overflow-y: auto;
-  padding: 12px 40px 12px 14px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
+  margin: 0 16px 12px;
+  display: flex;
+  flex-direction: column;
+}
+/* 翻译中占位 */
+.translate-dst-hint {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--border-subtle);
+  border-radius: 14px;
   background: var(--accent-soft);
-  font-size: 14px;
-  line-height: 1.8;
-  color: var(--text-primary);
-  word-break: break-all;
-  white-space: pre-wrap;
+  font-size: 13px;
+  color: var(--text-tertiary);
 }
 .translate-dst-copy {
   position: absolute;
@@ -98,17 +135,23 @@
   width: 26px;
   height: 26px;
   background: var(--bg-badge);
+  border-radius: 8px;
 }
-/* 底部：状态提示（操作快捷键说明 / 复制成功反馈） */
+.translate-dst-copy:hover {
+  background: var(--bg-item-active);
+}
+
+/* 底部：状态提示（快捷键说明 / 复制成功 / 失败反馈） */
 .translate-bar {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  padding: 7px 16px;
+  padding: 8px 16px;
   border-top: 1px solid var(--border-subtle);
   font-size: 12px;
   color: var(--text-tertiary);
 }
 .translate-status {
   white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease-out);
 }

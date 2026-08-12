@@ -1,5 +1,5 @@
-/** 翻译面板（类网页版翻译布局）：上方原文可编辑，下方译文，底部源/目标语言设置。
- *  划词触发后结果经事件推送；面板内可改语言、重新翻译、一键复制。 */
+/** 翻译面板（双向翻译）：上方原文可编辑（Enter 正向翻译），下方译文可编辑
+ *  （Enter 反向翻译回原文），顶部语言选择 + 翻译按钮，划词结果经事件推送。 */
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { TranslateResult } from "../../types";
@@ -20,12 +20,15 @@ function closePopup() {
 
 export function TranslatePopup() {
   const [result, setResult] = useState<TranslateResult | null>(null);
-  /** 原文输入（可编辑，翻译面板内修改后重新翻译） */
+  /** 原文输入（可编辑，Enter 正向翻译） */
   const [text, setText] = useState("");
+  /** 译文内容（可编辑，Enter 反向翻译回原文） */
+  const [dst, setDst] = useState("");
   const [fromLang, setFromLang] = useState("auto");
   const [toLang, setToLang] = useState("zh");
   const [translating, setTranslating] = useState(false);
-  const [copied, setCopied] = useState(false);
+  /** 底部状态提示（复制成功 / 反向翻译失败等，2s 后自动消失） */
+  const [statusMsg, setStatusMsg] = useState("");
   const [loading, setLoading] = useState(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   /** loading 镜像（供事件回调读取最新值，避免闭包捕获旧值） */
@@ -37,6 +40,12 @@ export function TranslatePopup() {
    *  造成"刚弹出就被关"的误判，故呼出后一小段时间内忽略失焦隐藏。 */
   const lastStartAt = useRef(0);
 
+  /** 底部临时提示，2s 后自动清除 */
+  const flashStatus = (msg: string) => {
+    setStatusMsg(msg);
+    window.setTimeout(() => setStatusMsg(""), 2000);
+  };
+
   // 划词触发的结果：填充原文与译文（保留用户已选的源/目标语言，仅更新内容）
   const applyResult = (r: TranslateResult) => {
     if (r.text) setText(r.text);
@@ -46,6 +55,7 @@ export function TranslatePopup() {
       setResult(null);
       return;
     }
+    setDst(r.translation);
     setResult(r);
     loadingRef.current = false;
     setLoading(false);
@@ -72,6 +82,7 @@ export function TranslatePopup() {
     onEvent<{ text?: string }>("translate://start", (p) => {
       const t = p?.text ?? "";
       setText(t);
+      setDst("");
       setResult(null);
       lastStartAt.current = Date.now();
       if (t.trim()) {
@@ -155,34 +166,47 @@ export function TranslatePopup() {
     return () => cleanup.forEach((fn) => fn());
   }, []);
 
-  /** 面板内手动翻译：用当前原文与所选语言 */
+  /** 正向翻译：以原文为源，翻译到目标语言（Enter / 顶部按钮触发） */
   const doTranslate = async () => {
     const t = text.trim();
     if (!t) return;
     setTranslating(true);
     try {
       const r = await translateText(t, fromLang, toLang);
+      setDst(r.translation);
       setResult(r);
     } catch (err) {
-      setResult({
-        text: t,
-        translation: `翻译失败：${err instanceof Error ? err.message : String(err)}`,
-        from: fromLang,
-        to: toLang,
-        provider: "",
-      });
+      flashStatus("翻译失败，请检查网络或服务商配置");
+    } finally {
+      setTranslating(false);
+    }
+  };
+
+  /** 反向翻译：以译文为源，翻译回原文语言（译文框内 Enter 触发）。
+   *  目标语言 = 用户选的源语言；未指定（auto）时用上次检测出的源语言，再兜底中文。 */
+  const doReverse = async () => {
+    const t = dst.trim();
+    if (!t) return;
+    setTranslating(true);
+    try {
+      const target = fromLang !== "auto" ? fromLang : (result?.from || "zh");
+      const r = await translateText(t, toLang, target);
+      // 反向结果放回原文区，译文区保留用户编辑的内容
+      setText(r.translation);
+      setResult({ ...r, text: t, from: toLang, to: target });
+    } catch (err) {
+      flashStatus("反向翻译失败，请检查网络或服务商配置");
     } finally {
       setTranslating(false);
     }
   };
 
   const doCopy = async () => {
-    if (!result) return;
+    if (!dst.trim()) return;
     try {
       // 复制译文不污染剪贴板历史（后端 SUPPRESS_WATCH）
-      await copyText(result.translation);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
+      await copyText(dst);
+      flashStatus("已复制");
     } catch (err) {
       console.error("复制译文失败", err);
     }
@@ -259,18 +283,28 @@ export function TranslatePopup() {
           }}
         />
 
-        {/* 下方：翻译内容，复制按钮浮在结果框内 */}
+        {/* 下方：译文（可编辑，Enter 反向翻译回原文）；复制按钮浮在结果框内 */}
         <div className="translate-dst">
-          {translating || loading ? (
-            "翻译中…"
+          {loading || translating ? (
+            <div className="translate-dst-hint">翻译中…</div>
           ) : (
-            <>{result?.translation ?? "划词或输入内容后翻译"}</>
+            <textarea
+              className="translate-dst-input"
+              value={dst}
+              placeholder="译文，可编辑…（Enter 反向翻译）"
+              onChange={(e) => setDst(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void doReverse();
+                }
+              }}
+            />
           )}
-          {result && (
+          {!translating && !loading && dst.trim() && (
             <button
               className="icon-btn translate-dst-copy"
               title="复制译文"
-              disabled={translating}
               onClick={() => void doCopy()}
             >
               <IconCopy size={14} />
@@ -281,7 +315,7 @@ export function TranslatePopup() {
         {/* 底部：状态提示 */}
         <div className="translate-bar">
           <span className="translate-status">
-            {copied ? "已复制" : "Enter 翻译 · Shift+Enter 换行 · Esc 关闭"}
+            {statusMsg || "Enter 翻译 · 译文框 Enter 反向 · Esc 关闭"}
           </span>
         </div>
       </div>
