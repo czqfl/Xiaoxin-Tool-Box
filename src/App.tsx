@@ -5,9 +5,11 @@ import { FolderPanel } from "./modules/folder/FolderPanel";
 import { CredentialPanel } from "./modules/credential/CredentialPanel";
 import { TranslatePopup } from "./modules/translate/TranslatePopup";
 import { SettingsApp } from "./settings/SettingsApp";
+import { diagLog } from "./core/tauri";
 
 export default function App() {
   const label = getCurrentWindow().label;
+  void diagLog(`App mounted: ${label}`);
 
   if (label === "clipboard-panel") {
     return <ClipboardPanel />;

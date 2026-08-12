@@ -10,7 +10,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::OnceLock;
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
@@ -40,6 +40,8 @@ enum Action {
     ToggleFolder,
     /// 呼出/隐藏账号密码面板
     ToggleCredential,
+    /// 关闭翻译弹窗（系统级兜底：弹窗无焦点时 webview 收不到 Esc）
+    CloseTranslate,
     /// 捕获模式：设置页录入 Win 组合键（payload 为虚拟键码）
     WinCaptured(u16),
 }
@@ -54,6 +56,8 @@ static CAPTURE_MODE: AtomicBool = AtomicBool::new(false);
 static CLIPBOARD_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
 static FOLDER_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
 static CREDENTIAL_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
+/// 翻译弹窗是否打开：打开时按 Esc 系统级关闭（弹窗 webview 可能无焦点收不到键）
+static TRANSLATE_POPUP_OPEN: AtomicBool = AtomicBool::new(false);
 static SENDER: OnceLock<Sender<Action>> = OnceLock::new();
 
 // ---- 仅钩子线程（回调与消息循环同线程）读写 ----
@@ -71,6 +75,11 @@ pub fn set_seq_paste_enabled(on: bool) {
 /// 同步队列可用性：队列为空时放行 Ctrl+V（交给系统普通粘贴）
 pub fn set_seq_queue_available(on: bool) {
     SEQ_AVAILABLE.store(on, Ordering::SeqCst);
+}
+
+/// 翻译弹窗打开状态：显示时置 true，Esc 系统级关闭时复位
+pub fn set_translate_popup_open(on: bool) {
+    TRANSLATE_POPUP_OPEN.store(on, Ordering::SeqCst);
 }
 
 /// 捕获模式：设置页录入快捷键期间接管 Win 组合，拦截后回传组合串
@@ -198,6 +207,13 @@ fn run_action<R: Runtime>(app: &AppHandle<R>, action: Action) {
         Action::ToggleCredential => {
             crate::panel::toggle_panel(app, crate::panel::CREDENTIAL_PANEL)
         }
+        Action::CloseTranslate => {
+            // 系统级关闭翻译弹窗（webview 无焦点时前端收不到 Esc 的兜底）
+            set_translate_popup_open(false);
+            if let Some(w) = app.get_webview_window(crate::translate::TRANSLATE_PANEL) {
+                let _ = w.hide();
+            }
+        }
         Action::WinCaptured(vk) => {
             // 回传组合串给设置页录入框（与前端 comboFromEvent 的格式一致）
             if let Some(name) = vk_to_combo_name(vk as u32) {
@@ -288,6 +304,9 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
             SWALLOWED_VK.store(vk as u16, Ordering::SeqCst);
             post(Action::SeqPaste);
             return LRESULT(1);
+        } else if vk == 0x1B && TRANSLATE_POPUP_OPEN.load(Ordering::SeqCst) {
+            // 翻译弹窗打开时按 Esc：系统级关闭（不吞键，避免弹窗已关后 Esc 失灵）
+            post(Action::CloseTranslate);
         }
     } else if is_up && SWALLOWED_VK.load(Ordering::SeqCst) == vk as u16 {
         SWALLOWED_VK.store(0, Ordering::SeqCst);

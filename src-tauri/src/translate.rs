@@ -157,6 +157,9 @@ fn show_popup<R: Runtime>(app: &AppHandle<R>) {
     }
     let _ = w.unminimize();
     let _ = w.show();
+    // 系统级 Esc 关闭兜底：标记弹窗打开（webview 无焦点时由键盘钩子关闭）
+    #[cfg(windows)]
+    crate::keyhook::set_translate_popup_open(true);
     // 确保弹窗获得键盘焦点：否则 Esc/输入框/拖动不可用。
     // 后台 SetForegroundWindow 常被前台锁拒绝，延时到后台线程再补一次（落入
     // 用户输入窗口期成功率更高），仍失败则由前端"点击即聚焦"兜底。

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { TranslateResult } from "../../types";
 import { onEvent } from "../../core/events";
-import { copyText, lastTranslateResult, translateText } from "../../core/tauri";
+import { copyText, diagLog, lastTranslateResult, translateText } from "../../core/tauri";
 import { IconClose, IconCopy } from "../../components/icons";
 import { LANG_OPTIONS, langLabel } from "./langs";
 import "../../styles/panel.css";
@@ -34,6 +34,7 @@ export function TranslatePopup() {
   };
 
   useEffect(() => {
+    void diagLog("TranslatePopup mounted");
     getCurrentWindow().setFocus().catch(() => undefined);
     // 挂载兜底：快捷键触发后窗口先 show、事件可能早于监听，先拉一次最近结果
     void lastTranslateResult().then((r) => {
@@ -106,6 +107,7 @@ export function TranslatePopup() {
   /** 头部拖动（JS 手柄）：不用 data-tauri-drag-region——它会抢占头部所有
    *  mousedown，导致关闭按钮点击失效；这里避开按钮后调 startDragging */
   const onHeadMouseDown = (e: React.MouseEvent) => {
+    void diagLog("head mousedown");
     if ((e.target as HTMLElement).closest("button")) return;
     getCurrentWindow().startDragging().catch(() => undefined);
   };
@@ -124,7 +126,10 @@ export function TranslatePopup() {
           <button
             className="icon-btn translate-close"
             title="关闭（Esc）"
-            onClick={closePopup}
+            onClick={() => {
+              void diagLog("close click");
+              closePopup();
+            }}
           >
             <IconClose size={13} />
           </button>

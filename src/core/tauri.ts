@@ -20,6 +20,11 @@ async function safe<T>(promise: Promise<T>, fallback: T): Promise<T> {
   }
 }
 
+// ---- 诊断 ----
+/** 写诊断日志到 data/diag.log（排查弹窗交互等疑难问题用） */
+export const diagLog = (msg: string) =>
+  safe(invoke("diag_log", { msg }), undefined);
+
 // ---- 配置 ----
 export const loadConfig = () => invoke<AppConfig>("config_load");
 export const saveConfig = (config: AppConfig) =>

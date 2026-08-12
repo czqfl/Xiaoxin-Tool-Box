@@ -3,6 +3,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
+use tauri::State;
 
 /// 应用所有数据文件的路径集合，启动时解析一次。
 #[derive(Debug, Clone)]
@@ -70,4 +71,19 @@ pub fn save_json<T: Serialize + ?Sized>(path: &Path, value: &T) -> std::io::Resu
     fs::write(&tmp, content)?;
     fs::rename(&tmp, path)?;
     Ok(())
+}
+
+/// 诊断日志：追加写 data/diag.log（定位"弹窗交互失效"等疑难问题：
+/// 看前端是否挂载、事件是否到达）
+#[tauri::command]
+pub fn diag_log(msg: String, paths: State<'_, AppPaths>) {
+    use std::io::Write;
+    let line = format!("{} {}\n", chrono::Utc::now().to_rfc3339(), msg);
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(paths.data_dir.join("diag.log"))
+    {
+        let _ = f.write_all(line.as_bytes());
+    }
 }
