@@ -102,11 +102,25 @@ pub const ALL_PANELS: &[&str] = &[
 /// （翻译/设置恰好有硬编码分支所以能开；快捷键传完整标签所以能开）。
 #[tauri::command]
 pub fn panel_toggle(app: tauri::AppHandle, label: String) -> Result<(), String> {
+    // 设置窗口：可见 → 关闭；不可见 → 打开（单击即关）
     if label == "settings" {
+        if let Some(w) = app.get_webview_window("settings") {
+            if w.is_visible().unwrap_or(false) {
+                let _ = w.hide();
+                return Ok(());
+            }
+        }
         crate::tray::show_settings_window(&app);
         return Ok(());
     }
+    // 划词翻译：弹窗可见 → 关闭（不再"关了又弹出来"）；不可见 → 触发翻译
     if label == "translation" {
+        if let Some(w) = app.get_webview_window(crate::translate::TRANSLATE_PANEL) {
+            if w.is_visible().unwrap_or(false) {
+                let _ = w.hide();
+                return Ok(());
+            }
+        }
         crate::translate::trigger_selection_translate(&app);
         return Ok(());
     }
@@ -249,22 +263,18 @@ fn ensure_panel_window<R: Runtime>(
     Some(w)
 }
 
-/// 切换面板：已显示【且持有焦点】则隐藏；否则呼出（恢复上次位置/居中）+ 可靠置前。
-/// 关闭判定用「可见且聚焦」——置顶常驻面板（always_on_top）失焦不隐藏，可能一直
-/// 可见但被其它窗口盖住；此时再触发应把面板【带回前台】而不是误判"已打开"而隐藏。
-/// 【互不影响】不再隐藏其他面板/设置窗口——各面板独立开合（用户需求：
-/// 打开 A 时 B 保持，再点一次自己的图标才关闭自己）。
+/// 切换面板：可见 → 关闭；不可见 → 呼出（恢复上次位置/居中）+ 可靠置前。
+/// 【单击即关】用 is_visible 判定而非"可见且聚焦"——点击工具栏图标时焦点会
+/// 先落到工具栏窗口（目标面板瞬时失焦），若用聚焦判定则第二次点击永远不成立、
+/// 面板关不掉（"要双击才能关"的根因）。各面板独立开合、互不影响。
 pub fn toggle_panel<R: Runtime>(app: &AppHandle<R>, label: &str) {
     // 窗口可能已被销毁（旧版本点 X）→ 自动重建，避免"以后都打不开"
     let Some(window) = ensure_panel_window(app, label) else {
         return;
     };
     let visible = window.is_visible().unwrap_or(false);
-    let focused = window.is_focused().unwrap_or(false);
-    crate::storage::diag_write(&format!(
-        "[toggle_panel] {label} visible={visible} focused={focused}"
-    ));
-    if visible && focused {
+    crate::storage::diag_write(&format!("[toggle_panel] {label} visible={visible}"));
+    if visible {
         // 关闭前记住窗口位置（持久化到配置），下次呼出恢复上次位置
         remember_position(app, &window, label);
         let _ = window.hide();
@@ -273,8 +283,7 @@ pub fn toggle_panel<R: Runtime>(app: &AppHandle<R>, label: &str) {
         if !restore_position(app, &window, label) {
             position_near_cursor(app, &window);
         }
-        // 显示 + 可靠置前（force_foreground_robust 不受前台锁限制，
-        // 快捷键/托盘/工具栏路径统一可靠）
+        // 显示 + 可靠置前（force_foreground_robust 不受前台锁限制）
         show_and_activate(&window);
         refresh_panel_acrylic(app, &window);
     }

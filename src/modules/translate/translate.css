@@ -65,10 +65,11 @@
   margin-left: 0;
 }
 
-/* 原文/译文统一的文本卡片 */
+/* 原文/译文统一的文本卡片。
+   注意：不设 width:100%——二者都是 flex 子项，交叉轴默认 stretch 自动撑满
+   （含 margin），width:100% 反而与左右 margin 叠加溢出（原文框右边界贴边的根因） */
 .translate-src,
 .translate-dst-input {
-  width: 100%;
   box-sizing: border-box;
   min-height: 0;
   resize: none;
@@ -92,14 +93,13 @@
 .translate-dst-input {
   flex: 1;
   margin: 0;
+  /* 右侧预留浮动复制按钮的空间 */
   padding-right: 40px;
-  background: var(--accent-soft);
-  border-style: dashed;
+  background: var(--bg-input);
 }
 .translate-src:focus,
 .translate-dst-input:focus {
   border-color: var(--accent);
-  border-style: solid;
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .translate-src::placeholder,
@@ -122,9 +122,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px dashed var(--border-subtle);
+  border: 1px solid var(--border-subtle);
   border-radius: 14px;
-  background: var(--accent-soft);
+  background: var(--bg-input);
   font-size: 13px;
   color: var(--text-tertiary);
 }
