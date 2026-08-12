@@ -82,6 +82,27 @@ pub fn set_translate_popup_open(on: bool) {
     TRANSLATE_POPUP_OPEN.store(on, Ordering::SeqCst);
 }
 
+/// 等待 Ctrl/Alt/Shift/Win 修饰键全部释放（最多 600ms）。
+/// 模拟复制（Ctrl+C）前必须调用：用户按翻译热键的瞬间修饰键还按着，
+/// 此时注入的 C 会与按住的 Alt 组合成 Alt+C/Ctrl+Alt+C，命中 QQ 等
+/// 截图工具的热键——与用户设置什么热键无关，只要有 Alt 就中招。
+pub fn wait_modifiers_released() {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        GetAsyncKeyState, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
+    };
+    for _ in 0..30 {
+        unsafe {
+            let pressed = [VK_CONTROL, VK_MENU, VK_SHIFT, VK_LWIN, VK_RWIN]
+                .iter()
+                .any(|&vk| ((GetAsyncKeyState(vk.0 as i32) as u16) & 0x8000) != 0);
+            if !pressed {
+                return;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
 /// 捕获模式：设置页录入快捷键期间接管 Win 组合，拦截后回传组合串
 pub fn set_capture_mode(on: bool) {
     CAPTURE_MODE.store(on, Ordering::SeqCst);

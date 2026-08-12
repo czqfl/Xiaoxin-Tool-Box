@@ -62,6 +62,10 @@ pub fn trigger_selection_translate<R: Runtime>(app: &AppHandle<R>) {
         //      通过"剪贴板内容是否变化"判断复制是否真的生效。
         let mut selected = String::new();
         for _ in 0..3 {
+            // 关键：先等修饰键释放再注入 Ctrl+C——否则注入的 C 与用户按住的
+            // Alt 组合成 Alt+C，命中 QQ 等截图工具热键（"无论设什么热键都截屏"根因）
+            #[cfg(windows)]
+            crate::keyhook::wait_modifiers_released();
             #[cfg(windows)]
             crate::keyhook::send_ctrl_c();
             std::thread::sleep(std::time::Duration::from_millis(120));
