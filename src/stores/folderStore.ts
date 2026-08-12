@@ -12,6 +12,8 @@ interface FolderStore {
   togglePin: (id: string) => Promise<void>;
   moveToTop: (id: string) => Promise<void>;
   reorder: (ids: string[]) => Promise<void>;
+  /** 设置颜色标签（null = 清除） */
+  setColor: (id: string, color: string | null) => Promise<void>;
 }
 
 export const useFolderStore = create<FolderStore>((set, get) => ({
@@ -51,6 +53,14 @@ export const useFolderStore = create<FolderStore>((set, get) => ({
   reorder: async (ids) => {
     await api.reorderFolders(ids);
     await get().refresh();
+  },
+
+  setColor: async (id, color) => {
+    // 乐观更新，失败时刷新回滚
+    set({
+      folders: get().folders.map((f) => (f.id === id ? { ...f, color } : f)),
+    });
+    await api.setFolderColor(id, color);
   },
 }));
 

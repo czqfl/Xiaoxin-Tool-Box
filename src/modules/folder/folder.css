@@ -404,3 +404,19 @@
   pointer-events: none;
   z-index: 10;
 }
+
+/* 右键菜单中的颜色选项色块 */
+.menu-color-dot {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.menu-color-none {
+  border: 1px solid var(--border-strong);
+  background:
+    linear-gradient(135deg, transparent 45%, var(--border-strong) 45%, var(--border-strong) 55%, transparent 55%),
+    linear-gradient(45deg, transparent 45%, var(--border-strong) 45%, var(--border-strong) 55%, transparent 55%);
+  background-size: 6px 6px;
+}

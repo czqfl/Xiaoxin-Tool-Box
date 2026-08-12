@@ -21,12 +21,14 @@ import {
   IconFolderPlus,
   IconGrid,
   IconList,
+  IconPalette,
   IconPin,
   IconSearch,
   IconTerminal,
   IconTrash,
   IconTree,
 } from "../../components/icons";
+import { FOLDER_COLORS } from "./colors";
 import "../../styles/panel.css";
 import "./folder.css";
 
@@ -126,7 +128,7 @@ function ZonePager({
 }
 
 export function FolderPanel() {
-  const { folders, loaded, refresh, add, remove, togglePin, moveToTop, reorder } =
+  const { folders, loaded, refresh, add, remove, togglePin, moveToTop, reorder, setColor } =
     useFolderStore();
   const config = useConfigStore((s) => s.config);
   const updateConfig = useConfigStore((s) => s.update);
@@ -423,6 +425,22 @@ export function FolderPanel() {
       onClick: () => {
         api.copyFolderPath(folder.path).catch((e) => window.alert(String(e)));
       },
+    },
+    {
+      label: "设置颜色",
+      icon: <IconPalette size={14} />,
+      children: [
+        {
+          label: "无颜色",
+          icon: <span className="menu-color-dot menu-color-none" />,
+          onClick: () => void setColor(folder.id, null),
+        },
+        ...FOLDER_COLORS.map((c) => ({
+          label: c.name,
+          icon: <span className="menu-color-dot" style={{ background: c.value }} />,
+          onClick: () => void setColor(folder.id, c.value),
+        })),
+      ],
     },
     {
       label: folder.pinned ? "取消固定" : "固定",

@@ -1,24 +1,16 @@
-/** 文件夹设置页：固定列表管理（增删改）、显示选项、布局模式 */
+/** 文件夹设置页：固定列表管理（增删改色）、显示选项、布局模式 */
 import { useEffect, useState } from "react";
 import { useConfigStore } from "../stores/configStore";
 import { sortFolders, useFolderStore } from "../stores/folderStore";
 import * as api from "../modules/folder/api";
+import { FOLDER_COLORS } from "../modules/folder/colors";
 import { Segmented, SettingGroup, SettingRow, Switch } from "./components";
-import { IconPalette, IconTrash } from "../components/icons";
-
-const COLOR_PRESETS = [
-  "#6366f1",
-  "#f59e0b",
-  "#10b981",
-  "#ef4444",
-  "#06b6d4",
-  "#ec4899",
-];
+import { IconTrash } from "../components/icons";
 
 export function FolderPage() {
   const config = useConfigStore((s) => s.config);
   const update = useConfigStore((s) => s.update);
-  const { folders, loaded, refresh, add, remove } = useFolderStore();
+  const { folders, loaded, refresh, add, remove, setColor } = useFolderStore();
   const [newPath, setNewPath] = useState("");
   const [error, setError] = useState("");
 
@@ -60,14 +52,6 @@ export function FolderPage() {
       await api.renameFolder(id, name);
       await refresh();
     }
-  };
-
-  const handleColor = async (id: string) => {
-    const current = folders.find((f) => f.id === id)?.color ?? null;
-    const idx = current ? COLOR_PRESETS.indexOf(current) : -1;
-    const next = COLOR_PRESETS[(idx + 1) % COLOR_PRESETS.length];
-    await api.setFolderColor(id, next);
-    await refresh();
   };
 
   const { pinned } = sortFolders(folders);
@@ -128,13 +112,23 @@ export function FolderPage() {
             <span className="folder-path" title={f.path}>
               {f.path}
             </span>
-            <button
-              className="icon-btn"
-              title="切换颜色标签"
-              onClick={() => void handleColor(f.id)}
-            >
-              <IconPalette size={14} />
-            </button>
+            {/* 可视化色块选择：当前色高亮，点击即设置 */}
+            <div className="folder-color-picker" title="设置颜色标签">
+              <button
+                className={`color-swatch ${!f.color ? "active" : ""}`}
+                title="无颜色"
+                onClick={() => void setColor(f.id, null)}
+              />
+              {FOLDER_COLORS.map((c) => (
+                <button
+                  key={c.value}
+                  className={`color-swatch ${f.color === c.value ? "active" : ""}`}
+                  style={{ background: c.value }}
+                  title={c.name}
+                  onClick={() => void setColor(f.id, c.value)}
+                />
+              ))}
+            </div>
             <button
               className="icon-btn"
               title="删除"

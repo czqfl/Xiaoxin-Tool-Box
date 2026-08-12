@@ -283,3 +283,38 @@
   color: var(--text-tertiary);
   font-size: 12px;
 }
+
+/* 文件夹颜色选择器：色块行，当前色高亮 */
+.folder-color-picker {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.folder-color-picker .color-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  transition: transform var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+.folder-color-picker .color-swatch:hover {
+  transform: scale(1.12);
+  box-shadow: var(--shadow-item);
+}
+/* 无颜色：斜线示意透明 */
+.folder-color-picker .color-swatch:first-child {
+  border-color: var(--border-strong);
+  background:
+    linear-gradient(135deg, transparent 45%, var(--border-strong) 45%, var(--border-strong) 55%, transparent 55%),
+    linear-gradient(45deg, transparent 45%, var(--border-strong) 45%, var(--border-strong) 55%, transparent 55%);
+  background-size: 6px 6px;
+}
+.folder-color-picker .color-swatch.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+  transform: scale(1.1);
+}
