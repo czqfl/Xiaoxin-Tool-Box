@@ -7,6 +7,7 @@ import type {
   Credential,
   EditorInfo,
   FolderEntry,
+  GitRunResult,
   PortProcess,
   TranslateResult,
 } from "../types";
@@ -112,6 +113,9 @@ export const detectEditors = () =>
 /** 在默认终端中执行命令（git 等）：shell 取 "wt" | "cmd" | "powershell" */
 export const gitExec = (path: string, command: string, shell: string) =>
   invoke<void>("folder_git_exec", { path, command, shell });
+/** 面板内逐条执行命令并捕获输出（友好展示每条结果） */
+export const gitRun = (path: string, commands: string[]) =>
+  safe(invoke<GitRunResult[]>("folder_git_run", { path, commands }), []);
 /** 批量读取文件夹的 Git 当前分支（非仓库为 null） */
 export const folderGitBranches = (paths: string[]) =>
   safe(invoke<(string | null)[]>("folder_git_branches", { paths }), []);

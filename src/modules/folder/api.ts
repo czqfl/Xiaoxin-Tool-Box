@@ -16,6 +16,7 @@ export {
   pickVscodeExecutable,
   detectEditors,
   gitExec,
+  gitRun,
   folderGitBranches,
   copyFolderPath,
   pickFolder,

@@ -347,6 +347,61 @@ pub fn folder_git_exec(path: String, command: String, shell: String) -> CmdResul
     exec_in_shell(&path, &shell, &command)
 }
 
+/// 单条命令执行结果（面板内友好展示用）
+#[derive(Serialize)]
+pub struct GitRunResult {
+    /// 命令原文（如 "git status"）
+    pub command: String,
+    /// 是否执行成功（退出码 0）
+    pub ok: bool,
+    /// 标准输出（已 trim）
+    pub stdout: String,
+    /// 标准错误（已 trim）
+    pub stderr: String,
+    /// 退出码；命令启动失败时为 None
+    pub code: Option<i32>,
+}
+
+/// 【面板内】逐条执行命令（git 等）并捕获输出，返回每条结果——
+/// 替代"开新终端看输出"：终端方式多条命令拼一行滚动太快只能看到末尾，
+/// 面板内逐条执行、每条独立展示结果，看得更清楚（用户反馈）。
+#[tauri::command]
+pub fn folder_git_run(path: String, commands: Vec<String>) -> Result<Vec<GitRunResult>, String> {
+    if !Path::new(&path).is_dir() {
+        return Err("文件夹不存在或已被移动".into());
+    }
+    let mut results = Vec::new();
+    for line in commands {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        // cmd /d /c <command>：当前目录执行并捕获输出
+        let out = Command::new("cmd")
+            .args(["/d", "/c"])
+            .arg(line)
+            .current_dir(&path)
+            .output();
+        match out {
+            Ok(o) => results.push(GitRunResult {
+                command: line.to_string(),
+                ok: o.status.success(),
+                stdout: String::from_utf8_lossy(&o.stdout).trim().to_string(),
+                stderr: String::from_utf8_lossy(&o.stderr).trim().to_string(),
+                code: o.status.code(),
+            }),
+            Err(e) => results.push(GitRunResult {
+                command: line.to_string(),
+                ok: false,
+                stdout: String::new(),
+                stderr: format!("命令启动失败：{e}"),
+                code: None,
+            }),
+        }
+    }
+    Ok(results)
+}
+
 /// 拉起终端并执行命令：复用 open_in_shell 的壳，进入目录后追加命令。
 /// 命令执行失败时错误信息同样显示在终端窗口内，反馈天然可见。
 ///

@@ -204,6 +204,7 @@ pub fn run() {
             folder::folder_detect_editors,
             folder::folder_set_vscode_path,
             folder::folder_git_exec,
+            folder::folder_git_run,
             folder::folder_git_branches,
             folder::folder_copy_path,
             shortcut::shortcut_test,

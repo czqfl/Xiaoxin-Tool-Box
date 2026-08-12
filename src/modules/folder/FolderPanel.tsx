@@ -1,7 +1,7 @@
 /** 文件夹快捷面板：固定/最常访问双分区、各自分页、搜索、右键菜单、拖拽添加与排序 */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { EditorInfo, FolderEntry, FolderLayout } from "../../types";
+import type { EditorInfo, FolderEntry, FolderLayout, GitRunResult } from "../../types";
 import { hideCurrentWindow, usePanelCommon, withNativeDialog } from "../../core/usePanel";
 import { EVT_FOLDER_CHANGED, onEvent } from "../../core/events";
 import { useFolderStore, sortFolders } from "../../stores/folderStore";
@@ -148,6 +148,12 @@ export function FolderPanel() {
   const [branches, setBranches] = useState<Record<string, string>>({});
   /** 已安装编辑器列表（null = 尚未检测完成） */
   const [editors, setEditors] = useState<EditorInfo[] | null>(null);
+  /** Git 命令面板内执行结果（浮层展示；null = 无执行） */
+  const [gitRun, setGitRun] = useState<{
+    folder: FolderEntry;
+    results: GitRunResult[];
+    running: boolean;
+  } | null>(null);
 
   // 列表变化时批量读取 Git 分支（读 .git/HEAD，毫秒级）
   useEffect(() => {
@@ -355,11 +361,17 @@ export function FolderPanel() {
     }
   };
 
-  /** 在默认终端中执行 Git 命令：终端窗口保留，命令输出直接可见 */
-  const execGitCommand = (folder: FolderEntry, cmd: string) => {
-    api
-      .gitExec(folder.path, cmd, config.folder.terminal_shell)
-      .catch((e) => console.error("执行 Git 命令失败", e));
+  /** 面板内逐条执行 Git 命令并友好展示结果：
+   *  不再开新终端（多条命令拼一行滚动太快只能看到末尾，用户反馈），
+   *  改为在面板内逐条执行、每条独立展示成功/失败与输出。 */
+  const execGitCommand = async (folder: FolderEntry, cmd: string) => {
+    const commands = cmd
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    setGitRun({ folder, results: [], running: true });
+    const results = await api.gitRun(folder.path, commands);
+    setGitRun({ folder, results, running: false });
   };
 
   const menuItems = (folder: FolderEntry): MenuItem[] => [
@@ -670,6 +682,46 @@ export function FolderPanel() {
             <span className="kbd">Esc</span> 关闭
           </span>
         </div>
+
+        {gitRun && (
+          <div className="git-run-overlay" onClick={() => setGitRun(null)}>
+            <div className="git-run-panel" onClick={(e) => e.stopPropagation()}>
+              <div className="git-run-head">
+                <span className="git-run-title">
+                  <IconBranch size={13} /> Git 执行结果 · {gitRun.folder.name}
+                </span>
+                <button
+                  className="icon-btn"
+                  title="关闭"
+                  onClick={() => setGitRun(null)}
+                >
+                  <IconClose size={14} />
+                </button>
+              </div>
+              <div className="git-run-body">
+                {gitRun.running ? (
+                  <div className="git-run-loading">正在执行命令…</div>
+                ) : gitRun.results.length === 0 ? (
+                  <div className="git-run-loading">没有可执行的命令</div>
+                ) : (
+                  gitRun.results.map((r, i) => (
+                    <div className={`git-run-item ${r.ok ? "ok" : "fail"}`} key={i}>
+                      <div className="git-run-cmd">
+                        <span className="git-run-status">{r.ok ? "✔" : "✘"}</span>
+                        <code>{r.command}</code>
+                        {!r.ok && r.code != null && (
+                          <span className="git-run-code">退出码 {r.code}</span>
+                        )}
+                      </div>
+                      {r.stdout && <pre className="git-run-out">{r.stdout}</pre>}
+                      {r.stderr && <pre className="git-run-err">{r.stderr}</pre>}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {menu && (
           <ContextMenu

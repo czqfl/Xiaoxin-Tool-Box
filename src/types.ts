@@ -182,6 +182,20 @@ export interface EditorInfo {
   exe: string;
 }
 
+/** Git 命令单条执行结果（文件夹面板内展示用） */
+export interface GitRunResult {
+  /** 命令原文（如 "git status"） */
+  command: string;
+  /** 是否执行成功（退出码 0） */
+  ok: boolean;
+  /** 标准输出 */
+  stdout: string;
+  /** 标准错误 */
+  stderr: string;
+  /** 退出码；启动失败为 null */
+  code: number | null;
+}
+
 /** 端口工具：占用指定端口的进程信息 */
 export interface PortProcess {
   pid: number;
