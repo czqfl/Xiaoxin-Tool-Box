@@ -57,7 +57,9 @@ export function ToolbarPage() {
                   className={`toolbar-tool ${checked ? "checked" : ""}`}
                   onClick={() => toggleTool(key)}
                 >
-                  <span className="toolbar-tool-icon">{tool.icon}</span>
+                  <span className="toolbar-tool-icon" style={{ color: tool.color }}>
+                    {tool.icon}
+                  </span>
                   <span className="toolbar-tool-name">{tool.label}</span>
                   <span className="toolbar-tool-check">{checked ? "✓" : ""}</span>
                 </button>

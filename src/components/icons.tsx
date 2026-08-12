@@ -236,12 +236,13 @@ export const IconLock = (p: IconProps) => (
   </svg>
 );
 
-/** 网络插头：端口工具（查端口占用 / 杀进程） */
+/** 网络端口（RJ45 网口 + 触点 + 网线）：端口工具（查端口占用 / 杀进程） */
 export const IconPort = (p: IconProps) => (
   <svg {...base(p)}>
-    <path d="M12 21v-4.5" />
-    <path d="M9 3v5M15 3v5" />
-    <path d="M6.5 8h11v3.5a5.5 5.5 0 0 1-11 0V8Z" />
+    <rect x="3.5" y="2.5" width="17" height="12" rx="2" />
+    <path d="M7 6.2h2M11 6.2h2M15 6.2h2" />
+    <path d="M12 14.5V20" />
+    <path d="M8 20h8" />
   </svg>
 );
 
@@ -280,9 +281,10 @@ export const IconClose = (p: IconProps) => (
   </svg>
 );
 
+/** 翻译：聊天气泡 + 文字行（比抽象语言符号更直观） */
 export const IconTranslate = (p: IconProps) => (
   <svg {...base(p)}>
-    <path d="M4 7h9M8.5 4v3M8.5 7c0 4 2.5 7 6 8.5M14 5c0 4-2.5 7-6 8.5" />
-    <path d="M5 13c2.5 1 4 3 4.5 6M19 13c-2.5 1-4 3-4.5 6" />
+    <path d="M21 14.5a2 2 0 0 1-2 2H8l-4.5 4V5a2 2 0 0 1 2-2h13.5a2 2 0 0 1 2 2Z" />
+    <path d="M8 9h8.5M8 12.2h5.5" />
   </svg>
 );

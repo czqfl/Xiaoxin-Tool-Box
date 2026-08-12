@@ -28,15 +28,22 @@
   border: none;
   border-radius: 8px;
   background: transparent;
-  color: var(--text-secondary);
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+/* 彩色图标：正常显示专属色，hover 提亮 + 加深底色 */
+.toolbar-icon {
+  display: flex;
+  transition: filter var(--dur-fast) var(--ease-out),
     transform var(--dur-fast) var(--ease-out);
 }
 .toolbar-btn:hover {
   background: var(--bg-item-hover);
-  color: var(--text-primary);
+}
+.toolbar-btn:hover .toolbar-icon {
+  filter: brightness(1.25);
+  transform: scale(1.08);
 }
 .toolbar-btn:active {
   transform: scale(0.9);

@@ -20,14 +20,39 @@ import {
 } from "../../components/icons";
 import "./toolbar.css";
 
-/** 工具定义：图标 + 提示文案（顺序即设置页勾选顺序） */
-export const TOOLS: Record<ToolKey, { label: string; icon: React.ReactNode }> = {
-  clipboard: { label: "剪贴板", icon: <IconClipboard size={18} /> },
-  folder: { label: "文件夹", icon: <IconFolder size={18} /> },
-  credentials: { label: "账号密码", icon: <IconLock size={18} /> },
-  translation: { label: "划词翻译", icon: <IconTranslate size={18} /> },
-  port: { label: "端口工具", icon: <IconPort size={18} /> },
-  settings: { label: "打开设置", icon: <IconSettings size={18} /> },
+/** 工具定义：图标（含专属颜色）+ 提示文案（顺序即设置页勾选顺序）。
+ *  每个图标一个辨识色，方便一眼定位工具；hover 提亮。 */
+export const TOOLS: Record<ToolKey, { label: string; color: string; icon: React.ReactNode }> = {
+  clipboard: {
+    label: "剪贴板",
+    color: "#60a5fa",
+    icon: <IconClipboard size={18} />,
+  },
+  folder: {
+    label: "文件夹",
+    color: "#fbbf24",
+    icon: <IconFolder size={18} />,
+  },
+  credentials: {
+    label: "账号密码",
+    color: "#34d399",
+    icon: <IconLock size={18} />,
+  },
+  translation: {
+    label: "划词翻译",
+    color: "#c084fc",
+    icon: <IconTranslate size={18} />,
+  },
+  port: {
+    label: "端口工具",
+    color: "#fb923c",
+    icon: <IconPort size={18} />,
+  },
+  settings: {
+    label: "打开设置",
+    color: "#94a3b8",
+    icon: <IconSettings size={18} />,
+  },
 };
 
 /** 可用工具列表（设置页勾选用） */
@@ -130,7 +155,9 @@ export function Toolbar() {
             data-key={key}
             title={tool.label}
           >
-            {tool.icon}
+            <span className="toolbar-icon" style={{ color: tool.color }}>
+              {tool.icon}
+            </span>
           </button>
         );
       })}
