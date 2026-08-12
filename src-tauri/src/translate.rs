@@ -157,8 +157,25 @@ fn show_popup<R: Runtime>(app: &AppHandle<R>) {
     }
     let _ = w.unminimize();
     let _ = w.show();
-    // 确保弹窗获得键盘焦点：否则 Esc/输入框不可用（后台 SetForegroundWindow 可能被前景锁拒绝）
-    let _ = w.set_focus();
+    // 确保弹窗获得键盘焦点：否则 Esc/输入框/拖动不可用。
+    // 后台 SetForegroundWindow 常被前台锁拒绝，延时到后台线程再补一次（落入
+    // 用户输入窗口期成功率更高），仍失败则由前端"点击即聚焦"兜底。
+    let w2 = w.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        #[cfg(windows)]
+        {
+            use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+            if let Ok(handle) = w2.window_handle() {
+                if let RawWindowHandle::Win32(h) = handle.as_raw() {
+                    crate::acrylic::force_topmost_foreground(windows::Win32::Foundation::HWND(
+                        h.hwnd.get() as *mut _,
+                    ));
+                }
+            }
+        }
+        let _ = w2.set_focus();
+    });
 }
 
 /// 按服务商调用对应翻译 API

@@ -5,12 +5,17 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { TranslateResult } from "../../types";
 import { onEvent } from "../../core/events";
 import { copyText, lastTranslateResult, translateText } from "../../core/tauri";
-import { IconCopy } from "../../components/icons";
+import { IconClose, IconCopy } from "../../components/icons";
 import { LANG_OPTIONS, langLabel } from "./langs";
 import "../../styles/panel.css";
 import "./translate.css";
 
 const EVT_RESULT = "translate://result";
+
+/** 关闭弹窗（按钮/Esc/失焦共用） */
+function closePopup() {
+  getCurrentWindow().hide().catch(() => undefined);
+}
 
 export function TranslatePopup() {
   const [result, setResult] = useState<TranslateResult | null>(null);
@@ -48,11 +53,20 @@ export function TranslatePopup() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        getCurrentWindow().hide().catch(() => undefined);
+        closePopup();
       }
     };
     window.addEventListener("keydown", onKey);
     cleanup.push(() => window.removeEventListener("keydown", onKey));
+    // 点击弹窗任意处即请求聚焦：后台置前被前台锁拒绝时弹窗无焦点，
+    // 导致 Esc 无效、失焦不触发、无法拖动；点击后一切恢复正常
+    const onPointerDown = () => {
+      if (!document.hasFocus()) {
+        getCurrentWindow().setFocus().catch(() => undefined);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    cleanup.push(() => document.removeEventListener("pointerdown", onPointerDown));
     return () => cleanup.forEach((fn) => fn());
   }, []);
 
@@ -99,6 +113,14 @@ export function TranslatePopup() {
               {langLabel(result.from)} → {langLabel(result.to)}
             </span>
           )}
+          {/* 不依赖焦点的关闭按钮：弹窗无焦点时 Esc/失焦均可能失效 */}
+          <button
+            className="icon-btn translate-close"
+            title="关闭（Esc）"
+            onClick={closePopup}
+          >
+            <IconClose size={13} />
+          </button>
         </div>
 
         {/* 上方：原始内容（可编辑） */}

@@ -17,6 +17,9 @@
   font-weight: 600;
   color: var(--text-secondary);
 }
+.translate-close {
+  margin-left: auto;
+}
 /* 原文输入区：可编辑文本域，上方区域 */
 .translate-src {
   flex: 1.1;
