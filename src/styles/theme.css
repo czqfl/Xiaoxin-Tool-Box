@@ -52,9 +52,9 @@
   --panel-opacity: 0.75;
   --bg-elevated: rgba(255, 255, 255, 0.94);
   --bg-input: rgba(255, 255, 255, 0.92);
-  /* 玻璃输入底：悬浮在亚克力面板上的输入框/下拉框用——透明度更高，
-     透出后端亚克力模糊（毛玻璃感）；实色场景（设置页非毛玻璃窗口）用 --bg-input */
-  --bg-input-glass: rgba(255, 255, 255, 0.5);
+  /* 玻璃输入底：与面板底色同色调（非纯白）、透明度更低——悬浮在亚克力
+     面板上的输入框/下拉框用，通透融入背景，不再突兀发白 */
+  --bg-input-glass: rgba(251, 252, 254, 0.32);
   --bg-item-hover: rgba(15, 23, 42, 0.05);
   --bg-item-active: rgba(15, 23, 42, 0.09);
   --bg-badge: rgba(15, 23, 42, 0.06);
@@ -134,7 +134,7 @@
   --bg-panel-rgb: 30, 32, 37;
   --bg-elevated: rgba(40, 43, 49, 0.94);
   --bg-input: rgba(48, 51, 58, 0.92);
-  --bg-input-glass: rgba(48, 51, 58, 0.5);
+  --bg-input-glass: rgba(30, 32, 37, 0.36);
   --bg-item-hover: rgba(255, 255, 255, 0.06);
   --bg-item-active: rgba(255, 255, 255, 0.11);
   --bg-badge: rgba(255, 255, 255, 0.09);
@@ -193,7 +193,7 @@
     --bg-panel-rgb: 30, 32, 37;
     --bg-elevated: rgba(40, 43, 49, 0.94);
     --bg-input: rgba(48, 51, 58, 0.92);
-  --bg-input-glass: rgba(48, 51, 58, 0.5);
+  --bg-input-glass: rgba(30, 32, 37, 0.36);
     --bg-item-hover: rgba(255, 255, 255, 0.06);
     --bg-item-active: rgba(255, 255, 255, 0.11);
     --bg-badge: rgba(255, 255, 255, 0.09);
