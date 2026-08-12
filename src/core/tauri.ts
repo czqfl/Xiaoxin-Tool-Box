@@ -166,9 +166,16 @@ export const pickVscodeExecutable = async (): Promise<string | null> => {
 export const setPanelAlwaysOnTop = (on: boolean) =>
   invoke<void>("panel_set_always_on_top", { on });
 
-/** 切换指定面板（工具栏图标点击呼出用；"settings" 打开设置窗口） */
-export const panelToggle = (label: string) =>
-  safe(invoke<void>("panel_toggle", { label }), undefined);
+/** 切换指定面板（工具栏图标点击呼出用；"settings" 打开设置窗口）。
+ *  失败写入 diag.log 便于排查（不再静默吞错）。 */
+export const panelToggle = async (label: string) => {
+  try {
+    await invoke<void>("panel_toggle", { label });
+  } catch (err) {
+    console.error("[panelToggle]", err);
+    void diagLog(`[panelToggle] ${label} failed: ${String(err)}`);
+  }
+};
 
 /** 悬浮工具栏显示/隐藏（设置页开关 / 托盘菜单共用） */
 export const setToolbarVisible = (on: boolean) =>

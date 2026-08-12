@@ -35,8 +35,50 @@ pub const ALL_PANELS: &[&str] = &[
     PORT_PANEL,
 ];
 
-/// 工具栏呼出面板：工具栏前端点击图标切换对应面板（「可见且聚焦」才关闭，
-/// 否则呼出置前——置顶常驻面板失焦被盖住时点击会带回前台而不是误关）。
+/// 总是呼出面板并置前（工具栏专用）：不判断可见性——面板没开就打开，
+/// 开着被盖住就带回前台，开着且聚焦也保持。工具栏是"快速入口"，
+/// 不承担开关语义（关闭用 Esc / 点外部 / 快捷键）。
+pub fn show_panel_foreground<R: Runtime>(app: &AppHandle<R>, label: &str) {
+    // 同一时间只展示一个面板：先隐藏其它所有面板
+    for other in ALL_PANELS {
+        if *other != label {
+            if let Some(w) = app.get_webview_window(other) {
+                let _ = w.hide();
+            }
+        }
+    }
+    if let Some(w) = app.get_webview_window("settings") {
+        let _ = w.hide();
+    }
+
+    // 窗口可能已被销毁 → 自动重建，避免"以后都打不开"
+    let Some(window) = ensure_panel_window(app, label) else {
+        crate::storage::diag_write(&format!("show_panel_foreground: {label} unavailable"));
+        return;
+    };
+    // 优先恢复上次位置；记录缺失或位置失效时回退居中
+    if !restore_position(app, &window, label) {
+        position_near_cursor(app, &window);
+    }
+    let _ = window.show();
+    // 可靠置前（绕过 Win32 前景锁），保证面板可正常交互/接收输入
+    #[cfg(windows)]
+    force_foreground_window(&window);
+    #[cfg(not(windows))]
+    let _ = window.set_focus();
+    #[cfg(windows)]
+    {
+        let acrylic = app
+            .try_state::<ConfigState>()
+            .map(|s| s.0.lock().unwrap().general.acrylic_enabled)
+            .unwrap_or(true);
+        crate::apply_panel_effects_for(&window, acrylic);
+    }
+    crate::storage::diag_write(&format!("[show_panel_foreground] {label} shown"));
+}
+
+/// 工具栏呼出面板：工具栏前端点击图标呼出对应面板（总是置前显示，
+/// 不关闭——面板被盖住时点击会带回前台）。
 /// "settings" 打开设置窗口；"translation" 触发划词翻译（有选中带出原文，
 /// 无选中打开空翻译面板）。
 #[tauri::command]
@@ -52,7 +94,7 @@ pub fn panel_toggle(app: tauri::AppHandle, label: String) -> Result<(), String> 
     if !ALL_PANELS.contains(&label.as_str()) {
         return Err("未知面板".into());
     }
-    toggle_panel(&app, &label);
+    show_panel_foreground(&app, &label);
     Ok(())
 }
 
