@@ -16,6 +16,8 @@ export interface ClipEntry {
   created_at: number;
   favorite: boolean;
   pinned: boolean;
+  /** 顺序队列（FIFO/LIFO）中已消耗：收藏项消耗后保留数据但不再入队 */
+  consumed: boolean;
   content_hash: string;
 }
 

@@ -50,6 +50,10 @@ pub struct ClipEntry {
     pub created_at: i64,
     pub favorite: bool,
     pub pinned: bool,
+    /// 顺序队列（FIFO/LIFO）中已消耗：收藏项被顺序粘贴消耗后【保留数据】
+    /// （普通模式仍可见），但不再进入顺序队列；普通条目消耗后直接删除。
+    #[serde(default)]
+    pub consumed: bool,
     /// 内容哈希（十进制字符串），用于重复内容去重合并
     pub content_hash: String,
 }
@@ -461,6 +465,7 @@ fn build_entry(snap: &Snapshot, hash: u64, images_dir: &std::path::Path) -> Opti
         created_at: now,
         favorite: false,
         pinned: false,
+        consumed: false,
         content_hash: hash.to_string(),
     })
 }
@@ -604,6 +609,11 @@ pub fn clipboard_toggle_favorite(
     let mut entries = store.0.lock().unwrap();
     if let Some(e) = entries.iter_mut().find(|e| e.id == id) {
         e.favorite = !e.favorite;
+        // 取消收藏：若该条是"已消耗的收藏项"（数据保留但退出顺序队列），
+        // 重置 consumed，恢复普通条目语义、重新参与顺序队列
+        if !e.favorite {
+            e.consumed = false;
+        }
     }
     save_json(&paths.clipboard_file, &*entries).map_err(|e| format!("保存失败：{e}"))
 }
@@ -718,13 +728,14 @@ pub fn sequential_paste<R: Runtime>(app: &AppHandle<R>) {
     let Some(paths) = app.try_state::<AppPaths>() else {
         return;
     };
-    // 队首 = 按模式排序后的第一条（与面板队列顺序一致；收藏项不参与顺序队列，
-    // 与面板过滤一致——否则粘贴到收藏项不消耗会卡住后续内容）
+    // 队首 = 按模式排序后的第一条（与面板队列顺序一致）。
+    // 收藏项也参与顺序队列（收藏的"防消耗"仅普通模式有效），但已消耗的
+    // （consumed）条目不再入队——它们保留数据但已从队列走掉。
     let entry = {
         let entries = store.0.lock().unwrap();
         let mut queue: Vec<ClipEntry> = entries
             .iter()
-            .filter(|e| !e.favorite)
+            .filter(|e| !e.consumed)
             .cloned()
             .collect();
         match mode {
@@ -742,24 +753,29 @@ pub fn sequential_paste<R: Runtime>(app: &AppHandle<R>) {
         std::thread::sleep(Duration::from_millis(80));
         let _ = simulate_paste();
     });
-    // 消耗已粘贴条目（收藏项保留，可反复带出）
-    if !entry.favorite {
-        let mut entries = store.0.lock().unwrap();
-        if let Some(pos) = entries.iter().position(|e| e.id == entry.id) {
+    // 消耗已粘贴条目：普通条目移除并压入回滚栈；收藏条目不删数据、
+    // 标记 consumed 退出顺序队列（普通模式仍可见，可反复收藏展示）
+    let mut entries = store.0.lock().unwrap();
+    if let Some(pos) = entries.iter().position(|e| e.id == entry.id) {
+        if entries[pos].favorite {
+            entries[pos].consumed = true;
+        } else {
             let removed = entries.remove(pos);
             // 压入回滚栈（撤销粘贴可恢复，支持连续多次）；图片文件保留不删——
             // 否则回滚时文件已不存在无法完整恢复。孤儿文件由清空时统一清理。
             LAST_CONSUMED.lock().unwrap().push(removed);
         }
-        let _ = save_json(&paths.clipboard_file, &*entries);
-        sync_seq_availability(&entries);
-        drop(entries);
-        let _ = app.emit(EVT_CHANGED, ());
     }
+    let _ = save_json(&paths.clipboard_file, &*entries);
+    sync_seq_availability(&entries);
+    drop(entries);
+    let _ = app.emit(EVT_CHANGED, ());
 }
 
 /// 顺序模式下手动粘贴（点击 / Enter / 数字键）后的消耗：
-/// 从队列移除条目并记录到回滚缓冲，不删图片文件（保证可撤销恢复）。
+/// 普通条目从队列移除并记录到回滚缓冲（不删图片文件，保证可撤销恢复）；
+/// **收藏条目不删数据**——标记 consumed 后退出顺序队列，但普通模式仍可见
+/// （收藏的"防消耗"仅在普通模式生效，顺序模式下收藏项照常被消耗走）。
 /// 与全局 Ctrl+V 的 sequential_paste 消耗路径语义一致，撤销统一生效。
 #[tauri::command]
 pub fn clipboard_consume(
@@ -770,9 +786,14 @@ pub fn clipboard_consume(
 ) -> Result<(), String> {
     let mut entries = store.0.lock().unwrap();
     if let Some(pos) = entries.iter().position(|e| e.id == id) {
-        let removed = entries.remove(pos);
-        // 压入回滚栈（支持连续多次撤销）
-        LAST_CONSUMED.lock().unwrap().push(removed);
+        if entries[pos].favorite {
+            // 收藏项：保留数据，标记已消耗（不再进入顺序队列，普通模式仍展示）
+            entries[pos].consumed = true;
+        } else {
+            let removed = entries.remove(pos);
+            // 压入回滚栈（支持连续多次撤销）
+            LAST_CONSUMED.lock().unwrap().push(removed);
+        }
         save_json(&paths.clipboard_file, &*entries).map_err(|e| format!("保存失败：{e}"))?;
         sync_seq_availability(&entries);
     }
@@ -833,6 +854,8 @@ pub fn clipboard_enqueue(
         return Err("记录不存在".into());
     };
     let mut entry = entries.remove(pos);
+    // 手动重新入队：清除"已消耗"标记（收藏项消耗后可在此重新进入顺序队列）
+    entry.consumed = false;
     let now = chrono::Utc::now().timestamp_millis();
     entry.created_at = if mode == PasteMode::Fifo {
         let oldest = entries.iter().map(|e| e.created_at).min().unwrap_or(now);
@@ -1095,6 +1118,7 @@ pub fn clipboard_insert_text(
             created_at,
             favorite: false,
             pinned: false,
+            consumed: false,
             content_hash: h.finish().to_string(),
         },
     );

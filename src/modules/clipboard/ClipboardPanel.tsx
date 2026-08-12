@@ -116,12 +116,12 @@ export function ClipboardPanel() {
     return () => cleanup.forEach((fn) => fn());
   }, [refresh]);
 
-  // 搜索 + 收藏过滤；顺序模式（FIFO/LIFO）下收藏项不参与粘贴队列，
-  // 仅在普通模式展示（避免粘贴到收藏项不消耗、卡住后续内容）
+  // 搜索 + 收藏过滤；顺序模式（FIFO/LIFO）下已消耗的条目（收藏项被粘贴走
+  // 但保留数据的）不再入队；收藏项照常参与顺序队列（收藏的"防消耗"仅普通模式）
   const filtered = useMemo(() => {
     let list = entries;
     if (favOnly) list = list.filter((e) => e.favorite);
-    if (isSequentialMode(mode)) list = list.filter((e) => !e.favorite);
+    if (isSequentialMode(mode)) list = list.filter((e) => !e.consumed);
     const q = query.trim().toLowerCase();
     if (!q) return list;
     return list.filter(
@@ -163,9 +163,10 @@ export function ClipboardPanel() {
       } catch (err) {
         console.error("粘贴失败：", err);
       }
-      // 顺序模式：消耗已粘贴条目（收藏项保留），下一条自动成为队首；
-      // 消耗走后端 consume（记录回滚缓冲，粘贴失败可撤销恢复）
-      if (sequential && !entry.favorite) void consumeEntry(entry.id);
+      // 顺序模式：消耗已粘贴条目（收藏项也会被消耗走，后端保留数据并标记
+      // consumed 退出队列，普通模式仍可见）；下一条自动成为队首。
+      // 消耗走后端 consume（普通项记录回滚缓冲，粘贴失败可撤销恢复）
+      if (sequential) void consumeEntry(entry.id);
       // 顺序模式必须隐藏面板让目标窗口获得焦点；普通模式尊重配置
       if (sequential || config.clipboard.close_after_paste) {
         hideCurrentWindow();
