@@ -42,21 +42,33 @@ export const useClipboardStore = create<ClipboardStore>((set, get) => ({
   },
 
   toggleFavorite: async (id) => {
+    const prev = get().entries;
     set({
-      entries: get().entries.map((e) =>
+      entries: prev.map((e) =>
         e.id === id ? { ...e, favorite: !e.favorite } : e
       ),
     });
-    await api.toggleFavorite(id);
+    try {
+      await api.toggleFavorite(id);
+    } catch (err) {
+      console.error("toggleFavorite failed", err);
+      set({ entries: prev }); // 后端失败回滚乐观更新
+    }
   },
 
   togglePin: async (id) => {
+    const prev = get().entries;
     set({
-      entries: get().entries.map((e) =>
+      entries: prev.map((e) =>
         e.id === id ? { ...e, pinned: !e.pinned } : e
       ),
     });
-    await api.togglePin(id);
+    try {
+      await api.togglePin(id);
+    } catch (err) {
+      console.error("togglePin failed", err);
+      set({ entries: prev }); // 后端失败回滚乐观更新
+    }
   },
 
   replaceText: (id, text) => {
@@ -74,9 +86,10 @@ export const useClipboardStore = create<ClipboardStore>((set, get) => ({
   },
 
   updateText: async (id, text) => {
-    // 乐观更新，失败时 refresh 回滚
+    // 乐观更新；后端失败则回滚到修改前的文本
+    const prev = get().entries;
     set({
-      entries: get().entries.map((e) =>
+      entries: prev.map((e) =>
         e.id === id && e.text !== null
           ? {
               ...e,
@@ -86,7 +99,12 @@ export const useClipboardStore = create<ClipboardStore>((set, get) => ({
           : e
       ),
     });
-    await api.updateClipboardText(id, text);
+    try {
+      await api.updateClipboardText(id, text);
+    } catch (err) {
+      console.error("updateText failed", err);
+      set({ entries: prev }); // 回滚
+    }
   },
 
   fetchImage: async (id) => {
