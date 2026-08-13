@@ -50,6 +50,7 @@ export function PortPanel() {
   const [items, setItems] = useState<PortProcess[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [feedback, setFeedback] = useState("");
   const [killing, setKilling] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -74,6 +75,7 @@ export function PortPanel() {
   const runQuery = async (p: number) => {
     setLoading(true);
     setError("");
+    setFeedback("");
     try {
       const list = await queryPort(p);
       setItems(list);
@@ -108,9 +110,11 @@ export function PortPanel() {
     setError("");
     try {
       await killPort(proc.pid);
-      // 结束后自动重新查询，刷新结果
+      // 结束后自动重新查询，刷新结果（runQuery 会先清空 feedback，故反馈在其后写入）
       const p = Number(port.trim());
       if (p) await runQuery(p);
+      // 关闭端口成功反馈：绿色横幅，与错误提示区分
+      setFeedback(`已成功终止进程「${proc.name}」（PID ${proc.pid}）`);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -169,8 +173,9 @@ export function PortPanel() {
         </div>
 
         <div className="panel-body">
-          {error && <div className="port-empty">{error}</div>}
-          {items.length === 0 && !error && (
+          {feedback && <div className="port-feedback">{feedback}</div>}
+          {error && !feedback && <div className="port-empty">{error}</div>}
+          {items.length === 0 && !error && !feedback && (
             <div className="port-empty">
               <span className="empty-icon">🔌</span>
               <span>输入端口号查询占用该端口的进程</span>

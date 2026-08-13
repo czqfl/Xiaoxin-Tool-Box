@@ -55,6 +55,20 @@
   font-size: 13px;
   color: var(--text-tertiary);
 }
+/* 操作成功反馈横幅（如关闭端口后）：绿色，与错误提示区分 */
+.port-feedback {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 9px 12px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--c-green);
+  background: var(--c-green-soft);
+  color: var(--success);
+  font-size: 13px;
+  font-weight: 600;
+}
 .port-empty .empty-icon {
   font-size: 28px;
 }
