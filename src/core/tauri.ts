@@ -18,6 +18,11 @@ async function safe<T>(promise: Promise<T>, fallback: T): Promise<T> {
     return await promise;
   } catch (err) {
     console.error("[invoke error]", err);
+    // 把后端错误写入应用诊断日志（data/diag.log），避免失败被静默吞掉、
+    // 面板只显示空列表而无从排查。读取类调用仍 fail-soft 返回兜底值。
+    try {
+      void invoke("diag_log", { msg: `[invoke error] ${String(err)}` });
+    } catch {}
     return fallback;
   }
 }
@@ -143,6 +148,11 @@ export const lastTranslateResult = () =>
 /** 复制任意文本到剪贴板（不触发监听重复记录，避免密码泄露到剪贴板历史） */
 export const copyText = (text: string) =>
   invoke<void>("clipboard_copy_text", { text });
+
+/** 关闭翻译弹窗：复位键盘钩子的"弹窗打开"标志并隐藏窗口（点 × / Esc / 失焦共用）。
+ *  确保 TRANSLATE_POPUP_OPEN 不残留为 true，否则系统级 Esc 会一直被兜底逻辑拦截。 */
+export const closeTranslatePopup = () =>
+  invoke<void>("translate_popup_close");
 
 /** 调起系统资源管理器选择文件夹，取消时返回 null */
 export const pickFolder = async (): Promise<string | null> => {
