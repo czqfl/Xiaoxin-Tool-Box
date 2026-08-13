@@ -42,12 +42,18 @@ pub fn start_explorer_watcher<R: Runtime>(app: AppHandle<R>) {
                 continue;
             };
             if first {
-                known = paths;
+                // 基线用小写键，使后续差异比较大小写不敏感（与 register_visit 的
+                // eq_ignore_ascii_case 一致），避免同目录不同大小写被重复计为"新访问"。
+                known = paths.iter().map(|p| p.to_ascii_lowercase()).collect();
                 first = false;
                 continue;
             }
-            let newly: Vec<String> = paths.difference(&known).cloned().collect();
-            known = paths;
+            let newly: Vec<String> = paths
+                .iter()
+                .filter(|p| !known.contains(&p.to_ascii_lowercase()))
+                .cloned()
+                .collect();
+            known = paths.iter().map(|p| p.to_ascii_lowercase()).collect();
             if newly.is_empty() {
                 continue;
             }
