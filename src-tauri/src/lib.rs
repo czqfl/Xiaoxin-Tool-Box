@@ -181,6 +181,7 @@ pub fn run() {
             clipboard::clipboard_enqueue,
             translate::translate,
             translate::translate_last_result,
+            translate::translate_popup_close,
             clipboard::clipboard_move,
             clipboard::clipboard_reorder,
             clipboard::clipboard_insert_text,

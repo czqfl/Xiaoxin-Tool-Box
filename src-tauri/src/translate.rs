@@ -52,6 +52,18 @@ pub fn translate_last_result(store: State<'_, TranslateStore>) -> Option<Transla
     store.0.lock().unwrap().clone()
 }
 
+/// 关闭翻译弹窗：复位键盘钩子的"弹窗打开"标志并隐藏窗口。
+/// 前端点 × / Esc / 失焦关闭都走这里，确保 TRANSLATE_POPUP_OPEN 不残留为 true
+/// （否则系统级 Esc 会一直被兜底逻辑拦截，误触发关闭）。
+#[tauri::command]
+pub fn translate_popup_close(app: AppHandle) {
+    #[cfg(windows)]
+    crate::keyhook::set_translate_popup_open(false);
+    if let Some(w) = app.get_webview_window(TRANSLATE_PANEL) {
+        let _ = w.hide();
+    }
+}
+
 /// 面板呼出事件载荷：带出原文，让面板显示的第一时间就有内容
 #[derive(Clone, Serialize)]
 struct StartPayload {
