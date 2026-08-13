@@ -52,17 +52,21 @@ export function SettingsApp() {
     // 兜底：窗口 hide/show 切换后偶发"渲染了但状态未就绪"（表现为打不开/空白），
     // 每次获得焦点时若配置尚未加载则补一次加载
     const cleanup: Array<() => void> = [];
+    let disposed = false;
     getCurrentWindow()
       .onFocusChanged(({ payload: focused }) => {
         if (focused && !useConfigStore.getState().loaded) void load();
       })
-      .then((un) => cleanup.push(un));
+      .then((un) => (disposed ? un() : cleanup.push(un)));
     // 启动时热键注册失败：跳转快捷键页并提示
     onEvent<string>(EVT_SHORTCUT_FAILED, (target) => {
       setShortcutFailed(target === "clipboard" ? "呼出剪贴板" : "呼出文件夹");
       setPage("shortcut");
-    }).then((un) => cleanup.push(un));
-    return () => cleanup.forEach((fn) => fn());
+    }).then((un) => (disposed ? un() : cleanup.push(un)));
+    return () => {
+      disposed = true;
+      cleanup.forEach((fn) => fn());
+    };
   }, [load]);
 
   if (!loaded) return null;

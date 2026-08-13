@@ -176,6 +176,7 @@ export function FolderPanel() {
     refresh();
     refreshEditors();
     const cleanup: Array<() => void> = [];
+    let disposed = false;
 
     // 记录失焦时刻，用于区分"真实打开"与"拖动面板导致的焦点短暂闪动"。
     // 拖动时 Windows 会让窗口瞬时失焦再夺回，若每次夺回都清空搜索框，
@@ -194,7 +195,7 @@ export function FolderPanel() {
         refresh();
         setTimeout(() => inputRef.current?.focus(), 0);
       })
-      .then((un) => cleanup.push(un));
+      .then((un) => (disposed ? un() : cleanup.push(un)));
 
     // 从系统资源管理器拖入文件夹快速添加
     getCurrentWindow()
@@ -213,12 +214,15 @@ export function FolderPanel() {
           }
         }
       })
-      .then((un) => cleanup.push(un));
+      .then((un) => (disposed ? un() : cleanup.push(un)));
 
     // 资源管理器追踪新增/计数后拉取最新数据
-    onEvent(EVT_FOLDER_CHANGED, () => refresh()).then((un) => cleanup.push(un));
+    onEvent(EVT_FOLDER_CHANGED, () => refresh()).then((un) => (disposed ? un() : cleanup.push(un)));
 
-    return () => cleanup.forEach((fn) => fn());
+    return () => {
+      disposed = true;
+      cleanup.forEach((fn) => fn());
+    };
   }, [refresh, add]);
 
   // 面板置顶状态跟随配置生效（经后端命令切换，避免透明窗口纯色屏）

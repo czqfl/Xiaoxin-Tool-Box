@@ -36,12 +36,13 @@ export function usePanelCommon(stayVisible = false) {
     load();
 
     const cleanup: Array<() => void> = [];
+    let disposed = false;
 
     // 配置变更后同步主题与行为参数；payload 缺失时回退为重新加载
     onEvent<AppConfig | undefined>(EVT_CONFIG_CHANGED, (cfg) => {
       if (cfg) sync(cfg);
       else void load();
-    }).then((un) => cleanup.push(un));
+    }).then((un) => (disposed ? un() : cleanup.push(un)));
 
     // 点击/拖动头部期间：置位拖动守卫（原生拖动导致瞬时失焦，期间不许隐藏）
     const onMouseDown = (e: MouseEvent) => {
@@ -100,6 +101,9 @@ export function usePanelCommon(stayVisible = false) {
     cleanup.push(() => document.removeEventListener("mouseover", onMouseActivate));
     cleanup.push(() => document.removeEventListener("mousedown", onMouseActivate));
 
-    return () => cleanup.forEach((fn) => fn());
+    return () => {
+      disposed = true;
+      cleanup.forEach((fn) => fn());
+    };
   }, [load, sync, stayVisible]);
 }

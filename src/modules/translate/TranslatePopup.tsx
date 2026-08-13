@@ -4,8 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { getAllWindows, getCurrentWindow } from "@tauri-apps/api/window";
 import type { TranslateResult } from "../../types";
 import { onEvent } from "../../core/events";
-import { hideCurrentWindow } from "../../core/usePanel";
-import { copyText, diagLog, lastTranslateResult, translateText } from "../../core/tauri";
+import { copyText, closeTranslatePopup, diagLog, lastTranslateResult, translateText } from "../../core/tauri";
 import { IconClose, IconCopy } from "../../components/icons";
 import { LANG_OPTIONS } from "./langs";
 import "../../styles/panel.css";
@@ -15,7 +14,7 @@ const EVT_RESULT = "translate://result";
 
 /** 关闭弹窗（按钮/Esc/失焦共用） */
 function closePopup() {
-  hideCurrentWindow();
+  void closeTranslatePopup();
 }
 
 export function TranslatePopup() {
@@ -73,8 +72,9 @@ export function TranslatePopup() {
       }
     });
     const cleanup: Array<() => void> = [];
+    let disposed = false;
     onEvent<TranslateResult>(EVT_RESULT, applyResult).then((un) =>
-      cleanup.push(un)
+      disposed ? un() : cleanup.push(un)
     );
     // 呼出：后端已读取选中文本（仅 UI Automation，不碰剪贴板），事件带出原文。
     // 有原文 → 进入"翻译中"等译文；无原文（用户没选中）→ 仅呼出空面板，不翻译、
@@ -102,7 +102,7 @@ export function TranslatePopup() {
         loadingRef.current = false;
         setLoading(false);
       }
-    }).then((un) => cleanup.push(un));
+    }).then((un) => (disposed ? un() : cleanup.push(un)));
     // 失焦自动隐藏：用窗口级 onFocusChanged 判断"焦点真正离开本窗口（点到别的程序）"
     // 才隐藏，不要用 DOM window blur——点击 data-tauri-drag-region 头部触发原生拖动时，
     // WebView2 会瞬时失焦并触发 blur，误把面板关掉（这正是"一点击就消失"的根因）。
@@ -124,15 +124,15 @@ export function TranslatePopup() {
         void getAllWindows()
           .then((wins) => Promise.all(wins.map((w) => w.isFocused())))
           .then((states) => {
-            if (!states.some(Boolean)) {
-              void diagLog("translate hide: focus left app");
-              hideCurrentWindow();
-            }
-          })
-          .catch(() => {
-            void diagLog("translate hide: focus lost to other window");
-            hideCurrentWindow();
-          });
+      if (!states.some(Boolean)) {
+        void diagLog("translate hide: focus left app");
+        void closeTranslatePopup();
+      }
+    })
+    .catch(() => {
+      void diagLog("translate hide: focus lost to other window");
+      void closeTranslatePopup();
+    });
       }, 80);
     });
     cleanup.push(() => focusUn.then((u) => u()));
@@ -176,7 +176,10 @@ export function TranslatePopup() {
     };
     window.addEventListener("keydown", onKey);
     cleanup.push(() => window.removeEventListener("keydown", onKey));
-    return () => cleanup.forEach((fn) => fn());
+    return () => {
+      disposed = true;
+      cleanup.forEach((fn) => fn());
+    };
   }, []);
 
   /** 正向翻译：以原文为源，翻译到目标语言（Enter / 顶部按钮触发） */

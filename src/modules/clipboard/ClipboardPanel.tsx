@@ -93,8 +93,9 @@ export function ClipboardPanel() {
   useEffect(() => {
     refresh();
     const cleanup: Array<() => void> = [];
+    let disposed = false;
     onEvent(EVT_CLIPBOARD_CHANGED, () => refresh()).then((un) =>
-      cleanup.push(un)
+      disposed ? un() : cleanup.push(un)
     );
     // 每次面板获得焦点（热键呼出）：聚焦搜索框并重置临时状态。
     // 但拖动面板时 Windows 会让窗口瞬时失焦再夺回，若每次夺回都清空搜索框，
@@ -112,8 +113,11 @@ export function ClipboardPanel() {
         setSelectedIdx(0);
         setTimeout(() => inputRef.current?.focus(), 0);
       })
-      .then((un) => cleanup.push(un));
-    return () => cleanup.forEach((fn) => fn());
+      .then((un) => (disposed ? un() : cleanup.push(un)));
+    return () => {
+      disposed = true;
+      cleanup.forEach((fn) => fn());
+    };
   }, [refresh]);
 
   // 搜索 + 收藏过滤；顺序模式（FIFO/LIFO）下已消耗的条目（收藏项被粘贴走

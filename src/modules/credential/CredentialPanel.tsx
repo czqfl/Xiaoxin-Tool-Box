@@ -66,6 +66,7 @@ export function CredentialPanel() {
   useEffect(() => {
     refresh();
     const cleanup: Array<() => void> = [];
+    let disposed = false;
     // 仅在"真正收起后重新呼出"时清空搜索框：拖动面板会让窗口瞬时失焦再夺回，
     // 若每次夺回都清空，用户刚输入的搜索内容会消失。故用失焦时长（>300ms 视为
     // 真实打开、亚 300ms 视为拖动造成的焦点闪动）区分两种情况。
@@ -80,8 +81,11 @@ export function CredentialPanel() {
         setQuery("");
         refresh();
       })
-      .then((un) => cleanup.push(un));
-    return () => cleanup.forEach((fn) => fn());
+      .then((un) => (disposed ? un() : cleanup.push(un)));
+    return () => {
+      disposed = true;
+      cleanup.forEach((fn) => fn());
+    };
   }, []);
 
   // 面板置顶状态跟随配置生效（经后端命令切换，避免透明窗口纯色屏）
