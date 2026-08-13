@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::Ordering;
 use std::sync::Mutex;
+use tauri::Emitter;
 use tauri::State;
 use tauri_plugin_opener::OpenerExt;
 
@@ -251,6 +252,8 @@ pub fn folder_open(
             persist(&entries, &paths)?;
         }
     }
+    // 通知前端刷新（"最常访问"排序/访问次数变化需即时反映）
+    let _ = app.emit(EVT_CHANGED, ());
     app.opener()
         .open_path(&path, None::<&str>)
         .map_err(|e| format!("打开失败：{e}"))
@@ -259,16 +262,18 @@ pub fn folder_open(
 /// 在终端中打开（默认：优先 Windows Terminal，回退 cmd），同时记录一次访问
 #[tauri::command]
 pub fn folder_open_in_terminal(
+    app: tauri::AppHandle,
     path: String,
     store: State<'_, FolderStore>,
     paths: State<'_, AppPaths>,
 ) -> CmdResult {
-    folder_open_in_terminal_with(path, "wt".into(), store, paths)
+    folder_open_in_terminal_with(app, path, "wt".into(), store, paths)
 }
 
 /// 在指定终端中打开文件夹：shell 取 "wt" | "cmd" | "powershell"，同时记录一次访问
 #[tauri::command]
 pub fn folder_open_in_terminal_with(
+    app: tauri::AppHandle,
     path: String,
     shell: String,
     store: State<'_, FolderStore>,
@@ -283,6 +288,8 @@ pub fn folder_open_in_terminal_with(
             persist(&entries, &paths)?;
         }
     }
+    // 通知前端刷新（访问计数/排序变化）
+    let _ = app.emit(EVT_CHANGED, ());
     open_in_shell(&path, &shell)
 }
 
@@ -512,6 +519,7 @@ pub fn folder_copy_path(path: String) -> CmdResult {
 /// JetBrains 系列在常见安装根目录下按目录名前缀探测可执行文件。
 #[tauri::command]
 pub fn folder_open_in_editor(
+    app: tauri::AppHandle,
     path: String,
     editor: String,
     store: State<'_, FolderStore>,
@@ -527,6 +535,8 @@ pub fn folder_open_in_editor(
             persist(&entries, &paths)?;
         }
     }
+    // 通知前端刷新（访问计数/排序变化）
+    let _ = app.emit(EVT_CHANGED, ());
     match editor.as_str() {
         "code" => {
             let configured = config.0.lock().unwrap().folder.vscode_path.clone();
