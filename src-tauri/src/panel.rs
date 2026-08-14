@@ -153,6 +153,44 @@ pub fn set_toolbar_visible_impl<R: Runtime>(app: &AppHandle<R>, on: bool) {
     }
 }
 
+/// 工具栏保持置顶：可见期间周期性 SetWindowPos 到 HWND_TOPMOST（不激活、不移动），
+/// 防止被 Windows 任务栏或其他置顶窗口压住——任务栏是系统级置顶，普通
+/// alwaysOnTop 窗口放任务栏上方时点别处会被它盖住、拖不出来（用户反馈）。
+/// 300ms 一次的轻量操作，仅窗口可见时执行；窗口销毁后自动退出。幂等启动。
+pub fn start_keep_on_top<R: Runtime>(app: AppHandle<R>) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static STARTED: AtomicBool = AtomicBool::new(false);
+    if STARTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let Some(window) = app.get_webview_window(TOOLBAR_WINDOW) else {
+            return; // 窗口已销毁，退出循环
+        };
+        if !window.is_visible().unwrap_or(false) {
+            continue;
+        }
+        #[cfg(windows)]
+        if let Some(hwnd) = hwnd_of(&window) {
+            use windows::Win32::UI::WindowsAndMessaging::{
+                SetWindowPos, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SWP_NOACTIVATE,
+            };
+            unsafe {
+                let _ = SetWindowPos(
+                    hwnd,
+                    Some(HWND_TOPMOST),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                );
+            }
+        }
+    });
+}
+
 /// 工具栏显示/隐藏命令（前端调用）
 #[tauri::command]
 pub fn toolbar_set_visible(app: tauri::AppHandle, on: bool) -> Result<(), String> {

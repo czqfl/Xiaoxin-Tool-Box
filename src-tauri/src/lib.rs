@@ -154,6 +154,8 @@ pub fn run() {
             if config.toolbar.enabled {
                 let _ = panel::toolbar_set_visible(handle.clone(), true);
             }
+            // 工具栏保持置顶（盖过任务栏等系统级置顶窗口，300ms 周期顶置）
+            panel::start_keep_on_top(handle.clone());
 
             // 非静默启动时直接打开设置窗口
             if !config.general.silent_start {
