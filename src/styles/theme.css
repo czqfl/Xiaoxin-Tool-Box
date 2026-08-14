@@ -89,8 +89,11 @@
   --radius-md: 8px;
   --radius-sm: 6px;
 
-  /* 焦点环：所有可聚焦控件的 focus 视觉统一（描边 + 柔和光晕） */
-  --ring: 0 0 0 3px var(--accent-soft);
+  /* 焦点环：所有可聚焦控件的 focus 视觉统一。
+     设计要点——不用"实线边框 + 独立光晕"（两层色会跳变出缝隙感）；
+     改为「紧贴淡环 + 柔和光晕」：与半透明边框（rgba accent 0.65）无缝
+     过渡成一条渐变蓝光，视觉单层、更精致 */
+  --ring: 0 0 0 3px rgba(var(--accent-rgb), 0.13), 0 3px 14px rgba(var(--accent-rgb), 0.16);
 
   /* 面板外壳顶部高光线：玻璃质感的关键——1px 内高光让外壳与背景"分离" */
   --panel-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.55);

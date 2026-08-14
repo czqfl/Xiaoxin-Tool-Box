@@ -230,7 +230,7 @@ button {
   border-color: var(--border-strong);
 }
 .text-input:focus {
-  border-color: var(--accent);
+  border-color: rgba(var(--accent-rgb), 0.65);
   box-shadow: var(--ring);
 }
 .text-input::placeholder {
