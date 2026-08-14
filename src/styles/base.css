@@ -25,7 +25,14 @@ body {
   font-optical-sizing: auto;
   text-rendering: optimizeLegibility;
   color: var(--text-primary);
-  background: var(--bg-app);
+  /* 应用背景：品牌色径向微光（顶部）叠中性底——有层次但不抢内容 */
+  background:
+    radial-gradient(
+      1100px 560px at 50% -8%,
+      rgba(var(--accent-rgb), 0.055),
+      transparent 62%
+    ),
+    var(--bg-app);
   -webkit-font-smoothing: antialiased;
   user-select: none;
 }
@@ -52,17 +59,17 @@ button {
   cursor: pointer;
 }
 
-/* 细滚动条：品牌色系（浅色态更柔和） */
+/* 细滚动条：默认中性，hover 亮出品牌色（克制） */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(var(--accent-rgb), 0.35);
+  background: var(--border-strong);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(var(--accent-rgb), 0.55);
+  background: rgba(var(--accent-rgb), 0.45);
 }
 ::-webkit-scrollbar-track {
   background: transparent;
@@ -224,7 +231,7 @@ button {
 }
 .text-input:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--ring);
 }
 .text-input::placeholder {
   color: var(--text-tertiary);

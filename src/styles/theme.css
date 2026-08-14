@@ -21,7 +21,9 @@
   --danger: #e5484d;
   --danger-soft: rgba(229, 72, 77, 0.12);
   --success: #27a567;
+  --success-soft: rgba(39, 165, 103, 0.12);
   --warning: #f5a524;
+  --warning-soft: rgba(245, 165, 36, 0.14);
 
   /* 内容类型色（低饱和，克制使用）：仅"内容类型图标"等有语义的元素用。
      其余信息层级一律交给中性灰；色彩角色收敛为 品牌蓝/成功绿/警告琥珀/危险红。 */
@@ -77,14 +79,22 @@
   /* 控件 */
   --switch-knob: #ffffff;
 
-  /* 圆角：层级分明，8px 只留给面板外壳（与 DWM 窗口圆角一致） */
+  /* 圆角：层级分明，8px 只留给面板外壳（与 DWM 窗口圆角一致）。
+     控件统一 8px、卡片 12px、弹层 16px——同类元素同圆角，视觉语言一致 */
   --radius-xl: 16px;
   /* 面板外壳圆角：与窗口 DWM 原生圆角（DWMWCP_ROUND ≈ 8px）保持一致，
      避免"外壳圆角 ≠ 窗口圆角"在边角露出背景 */
   --radius-panel: 8px;
   --radius-lg: 12px;
-  --radius-md: 6px;
-  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-sm: 6px;
+
+  /* 焦点环：所有可聚焦控件的 focus 视觉统一（描边 + 柔和光晕） */
+  --ring: 0 0 0 3px var(--accent-soft);
+
+  /* 面板外壳顶部高光线：玻璃质感的关键——1px 内高光让外壳与背景"分离" */
+  --panel-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  --panel-highlight-strong: inset 0 1px 0 rgba(255, 255, 255, 0.75);
 
   /* 字号阶梯：全局统一语义字号，主次分明 */
   --font-xs: 11px;
@@ -115,7 +125,9 @@
   --danger: #f2555a;
   --danger-soft: rgba(242, 85, 90, 0.16);
   --success: #3dd68c;
+  --success-soft: rgba(61, 214, 140, 0.16);
   --warning: #f7b955;
+  --warning-soft: rgba(247, 185, 85, 0.17);
 
   /* 内容类型色（深色提亮一档，保持低饱和） */
   --c-cyan: #55b6d8;
@@ -160,6 +172,10 @@
   /* 控件 */
   --switch-knob: #e8eaef;
 
+  /* 面板外壳顶部高光线（深色主题：微弱白线提亮玻璃边缘） */
+  --panel-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  --panel-highlight-strong: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+
   color-scheme: dark;
 }
 
@@ -175,7 +191,9 @@
     --danger: #f2555a;
     --danger-soft: rgba(242, 85, 90, 0.16);
     --success: #3dd68c;
+    --success-soft: rgba(61, 214, 140, 0.16);
     --warning: #f7b955;
+    --warning-soft: rgba(247, 185, 85, 0.17);
 
     /* 内容类型色（深色提亮一档，保持低饱和） */
     --c-cyan: #55b6d8;
@@ -218,6 +236,10 @@
 
     /* 控件 */
     --switch-knob: #e8eaef;
+
+    /* 面板外壳顶部高光线（深色主题：微弱白线提亮玻璃边缘） */
+    --panel-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    --panel-highlight-strong: inset 0 1px 0 rgba(255, 255, 255, 0.14);
 
     color-scheme: dark;
   }

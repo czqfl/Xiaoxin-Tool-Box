@@ -19,6 +19,8 @@
 }
 .clip-item:hover {
   background: var(--bg-item-hover);
+  border-color: var(--border-subtle);
+  box-shadow: var(--shadow-item);
 }
 .clip-item.selected {
   background: var(--bg-item-active);
@@ -316,18 +318,15 @@
   background: var(--bg-item-active);
 }
 
-/* ---- 彩色点缀（柔和色板）：类型图标 / 收藏徽标 / 来源 chip ---- */
-/* 类型图标：文本=青、图片=绿、文件=琥珀，扫一眼区分内容类型 */
-.clip-ic-text {
-  color: var(--c-cyan);
-}
-.clip-ic-image {
-  color: var(--c-green);
-}
+/* ---- 类型图标 / 收藏徽标 / 来源 chip ----
+   类型图标统一中性灰：类型靠图标形状（T/图片/文件）区分，不再用多色——
+   列表高频区多色是视觉噪音；彩色只留给"收藏"这类有语义的徽标 */
+.clip-ic-text,
+.clip-ic-image,
 .clip-ic-files {
-  color: var(--c-amber);
+  color: var(--text-tertiary);
 }
-/* 收藏徽标：琥珀星（收藏=金色更直觉） */
+/* 收藏徽标：琥珀星（收藏=金色，语义色保留） */
 .clip-fav-badge {
   color: var(--c-amber);
   background: var(--c-amber-soft);
