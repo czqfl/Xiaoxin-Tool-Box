@@ -86,8 +86,8 @@
       {
         "label": "toolbar",
         "title": "悬浮工具栏",
-        "width": 272,
-        "height": 44,
+        "width": 188,
+        "height": 36,
         "resizable": false,
         "fullscreen": false,
         "maximized": false,

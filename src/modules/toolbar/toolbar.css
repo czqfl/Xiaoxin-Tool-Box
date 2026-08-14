@@ -1,51 +1,48 @@
-/* 悬浮工具栏：横向小工具条，常驻置顶、可拖动、点击图标呼出面板。
-   .toolbar 填满整个窗口（width/height 100%），圆角用 --radius-panel
-   （与窗口 DWM 原生圆角 8px 一致）、底色与面板同一套变量 → 背景与亚克力层
-   完全重合，视觉单层，不再出现"两层圆角" */
+/* 悬浮工具栏：紧凑横向小工具条，常驻置顶、可拖动、点击图标呼出面板。
+   尺寸（v2）：按钮 28px、间距 2px、内边距 4px——比 v1（36/3/5）紧凑约 1/4。
+   磁吸动效：transform 由 JS（rAF）实时写入，这里只负责静态样式与 hover 提亮 */
 .toolbar {
   width: 100%;
   height: 100%;
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 3px;
-  padding: 5px;
+  gap: 2px;
+  padding: 4px;
   border-radius: var(--radius-panel);
   border: 1px solid var(--border-subtle);
   background: rgba(var(--bg-panel-rgb), var(--panel-opacity));
-  box-shadow: var(--shadow-item);
+  box-shadow: var(--shadow-item), var(--panel-highlight);
   user-select: none;
   cursor: default;
+  will-change: transform;
 }
 
 .toolbar-btn {
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   background: transparent;
   cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-out),
-    transform var(--dur-fast) var(--ease-out);
+  transition: background var(--dur-fast) var(--ease-out);
 }
-/* 图标：平时中性灰（克制的单色工具条），hover 亮出各自辨识色（--tool-*） */
+/* 彩色图标：正常显示专属辨识色（磁吸放大时更醒目），hover 提亮 */
 .toolbar-icon {
   display: flex;
-  color: var(--text-secondary);
-  transition: color var(--dur-fast) var(--ease-out),
-    transform var(--dur-fast) var(--ease-out);
+  color: var(--tool-color);
+  transition: filter var(--dur-fast) var(--ease-out);
 }
 .toolbar-btn:hover {
   background: var(--bg-item-hover);
 }
 .toolbar-btn:hover .toolbar-icon {
-  color: var(--tool-color);
-  transform: scale(1.08);
+  filter: brightness(1.3);
 }
-.toolbar-btn:active {
-  transform: scale(0.9);
+.toolbar-btn:active .toolbar-icon {
+  transform: scale(0.85);
 }
