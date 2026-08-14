@@ -257,7 +257,9 @@ export function TranslatePopup() {
                 label: l.value === "auto" ? "自动检测" : l.label,
               }))}
             />
-            <span className="lang-arrow">→</span>
+            <span className="lang-arrow" title="双向翻译：译文框 Enter 可反向翻译回原文">
+              ⇄
+            </span>
             <GlassSelect
               value={toLang}
               onChange={setToLang}
