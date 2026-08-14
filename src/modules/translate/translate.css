@@ -53,18 +53,19 @@
   min-height: 0;
   resize: none;
   border: 1px solid var(--border-subtle);
-  /* 圆角 10px：与整体控件体系（8-12）一致，避免 14px 大圆角在聚焦时
-     显露出突兀的"圆角变化"感 */
+  /* 圆角 10px：与整体控件体系（8-12）一致 */
   border-radius: 10px;
   outline: none;
+  appearance: none;
   padding: 12px 14px;
   font-size: 14px;
   line-height: 1.7;
   color: var(--text-primary);
   font-family: inherit;
-  box-shadow: var(--shadow-item);
-  transition: border-color var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur-fast) var(--ease-out);
+  /* 彻底去掉 box-shadow（默认投影 + 聚焦光晕都是"第二层边"的来源）：
+     全程只有一层真实边框，聚焦仅边框变色 */
+  box-shadow: none;
+  transition: border-color var(--dur-fast) var(--ease-out);
 }
 .translate-src {
   flex: 1.1;
@@ -81,9 +82,9 @@
 }
 .translate-src:focus,
 .translate-dst-input:focus {
-  /* 极简焦点：半透明品牌边框 + 1px 紧贴淡环——干净单层，无大光晕 */
+  /* 极简焦点：仅边框变色，无任何阴影/光晕——单层、干净 */
   border-color: rgba(var(--accent-rgb), 0.6);
-  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.3);
+  box-shadow: none;
 }
 .translate-src::placeholder,
 .translate-dst-input::placeholder {
