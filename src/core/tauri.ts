@@ -196,9 +196,31 @@ export const setToolbarVisible = (on: boolean) =>
   safe(invoke<void>("toolbar_set_visible", { on }), undefined);
 
 // ---- 端口工具 ----
-/** 按端口号或应用名（进程名）搜索占用端口的进程列表 */
+/** Promise 超时包装：超时即 reject，避免后端命令挂起时前端查询永久 pending（loading 卡死） */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`查询超时（${Math.round(ms / 1000)} 秒），netstat 无响应`)),
+      ms
+    );
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      }
+    );
+  });
+}
+/** 按端口号或应用名（进程名）搜索占用端口的进程列表（带 20s 超时兜底） */
 export const portSearch = (keyword: string) =>
-  safe(invoke<PortProcess[]>("port_search", { keyword }), []);
+  withTimeout(
+    safe(invoke<PortProcess[]>("port_search", { keyword }), []),
+    20000
+  );
 /** 结束指定 PID 的进程 */
 export const killPort = (pid: number) =>
   safe(invoke("port_kill", { pid }), undefined);

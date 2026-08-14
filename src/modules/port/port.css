@@ -87,11 +87,14 @@
   pointer-events: none;
 }
 .port-spinner {
+  display: inline-block;
   width: 26px;
   height: 26px;
   border-radius: 50%;
   border: 3px solid var(--border-strong);
   border-top-color: var(--accent);
+  box-sizing: border-box;
+  will-change: transform;
   animation: port-spin 0.7s linear infinite;
 }
 @keyframes port-spin {

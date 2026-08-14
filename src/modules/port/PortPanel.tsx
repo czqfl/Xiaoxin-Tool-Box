@@ -2,7 +2,6 @@
  *  头部 = 输入框 + 查询按钮 + 置顶 + 关闭；面板空白处可拖动窗口（JS 手柄，
  *  自动跳过按钮/输入框/结果条目）；置顶开启时面板常驻（失焦不自动隐藏）。 */
 import { useEffect, useRef, useState } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { PortProcess } from "../../types";
 import { hideCurrentWindow, usePanelCommon } from "../../core/usePanel";
 import { useConfigStore } from "../../stores/configStore";
@@ -129,17 +128,7 @@ export function PortPanel() {
 
   return (
     <div className="panel">
-      <div
-        className="panel-shell"
-        onMouseDown={(e) => {
-          // 面板空白处可拖动；跳过交互元素与结果条目（避免误触按钮/选中文本）
-          const t = e.target as HTMLElement;
-          if (t.closest("button, select, input, textarea, .port-item, .port-confirm")) {
-            return;
-          }
-          getCurrentWindow().startDragging().catch(() => undefined);
-        }}
-      >
+      <div className="panel-shell" data-tauri-drag-region>
         {/* 头部：输入框 + 查询按钮 + 置顶 + 关闭。
             输入框接受端口号或应用名（如 8080 / node）；查询按钮独立在输入框外。 */}
         <div className="panel-header port-header">
