@@ -27,6 +27,9 @@ export function TranslatePopup() {
   const [dst, setDst] = useState("");
   const [fromLang, setFromLang] = useState("auto");
   const [toLang, setToLang] = useState("zh");
+  /** fromLang 镜像（供事件回调读取最新值，避免闭包捕获旧值） */
+  const fromLangRef = useRef("auto");
+  fromLangRef.current = fromLang;
   /** 翻译中状态：src=反向翻译（结果回原文区，上方显示"翻译中"）；
    *  dst=正向翻译/划词等待（结果到译文区，下方显示"翻译中"）；null=空闲 */
   const [busy, setBusy] = useState<"src" | "dst" | null>(null);
@@ -102,6 +105,10 @@ export function TranslatePopup() {
       setResult(null);
       lastStartAt.current = Date.now();
       if (t.trim()) {
+        // 源语言为自动检测：目标语言下拉跟随识别结果（中文→英 / 英文→中）
+        if (fromLangRef.current === "auto") {
+          setToLang(smartTarget(t));
+        }
         // 有原文：进入"翻译中"，等后端异步 emit 的译文到达
         loadingRef.current = true;
         setLoading(true);
@@ -217,6 +224,8 @@ export function TranslatePopup() {
       const r = await translateText(t, fromLang, target);
       setDst(r.translation);
       setResult(r);
+      // 源语言为自动检测：目标语言下拉跟随识别结果（用户反馈）
+      if (fromLang === "auto") setToLang(target);
     } catch (err) {
       flashStatus("翻译失败，请检查网络或服务商配置");
     } finally {
