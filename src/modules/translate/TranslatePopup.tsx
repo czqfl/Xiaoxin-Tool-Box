@@ -244,6 +244,26 @@ export function TranslatePopup() {
     }
   };
 
+  /** 复制原文（同 SUPPRESS_WATCH，不进剪贴板历史） */
+  const doCopySrc = async () => {
+    if (!text.trim()) return;
+    try {
+      await copyText(text);
+      flashStatus("已复制原文");
+    } catch (err) {
+      console.error("复制原文失败", err);
+    }
+  };
+
+  /** 点击中间 ⇄：交换源/目标语言。源为「自动检测」时，交换后的目标语言
+   *  用上次检测出的语言（result.from）兜底，避免出现"目标=自动"的无效组合 */
+  const swapLangs = () => {
+    const f = fromLang;
+    const t = toLang;
+    setFromLang(t);
+    setToLang(f === "auto" ? (result?.from || "zh") : f);
+  };
+
   /** 头部拖动：与其他面板一致用 data-tauri-drag-region（激活窗口下
    *  Tauri 会自动排除按钮等交互元素，× 点击不受影响） */
 
@@ -272,9 +292,14 @@ export function TranslatePopup() {
                 label: l.value === "auto" ? "自动检测" : l.label,
               }))}
             />
-            <span className="lang-arrow" title="双向翻译：译文框 Enter 可反向翻译回原文">
+            {/* 中间双向按钮：点击交换源/目标语言 */}
+            <button
+              className="lang-swap"
+              title="交换源/目标语言"
+              onClick={swapLangs}
+            >
               ⇄
-            </span>
+            </button>
             <GlassSelect
               value={toLang}
               onChange={setToLang}
@@ -313,20 +338,31 @@ export function TranslatePopup() {
           </button>
         </div>
 
-        {/* 上方：原始内容（可编辑）；Enter 翻译，Shift+Enter 换行 */}
-        <textarea
-          ref={inputRef}
-          className="translate-src"
-          value={text}
-          placeholder="输入或粘贴要翻译的内容…（Enter 翻译）"
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              if (text.trim()) void doTranslate();
-            }
-          }}
-        />
+        {/* 上方：原始内容（可编辑）；Enter 翻译，Shift+Enter 换行；复制按钮浮在框内 */}
+        <div className="translate-src-wrap">
+          <textarea
+            ref={inputRef}
+            className="translate-src"
+            value={text}
+            placeholder="输入或粘贴要翻译的内容…（Enter 翻译）"
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                if (text.trim()) void doTranslate();
+              }
+            }}
+          />
+          {text.trim() && (
+            <button
+              className="icon-btn translate-src-copy"
+              title="复制原文"
+              onClick={() => void doCopySrc()}
+            >
+              <IconCopy size={13} />
+            </button>
+          )}
+        </div>
 
         {/* 下方：译文（可编辑，Enter 反向翻译回原文）；复制按钮浮在结果框内 */}
         <div className="translate-dst">

@@ -14,6 +14,14 @@
   padding: 12px 16px;
   cursor: default;
 }
+.translate-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  cursor: default;
+}
 .translate-title {
   flex-shrink: 0;
   font-size: 14px;
@@ -21,41 +29,68 @@
   color: var(--text-primary);
   letter-spacing: 0.3px;
 }
-/* 语言选择组：居中自适应，宽度不足时压缩下拉框 */
+/* 语言选择组：绝对居中（标题/按钮宽度不对称时也保持正中） */
 .translate-langs {
-  flex: 1;
-  min-width: 0;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 72%;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 4px;
 }
-.lang-arrow {
+/* 中间双向交换按钮：点击交换源/目标语言 */
+.lang-swap {
   flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--text-tertiary);
-  font-size: 12px;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+.lang-swap:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: rgba(var(--accent-rgb), 0.3);
+  transform: rotate(180deg);
+}
+.lang-swap:active {
+  transform: rotate(180deg) scale(0.88);
 }
 .translate-btn {
   flex-shrink: 0;
   border-radius: 9px;
-  /* 「水滴融合」按钮：多个低饱和彩色径向渐变叠加 + 半透明基底——
-     像几滴彩色墨水在玻璃上晕开融合，与面板的透明模糊质感一致，
-     不再是突兀的实心蓝色块。颜色克制（低饱和）且带透明。 */
+  /* 「水滴融合」按钮 v2：多个不同大小/位置的椭圆水滴（非均匀排布）——
+     有随机晕染感，像水在玻璃上不规则地融合；低饱和、带透明。 */
   background:
-    radial-gradient(circle at 18% 32%, rgba(167, 139, 250, 0.5), transparent 48%),
-    radial-gradient(circle at 80% 20%, rgba(76, 158, 255, 0.42), transparent 50%),
-    radial-gradient(circle at 66% 80%, rgba(79, 196, 187, 0.4), transparent 54%),
-    radial-gradient(circle at 26% 82%, rgba(232, 181, 88, 0.36), transparent 46%),
-    rgba(255, 255, 255, 0.14);
+    radial-gradient(46% 58% at 12% 30%, rgba(167, 139, 250, 0.5), transparent 72%),
+    radial-gradient(36% 46% at 84% 16%, rgba(76, 158, 255, 0.44), transparent 74%),
+    radial-gradient(52% 40% at 66% 82%, rgba(79, 196, 187, 0.4), transparent 76%),
+    radial-gradient(28% 40% at 20% 86%, rgba(232, 181, 88, 0.38), transparent 70%),
+    radial-gradient(30% 52% at 56% 44%, rgba(217, 111, 142, 0.3), transparent 74%),
+    rgba(255, 255, 255, 0.12);
   border: 1px solid rgba(255, 255, 255, 0.45);
-  color: #fff;
-  text-shadow: 0 1px 3px rgba(15, 23, 42, 0.35);
+  /* 文字对比：浅色主题深字 + 白高光；深色主题白字（见 dark 覆盖） */
+  color: rgba(23, 26, 33, 0.88);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45);
   box-shadow: var(--shadow-item);
   transition: filter var(--dur-fast) var(--ease-out),
     box-shadow var(--dur-fast) var(--ease-out);
 }
 .translate-btn:hover {
-  filter: brightness(1.15);
+  filter: brightness(1.12);
   box-shadow: var(--shadow-item), 0 0 14px rgba(167, 139, 250, 0.3);
 }
 .translate-btn:active {
@@ -66,14 +101,17 @@
   filter: none;
   cursor: default;
 }
-/* 深色主题：水滴提亮一档，保证可见 */
+/* 深色主题：水滴提亮、文字改白，保证对比与可见 */
 :root[data-theme="dark"] .translate-btn {
   background:
-    radial-gradient(circle at 18% 32%, rgba(183, 154, 224, 0.6), transparent 48%),
-    radial-gradient(circle at 80% 20%, rgba(76, 158, 255, 0.52), transparent 50%),
-    radial-gradient(circle at 66% 80%, rgba(79, 196, 187, 0.5), transparent 54%),
-    radial-gradient(circle at 26% 82%, rgba(232, 181, 88, 0.44), transparent 46%),
+    radial-gradient(46% 58% at 12% 30%, rgba(183, 154, 224, 0.58), transparent 72%),
+    radial-gradient(36% 46% at 84% 16%, rgba(76, 158, 255, 0.52), transparent 74%),
+    radial-gradient(52% 40% at 66% 82%, rgba(79, 196, 187, 0.48), transparent 76%),
+    radial-gradient(28% 40% at 20% 86%, rgba(232, 181, 88, 0.42), transparent 70%),
+    radial-gradient(30% 52% at 56% 44%, rgba(229, 138, 165, 0.34), transparent 74%),
     rgba(255, 255, 255, 0.1);
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(15, 23, 42, 0.4);
 }
 .translate-close {
   flex-shrink: 0;
@@ -103,11 +141,32 @@
   box-shadow: none;
   transition: border-color var(--dur-fast) var(--ease-out);
 }
-.translate-src {
+/* 原文框容器：相对定位承载浮动复制按钮（margin 从 textarea 移到此） */
+.translate-src-wrap {
+  position: relative;
   flex: 1.1;
+  min-height: 0;
+  display: flex;
   margin: 4px 16px 6px;
-  /* 玻璃输入底：透出亚克力模糊（毛玻璃质感） */
+}
+.translate-src {
+  flex: 1;
+  min-width: 0;
+  /* 右侧预留浮动复制按钮的空间 */
+  padding-right: 40px;
   background: var(--bg-input-glass);
+}
+.translate-src-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  background: var(--bg-badge);
+  border-radius: 7px;
+}
+.translate-src-copy:hover {
+  background: var(--bg-item-active);
 }
 .translate-dst-input {
   flex: 1;
