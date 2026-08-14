@@ -35,6 +35,7 @@
   align-items: center;
   justify-content: center;
   font-size: 12px;
+  box-shadow: 0 2px 8px var(--accent-soft);
 }
 .settings-nav-item {
   display: flex;
@@ -47,16 +48,19 @@
   color: var(--text-secondary);
   text-align: left;
   transition: background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out);
+    color var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
 }
 .settings-nav-item:hover {
   background: var(--bg-item-hover);
   color: var(--text-primary);
+  transform: translateX(2px);
 }
 .settings-nav-item.active {
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 600;
+  transform: none;
 }
 .settings-sidebar-footer {
   margin-top: auto;

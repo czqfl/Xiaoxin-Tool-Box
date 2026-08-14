@@ -63,6 +63,8 @@ html[data-window="panel"] body {
     rgba(var(--accent-rgb), 0.06),
     rgba(var(--accent-rgb), 0.015) 85%
   );
+  /* 分隔线下方投射一道极轻的阴影，头身层次更分明 */
+  box-shadow: 0 1px 8px rgba(15, 23, 42, 0.05);
 }
 
 .panel-search {
@@ -165,6 +167,7 @@ html[data-window="panel"] body {
   color: var(--text-secondary);
   font-size: 10px;
   font-family: inherit;
+  box-shadow: 0 1px 0 var(--border-subtle) inset, 0 1px 1px rgba(15, 23, 42, 0.04);
 }
 
 /* 分段选择器（粘贴模式等）：选中项为实心品牌色胶囊，对比强烈 */
@@ -193,6 +196,7 @@ html[data-window="panel"] body {
   background: var(--accent);
   color: var(--accent-text);
   box-shadow: 0 1px 6px var(--accent-soft);
+  font-weight: 600;
 }
 
 /* 右键菜单 */
