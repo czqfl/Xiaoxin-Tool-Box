@@ -29,11 +29,15 @@
   color: var(--text-primary);
   letter-spacing: 0.3px;
 }
-/* 语言选择组：绝对居中（标题/按钮宽度不对称时也保持正中） */
+/* 语言选择组：绝对居中（标题/按钮宽度不对称时也保持正中）。
+   z-index 必须显式提升：translateX(-50%) 的 transform 会创建独立层叠
+   上下文，若不提升，其内部弹出层的 z-index 被锁在组内，抢不过后面的
+   输入框（弹出层被输入框盖住、点不到） */
 .translate-langs {
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
+  z-index: 60;
   max-width: 72%;
   display: flex;
   align-items: center;
@@ -71,6 +75,9 @@
 }
 .translate-btn {
   flex-shrink: 0;
+  /* 按钮组靠右：语言组绝对居中后，用 auto 左边距把翻译/置顶/关闭推回
+     头部右侧（保持原位置，不被居中布局挤偏） */
+  margin-left: auto;
   border-radius: 9px;
   /* 「水滴融合」按钮 v2：多个不同大小/位置的椭圆水滴（非均匀排布）——
      有随机晕染感，像水在玻璃上不规则地融合；低饱和、带透明。 */
