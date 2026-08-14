@@ -172,7 +172,7 @@
   outline: none;
 }
 .number-input:focus {
-  border-color: rgba(var(--accent-rgb), 0.65);
+  border-color: rgba(var(--accent-rgb), 0.5);
   box-shadow: var(--ring);
 }
 

@@ -6,6 +6,7 @@ import type { TranslateResult } from "../../types";
 import { onEvent } from "../../core/events";
 import { copyText, closeTranslatePopup, diagLog, lastTranslateResult, translateText } from "../../core/tauri";
 import { IconClose, IconCopy } from "../../components/icons";
+import { GlassSelect } from "../../components/GlassSelect";
 import { LANG_OPTIONS } from "./langs";
 import "../../styles/panel.css";
 import "./translate.css";
@@ -247,31 +248,25 @@ export function TranslatePopup() {
         >
           <span className="translate-title">翻译</span>
           <div className="translate-langs">
-            <select
-              className="lang-select"
+            <GlassSelect
               value={fromLang}
+              onChange={setFromLang}
               title="源语言"
-              onChange={(e) => setFromLang(e.target.value)}
-            >
-              {LANG_OPTIONS.map((l) => (
-                <option key={l.value} value={l.value}>
-                  {l.value === "auto" ? "自动检测" : l.label}
-                </option>
-              ))}
-            </select>
+              options={LANG_OPTIONS.map((l) => ({
+                value: l.value,
+                label: l.value === "auto" ? "自动检测" : l.label,
+              }))}
+            />
             <span className="lang-arrow">→</span>
-            <select
-              className="lang-select"
+            <GlassSelect
               value={toLang}
+              onChange={setToLang}
               title="目标语言"
-              onChange={(e) => setToLang(e.target.value)}
-            >
-              {LANG_OPTIONS.filter((l) => l.value !== "auto").map((l) => (
-                <option key={l.value} value={l.value}>
-                  {l.label}
-                </option>
-              ))}
-            </select>
+              options={LANG_OPTIONS.filter((l) => l.value !== "auto").map((l) => ({
+                value: l.value,
+                label: l.label,
+              }))}
+            />
           </div>
           <button
             className="btn btn-primary btn-sm translate-btn"
