@@ -217,6 +217,7 @@ pub fn run() {
             panel::toolbar_set_visible,
             port::port_query,
             port::port_kill,
+            port::port_search,
         ])
         .run(tauri::generate_context!())
         .expect("应用启动失败");

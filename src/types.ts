@@ -207,4 +207,6 @@ export interface PortProcess {
   proto: string;
   /** 是否系统关键进程（受保护，拒绝结束） */
   protected: boolean;
+  /** 该进程占用的端口（按名称搜索时多个端口逐行返回；按端口查询时为查询端口） */
+  port?: number;
 }

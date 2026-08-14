@@ -73,6 +73,94 @@
   font-size: 28px;
 }
 
+/* 查询中加载态：旋转指示器 + 提示，pointer-events:none 不阻挡窗口拖动 */
+.port-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: 100%;
+  padding: 24px;
+  font-size: 13px;
+  color: var(--text-tertiary);
+  pointer-events: none;
+}
+.port-spinner {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 3px solid var(--border-strong);
+  border-top-color: var(--accent);
+  animation: port-spin 0.7s linear infinite;
+}
+@keyframes port-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 终止二次确认弹窗 */
+.port-confirm-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  animation: panel-in var(--dur-fast) var(--ease-out);
+}
+.port-confirm {
+  width: 320px;
+  max-width: calc(100vw - 32px);
+  padding: 18px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-menu);
+}
+.port-confirm-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+.port-confirm-body {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.port-confirm-row {
+  display: flex;
+  gap: 10px;
+  padding: 3px 0;
+}
+.port-confirm-key {
+  flex-shrink: 0;
+  width: 36px;
+  color: var(--text-tertiary);
+}
+.port-confirm-val {
+  color: var(--text-primary);
+  font-weight: 600;
+  word-break: break-all;
+}
+.port-confirm-warn {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: var(--c-amber-soft);
+  color: var(--c-amber);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.port-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
 /* 系统进程徽标：受保护不可终止 */
 .port-protected {
   margin-left: 6px;

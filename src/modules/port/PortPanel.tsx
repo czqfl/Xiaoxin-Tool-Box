@@ -1,12 +1,12 @@
-/** 端口工具面板：输入端口号查询占用进程，一键结束（开发者高频工具）。
- *  头部 = 输入框 + 查询按钮 + 置顶 + 关闭；头部空白处可拖动窗口（JS 手柄，
- *  自动跳过按钮/输入框）；置顶开启时面板常驻（失焦不自动隐藏）。 */
+/** 端口工具面板：输入端口号或应用名查询占用进程，一键结束（开发者高频工具）。
+ *  头部 = 输入框 + 查询按钮 + 置顶 + 关闭；面板空白处可拖动窗口（JS 手柄，
+ *  自动跳过按钮/输入框/结果条目）；置顶开启时面板常驻（失焦不自动隐藏）。 */
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { PortProcess } from "../../types";
 import { hideCurrentWindow, usePanelCommon } from "../../core/usePanel";
 import { useConfigStore } from "../../stores/configStore";
-import { killPort, queryPort, setPanelAlwaysOnTop } from "../../core/tauri";
+import { killPort, portSearch, setPanelAlwaysOnTop } from "../../core/tauri";
 import { IconClose, IconPin, IconSearch } from "../../components/icons";
 import "../../styles/panel.css";
 import "./port.css";
@@ -46,12 +46,14 @@ export function PortPanel() {
   // 置顶开启时面板常驻：失焦不再自动隐藏
   usePanelCommon(config.port.always_on_top);
 
-  const [port, setPort] = useState("");
+  const [keyword, setKeyword] = useState("");
   const [items, setItems] = useState<PortProcess[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [feedback, setFeedback] = useState("");
   const [killing, setKilling] = useState<number | null>(null);
+  // 终止确认弹窗：命中"终止"按钮后置为待确认进程；null 表示无弹窗
+  const [confirmTarget, setConfirmTarget] = useState<PortProcess | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // 面板置顶状态跟随配置生效（经后端命令切换，避免透明窗口黑屏）
@@ -72,16 +74,22 @@ export function PortPanel() {
     });
   };
 
-  const runQuery = async (p: number) => {
+  const runQuery = async (kw: string) => {
+    const q = kw.trim();
+    if (!q) {
+      setError("请输入端口号或应用名");
+      return;
+    }
     setLoading(true);
     setError("");
     setFeedback("");
     try {
-      const list = await queryPort(p);
+      const list = await portSearch(q);
       setItems(list);
       if (list.length === 0) {
-        setError(`端口 ${p} 未被占用`);
-      } else if (list.every((x) => x.state === "TIME_WAIT")) {
+        // 数字走端口语义，否则按应用名语义给出不同提示
+        setError(/^\d+$/.test(q) ? `端口 ${q} 未被占用` : `未找到匹配「${q}」的进程`);
+      } else if (/^\d+$/.test(q) && list.every((x) => x.state === "TIME_WAIT")) {
         setError("仅 TIME_WAIT 连接（几分钟后自动释放，通常无需处理）");
       }
     } catch (err) {
@@ -92,27 +100,18 @@ export function PortPanel() {
     }
   };
 
-  const handleQuery = () => {
-    const n = Number(port.trim());
-    if (!port.trim() || Number.isNaN(n) || n < 1 || n > 65535) {
-      setError("请输入 1-65535 之间的端口号");
-      return;
-    }
-    void runQuery(n);
-  };
+  const handleQuery = () => void runQuery(keyword);
 
-  const handleKill = async (proc: PortProcess) => {
-    const sure = window.confirm(
-      `确定结束进程「${proc.name}」（PID ${proc.pid}）吗？\n该进程打开的窗口与数据可能丢失。`
-    );
-    if (!sure) return;
+  // 真正的终止逻辑（确认后调用）
+  const doKill = async (proc: PortProcess) => {
+    setConfirmTarget(null);
     setKilling(proc.pid);
     setError("");
     try {
       await killPort(proc.pid);
       // 结束后自动重新查询，刷新结果（runQuery 会先清空 feedback，故反馈在其后写入）
-      const p = Number(port.trim());
-      if (p) await runQuery(p);
+      const q = keyword.trim();
+      if (q) await runQuery(q);
       // 关闭端口成功反馈：绿色横幅，与错误提示区分
       setFeedback(`已成功终止进程「${proc.name}」（PID ${proc.pid}）`);
     } catch (err) {
@@ -122,30 +121,37 @@ export function PortPanel() {
     }
   };
 
+  // 点"终止"→ 弹出二次确认（替代 Tauri 中不生效的 window.confirm）
+  const handleKillClick = (proc: PortProcess) => {
+    if (proc.protected) return; // 系统进程无终止按钮，理论上不会进这里
+    setConfirmTarget(proc);
+  };
+
   return (
     <div className="panel">
-      <div className="panel-shell">
+      <div
+        className="panel-shell"
+        onMouseDown={(e) => {
+          // 面板空白处可拖动；跳过交互元素与结果条目（避免误触按钮/选中文本）
+          const t = e.target as HTMLElement;
+          if (t.closest("button, select, input, textarea, .port-item, .port-confirm")) {
+            return;
+          }
+          getCurrentWindow().startDragging().catch(() => undefined);
+        }}
+      >
         {/* 头部：输入框 + 查询按钮 + 置顶 + 关闭。
-            查询按钮独立在输入框外边；头部空白处可拖动窗口（JS 手柄，
-            自动跳过按钮/输入框等交互元素） */}
-        <div
-          className="panel-header port-header"
-          onMouseDown={(e) => {
-            const t = e.target as HTMLElement;
-            if (t.closest("button, select, input, textarea")) return;
-            getCurrentWindow().startDragging().catch(() => undefined);
-          }}
-        >
+            输入框接受端口号或应用名（如 8080 / node）；查询按钮独立在输入框外。 */}
+        <div className="panel-header port-header">
           <div className="port-query">
             <span className="search-icon">
               <IconSearch size={15} />
             </span>
             <input
               ref={inputRef}
-              value={port}
-              placeholder="输入端口号，如 8080"
-              inputMode="numeric"
-              onChange={(e) => setPort(e.target.value.replace(/\D/g, ""))}
+              value={keyword}
+              placeholder="端口号或应用名，如 8080 / node"
+              onChange={(e) => setKeyword(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleQuery()}
             />
           </div>
@@ -175,17 +181,23 @@ export function PortPanel() {
         <div className="panel-body">
           {feedback && <div className="port-feedback">{feedback}</div>}
           {error && !feedback && <div className="port-empty">{error}</div>}
-          {items.length === 0 && !error && !feedback && (
+          {items.length === 0 && !error && !feedback && !loading && (
             <div className="port-empty">
               <span className="empty-icon">🔌</span>
-              <span>输入端口号查询占用该端口的进程</span>
+              <span>输入端口号或应用名查询占用进程</span>
+            </div>
+          )}
+          {loading && (
+            <div className="port-loading">
+              <span className="port-spinner" />
+              <span>正在查询端口占用…</span>
             </div>
           )}
           {items.map((proc) => {
             // 安全信息内嵌到条目里展示（不再单独顶部提示条）
-            const sensitive = SENSITIVE_PORTS.has(Number(port));
+            const sensitive = proc.port ? SENSITIVE_PORTS.has(proc.port) : false;
             return (
-              <div className="port-item" key={proc.pid}>
+              <div className="port-item" key={`${proc.pid}-${proc.port ?? proc.pid}`}>
                 <span className={`port-proto ${proc.proto.toLowerCase()}`}>{proc.proto}</span>
                 <div className="port-main">
                   <div className="port-name">
@@ -197,6 +209,7 @@ export function PortPanel() {
                     )}
                   </div>
                   <div className="port-meta">
+                    {proc.port !== undefined && <span>端口 {proc.port}</span>}
                     <span>PID {proc.pid}</span>
                     {proc.state && (
                       <span className={`port-state ${proc.state}`}>
@@ -219,7 +232,7 @@ export function PortPanel() {
                     className="port-kill-btn"
                     title={`终止进程 ${proc.name}（PID ${proc.pid}）`}
                     disabled={killing === proc.pid}
-                    onClick={() => void handleKill(proc)}
+                    onClick={() => handleKillClick(proc)}
                   >
                     {killing === proc.pid ? "终止中…" : "终止"}
                   </button>
@@ -236,6 +249,48 @@ export function PortPanel() {
           </span>
         </div>
       </div>
+
+      {/* 终止二次确认弹窗（应用内模态，替代 Tauri 默认不生效的 window.confirm） */}
+      {confirmTarget && (
+        <div className="port-confirm-mask" onMouseDown={(e) => {
+          if (e.target === e.currentTarget) setConfirmTarget(null);
+        }}>
+          <div className="port-confirm" onClick={(e) => e.stopPropagation()}>
+            <div className="port-confirm-title">确认终止进程？</div>
+            <div className="port-confirm-body">
+              <div className="port-confirm-row">
+                <span className="port-confirm-key">进程</span>
+                <span className="port-confirm-val">{confirmTarget.name}</span>
+              </div>
+              <div className="port-confirm-row">
+                <span className="port-confirm-key">PID</span>
+                <span className="port-confirm-val">{confirmTarget.pid}</span>
+              </div>
+              {confirmTarget.port !== undefined && (
+                <div className="port-confirm-row">
+                  <span className="port-confirm-key">端口</span>
+                  <span className="port-confirm-val">{confirmTarget.port}</span>
+                </div>
+              )}
+              <div className="port-confirm-warn">
+                该进程打开的窗口与未保存数据可能丢失，且无法撤销。
+              </div>
+            </div>
+            <div className="port-confirm-actions">
+              <button className="btn btn-ghost" onClick={() => setConfirmTarget(null)}>
+                取消
+              </button>
+              <button
+                className="btn btn-danger"
+                disabled={killing === confirmTarget.pid}
+                onClick={() => void doKill(confirmTarget)}
+              >
+                {killing === confirmTarget.pid ? "终止中…" : "确认终止"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

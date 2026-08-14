@@ -196,9 +196,9 @@ export const setToolbarVisible = (on: boolean) =>
   safe(invoke<void>("toolbar_set_visible", { on }), undefined);
 
 // ---- 端口工具 ----
-/** 查询占用指定端口的进程列表 */
-export const queryPort = (port: number) =>
-  safe(invoke<PortProcess[]>("port_query", { port }), []);
+/** 按端口号或应用名（进程名）搜索占用端口的进程列表 */
+export const portSearch = (keyword: string) =>
+  safe(invoke<PortProcess[]>("port_search", { keyword }), []);
 /** 结束指定 PID 的进程 */
 export const killPort = (pid: number) =>
   safe(invoke("port_kill", { pid }), undefined);

@@ -1,6 +1,7 @@
 //! 端口工具：查询占用指定端口的进程（netstat -ano 解析），一键结束进程。
 //! 开发时"端口被占用"高频问题，不用再开 cmd 敲 netstat + taskkill。
 use serde::Serialize;
+use std::collections::HashSet;
 use std::process::Command;
 
 #[derive(Debug, Clone, Serialize)]
@@ -14,6 +15,9 @@ pub struct PortProcess {
     pub proto: String,
     /// 是否系统关键进程（受保护，拒绝结束）——前端据此不展示终止按钮
     pub protected: bool,
+    /// 该进程占用的端口（按端口查询时为查询端口；按名称搜索时为该行实际端口）。
+    /// 同一进程可能占用多个端口，按名称搜索时逐行返回。
+    pub port: Option<u16>,
 }
 
 /// 查询占用指定端口的进程列表（按 PID 去重）。
@@ -72,6 +76,87 @@ pub fn port_query(port: u16) -> Result<Vec<PortProcess>, String> {
             name,
             state,
             proto,
+            port: Some(port),
+        });
+    }
+    Ok(result)
+}
+
+/// 增强搜索：输入端口号或应用名（进程名），返回占用端口的进程列表。
+/// - 纯数字（1-65535）→ 等价于 `port_query(port)`，所有匹配行 port=Some(port)。
+/// - 非数字 → 按进程名做不区分大小写的子串匹配（如 "node" 命中 node.exe），
+///   逐行返回该进程占用的每个端口（port=该行实际端口），并按 (pid,port,proto,state) 去重。
+#[tauri::command]
+pub fn port_search(keyword: String) -> Result<Vec<PortProcess>, String> {
+    let kw = keyword.trim();
+    if kw.is_empty() {
+        return Ok(Vec::new());
+    }
+    // 纯数字 → 按端口号查询（与原 port_query 一致）
+    if let Ok(port) = kw.parse::<u16>() {
+        if port == 0 {
+            return Err("请输入 1-65535 之间的端口号".into());
+        }
+        return port_query(port);
+    }
+    // 非数字 → 按进程名模糊搜索
+    let kw_lower = kw.to_lowercase();
+    let out = Command::new("netstat")
+        .args(["-ano"])
+        .output()
+        .map_err(|e| format!("netstat 执行失败：{e}"))?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut result: Vec<PortProcess> = Vec::new();
+    let mut seen: HashSet<(u32, u16, String, String)> = HashSet::new();
+    for line in text.lines() {
+        let t = line.trim();
+        if t.is_empty()
+            || t.starts_with("Proto")
+            || t.starts_with("活动")
+            || t.starts_with("Active")
+        {
+            continue;
+        }
+        let parts: Vec<&str> = t.split_whitespace().collect();
+        if parts.len() < 4 {
+            continue;
+        }
+        let proto = parts[0].to_uppercase();
+        if !(proto == "TCP" || proto == "TCP6" || proto == "UDP" || proto == "UDP6") {
+            continue;
+        }
+        let local = parts[1];
+        let Some(colon) = local.rfind(':') else {
+            continue;
+        };
+        let Ok(p): Result<u16, _> = local[colon + 1..].trim_end_matches(']').parse() else {
+            continue;
+        };
+        let Ok(pid): Result<u32, _> = parts.last().unwrap().parse() else {
+            continue;
+        };
+        if pid == 0 {
+            continue;
+        }
+        let state = if proto.starts_with("TCP") {
+            parts.get(3).map(|s| s.to_string()).unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let name = process_name(pid);
+        if !name.to_lowercase().contains(&kw_lower) {
+            continue;
+        }
+        if !seen.insert((pid, p, proto.clone(), state.clone())) {
+            continue;
+        }
+        result.push(PortProcess {
+            pid,
+            protected: SYSTEM_PROTECTED.contains(&name.to_lowercase().as_str()),
+            name,
+            state,
+            proto,
+            port: Some(p),
         });
     }
     Ok(result)
