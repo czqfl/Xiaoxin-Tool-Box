@@ -27,7 +27,9 @@ export function TranslatePopup() {
   const [dst, setDst] = useState("");
   const [fromLang, setFromLang] = useState("auto");
   const [toLang, setToLang] = useState("zh");
-  const [translating, setTranslating] = useState(false);
+  /** 翻译中状态：src=反向翻译（结果回原文区，上方显示"翻译中"）；
+   *  dst=正向翻译/划词等待（结果到译文区，下方显示"翻译中"）；null=空闲 */
+  const [busy, setBusy] = useState<"src" | "dst" | null>(null);
   /** 底部状态提示（复制成功 / 反向翻译失败等，2s 后自动消失） */
   const [statusMsg, setStatusMsg] = useState("");
   const [loading, setLoading] = useState(true);
@@ -198,11 +200,12 @@ export function TranslatePopup() {
     };
   }, []);
 
-  /** 正向翻译：以原文为源，翻译到目标语言（Enter / 顶部按钮触发） */
+  /** 正向翻译：以原文为源，翻译到目标语言（Enter / 顶部按钮触发）。
+   *  结果落到译文区 → "翻译中"显示在下方 */
   const doTranslate = async () => {
     const t = text.trim();
     if (!t) return;
-    setTranslating(true);
+    setBusy("dst");
     try {
       const r = await translateText(t, fromLang, toLang);
       setDst(r.translation);
@@ -210,16 +213,17 @@ export function TranslatePopup() {
     } catch (err) {
       flashStatus("翻译失败，请检查网络或服务商配置");
     } finally {
-      setTranslating(false);
+      setBusy(null);
     }
   };
 
   /** 反向翻译：以译文为源，翻译回原文语言（译文框内 Enter 触发）。
-   *  目标语言 = 用户选的源语言；未指定（auto）时用上次检测出的源语言，再兜底中文。 */
+   *  目标语言 = 用户选的源语言；未指定（auto）时用上次检测出的源语言，再兜底中文。
+   *  结果放回原文区 → "翻译中"显示在上方（用户反馈） */
   const doReverse = async () => {
     const t = dst.trim();
     if (!t) return;
-    setTranslating(true);
+    setBusy("src");
     try {
       const target = fromLang !== "auto" ? fromLang : (result?.from || "zh");
       const r = await translateText(t, toLang, target);
@@ -229,7 +233,7 @@ export function TranslatePopup() {
     } catch (err) {
       flashStatus("反向翻译失败，请检查网络或服务商配置");
     } finally {
-      setTranslating(false);
+      setBusy(null);
     }
   };
 
@@ -312,10 +316,10 @@ export function TranslatePopup() {
           </div>
           <button
             className="btn btn-primary btn-sm translate-btn"
-            disabled={translating || !text.trim()}
+            disabled={busy != null || !text.trim()}
             onClick={() => void doTranslate()}
           >
-            {translating ? "翻译中…" : "翻译"}
+            {busy === "src" ? "反向中…" : busy ? "翻译中…" : "翻译"}
           </button>
           {/* 置顶常驻：开启后失焦不自动隐藏（与其他面板一致） */}
           <button
@@ -338,35 +342,41 @@ export function TranslatePopup() {
           </button>
         </div>
 
-        {/* 上方：原始内容（可编辑）；Enter 翻译，Shift+Enter 换行；复制按钮浮在框内 */}
-        <div className="translate-src-wrap">
-          <textarea
-            ref={inputRef}
-            className="translate-src"
-            value={text}
-            placeholder="输入或粘贴要翻译的内容…（Enter 翻译）"
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                if (text.trim()) void doTranslate();
-              }
-            }}
-          />
-          {text.trim() && (
-            <button
-              className="icon-btn translate-src-copy"
-              title="复制原文"
-              onClick={() => void doCopySrc()}
-            >
-              <IconCopy size={13} />
-            </button>
-          )}
-        </div>
+        {/* 上方：原始内容（可编辑）；Enter 翻译，Shift+Enter 换行；复制按钮浮在框内。
+            反向翻译中（结果回原文区）→ 上方显示"翻译中" */}
+        {busy === "src" ? (
+          <div className="translate-src-hint">反向翻译中…</div>
+        ) : (
+          <div className="translate-src-wrap">
+            <textarea
+              ref={inputRef}
+              className="translate-src"
+              value={text}
+              placeholder="输入或粘贴要翻译的内容…（Enter 翻译）"
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (text.trim()) void doTranslate();
+                }
+              }}
+            />
+            {text.trim() && (
+              <button
+                className="icon-btn translate-src-copy"
+                title="复制原文"
+                onClick={() => void doCopySrc()}
+              >
+                <IconCopy size={13} />
+              </button>
+            )}
+          </div>
+        )}
 
-        {/* 下方：译文（可编辑，Enter 反向翻译回原文）；复制按钮浮在结果框内 */}
+        {/* 下方：译文（可编辑，Enter 反向翻译回原文）；复制按钮浮在结果框内。
+            正向翻译/划词等待（结果到译文区）→ 下方显示"翻译中" */}
         <div className="translate-dst">
-          {loading || translating ? (
+          {loading || busy === "dst" ? (
             <div className="translate-dst-hint">翻译中…</div>
           ) : (
             <textarea
@@ -382,7 +392,7 @@ export function TranslatePopup() {
               }}
             />
           )}
-          {!translating && !loading && dst.trim() && (
+          {busy !== "dst" && !loading && dst.trim() && (
             <button
               className="icon-btn translate-dst-copy"
               title="复制译文"

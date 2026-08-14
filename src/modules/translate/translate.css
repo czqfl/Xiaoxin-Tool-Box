@@ -202,17 +202,26 @@
   display: flex;
   flex-direction: column;
 }
-/* 翻译中占位 */
-.translate-dst-hint {
-  flex: 1;
+/* 翻译中占位：原文区/译文区共用（玻璃底，与输入框一致，不突兀变实色） */
+.translate-dst-hint,
+.translate-src-hint {
   display: flex;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
-  background: var(--bg-input);
+  background: var(--bg-input-glass);
   font-size: 13px;
   color: var(--text-tertiary);
+}
+.translate-dst-hint {
+  flex: 1;
+  min-height: 0;
+}
+.translate-src-hint {
+  flex: 1.1;
+  min-height: 0;
+  margin: 4px 16px 6px;
 }
 .translate-dst-copy {
   position: absolute;
