@@ -23,23 +23,22 @@
   --success: #27a567;
   --warning: #f5a524;
 
-  /* 柔和多彩色板（低饱和，丰富但不刺眼）：图标/徽标/渐变/点缀用。
-     主色 accent（天蓝）之外，用靛蓝/紫/青/绿/琥珀/玫红做功能色区分，
-     大面积背景仍保持中性——只做"点彩"，不做"浓墨"。 */
-  --c-indigo: #6d74d8;
-  --c-violet: #9a7bd4;
+  /* 内容类型色（低饱和，克制使用）：仅"内容类型图标"等有语义的元素用。
+     其余信息层级一律交给中性灰；色彩角色收敛为 品牌蓝/成功绿/警告琥珀/危险红。 */
   --c-cyan: #3ea8c9;
-  --c-teal: #2fa89d;
   --c-green: #4ca674;
   --c-amber: #d99a2b;
-  --c-rose: #d96f8e;
-  --c-indigo-soft: rgba(109, 116, 216, 0.13);
-  --c-violet-soft: rgba(154, 123, 212, 0.13);
   --c-cyan-soft: rgba(62, 168, 201, 0.13);
-  --c-teal-soft: rgba(47, 168, 157, 0.13);
   --c-green-soft: rgba(76, 166, 116, 0.13);
   --c-amber-soft: rgba(217, 154, 43, 0.14);
-  --c-rose-soft: rgba(217, 111, 142, 0.13);
+  /* 工具栏图标辨识色（收编原硬编码高饱和色）：默认图标显示中性灰，
+     hover 时亮出各自辨识色；深色主题另有提亮变体 */
+  --tool-clipboard: #60a5fa;
+  --tool-folder: #fbbf24;
+  --tool-credentials: #34d399;
+  --tool-translation: #c084fc;
+  --tool-port: #fb923c;
+  --tool-settings: #818cf8;
   /* 品牌色 RGB（供轻渐变/半透明叠加使用） */
   --accent-rgb: 47, 128, 237;
 
@@ -78,14 +77,20 @@
   /* 控件 */
   --switch-knob: #ffffff;
 
-  /* 圆角 */
+  /* 圆角：层级分明，8px 只留给面板外壳（与 DWM 窗口圆角一致） */
   --radius-xl: 16px;
   /* 面板外壳圆角：与窗口 DWM 原生圆角（DWMWCP_ROUND ≈ 8px）保持一致，
      避免"外壳圆角 ≠ 窗口圆角"在边角露出背景 */
   --radius-panel: 8px;
   --radius-lg: 12px;
-  --radius-md: 8px;
-  --radius-sm: 6px;
+  --radius-md: 6px;
+  --radius-sm: 4px;
+
+  /* 字号阶梯：全局统一语义字号，主次分明 */
+  --font-xs: 11px;
+  --font-sm: 12px;
+  --font-base: 13px;
+  --font-title: 15px;
 
   /* 动效 */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
@@ -112,21 +117,20 @@
   --success: #3dd68c;
   --warning: #f7b955;
 
-  /* 柔和多彩色板（深色提亮一档，保持低饱和） */
-  --c-indigo: #8b93f0;
-  --c-violet: #b79ae0;
+  /* 内容类型色（深色提亮一档，保持低饱和） */
   --c-cyan: #55b6d8;
-  --c-teal: #4fc4bb;
   --c-green: #6cd4a0;
   --c-amber: #e8b558;
-  --c-rose: #e58aa5;
-  --c-indigo-soft: rgba(139, 147, 240, 0.16);
-  --c-violet-soft: rgba(183, 154, 224, 0.16);
   --c-cyan-soft: rgba(85, 182, 216, 0.16);
-  --c-teal-soft: rgba(79, 196, 187, 0.16);
   --c-green-soft: rgba(108, 212, 160, 0.16);
   --c-amber-soft: rgba(232, 181, 88, 0.17);
-  --c-rose-soft: rgba(229, 138, 165, 0.16);
+  /* 工具栏图标辨识色（深色提亮一档） */
+  --tool-clipboard: #6cb3ff;
+  --tool-folder: #f6c453;
+  --tool-credentials: #4ed9a8;
+  --tool-translation: #cd96ff;
+  --tool-port: #ffab5e;
+  --tool-settings: #97a1fb;
   --accent-rgb: 76, 158, 255;
 
   /* 背景：纯净石墨黑（无紫调） */
@@ -173,21 +177,20 @@
     --success: #3dd68c;
     --warning: #f7b955;
 
-    /* 柔和多彩色板（深色提亮一档，保持低饱和） */
-    --c-indigo: #8b93f0;
-    --c-violet: #b79ae0;
+    /* 内容类型色（深色提亮一档，保持低饱和） */
     --c-cyan: #55b6d8;
-    --c-teal: #4fc4bb;
     --c-green: #6cd4a0;
     --c-amber: #e8b558;
-    --c-rose: #e58aa5;
-    --c-indigo-soft: rgba(139, 147, 240, 0.16);
-    --c-violet-soft: rgba(183, 154, 224, 0.16);
     --c-cyan-soft: rgba(85, 182, 216, 0.16);
-    --c-teal-soft: rgba(79, 196, 187, 0.16);
     --c-green-soft: rgba(108, 212, 160, 0.16);
     --c-amber-soft: rgba(232, 181, 88, 0.17);
-    --c-rose-soft: rgba(229, 138, 165, 0.16);
+    /* 工具栏图标辨识色（深色提亮一档） */
+    --tool-clipboard: #6cb3ff;
+    --tool-folder: #f6c453;
+    --tool-credentials: #4ed9a8;
+    --tool-translation: #cd96ff;
+    --tool-port: #ffab5e;
+    --tool-settings: #97a1fb;
     --accent-rgb: 76, 158, 255;
 
     --bg-app: #16181c;

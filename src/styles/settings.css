@@ -379,7 +379,7 @@
   font-weight: 600;
   box-shadow: inset 3px 0 0 var(--accent);
 }
-/* 分组卡片：左侧柔和靛蓝细条，视觉上"编组" */
+/* 分组卡片：左侧品牌蓝细条，视觉上"编组" */
 .setting-group {
   position: relative;
 }
@@ -391,17 +391,10 @@
   bottom: 8px;
   width: 3px;
   border-radius: 2px;
-  background: linear-gradient(
-    180deg,
-    var(--c-indigo),
-    var(--c-teal)
-  );
-  opacity: 0.55;
+  background: var(--accent);
+  opacity: 0.4;
 }
-/* 设置页大标题：渐变色文字（克制的品牌感） */
+/* 设置页大标题：品牌蓝纯色（克制的品牌感，不抢内容） */
 .settings-page h2 {
-  background: linear-gradient(120deg, var(--accent), var(--c-violet));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: var(--accent);
 }

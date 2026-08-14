@@ -3,7 +3,7 @@
  *  失焦不隐藏（不用 usePanelCommon 的失焦隐藏）。
  *  交互：按下不移动松开 = 点击呼出（100% 可靠，不走 click 事件）；
  *  按下移动超过阈值 = 拖动窗口位置。 */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import type { AppConfig, ToolKey } from "../../types";
@@ -21,37 +21,38 @@ import {
 } from "../../components/icons";
 import "./toolbar.css";
 
-/** 工具定义：图标（含专属颜色）+ 提示文案（顺序即设置页勾选顺序）。
- *  每个图标一个辨识色，方便一眼定位工具；hover 提亮。 */
+/** 工具定义：图标（含专属辨识色，收编为 theme.css 的 --tool-* 令牌，
+ *  深色主题自动适配）+ 提示文案（顺序即设置页勾选顺序）。
+ *  图标平时显示中性灰，hover 时亮出辨识色——克制的高级感，不喧宾夺主。 */
 export const TOOLS: Record<ToolKey, { label: string; color: string; icon: React.ReactNode }> = {
   clipboard: {
     label: "剪贴板",
-    color: "#60a5fa",
+    color: "var(--tool-clipboard)",
     icon: <IconClipboard size={18} />,
   },
   folder: {
     label: "文件夹",
-    color: "#fbbf24",
+    color: "var(--tool-folder)",
     icon: <IconFolder size={18} />,
   },
   credentials: {
     label: "账号密码",
-    color: "#34d399",
+    color: "var(--tool-credentials)",
     icon: <IconKey size={18} />,
   },
   translation: {
     label: "划词翻译",
-    color: "#c084fc",
+    color: "var(--tool-translation)",
     icon: <IconTranslate size={18} />,
   },
   port: {
     label: "端口工具",
-    color: "#fb923c",
+    color: "var(--tool-port)",
     icon: <IconPort size={18} />,
   },
   settings: {
     label: "打开设置",
-    color: "#818cf8",
+    color: "var(--tool-settings)",
     icon: <IconSettings size={18} />,
   },
 };
@@ -158,7 +159,10 @@ export function Toolbar() {
             data-key={key}
             title={tool.label}
           >
-            <span className="toolbar-icon" style={{ color: tool.color }}>
+            <span
+              className="toolbar-icon"
+              style={{ "--tool-color": tool.color } as CSSProperties}
+            >
               {tool.icon}
             </span>
           </button>

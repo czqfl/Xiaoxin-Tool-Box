@@ -246,7 +246,7 @@
   color: var(--text-tertiary);
 }
 .clip-preview {
-  font-size: 13px;
+  font-size: var(--font-base);
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -257,7 +257,7 @@
   align-items: center;
   gap: 8px;
   margin-top: 2px;
-  font-size: 11px;
+  font-size: var(--font-xs);
   color: var(--text-tertiary);
 }
 .clip-source {
@@ -332,16 +332,16 @@
   color: var(--c-amber);
   background: var(--c-amber-soft);
 }
-/* 来源应用：靛蓝淡底，比纯灰更有识别度 */
+/* 来源应用：中性灰 chip——次要信息不该抢彩色，彩色只留给"类型/收藏"等有语义处 */
 .clip-source {
-  color: var(--c-indigo);
-  background: var(--c-indigo-soft);
+  color: var(--text-secondary);
+  background: var(--bg-badge);
   padding: 1px 6px;
   border-radius: 5px;
 }
-/* 队列序号（非下一条）：靛蓝数字 */
+/* 队列序号（非下一条）：中性灰数字 */
 .clip-order {
-  color: var(--c-indigo);
-  background: var(--c-indigo-soft);
+  color: var(--text-secondary);
+  background: var(--bg-badge);
   font-weight: 600;
 }

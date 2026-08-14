@@ -32,17 +32,18 @@
   transition: background var(--dur-fast) var(--ease-out),
     transform var(--dur-fast) var(--ease-out);
 }
-/* 彩色图标：正常显示专属色，hover 提亮 + 加深底色 */
+/* 图标：平时中性灰（克制的单色工具条），hover 亮出各自辨识色（--tool-*） */
 .toolbar-icon {
   display: flex;
-  transition: filter var(--dur-fast) var(--ease-out),
+  color: var(--text-secondary);
+  transition: color var(--dur-fast) var(--ease-out),
     transform var(--dur-fast) var(--ease-out);
 }
 .toolbar-btn:hover {
   background: var(--bg-item-hover);
 }
 .toolbar-btn:hover .toolbar-icon {
-  filter: brightness(1.25);
+  color: var(--tool-color);
   transform: scale(1.08);
 }
 .toolbar-btn:active {
