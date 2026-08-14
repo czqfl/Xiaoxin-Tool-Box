@@ -259,7 +259,8 @@ impl Default for TranslatorConfig {
             baidu_appid: String::new(),
             baidu_secret: String::new(),
             target_lang: "zh".into(),
-            always_on_top: false,
+            // 默认置顶常驻：与其他面板一致，划词翻译后不因失焦自动关闭
+            always_on_top: true,
         }
     }
 }

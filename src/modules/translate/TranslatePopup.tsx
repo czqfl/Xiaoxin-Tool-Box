@@ -200,14 +200,21 @@ export function TranslatePopup() {
     };
   }, []);
 
+  /** 智能目标语言：源语言为"自动检测"时，按输入内容自动定向——
+   *  含中文（CJK）→ 翻译成英文；否则（英文等）→ 翻译成中文 */
+  const smartTarget = (t: string): string =>
+    /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/.test(t) ? "en" : "zh";
+
   /** 正向翻译：以原文为源，翻译到目标语言（Enter / 顶部按钮触发）。
-   *  结果落到译文区 → "翻译中"显示在下方 */
+   *  源语言选「自动检测」时目标语言走智能方向（中文→英 / 英文→中）；
+   *  手动指定了目标语言则用用户选择。结果落到译文区 → "翻译中"显示在下方 */
   const doTranslate = async () => {
     const t = text.trim();
     if (!t) return;
     setBusy("dst");
     try {
-      const r = await translateText(t, fromLang, toLang);
+      const target = fromLang === "auto" ? smartTarget(t) : toLang;
+      const r = await translateText(t, fromLang, target);
       setDst(r.translation);
       setResult(r);
     } catch (err) {

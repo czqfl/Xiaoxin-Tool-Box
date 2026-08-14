@@ -49,7 +49,8 @@ const defaultConfig: AppConfig = {
     baidu_appid: "",
     baidu_secret: "",
     target_lang: "zh",
-    always_on_top: false,
+    /* 默认置顶常驻：划词翻译后不因失焦自动关闭（与其他面板一致） */
+    always_on_top: true,
   },
   port: {
     always_on_top: true,
