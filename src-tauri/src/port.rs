@@ -27,11 +27,7 @@ pub fn port_query(port: u16) -> Result<Vec<PortProcess>, String> {
     if port == 0 {
         return Err("请输入 1-65535 之间的端口号".into());
     }
-    let out = Command::new("netstat")
-        .args(["-ano"])
-        .output()
-        .map_err(|e| format!("netstat 执行失败：{e}"))?;
-    let text = String::from_utf8_lossy(&out.stdout);
+    let text = run_netstat()?;
     let mut result: Vec<PortProcess> = Vec::new();
     for line in text.lines() {
         let t = line.trim();
@@ -101,11 +97,7 @@ pub fn port_search(keyword: String) -> Result<Vec<PortProcess>, String> {
     }
     // 非数字 → 按进程名模糊搜索
     let kw_lower = kw.to_lowercase();
-    let out = Command::new("netstat")
-        .args(["-ano"])
-        .output()
-        .map_err(|e| format!("netstat 执行失败：{e}"))?;
-    let text = String::from_utf8_lossy(&out.stdout);
+    let text = run_netstat()?;
     let mut result: Vec<PortProcess> = Vec::new();
     let mut seen: HashSet<(u32, u16, String, String)> = HashSet::new();
     for line in text.lines() {
@@ -160,6 +152,25 @@ pub fn port_search(keyword: String) -> Result<Vec<PortProcess>, String> {
         });
     }
     Ok(result)
+}
+
+/// 执行 `netstat -ano` 并返回标准输出文本。
+/// 用独立线程 + channel 接收超时（15s）包裹；某些环境下 netstat 可能长时间无响应，
+/// 若无超时会导致调用方（前端查询）永久挂起、loading 卡死。
+fn run_netstat() -> Result<String, String> {
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let out = Command::new("netstat").args(["-ano"]).output();
+        let _ = tx.send(out);
+    });
+    match rx.recv_timeout(Duration::from_secs(15)) {
+        Ok(Ok(out)) => Ok(String::from_utf8_lossy(&out.stdout).to_string()),
+        Ok(Err(e)) => Err(format!("netstat 执行失败：{e}")),
+        Err(_) => Err("netstat 执行超时（15 秒无响应），请稍后重试".into()),
+    }
 }
 
 /// 结束指定 PID 的进程（TerminateProcess）。权限不足（如目标是管理员进程）时返回错误。
