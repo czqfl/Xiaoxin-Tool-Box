@@ -202,17 +202,19 @@
   display: flex;
   flex-direction: column;
 }
-/* 翻译中占位：原文区/译文区共用（玻璃底，与输入框一致，不突兀变实色） */
+/* 翻译中占位：原文区/译文区共用（玻璃底 + 旋转指示器 + 更清晰的文字） */
 .translate-dst-hint,
 .translate-src-hint {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
   background: var(--bg-input-glass);
   font-size: 13px;
-  color: var(--text-tertiary);
+  font-weight: 500;
+  color: var(--text-secondary);
 }
 .translate-dst-hint {
   flex: 1;
@@ -222,6 +224,22 @@
   flex: 1.1;
   min-height: 0;
   margin: 4px 16px 6px;
+}
+/* 旋转指示器：品牌色小圈，动态提示翻译进行中 */
+.translate-hint-spin {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: translate-spin 0.7s linear infinite;
+}
+@keyframes translate-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .translate-dst-copy {
   position: absolute;
