@@ -38,6 +38,42 @@
 .translate-btn {
   flex-shrink: 0;
   border-radius: 9px;
+  /* 「水滴融合」按钮：多个低饱和彩色径向渐变叠加 + 半透明基底——
+     像几滴彩色墨水在玻璃上晕开融合，与面板的透明模糊质感一致，
+     不再是突兀的实心蓝色块。颜色克制（低饱和）且带透明。 */
+  background:
+    radial-gradient(circle at 18% 32%, rgba(167, 139, 250, 0.5), transparent 48%),
+    radial-gradient(circle at 80% 20%, rgba(76, 158, 255, 0.42), transparent 50%),
+    radial-gradient(circle at 66% 80%, rgba(79, 196, 187, 0.4), transparent 54%),
+    radial-gradient(circle at 26% 82%, rgba(232, 181, 88, 0.36), transparent 46%),
+    rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(15, 23, 42, 0.35);
+  box-shadow: var(--shadow-item);
+  transition: filter var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+.translate-btn:hover {
+  filter: brightness(1.15);
+  box-shadow: var(--shadow-item), 0 0 14px rgba(167, 139, 250, 0.3);
+}
+.translate-btn:active {
+  filter: brightness(0.95);
+}
+.translate-btn:disabled {
+  opacity: 0.5;
+  filter: none;
+  cursor: default;
+}
+/* 深色主题：水滴提亮一档，保证可见 */
+:root[data-theme="dark"] .translate-btn {
+  background:
+    radial-gradient(circle at 18% 32%, rgba(183, 154, 224, 0.6), transparent 48%),
+    radial-gradient(circle at 80% 20%, rgba(76, 158, 255, 0.52), transparent 50%),
+    radial-gradient(circle at 66% 80%, rgba(79, 196, 187, 0.5), transparent 54%),
+    radial-gradient(circle at 26% 82%, rgba(232, 181, 88, 0.44), transparent 46%),
+    rgba(255, 255, 255, 0.1);
 }
 .translate-close {
   flex-shrink: 0;
