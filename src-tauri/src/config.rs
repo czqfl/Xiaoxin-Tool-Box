@@ -245,6 +245,9 @@ pub struct TranslatorConfig {
     pub baidu_secret: String,
     /// 目标语言（通用代码 zh/en/ja/ko/fr/de/ru/es…），源语言由服务商自动检测
     pub target_lang: String,
+    /// 翻译面板是否置顶常驻（失焦不自动隐藏），与其他面板的置顶语义一致
+    #[serde(default)]
+    pub always_on_top: bool,
 }
 
 impl Default for TranslatorConfig {
@@ -256,6 +259,7 @@ impl Default for TranslatorConfig {
             baidu_appid: String::new(),
             baidu_secret: String::new(),
             target_lang: "zh".into(),
+            always_on_top: false,
         }
     }
 }

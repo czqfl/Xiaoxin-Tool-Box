@@ -145,6 +145,8 @@ export interface TranslatorConfig {
   baidu_secret: string;
   /** 目标语言通用代码：zh/en/ja/ko/fr/de/ru/es */
   target_lang: string;
+  /** 翻译面板置顶常驻（失焦不自动隐藏） */
+  always_on_top: boolean;
 }
 
 /** 翻译结果（含服务商检测出的源语言） */

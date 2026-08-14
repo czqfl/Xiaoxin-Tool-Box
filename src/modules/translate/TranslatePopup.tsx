@@ -5,7 +5,8 @@ import { getAllWindows, getCurrentWindow } from "@tauri-apps/api/window";
 import type { TranslateResult } from "../../types";
 import { onEvent } from "../../core/events";
 import { copyText, closeTranslatePopup, diagLog, lastTranslateResult, translateText } from "../../core/tauri";
-import { IconClose, IconCopy } from "../../components/icons";
+import { useConfigStore } from "../../stores/configStore";
+import { IconClose, IconCopy, IconPin } from "../../components/icons";
 import { GlassSelect } from "../../components/GlassSelect";
 import { LANG_OPTIONS } from "./langs";
 import "../../styles/panel.css";
@@ -39,6 +40,18 @@ export function TranslatePopup() {
   /** 最近一次呼出时间戳：再次呼出时 reveal_popup 会让已聚焦的窗口短暂失焦，
    *  造成"刚弹出就被关"的误判，故呼出后一小段时间内忽略失焦隐藏。 */
   const lastStartAt = useRef(0);
+  /** 置顶常驻（失焦不隐藏）：读配置，ref 同步供事件回调使用 */
+  const config = useConfigStore((s) => s.config);
+  const updateConfig = useConfigStore((s) => s.update);
+  const alwaysOnTop = config.translator?.always_on_top ?? false;
+  const alwaysOnTopRef = useRef(alwaysOnTop);
+  alwaysOnTopRef.current = alwaysOnTop;
+  const toggleAlwaysOnTop = () => {
+    void updateConfig({
+      ...config,
+      translator: { ...config.translator, always_on_top: !alwaysOnTop },
+    });
+  };
 
   /** 底部临时提示，2s 后自动清除 */
   const flashStatus = (msg: string) => {
@@ -119,6 +132,8 @@ export function TranslatePopup() {
       if (!prev || focused) return;
       const sinceStart = Date.now() - lastStartAt.current;
       if (dragGuardRef.current || sinceStart < 1000) return;
+      // 置顶常驻：失焦不自动隐藏（与其他面板的置顶语义一致）
+      if (alwaysOnTopRef.current) return;
       // 【互不影响】本应用内窗口之间切换焦点（如点开剪贴板面板）不关闭——
       // 仅当焦点离开整个应用（没有任何本应用窗口持有焦点）才关闭。
       window.setTimeout(() => {
@@ -276,6 +291,14 @@ export function TranslatePopup() {
             onClick={() => void doTranslate()}
           >
             {translating ? "翻译中…" : "翻译"}
+          </button>
+          {/* 置顶常驻：开启后失焦不自动隐藏（与其他面板一致） */}
+          <button
+            className={`icon-btn translate-pin${alwaysOnTop ? " active" : ""}`}
+            title={alwaysOnTop ? "取消置顶（失焦自动隐藏）" : "置顶常驻（失焦不隐藏）"}
+            onClick={toggleAlwaysOnTop}
+          >
+            <IconPin size={13} filled={alwaysOnTop} />
           </button>
           {/* 关闭按钮（data-tauri-drag-region 会自动排除按钮，点击正常触发） */}
           <button

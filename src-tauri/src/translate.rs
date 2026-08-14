@@ -98,14 +98,11 @@ pub fn trigger_selection_translate<R: Runtime>(app: &AppHandle<R>) {
     #[cfg(windows)]
     let src_raw: Option<usize> = crate::keyhook::foreground_hwnd().map(|h| h.0 as usize);
 
-    // 【提速】立即清空 store 并弹出空面板（不抢焦点、不激活）——弹窗与普通
-    // 面板一样瞬间出现；选中文本随后由后台线程读回并填充。此前先读完选中再
-    // 显示，剪贴板兜底（无选中时轮询剪贴板）可能耗时数百 ms，弹窗明显慢。
-    // 显示不激活：源应用仍持焦点，剪贴板复制兜底不受干扰。
-    if let Some(store) = app.try_state::<TranslateStore>() {
-        *store.0.lock().unwrap() = None;
-    }
-    let _ = app.emit("translate://start", StartPayload { text: String::new() });
+    // 【提速】立即弹出面板（不抢焦点、不激活）——弹窗与普通面板一样瞬间出现；
+    // 选中文本随后由后台线程读回并填充。显示不激活：源应用仍持焦点，剪贴板
+    // 复制兜底不受干扰。
+    // 【内容保留】不再 emit 空文本：关闭（隐藏）再打开时不清空前端内容——
+    // 前端 state 保留上次输入；仅当读到新选中文本时才 emit 替换。
     show_popup_instant(&app);
 
     // 读取选中文本是同步的 Win32/UIA 操作（含 COM 初始化与剪贴板轮询），放独立线程执行，
@@ -168,8 +165,9 @@ pub fn trigger_selection_translate<R: Runtime>(app: &AppHandle<R>) {
                 });
             }
             _ => {
-                // 无选中文本：空面板已显示，仅激活（可手动输入），不翻译、不碰剪贴板
-                crate::storage::diag_write("[translate] no selection -> empty panel");
+                // 无选中文本：不清空前端内容（保留上次输入/译文，关闭再开不丢），
+                // 仅激活面板（可继续编辑）；store 清空仅为挂载兜底不显示旧结果。
+                crate::storage::diag_write("[translate] no selection -> keep content");
                 if let Some(store) = app.try_state::<TranslateStore>() {
                     *store.0.lock().unwrap() = None;
                 }

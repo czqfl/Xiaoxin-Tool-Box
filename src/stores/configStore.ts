@@ -49,6 +49,7 @@ const defaultConfig: AppConfig = {
     baidu_appid: "",
     baidu_secret: "",
     target_lang: "zh",
+    always_on_top: false,
   },
   port: {
     always_on_top: true,
