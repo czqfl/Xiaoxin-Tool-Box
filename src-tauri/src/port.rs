@@ -1,8 +1,8 @@
-//! 端口工具：查询占用指定端口的进程（netstat -ano 解析），一键结束进程。
+//! 端口工具：查询占用指定端口的进程（Windows IP Helper API，无需启动 netstat 子进程，
+//! 避免杀毒软件对安装版应用拉起的子进程做实时扫描导致查询卡顿），一键结束进程。
 //! 开发时"端口被占用"高频问题，不用再开 cmd 敲 netstat + taskkill。
 use serde::Serialize;
 use std::collections::HashSet;
-use std::process::Command;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PortProcess {
@@ -20,62 +20,197 @@ pub struct PortProcess {
     pub port: Option<u16>,
 }
 
+/// 原始连接行（解析自 IP Helper 表）
+struct RawConn {
+    pid: u32,
+    port: u16,
+    proto: &'static str,
+    state: String,
+}
+
+#[cfg(windows)]
+fn list_all_ports() -> Vec<RawConn> {
+    use windows::Win32::NetworkManagement::IpHelper::{
+        GetExtendedTcpTable, GetExtendedUdpTable, TCP_TABLE_CLASS, UDP_TABLE_CLASS,
+    };
+
+    // AF_INET=2 / AF_INET6=23（用字面量避免额外 WinSock feature 依赖）
+    const AF_INET: u32 = 2;
+    const AF_INET6: u32 = 23;
+
+    fn tcp_state(s: u32) -> String {
+        let name = match s {
+            1 => "CLOSED",
+            2 => "LISTENING",
+            3 => "SYN_SENT",
+            4 => "SYN_RCVD",
+            5 => "ESTABLISHED",
+            6 => "FIN_WAIT1",
+            7 => "FIN_WAIT2",
+            8 => "TIME_WAIT",
+            9 => "CLOSE_WAIT",
+            10 => "LAST_ACK",
+            11 => "CLOSING",
+            12 => "DELETE_TCB",
+            _ => "",
+        };
+        name.to_string()
+    }
+
+    // 先以 null 缓冲探测所需大小，再分配后真正拉取。第一次调用无论返回 NO_ERROR(0)
+    // 还是 ERROR_INSUFFICIENT_BUFFER(111)，都会把所需字节数写入 size。
+    fn get_table(af: u32, tcp: bool) -> Option<Vec<u8>> {
+        use std::ffi::c_void;
+        let mut size: u32 = 0;
+        // TCP_TABLE_OWNER_PID_ALL=5 / UDP_TABLE_OWNER_PID=1（windows-rs 将该枚举建模为 newtype，
+        // 直接按值构造以避开关联常量命名差异）；两分支类型不同，各自内联传入。
+        let _ = if tcp {
+            unsafe { GetExtendedTcpTable(None, &mut size, true.into(), af, TCP_TABLE_CLASS(5), 0) }
+        } else {
+            unsafe { GetExtendedUdpTable(None, &mut size, true.into(), af, UDP_TABLE_CLASS(1), 0) }
+        };
+        if size == 0 {
+            return Some(Vec::new());
+        }
+        let mut buf = vec![0u8; size as usize];
+        let res = if tcp {
+            unsafe {
+                GetExtendedTcpTable(
+                    Some(buf.as_mut_ptr() as *mut c_void),
+                    &mut size,
+                    true.into(),
+                    af,
+                    TCP_TABLE_CLASS(5),
+                    0,
+                )
+            }
+        } else {
+            unsafe {
+                GetExtendedUdpTable(
+                    Some(buf.as_mut_ptr() as *mut c_void),
+                    &mut size,
+                    true.into(),
+                    af,
+                    UDP_TABLE_CLASS(1),
+                    0,
+                )
+            }
+        };
+        // 返回值为 WIN32 错误码，0 (NO_ERROR) 表示成功
+        if res != 0 {
+            return None;
+        }
+        Some(buf)
+    }
+
+    fn rd_u32(b: &[u8], o: usize) -> u32 {
+        u32::from_ne_bytes(b[o..o + 4].try_into().unwrap())
+    }
+    // 端口字段为网络字节序（大端），需翻转还原成主机序数字
+    fn port_of(v: u32) -> u16 {
+        u16::from_be(v as u16)
+    }
+
+    // 解析 MIB_*TABLE_OWNER_PID；行布局（DWORD=4字节）：
+    //  TCP4: [state,addr,port,raddr,rport,pid] = 24B
+    //  UDP4: [addr,port,pid] = 12B
+    //  TCP6: [addr16,port,raddr16,rport,state,pid] = 48B
+    //  UDP6: [addr16,port,pid] = 24B
+    fn parse(buf: &[u8], proto: &'static str, ipv6: bool) -> Vec<RawConn> {
+        if buf.len() < 4 {
+            return vec![];
+        }
+        let num = rd_u32(buf, 0) as usize;
+        let row = match (ipv6, proto) {
+            (false, "TCP") => 24,
+            (false, _) => 12,
+            (true, "TCP6") => 48,
+            (true, _) => 24,
+        };
+        let mut out = Vec::with_capacity(num.min((buf.len().saturating_sub(4)) / row + 1));
+        for i in 0..num {
+            let base = 4 + i * row;
+            if base + row > buf.len() {
+                break;
+            }
+            let (port_off, pid_off, has_state) = match (ipv6, proto) {
+                (false, "TCP") => (8, 20, true),
+                (false, _) => (4, 8, false),
+                (true, "TCP6") => (16, 44, true),
+                (true, _) => (16, 20, false),
+            };
+            let port = port_of(rd_u32(buf, base + port_off));
+            let pid = rd_u32(buf, base + pid_off);
+            let state = if has_state {
+                tcp_state(if ipv6 {
+                    rd_u32(buf, base + 40)
+                } else {
+                    rd_u32(buf, base + 0)
+                })
+            } else {
+                String::new()
+            };
+            out.push(RawConn { pid, port, proto, state });
+        }
+        out
+    }
+
+    let mut out = Vec::new();
+    if let Some(b) = get_table(AF_INET, true) {
+        out.extend(parse(&b, "TCP", false));
+    }
+    if let Some(b) = get_table(AF_INET, false) {
+        out.extend(parse(&b, "UDP", false));
+    }
+    if let Some(b) = get_table(AF_INET6, true) {
+        out.extend(parse(&b, "TCP6", true));
+    }
+    if let Some(b) = get_table(AF_INET6, false) {
+        out.extend(parse(&b, "UDP6", true));
+    }
+    out
+}
+
+#[cfg(not(windows))]
+#[allow(dead_code)]
+fn list_all_ports() -> Vec<RawConn> {
+    Vec::new()
+}
+
 /// 查询占用指定端口的进程列表（按 PID 去重）。
-/// 执行 `netstat -ano` 解析：本地地址 `host:port` 匹配端口，最后一列是 PID。
 #[tauri::command]
 pub fn port_query(port: u16) -> Result<Vec<PortProcess>, String> {
     if port == 0 {
         return Err("请输入 1-65535 之间的端口号".into());
     }
-    let text = run_netstat()?;
-    let mut result: Vec<PortProcess> = Vec::new();
-    for line in text.lines() {
-        let t = line.trim();
-        if t.is_empty() || t.starts_with("Proto") || t.starts_with("活动") || t.starts_with("Active") {
-            continue;
-        }
-        let parts: Vec<&str> = t.split_whitespace().collect();
-        if parts.len() < 4 {
-            continue;
-        }
-        let proto = parts[0].to_uppercase();
-        if !(proto == "TCP" || proto == "TCP6" || proto == "UDP" || proto == "UDP6") {
-            continue;
-        }
-        // 本地地址：形如 0.0.0.0:8080 / [::]:8080 / 127.0.0.1:3000
-        let local = parts[1];
-        let Some(colon) = local.rfind(':') else {
-            continue;
-        };
-        let Ok(p): Result<u16, _> = local[colon + 1..].trim_end_matches(']').parse() else {
-            continue;
-        };
-        if p != port {
-            continue;
-        }
-        // PID = 最后一列
-        let Ok(pid): Result<u32, _> = parts.last().unwrap().parse() else {
-            continue;
-        };
-        if pid == 0 || result.iter().any(|r| r.pid == pid) {
-            continue;
-        }
-        let state = if proto.starts_with("TCP") {
-            parts.get(3).map(|s| s.to_string()).unwrap_or_default()
-        } else {
-            String::new()
-        };
-        let name = process_name(pid);
-        result.push(PortProcess {
-            pid,
-            protected: SYSTEM_PROTECTED.contains(&name.to_lowercase().as_str()),
-            name,
-            state,
-            proto,
-            port: Some(port),
-        });
+    #[cfg(not(windows))]
+    {
+        let _ = port;
+        return Err("当前平台不支持".into());
     }
-    Ok(result)
+    #[cfg(windows)]
+    {
+        let conns = list_all_ports();
+        let mut result: Vec<PortProcess> = Vec::new();
+        for c in conns {
+            if c.port != port {
+                continue;
+            }
+            if result.iter().any(|r| r.pid == c.pid) {
+                continue;
+            }
+            let name = process_name(c.pid);
+            result.push(PortProcess {
+                pid: c.pid,
+                protected: SYSTEM_PROTECTED.contains(&name.to_lowercase().as_str()),
+                name,
+                state: c.state,
+                proto: c.proto.to_string(),
+                port: Some(port),
+            });
+        }
+        Ok(result)
+    }
 }
 
 /// 增强搜索：输入端口号或应用名（进程名），返回占用端口的进程列表。
@@ -88,88 +223,44 @@ pub fn port_search(keyword: String) -> Result<Vec<PortProcess>, String> {
     if kw.is_empty() {
         return Ok(Vec::new());
     }
-    // 纯数字 → 按端口号查询（与原 port_query 一致）
     if let Ok(port) = kw.parse::<u16>() {
         if port == 0 {
             return Err("请输入 1-65535 之间的端口号".into());
         }
         return port_query(port);
     }
-    // 非数字 → 按进程名模糊搜索
-    let kw_lower = kw.to_lowercase();
-    let text = run_netstat()?;
-    let mut result: Vec<PortProcess> = Vec::new();
-    let mut seen: HashSet<(u32, u16, String, String)> = HashSet::new();
-    for line in text.lines() {
-        let t = line.trim();
-        if t.is_empty()
-            || t.starts_with("Proto")
-            || t.starts_with("活动")
-            || t.starts_with("Active")
-        {
-            continue;
-        }
-        let parts: Vec<&str> = t.split_whitespace().collect();
-        if parts.len() < 4 {
-            continue;
-        }
-        let proto = parts[0].to_uppercase();
-        if !(proto == "TCP" || proto == "TCP6" || proto == "UDP" || proto == "UDP6") {
-            continue;
-        }
-        let local = parts[1];
-        let Some(colon) = local.rfind(':') else {
-            continue;
-        };
-        let Ok(p): Result<u16, _> = local[colon + 1..].trim_end_matches(']').parse() else {
-            continue;
-        };
-        let Ok(pid): Result<u32, _> = parts.last().unwrap().parse() else {
-            continue;
-        };
-        if pid == 0 {
-            continue;
-        }
-        let state = if proto.starts_with("TCP") {
-            parts.get(3).map(|s| s.to_string()).unwrap_or_default()
-        } else {
-            String::new()
-        };
-        let name = process_name(pid);
-        if !name.to_lowercase().contains(&kw_lower) {
-            continue;
-        }
-        if !seen.insert((pid, p, proto.clone(), state.clone())) {
-            continue;
-        }
-        result.push(PortProcess {
-            pid,
-            protected: SYSTEM_PROTECTED.contains(&name.to_lowercase().as_str()),
-            name,
-            state,
-            proto,
-            port: Some(p),
-        });
+    #[cfg(not(windows))]
+    {
+        let _ = kw;
+        return Err("当前平台不支持".into());
     }
-    Ok(result)
-}
-
-/// 执行 `netstat -ano` 并返回标准输出文本。
-/// 用独立线程 + channel 接收超时（15s）包裹；某些环境下 netstat 可能长时间无响应，
-/// 若无超时会导致调用方（前端查询）永久挂起、loading 卡死。
-fn run_netstat() -> Result<String, String> {
-    use std::sync::mpsc;
-    use std::thread;
-    use std::time::Duration;
-    let (tx, rx) = mpsc::channel();
-    thread::spawn(move || {
-        let out = Command::new("netstat").args(["-ano"]).output();
-        let _ = tx.send(out);
-    });
-    match rx.recv_timeout(Duration::from_secs(15)) {
-        Ok(Ok(out)) => Ok(String::from_utf8_lossy(&out.stdout).to_string()),
-        Ok(Err(e)) => Err(format!("netstat 执行失败：{e}")),
-        Err(_) => Err("netstat 执行超时（15 秒无响应），请稍后重试".into()),
+    #[cfg(windows)]
+    {
+        let kw_lower = kw.to_lowercase();
+        let conns = list_all_ports();
+        let mut result: Vec<PortProcess> = Vec::new();
+        let mut seen: HashSet<(u32, u16, String, String)> = HashSet::new();
+        for c in conns {
+            if c.pid == 0 {
+                continue;
+            }
+            let name = process_name(c.pid);
+            if !name.to_lowercase().contains(&kw_lower) {
+                continue;
+            }
+            if !seen.insert((c.pid, c.port, c.proto.to_string(), c.state.clone())) {
+                continue;
+            }
+            result.push(PortProcess {
+                pid: c.pid,
+                protected: SYSTEM_PROTECTED.contains(&name.to_lowercase().as_str()),
+                name,
+                state: c.state,
+                proto: c.proto.to_string(),
+                port: Some(c.port),
+            });
+        }
+        Ok(result)
     }
 }
 
