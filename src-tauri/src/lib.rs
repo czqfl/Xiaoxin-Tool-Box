@@ -216,6 +216,7 @@ pub fn run() {
             shortcut::shortcut_capture_end,
             panel::panel_set_always_on_top,
             panel::panel_toggle,
+            panel::panel_active,
             panel::toolbar_set_visible,
             port::port_query,
             port::port_kill,

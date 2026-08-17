@@ -6,12 +6,12 @@
  *  动态反馈（磁吸）：鼠标在图标间移动时，图标随鼠标位置实时产生
  *  「磁性牵引」——靠近的图标放大提亮，两侧图标被轻微拉向鼠标。
  *  用 requestAnimationFrame + 直接写 DOM transform，零 React 重渲染，最流畅。 */
-import { useEffect, useRef, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import type { AppConfig, ToolKey } from "../../types";
-import { panelToggle } from "../../core/tauri";
-import { EVT_CONFIG_CHANGED, onEvent } from "../../core/events";
+import { panelActive, panelToggle } from "../../core/tauri";
+import { EVT_CONFIG_CHANGED, EVT_PANEL_VISIBILITY, onEvent } from "../../core/events";
 import { diagLog } from "../../core/tauri";
 import { useConfigStore } from "../../stores/configStore";
 import {
@@ -74,6 +74,16 @@ export const TOOLS: Record<ToolKey, { label: string; color: string; icon: React.
 /** 可用工具列表（设置页勾选用） */
 export const TOOL_KEYS = Object.keys(TOOLS) as ToolKey[];
 
+/** 窗口标签 → 工具栏键名映射（面板显隐广播/查询的 label 反查工具） */
+const PANEL_LABEL_TO_KEY: Record<string, ToolKey> = {
+  "clipboard-panel": "clipboard",
+  "folder-panel": "folder",
+  "credential-panel": "credentials",
+  "port-panel": "port",
+  settings: "settings",
+  "translate-popup": "translation",
+};
+
 /** 拖动判定阈值（px）：超过视为拖动窗口，否则视为点击。
  *  阈值适当放宽，避免点击时轻微手抖被误判成拖动（"点了没反应"）。 */
 const DRAG_THRESHOLD = 10;
@@ -89,6 +99,33 @@ export function Toolbar() {
     key: ToolKey | null;
     dragged: boolean;
   } | null>(null);
+  /** 当前打开的面板（高亮对应图标）；null = 无面板打开 */
+  const [activeKey, setActiveKey] = useState<ToolKey | null>(null);
+
+  /** 刷新高亮：全量查询当前可见面板（比增量维护事件状态更可靠，杜绝漂移） */
+  const refreshActive = async () => {
+    const labels = await panelActive();
+    // 取最后一个可见面板（通常同时只开一个；后打开的覆盖先打开的）
+    let key: ToolKey | null = null;
+    for (const label of labels) {
+      const k = PANEL_LABEL_TO_KEY[label];
+      if (k) key = k;
+    }
+    setActiveKey(key);
+  };
+
+  // 面板显隐事件 → 刷新高亮（覆盖后端 toggle_panel / translate 关闭 / 前端 hide 全路径）；
+  // 事件仅是"触发器"，状态始终来自真实查询
+  useEffect(() => {
+    void refreshActive();
+    let cleanup: (() => void) | undefined;
+    onEvent<{ label: string; visible: boolean }>(EVT_PANEL_VISIBILITY, () => {
+      void refreshActive();
+    }).then((un) => {
+      cleanup = un;
+    });
+    return () => cleanup?.();
+  }, []);
 
   // ---- 磁吸交互：DOM 直写（refs + rAF），避免每帧 React 重渲染 ----
   const barRef = useRef<HTMLDivElement>(null);
@@ -220,6 +257,7 @@ export function Toolbar() {
       {tools.map((key, i) => {
         const tool = TOOLS[key];
         if (!tool) return null;
+        const active = activeKey === key;
         return (
           <button
             key={key}
@@ -227,9 +265,9 @@ export function Toolbar() {
               btnRefs.current[i] = el;
             }}
             type="button"
-            className="toolbar-btn"
+            className={`toolbar-btn${active ? " active" : ""}`}
             data-key={key}
-            title={tool.label}
+            title={active ? `${tool.label}（面板已打开）` : tool.label}
             style={{ transition: "transform 90ms var(--ease-out)" }}
           >
             <span

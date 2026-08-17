@@ -191,6 +191,10 @@ export const panelToggle = async (label: string) => {
   }
 };
 
+/** 当前可见的面板窗口标签列表（工具栏高亮状态查询用） */
+export const panelActive = () =>
+  safe(invoke<string[]>("panel_active"), []);
+
 /** 悬浮工具栏显示/隐藏（设置页开关 / 托盘菜单共用） */
 export const setToolbarVisible = (on: boolean) =>
   safe(invoke<void>("toolbar_set_visible", { on }), undefined);

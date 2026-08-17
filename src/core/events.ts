@@ -11,6 +11,9 @@ export const EVT_SHORTCUT_WIN_CAPTURED = "shortcut://win-captured";
 export const EVT_CONFIG_CHANGED = "config://changed";
 /** 文件夹数据变化（资源管理器追踪新增/计数时由后端广播） */
 export const EVT_FOLDER_CHANGED = "folder://changed";
+/** 面板显隐变化（后端在各显隐变化点广播；payload: { label, visible }，
+ *  工具栏据此给当前打开的面板图标加高亮标志） */
+export const EVT_PANEL_VISIBILITY = "panel://visibility-changed";
 
 export function broadcastConfigChanged(config: unknown): Promise<void> {
   return emit(EVT_CONFIG_CHANGED, config);

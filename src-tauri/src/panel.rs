@@ -1,7 +1,7 @@
 //! 悬浮面板的显示/隐藏与定位逻辑（两个面板共用）。
 use crate::config::ConfigState;
 use crate::storage::{save_json, AppPaths};
-use tauri::{AppHandle, LogicalPosition, Manager, Runtime, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, LogicalPosition, Manager, Runtime, WebviewWindow, WebviewWindowBuilder};
 use windows::Win32::Foundation::HWND;
 
 /// 取 webview 所属顶层窗口 HWND（用于 Win32 置前/激活/强制显示）
@@ -85,6 +85,50 @@ pub const PORT_PANEL: &str = "port-panel";
 /// 悬浮工具栏窗口（常驻小工具条，不参与面板互斥，独立显隐）
 pub const TOOLBAR_WINDOW: &str = "toolbar";
 
+/// 面板显隐变化广播（payload: { label, visible }）。
+/// 工具栏前端据此给"当前打开的面板"图标加高亮标志；settings / translate-popup 也广播。
+pub const EVT_PANEL_VISIBILITY: &str = "panel://visibility-changed";
+
+/// 广播面板显隐变化（label 为窗口标签：clipboard-panel / settings / translate-popup 等）。
+/// 调用点覆盖：toggle_panel（工具栏/快捷键/托盘/热键全路径）、panel_toggle 的
+/// settings/translation 分支、translate_popup_close（前端 ×/Esc/失焦）。
+pub(crate) fn broadcast_panel_visibility<R: Runtime>(
+    app: &AppHandle<R>,
+    label: &str,
+    visible: bool,
+) {
+    let _ = app.emit(
+        EVT_PANEL_VISIBILITY,
+        serde_json::json!({ "label": label, "visible": visible }),
+    );
+}
+
+/// 当前可见的面板窗口标签列表（工具栏初始化 / 收到事件后全量查询用，
+/// 避免增量维护状态漂移；settings / translate-popup 一并纳入）。
+#[tauri::command]
+pub fn panel_active(app: tauri::AppHandle) -> Vec<String> {
+    let mut labels = Vec::new();
+    for label in ALL_PANELS {
+        if app
+            .get_webview_window(label)
+            .and_then(|w| w.is_visible().ok())
+            .unwrap_or(false)
+        {
+            labels.push((*label).to_string());
+        }
+    }
+    for label in ["settings", crate::translate::TRANSLATE_PANEL] {
+        if app
+            .get_webview_window(label)
+            .and_then(|w| w.is_visible().ok())
+            .unwrap_or(false)
+        {
+            labels.push(label.to_string());
+        }
+    }
+    labels
+}
+
 /// 所有悬浮面板标签（同一时间只展示一个）
 pub const ALL_PANELS: &[&str] = &[
     CLIPBOARD_PANEL,
@@ -107,10 +151,12 @@ pub fn panel_toggle(app: tauri::AppHandle, label: String) -> Result<(), String> 
         if let Some(w) = app.get_webview_window("settings") {
             if w.is_visible().unwrap_or(false) {
                 let _ = w.hide();
+                broadcast_panel_visibility(&app, "settings", false);
                 return Ok(());
             }
         }
         crate::tray::show_settings_window(&app);
+        broadcast_panel_visibility(&app, "settings", true);
         return Ok(());
     }
     // 划词翻译：弹窗可见 → 关闭（不再"关了又弹出来"）；不可见 → 触发翻译
@@ -118,10 +164,12 @@ pub fn panel_toggle(app: tauri::AppHandle, label: String) -> Result<(), String> 
         if let Some(w) = app.get_webview_window(crate::translate::TRANSLATE_PANEL) {
             if w.is_visible().unwrap_or(false) {
                 let _ = w.hide();
+                broadcast_panel_visibility(&app, crate::translate::TRANSLATE_PANEL, false);
                 return Ok(());
             }
         }
         crate::translate::trigger_selection_translate(&app);
+        broadcast_panel_visibility(&app, crate::translate::TRANSLATE_PANEL, true);
         return Ok(());
     }
     let full = match label.as_str() {
@@ -316,6 +364,7 @@ pub fn toggle_panel<R: Runtime>(app: &AppHandle<R>, label: &str) {
         // 关闭前记住窗口位置（持久化到配置），下次呼出恢复上次位置
         remember_position(app, &window, label);
         let _ = window.hide();
+        broadcast_panel_visibility(app, label, false);
     } else {
         // 优先恢复上次关闭位置；记录缺失或位置失效（换屏/分辨率变化）时回退居中
         if !restore_position(app, &window, label) {
@@ -324,6 +373,7 @@ pub fn toggle_panel<R: Runtime>(app: &AppHandle<R>, label: &str) {
         // 显示 + 可靠置前（force_foreground_robust 不受前台锁限制）
         show_and_activate(&window);
         refresh_panel_acrylic(app, &window);
+        broadcast_panel_visibility(app, label, true);
     }
 }
 

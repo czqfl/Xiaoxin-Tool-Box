@@ -2,10 +2,16 @@
 import { useEffect, useRef } from "react";
 import { getAllWindows, getCurrentWindow } from "@tauri-apps/api/window";
 import { useConfigStore } from "../stores/configStore";
-import { EVT_CONFIG_CHANGED, onEvent } from "./events";
+import { EVT_CONFIG_CHANGED, EVT_PANEL_VISIBILITY, onEvent } from "./events";
+import { emit } from "@tauri-apps/api/event";
 import type { AppConfig } from "../types";
 
+/** 隐藏当前窗口并广播显隐事件（工具栏据此熄灭/点亮图标高亮）。
+ *  面板的所有前端关闭路径（失焦自动隐藏 / Esc / 关闭按钮）都走这里，
+ *  事件与后端 toggle_panel 的广播互补，保证工具栏状态实时准确。 */
 export function hideCurrentWindow() {
+  const label = getCurrentWindow().label;
+  void emit(EVT_PANEL_VISIBILITY, { label, visible: false });
   getCurrentWindow().hide().catch(console.error);
 }
 

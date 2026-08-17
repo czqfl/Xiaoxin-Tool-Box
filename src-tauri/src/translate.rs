@@ -62,6 +62,7 @@ pub fn translate_popup_close(app: AppHandle) {
     if let Some(w) = app.get_webview_window(TRANSLATE_PANEL) {
         let _ = w.hide();
     }
+    crate::panel::broadcast_panel_visibility(&app, TRANSLATE_PANEL, false);
 }
 
 /// 面板呼出事件载荷：带出原文，让面板显示的第一时间就有内容

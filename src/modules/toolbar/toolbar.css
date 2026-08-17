@@ -19,6 +19,7 @@
 }
 
 .toolbar-btn {
+  position: relative;
   width: 28px;
   height: 28px;
   flex-shrink: 0;
@@ -45,4 +46,20 @@
 }
 .toolbar-btn:active .toolbar-icon {
   transform: scale(0.85);
+}
+/* 面板打开中（active）：浅色底 + 底部辨识色指示条（"被选中显示"的标志）。
+   指示条用 ::after 绝对定位，不受磁吸 transform（写在按钮 inline style）影响 */
+.toolbar-btn.active {
+  background: var(--bg-item-active);
+}
+.toolbar-btn.active::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--tool-color);
+  transform: translateX(-50%);
 }
