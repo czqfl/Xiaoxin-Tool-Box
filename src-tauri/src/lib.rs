@@ -139,6 +139,12 @@ pub fn run() {
     sticky::migrate_legacy_sticky(&paths);
 
     tauri::Builder::default()
+        // 单实例保护：重复启动时新实例退出并唤起已有实例的设置窗口——
+        // 没有它时多实例会产出两个托盘图标/两个工具栏/热键互抢（用户实测）
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            #[cfg(windows)]
+            crate::tray::show_settings_window(app);
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(
