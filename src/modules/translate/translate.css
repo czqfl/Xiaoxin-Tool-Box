@@ -73,50 +73,84 @@
 .lang-swap:active {
   transform: rotate(180deg) scale(0.88);
 }
+/* ---- 翻译按钮：流动水彩（色彩交融 + 缓慢旋转流动）----
+   @property 自定义属性驱动 conic 渐变角度动画——色带绕圆心旋转，
+   多段柔和色首尾闭合，产生"水彩在水中晕开流动"的质感；
+   不旋转按钮本身，文字保持水平。 */
+@property --flow-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
 .translate-btn {
+  position: relative;
   flex-shrink: 0;
   /* 按钮组靠右：语言组绝对居中后，用 auto 左边距把翻译/置顶/关闭推回
      头部右侧（保持原位置，不被居中布局挤偏） */
   margin-left: auto;
   border-radius: 9px;
-  /* 「水滴融合」按钮 v2：多个不同大小/位置的椭圆水滴（非均匀排布）——
-     有随机晕染感，像水在玻璃上不规则地融合；低饱和、带透明。 */
+  /* 双层合成：玻璃高光罩（上）+ conic 水彩带（下，角度动画流动）。
+     色带在 紫→蓝→青绿→琥珀→玫红 之间连续过渡，色彩自然交融 */
   background:
-    radial-gradient(46% 58% at 12% 30%, rgba(167, 139, 250, 0.5), transparent 72%),
-    radial-gradient(36% 46% at 84% 16%, rgba(76, 158, 255, 0.44), transparent 74%),
-    radial-gradient(52% 40% at 66% 82%, rgba(79, 196, 187, 0.4), transparent 76%),
-    radial-gradient(28% 40% at 20% 86%, rgba(232, 181, 88, 0.38), transparent 70%),
-    radial-gradient(30% 52% at 56% 44%, rgba(217, 111, 142, 0.3), transparent 74%),
-    rgba(255, 255, 255, 0.12);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.05)),
+    conic-gradient(
+      from var(--flow-angle),
+      rgba(167, 139, 250, 0.5),
+      rgba(76, 158, 255, 0.42),
+      rgba(79, 196, 187, 0.36),
+      rgba(232, 181, 88, 0.32),
+      rgba(229, 138, 165, 0.42),
+      rgba(167, 139, 250, 0.5)
+    );
   border: 1px solid rgba(255, 255, 255, 0.45);
   /* 文字对比：浅色主题深字 + 白高光；深色主题白字（见 dark 覆盖） */
-  color: rgba(23, 26, 33, 0.88);
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45);
+  color: rgba(23, 26, 33, 0.9);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
   box-shadow: var(--shadow-item);
+  overflow: hidden;
+  animation: translate-flow 9s linear infinite;
   transition: filter var(--dur-fast) var(--ease-out),
     box-shadow var(--dur-fast) var(--ease-out);
 }
+@keyframes translate-flow {
+  to {
+    --flow-angle: 360deg;
+  }
+}
 .translate-btn:hover {
-  filter: brightness(1.12);
+  filter: brightness(1.1);
   box-shadow: var(--shadow-item), 0 0 14px rgba(167, 139, 250, 0.3);
 }
+/* 点击瞬间：色带快速旋转（像被"搅动"）+ 水波光晕扩散 */
 .translate-btn:active {
-  filter: brightness(0.95);
+  animation-duration: 1.4s;
+  filter: brightness(0.98);
+  box-shadow: 0 0 0 4px rgba(167, 139, 250, 0.22), 0 0 22px rgba(76, 158, 255, 0.4);
 }
+/* 翻译中（disabled）：不清淡不透明，保留流动并加速 + 柔和光晕脉冲 =
+   "工作中"的动感；background-color 清掉 base.css .btn-primary:disabled 的
+   accent-soft 底（否则会盖在水彩下层改变色调） */
 .translate-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.9;
   filter: none;
   cursor: default;
+  background-color: transparent;
+  animation-duration: 1.6s;
+  box-shadow: 0 0 0 3px rgba(76, 158, 255, 0.18), 0 0 18px rgba(167, 139, 250, 0.35);
 }
-/* 深色主题：水滴提亮、文字改白，保证对比与可见 */
+/* 深色主题：水彩提亮一档、文字改白，保证对比与可见 */
 :root[data-theme="dark"] .translate-btn {
   background:
-    radial-gradient(46% 58% at 12% 30%, rgba(183, 154, 224, 0.58), transparent 72%),
-    radial-gradient(36% 46% at 84% 16%, rgba(76, 158, 255, 0.52), transparent 74%),
-    radial-gradient(52% 40% at 66% 82%, rgba(79, 196, 187, 0.48), transparent 76%),
-    radial-gradient(28% 40% at 20% 86%, rgba(232, 181, 88, 0.42), transparent 70%),
-    radial-gradient(30% 52% at 56% 44%, rgba(229, 138, 165, 0.34), transparent 74%),
-    rgba(255, 255, 255, 0.1);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.02)),
+    conic-gradient(
+      from var(--flow-angle),
+      rgba(183, 154, 224, 0.6),
+      rgba(76, 158, 255, 0.52),
+      rgba(79, 196, 187, 0.46),
+      rgba(232, 181, 88, 0.42),
+      rgba(229, 138, 165, 0.48),
+      rgba(183, 154, 224, 0.6)
+    );
   color: #fff;
   text-shadow: 0 1px 3px rgba(15, 23, 42, 0.4);
 }
