@@ -41,11 +41,20 @@ export function StickyNotePage() {
   const [loaded, setLoaded] = useState(false);
 
   const load = async () => {
+    // 兜底：后端命令异常/无响应时 1.2s 后强制结束"加载中"，展示默认设置，
+    // 避免 IPC 挂起导致页面永远空白
+    const guard = new Promise<StickySettings | null>((resolve) =>
+      setTimeout(() => resolve(null), 1200)
+    );
     try {
-      const s = (await invoke<StickySettings>("load_settings")) ?? DEFAULT;
-      setSettings({ ...DEFAULT, ...s });
-      const dir = await invoke<string>("effective_notes_dir");
-      setEffDir(dir);
+      const s = (await Promise.race([invoke<StickySettings>("load_settings"), guard])) ?? DEFAULT;
+      if (s) setSettings({ ...DEFAULT, ...s });
+      try {
+        const dir = await invoke<string>("effective_notes_dir");
+        setEffDir(dir);
+      } catch {
+        /* 目录信息不可用不影响页面 */
+      }
     } catch {
       /* 后端未就绪时保持默认 */
     }

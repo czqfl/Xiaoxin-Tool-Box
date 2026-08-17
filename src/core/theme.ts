@@ -11,11 +11,17 @@ export function applyTheme(mode: ThemeMode) {
   }
   // 系统标题栏（设置窗口有原生边框）颜色跟随应用主题——否则浅色主题下
   // 窗口顶部仍是 Windows 系统深色标题栏（黑色一条）。无边框窗口调用无副作用。
-  // system 模式传 null（Tauri 语义：跟随系统默认）；mint 属浅色系 → light
-  const windowTheme = mode === "mint" ? "light" : mode === "system" ? null : mode;
-  getCurrentWindow()
-    .setTheme(windowTheme)
-    .catch(() => undefined);
+  // system 模式传 null（Tauri 语义：跟随系统默认）；mint 属浅色系 → light。
+  // try/catch 兜底：setTheme 若有同步异常也不能中断配置保存链路
+  // （否则设置页"所有配置保存无效"）。
+  try {
+    const windowTheme = mode === "mint" ? "light" : mode === "system" ? null : mode;
+    getCurrentWindow()
+      .setTheme(windowTheme)
+      .catch(() => undefined);
+  } catch {
+    /* 窗口不支持 setTheme 时忽略 */
+  }
 }
 
 /**

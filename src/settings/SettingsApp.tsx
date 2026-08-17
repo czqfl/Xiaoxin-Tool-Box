@@ -37,10 +37,10 @@ type Page =
 const NAV_ITEMS: Array<{ key: Page; label: string; icon: React.ReactNode }> = [
   { key: "clipboard", label: "剪贴板设置", icon: <IconClipboard size={15} /> },
   { key: "folder", label: "文件夹设置", icon: <IconFolder size={15} /> },
-  { key: "shortcut", label: "快捷键设置", icon: <IconKeyboard size={15} /> },
-  { key: "translation", label: "翻译设置", icon: <IconTranslate size={15} /> },
-  { key: "toolbar", label: "悬浮工具栏", icon: <IconGrid size={15} /> },
   { key: "sticky", label: "便签设置", icon: <IconSticky size={15} /> },
+  { key: "translation", label: "翻译设置", icon: <IconTranslate size={15} /> },
+  { key: "shortcut", label: "快捷键设置", icon: <IconKeyboard size={15} /> },
+  { key: "toolbar", label: "悬浮工具栏", icon: <IconGrid size={15} /> },
   { key: "general", label: "通用设置", icon: <IconSettings size={15} /> },
   { key: "about", label: "关于", icon: <IconInfo size={15} /> },
 ];
