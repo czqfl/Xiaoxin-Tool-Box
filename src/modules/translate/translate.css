@@ -102,23 +102,24 @@
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  /* 双层合成：玻璃高光罩（上）+ conic 水彩带（下，角度动画流动）。
-     色带在 紫→蓝→青绿→琥珀→玫红 之间连续过渡，色彩自然交融；
-     alpha 提高一档保证小按钮上色彩可见 */
+  /* 双层合成：白罩提亮（玻璃通透感）+ conic 水彩带（--water-* 主题变量，
+     浅色鲜亮 / 深色提亮，自动适配手动与系统主题，无选择器覆盖问题）。
+     色带在 紫→蓝→青绿→琥珀→玫红 之间连续过渡，色彩自然交融 */
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.05)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.08)),
     conic-gradient(
       from var(--flow-angle),
-      rgba(167, 139, 250, 0.68),
-      rgba(76, 158, 255, 0.6),
-      rgba(79, 196, 187, 0.55),
-      rgba(232, 181, 88, 0.5),
-      rgba(229, 138, 165, 0.6),
-      rgba(167, 139, 250, 0.68)
+      var(--water-a),
+      var(--water-b),
+      var(--water-c),
+      var(--water-d),
+      var(--water-e),
+      var(--water-a)
     );
-  /* 文字对比：浅色主题深字 + 白高光；深色主题白字（见 dark 覆盖） */
-  color: #171a21;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.55);
+  /* 文字对比：--btn-text / --btn-text-shadow 由主题变量驱动
+     （浅色=深字+白高光，深色=白字+暗影），任何主题下都协调 */
+  color: var(--btn-text);
+  text-shadow: var(--btn-text-shadow);
   box-shadow: var(--shadow-item);
   overflow: hidden;
   animation: translate-flow 6s linear infinite;
@@ -185,22 +186,9 @@
 .translate-btn:disabled::after {
   animation-duration: 1.2s;
 }
-/* 深色主题：水彩提亮一档、文字改白，保证对比与可见 */
-:root[data-theme="dark"] .translate-btn {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.02)),
-    conic-gradient(
-      from var(--flow-angle),
-      rgba(183, 154, 224, 0.75),
-      rgba(76, 158, 255, 0.68),
-      rgba(79, 196, 187, 0.62),
-      rgba(232, 181, 88, 0.58),
-      rgba(229, 138, 165, 0.68),
-      rgba(183, 154, 224, 0.75)
-    );
-  color: #fff;
-  text-shadow: 0 1px 3px rgba(15, 23, 42, 0.5);
-}
+/* 深色/系统深色主题适配：由 theme.css 的 --water-* / --btn-text 变量自动完成
+   （不再用 :root[data-theme="dark"] 选择器——系统深色模式无 data-theme 属性，
+   选择器不生效，会错误地沿用浅色样式导致"黑薄膜+黑字"） */
 .translate-close {
   flex-shrink: 0;
   margin-left: 0;
