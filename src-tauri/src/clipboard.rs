@@ -753,18 +753,14 @@ pub fn sequential_paste<R: Runtime>(app: &AppHandle<R>) {
         std::thread::sleep(Duration::from_millis(80));
         let _ = simulate_paste();
     });
-    // 消耗已粘贴条目：普通条目移除并压入回滚栈；收藏条目不删数据、
-    // 标记 consumed 退出顺序队列（普通模式仍可见，可反复收藏展示）
+    // 消耗已粘贴条目：无论收藏与否都【保留数据】（普通模式仍可见——
+    // 此前非收藏项被 remove 移除，用户反馈"非收藏数据在面板消失"），
+    // 仅标记 consumed 退出顺序队列；回滚栈记录克隆，撤销时清除标记重新入队。
+    // 历史数据量由 max_history 裁剪（trim_entries）控制。
     let mut entries = store.0.lock().unwrap();
     if let Some(pos) = entries.iter().position(|e| e.id == entry.id) {
-        if entries[pos].favorite {
-            entries[pos].consumed = true;
-        } else {
-            let removed = entries.remove(pos);
-            // 压入回滚栈（撤销粘贴可恢复，支持连续多次）；图片文件保留不删——
-            // 否则回滚时文件已不存在无法完整恢复。孤儿文件由清空时统一清理。
-            LAST_CONSUMED.lock().unwrap().push(removed);
-        }
+        entries[pos].consumed = true;
+        LAST_CONSUMED.lock().unwrap().push(entries[pos].clone());
     }
     let _ = save_json(&paths.clipboard_file, &*entries);
     sync_seq_availability(&entries);
@@ -773,9 +769,8 @@ pub fn sequential_paste<R: Runtime>(app: &AppHandle<R>) {
 }
 
 /// 顺序模式下手动粘贴（点击 / Enter / 数字键）后的消耗：
-/// 普通条目从队列移除并记录到回滚缓冲（不删图片文件，保证可撤销恢复）；
-/// **收藏条目不删数据**——标记 consumed 后退出顺序队列，但普通模式仍可见
-/// （收藏的"防消耗"仅在普通模式生效，顺序模式下收藏项照常被消耗走）。
+/// 无论收藏与否都保留数据（普通模式仍可见），仅标记 consumed 退出顺序队列，
+/// 回滚栈记录克隆供撤销恢复（"防消耗"对所有条目生效，不再丢数据）。
 /// 与全局 Ctrl+V 的 sequential_paste 消耗路径语义一致，撤销统一生效。
 #[tauri::command]
 pub fn clipboard_consume(
@@ -786,14 +781,9 @@ pub fn clipboard_consume(
 ) -> Result<(), String> {
     let mut entries = store.0.lock().unwrap();
     if let Some(pos) = entries.iter().position(|e| e.id == id) {
-        if entries[pos].favorite {
-            // 收藏项：保留数据，标记已消耗（不再进入顺序队列，普通模式仍展示）
-            entries[pos].consumed = true;
-        } else {
-            let removed = entries.remove(pos);
-            // 压入回滚栈（支持连续多次撤销）
-            LAST_CONSUMED.lock().unwrap().push(removed);
-        }
+        // 保留数据，标记已消耗（不再进入顺序队列，普通模式仍展示）
+        entries[pos].consumed = true;
+        LAST_CONSUMED.lock().unwrap().push(entries[pos].clone());
         save_json(&paths.clipboard_file, &*entries).map_err(|e| format!("保存失败：{e}"))?;
         sync_seq_availability(&entries);
     }
@@ -802,10 +792,10 @@ pub fn clipboard_consume(
     Ok(())
 }
 
-/// 撤销最近一次顺序粘贴的消耗：把条目按原 created_at 插回队列的正确位置
-/// （FIFO 下回到队首附近，LIFO 下回到队尾附近，语义一致）。
-/// 回滚栈支持连续多次撤销：每次撤销最近一条，已不在栈（重新入队等）的跳过。
-/// 用于"按了 Ctrl+V 却没粘贴上 / 粘贴错地方"时恢复内容。
+/// 撤销最近一次顺序粘贴的消耗：条目消耗后保留数据（仅标记 consumed），
+/// 撤销 = 清除 consumed 标记，按原 created_at 位置重新参与顺序队列。
+/// 回滚栈支持连续多次撤销：每次撤销最近一条；条目已被手动删除（兜底）
+/// 则按 created_at 插回队列。用于"按了 Ctrl+V 却没粘贴上 / 粘贴错地方"时恢复。
 #[tauri::command]
 pub fn clipboard_rollback(
     app: AppHandle,
@@ -818,10 +808,16 @@ pub fn clipboard_rollback(
         let Some(entry) = LAST_CONSUMED.lock().unwrap().pop() else {
             return Ok(());
         };
-        // 条目已在队列（收藏项 / 重新入队等）则跳过，继续撤销更早的
-        if entries.iter().any(|e| e.id == entry.id) {
-            continue;
+        // 条目仍保留在列表中（消耗后仅标记 consumed）：清除标记重新入队
+        if let Some(e) = entries.iter_mut().find(|e| e.id == entry.id) {
+            e.consumed = false;
+            save_json(&paths.clipboard_file, &*entries).map_err(|e| format!("保存失败：{e}"))?;
+            sync_seq_availability(&entries);
+            drop(entries);
+            let _ = app.emit(EVT_CHANGED, ());
+            return Ok(());
         }
+        // 兜底：条目确实不在（旧版本数据 / 手动删除）→ 按 created_at 插回
         let pos = entries
             .iter()
             .position(|e| e.created_at > entry.created_at)
