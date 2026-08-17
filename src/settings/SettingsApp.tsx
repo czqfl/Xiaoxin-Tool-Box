@@ -67,6 +67,10 @@ export function SettingsApp() {
       setShortcutFailed(target === "clipboard" ? "呼出剪贴板" : "呼出文件夹");
       setPage("shortcut");
     }).then((un) => (disposed ? un() : cleanup.push(un)));
+    // 便签窗口"设置"入口：跳到便签设置页
+    onEvent<void>("sticky://goto-settings", () => {
+      setPage("sticky");
+    }).then((un) => (disposed ? un() : cleanup.push(un)));
     return () => {
       disposed = true;
       cleanup.forEach((fn) => fn());

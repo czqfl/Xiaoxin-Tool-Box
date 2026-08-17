@@ -1,5 +1,5 @@
 /** 悬浮工具栏设置页：启用开关 + 勾选显示哪些工具 + 拖拽排序图标顺序 */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useConfigStore } from "../stores/configStore";
 import { setToolbarVisible } from "../core/tauri";
 import type { ToolKey } from "../types";
@@ -9,7 +9,10 @@ import { TOOL_KEYS, TOOLS } from "../modules/toolbar/Toolbar";
 export function ToolbarPage() {
   const config = useConfigStore((s) => s.config);
   const update = useConfigStore((s) => s.update);
-  /** 拖拽中的源下标（null = 未在拖拽） */
+  /** 拖拽中的源下标：用 ref 同步（拖拽事件间隙 React state 可能未提交，
+   *  导致 drop 时读到旧值/空值——WebView2 下拖拽"无效"的根因） */
+  const dragFromRef = useRef<number | null>(null);
+  /** 视觉反馈：当前拖拽源（仅用于高亮，React state 异步无碍） */
   const [dragIdx, setDragIdx] = useState<number | null>(null);
 
   if (!config.toolbar) return null;
@@ -103,6 +106,7 @@ export function ToolbarPage() {
                   className={`toolbar-sort-item${dragIdx === i ? " dragging" : ""}`}
                   draggable
                   onDragStart={(e) => {
+                    dragFromRef.current = i;
                     setDragIdx(i);
                     e.dataTransfer.effectAllowed = "move";
                     e.dataTransfer.setData("text/plain", String(i));
@@ -113,11 +117,15 @@ export function ToolbarPage() {
                   }}
                   onDrop={(e) => {
                     e.preventDefault();
-                    const from = dragIdx ?? Number(e.dataTransfer.getData("text/plain") || i);
+                    const from = dragFromRef.current ?? Number(e.dataTransfer.getData("text/plain"));
+                    dragFromRef.current = null;
                     setDragIdx(null);
                     if (from >= 0 && from < ordered.length) moveTool(from, i);
                   }}
-                  onDragEnd={() => setDragIdx(null)}
+                  onDragEnd={() => {
+                    dragFromRef.current = null;
+                    setDragIdx(null);
+                  }}
                 >
                   <span className="toolbar-sort-handle" aria-hidden>
                     ⠿

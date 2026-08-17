@@ -798,18 +798,78 @@ pub fn open_history_window(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// 便签窗口显示/隐藏/关闭（便签窗口关闭 = 隐藏到托盘式常驻）。
+/// 便签窗口显示/隐藏/关闭（与 StickyNote 语义一致：便签窗口关闭 = 隐藏常驻，
+/// 辅助窗口（历史）真正关闭）。
 #[tauri::command]
-pub fn sticky_close_window(window: tauri::WebviewWindow) -> Result<(), String> {
+pub fn close_window(window: tauri::WebviewWindow) -> Result<(), String> {
     match window.label() {
         HISTORY_WINDOW => window.close().map_err(|e| e.to_string()),
         _ => window.hide().map_err(|e| e.to_string()),
     }
 }
 
+/// 便签窗口开始拖动（标题栏按住拖动）。
+#[tauri::command]
+pub fn start_dragging(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.start_dragging().map_err(|e| e.to_string())
+}
+
+/// 便签窗口置顶/取消置顶。
+#[tauri::command]
+pub fn set_always_on_top(window: tauri::WebviewWindow, pinned: bool) -> Result<(), String> {
+    window.set_always_on_top(pinned).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn minimize_to_taskbar(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.minimize().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn minimize_to_tray(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.hide().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn show_window(app: AppHandle, label: String) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window(&label) {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn quit_app(app: AppHandle) -> Result<(), String> {
+    app.exit(0);
+    Ok(())
+}
+
+/// 便签全局快捷键：集成版暂不注册（避免与工具箱快捷键冲突），
+/// 入口走工具栏图标与设置页；前端保存设置后调用，stub 静默成功。
+#[tauri::command]
+pub fn register_shortcuts() -> Result<(), String> {
+    Ok(())
+}
+
+/// 打开便签设置：路由到工具箱设置窗口并跳转"便签设置"页。
+#[tauri::command]
+pub fn open_settings_window(app: AppHandle) -> Result<(), String> {
+    crate::tray::show_settings_window(&app);
+    let _ = app.emit("sticky://goto-settings", ());
+    Ok(())
+}
+
+/// 大模型整理便签：集成版暂未接入，返回明确错误（前端展示为提示）。
+#[tauri::command]
+pub fn format_with_llm(_content: String, _output_format: String) -> Result<String, String> {
+    Err("集成版暂未接入大模型格式化".into())
+}
+
 /// 便签原生亚克力（着色跟随主题色；便签透明背景实时毛玻璃用）。
 #[tauri::command]
-pub fn sticky_set_acrylic(
+pub fn set_acrylic(
     window: tauri::WebviewWindow,
     enable: bool,
     _opacity: u32,
