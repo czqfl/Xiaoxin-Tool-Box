@@ -280,6 +280,13 @@ export const IconClose = (p: IconProps) => (
   </svg>
 );
 
+/** 勾（成功提示）：复制成功 / 完成状态用 */
+export const IconCheck = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M4 12.5 9.5 18 20 6.5" />
+  </svg>
+);
+
 /** 翻译：左侧「文」字 + 右侧「A」（多语言互译，最经典的翻译图标） */
 export const IconTranslate = (p: IconProps) => (
   <svg {...base(p)}>

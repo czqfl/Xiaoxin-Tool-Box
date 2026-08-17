@@ -254,7 +254,9 @@
   background: var(--bg-item-active);
 }
 
-/* 底部：状态提示（快捷键说明 / 复制成功 / 失败反馈） */
+/* 底部：状态提示（快捷键说明 / 复制成功 / 失败反馈）。
+   默认（快捷键说明）= 淡灰文字；临时状态 ok/err 用彩色胶囊 + 加粗 + 图标，
+   与说明明显区分，一眼可辨 */
 .translate-bar {
   display: flex;
   align-items: center;
@@ -265,6 +267,26 @@
   color: var(--text-tertiary);
 }
 .translate-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   white-space: nowrap;
-  transition: color var(--dur-fast) var(--ease-out);
+  transition: color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+/* 成功（复制成功等）：绿色胶囊 + 勾图标 */
+.translate-status.ok {
+  color: var(--success);
+  font-weight: 600;
+  background: var(--success-soft);
+  padding: 3px 10px;
+  border-radius: 11px;
+}
+/* 失败（翻译失败等）：红色胶囊 */
+.translate-status.err {
+  color: var(--danger);
+  font-weight: 600;
+  background: var(--danger-soft);
+  padding: 3px 10px;
+  border-radius: 11px;
 }

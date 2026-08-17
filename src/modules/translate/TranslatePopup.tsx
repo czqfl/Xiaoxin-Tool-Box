@@ -6,7 +6,7 @@ import type { TranslateResult } from "../../types";
 import { onEvent } from "../../core/events";
 import { copyText, closeTranslatePopup, diagLog, lastTranslateResult, translateText } from "../../core/tauri";
 import { useConfigStore } from "../../stores/configStore";
-import { IconClose, IconCopy, IconPin } from "../../components/icons";
+import { IconCheck, IconClose, IconCopy, IconPin } from "../../components/icons";
 import { GlassSelect } from "../../components/GlassSelect";
 import { LANG_OPTIONS } from "./langs";
 import "../../styles/panel.css";
@@ -35,6 +35,8 @@ export function TranslatePopup() {
   const [busy, setBusy] = useState<"src" | "dst" | null>(null);
   /** 底部状态提示（复制成功 / 反向翻译失败等，2s 后自动消失） */
   const [statusMsg, setStatusMsg] = useState("");
+  /** 提示类型：ok=成功（绿色+勾）/ err=失败（红色）；决定状态条样式 */
+  const [statusType, setStatusType] = useState<"ok" | "err">("ok");
   const [loading, setLoading] = useState(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   /** loading 镜像（供事件回调读取最新值，避免闭包捕获旧值） */
@@ -58,8 +60,9 @@ export function TranslatePopup() {
     });
   };
 
-  /** 底部临时提示，2s 后自动清除 */
-  const flashStatus = (msg: string) => {
+  /** 底部临时提示，2s 后自动清除；type 决定样式（ok=成功绿 / err=失败红） */
+  const flashStatus = (msg: string, type: "ok" | "err" = "ok") => {
+    setStatusType(type);
     setStatusMsg(msg);
     window.setTimeout(() => setStatusMsg(""), 2000);
   };
@@ -227,7 +230,7 @@ export function TranslatePopup() {
       // 源语言为自动检测：目标语言下拉跟随识别结果（用户反馈）
       if (fromLang === "auto") setToLang(target);
     } catch (err) {
-      flashStatus("翻译失败，请检查网络或服务商配置");
+      flashStatus("翻译失败，请检查网络或服务商配置", "err");
     } finally {
       setBusy(null);
     }
@@ -247,7 +250,7 @@ export function TranslatePopup() {
       setText(r.translation);
       setResult({ ...r, text: t, from: toLang, to: target });
     } catch (err) {
-      flashStatus("反向翻译失败，请检查网络或服务商配置");
+      flashStatus("反向翻译失败，请检查网络或服务商配置", "err");
     } finally {
       setBusy(null);
     }
@@ -425,9 +428,12 @@ export function TranslatePopup() {
           )}
         </div>
 
-        {/* 底部：状态提示 */}
+        {/* 底部：状态提示（默认快捷键说明；临时状态按 ok/err 变色加图标） */}
         <div className="translate-bar">
-          <span className="translate-status">
+          <span className={`translate-status ${statusMsg ? statusType : ""}`}>
+            {statusMsg ? (
+              statusType === "ok" && <IconCheck size={12} />
+            ) : null}
             {statusMsg || "Enter 翻译 · 译文框 Enter 反向 · Esc 关闭"}
           </span>
         </div>
