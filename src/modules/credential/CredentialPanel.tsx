@@ -171,7 +171,8 @@ export function CredentialPanel() {
             title={showAll ? "隐藏全部密码" : "显示全部密码"}
             onClick={toggleShowAll}
           >
-            {showAll ? <IconEyeOff size={16} /> : <IconEye size={16} />}
+            {/* 状态导向：密码显示中=睁眼，隐藏中=闭眼（图标反映当前状态） */}
+            {showAll ? <IconEye size={16} /> : <IconEyeOff size={16} />}
           </button>
           <button
             className="icon-btn"
@@ -264,7 +265,8 @@ export function CredentialPanel() {
                           title={isRevealed ? "隐藏密码" : "显示密码"}
                           onClick={() => toggleReveal(c.id)}
                         >
-                          {isRevealed ? <IconEyeOff size={14} /> : <IconEye size={14} />}
+                          {/* 状态导向：该条显示中=睁眼，隐藏中=闭眼 */}
+                          {isRevealed ? <IconEye size={14} /> : <IconEyeOff size={14} />}
                         </button>
                       )}
                       <button
@@ -393,7 +395,8 @@ function CredentialForm({ initial, onClose, onSaved }: FormProps) {
               title={showPw ? "隐藏" : "显示"}
               onClick={() => setShowPw((v) => !v)}
             >
-              {showPw ? <IconEyeOff size={14} /> : <IconEye size={14} />}
+              {/* 状态导向：显示中=睁眼，隐藏中=闭眼 */}
+              {showPw ? <IconEye size={14} /> : <IconEyeOff size={14} />}
             </button>
           </div>
         </label>
