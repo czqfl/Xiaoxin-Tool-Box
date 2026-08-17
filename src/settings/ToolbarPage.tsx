@@ -1,5 +1,7 @@
-/** 悬浮工具栏设置页：启用开关 + 勾选显示哪些工具 + 拖拽排序图标顺序 */
-import { useRef, useState } from "react";
+/** 悬浮工具栏设置页：启用开关 + 勾选显示哪些工具 + 拖拽排序图标顺序
+ *  拖拽用 pointer 事件自实现（WebView2 在 Tauri 下拦截 HTML5 drag，
+ *  原生 draggable 会显示"禁用"光标且无法 drop）。 */
+import { useEffect, useRef, useState } from "react";
 import { useConfigStore } from "../stores/configStore";
 import { setToolbarVisible } from "../core/tauri";
 import type { ToolKey } from "../types";
@@ -9,17 +11,17 @@ import { TOOL_KEYS, TOOLS } from "../modules/toolbar/Toolbar";
 export function ToolbarPage() {
   const config = useConfigStore((s) => s.config);
   const update = useConfigStore((s) => s.update);
-  /** 拖拽中的源下标：用 ref 同步（拖拽事件间隙 React state 可能未提交，
-   *  导致 drop 时读到旧值/空值——WebView2 下拖拽"无效"的根因） */
+  /** 拖拽源下标（ref 同步，pointer 事件链里可靠读取） */
   const dragFromRef = useRef<number | null>(null);
-  /** 视觉反馈：当前拖拽源（仅用于高亮，React state 异步无碍） */
-  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  /** 当前悬停目标下标（视觉高亮） */
+  const [dragOver, setDragOver] = useState<number | null>(null);
+  /** 排序列表容器 ref（pointermove 里取各项位置） */
+  const listRef = useRef<HTMLDivElement>(null);
 
   if (!config.toolbar) return null;
 
   const toggleEnabled = (on: boolean) => {
     void update({ ...config, toolbar: { ...config.toolbar, enabled: on } });
-    // 同步窗口显隐（配置保存后广播给工具栏窗口，但窗口可见性由后端控制）
     void setToolbarVisible(on);
   };
 
@@ -31,7 +33,7 @@ export function ToolbarPage() {
     void update({ ...config, toolbar: { ...config.toolbar, tools } });
   };
 
-  /** 把 from 下标的工具移动到 to 下标（拖拽排序），保存后广播给工具栏窗口即时生效 */
+  /** 把 from 下标移动到 to 下标；保存即广播给工具栏窗口即时生效 */
   const moveTool = (from: number, to: number) => {
     if (from === to) return;
     const tools = [...config.toolbar.tools];
@@ -39,6 +41,44 @@ export function ToolbarPage() {
     tools.splice(to, 0, item);
     void update({ ...config, toolbar: { ...config.toolbar, tools } });
   };
+
+  /** 根据鼠标 Y 计算悬停目标下标（按各项垂直中点判定） */
+  const hoverIndexAt = (clientY: number): number | null => {
+    const container = listRef.current;
+    if (!container) return null;
+    const items = Array.from(container.children) as HTMLElement[];
+    if (items.length === 0) return null;
+    for (let i = 0; i < items.length; i++) {
+      const r = items[i].getBoundingClientRect();
+      if (clientY < r.top + r.height / 2) return i;
+    }
+    return items.length - 1;
+  };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (dragFromRef.current == null) return;
+    const over = hoverIndexAt(e.clientY);
+    setDragOver((cur) => (cur === over ? cur : over));
+  };
+
+  const endDrag = () => {
+    const from = dragFromRef.current;
+    dragFromRef.current = null;
+    if (from != null && dragOver != null) moveTool(from, dragOver);
+    setDragOver(null);
+  };
+
+  // 兜底：pointer 在容器外松开时也结束拖拽
+  useEffect(() => {
+    const up = () => endDrag();
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragOver]);
 
   const ordered = config.toolbar.tools;
 
@@ -89,9 +129,14 @@ export function ToolbarPage() {
       <SettingGroup>
         <SettingRow
           title="图标顺序"
-          desc={ordered.length ? "按住左侧手柄拖拽调整图标在工具栏上的排列顺序" : "请先在上方勾选工具"}
+          desc={ordered.length ? "按住左侧手柄上下拖动调整排列顺序" : "请先在上方勾选工具"}
         >
-          <div className="toolbar-sort">
+          <div
+            className="toolbar-sort"
+            ref={listRef}
+            onPointerMove={onPointerMove}
+            onPointerUp={endDrag}
+          >
             {ordered.length === 0 && (
               <div className="empty-state" style={{ padding: "12px 0" }}>
                 未勾选任何工具
@@ -103,28 +148,12 @@ export function ToolbarPage() {
               return (
                 <div
                   key={key}
-                  className={`toolbar-sort-item${dragIdx === i ? " dragging" : ""}`}
-                  draggable
-                  onDragStart={(e) => {
+                  className={`toolbar-sort-item${dragOver === i && dragFromRef.current != null ? " dragging" : ""}`}
+                  onPointerDown={(e) => {
+                    if (e.button !== 0) return;
+                    e.preventDefault();
                     dragFromRef.current = i;
-                    setDragIdx(i);
-                    e.dataTransfer.effectAllowed = "move";
-                    e.dataTransfer.setData("text/plain", String(i));
-                  }}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = "move";
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const from = dragFromRef.current ?? Number(e.dataTransfer.getData("text/plain"));
-                    dragFromRef.current = null;
-                    setDragIdx(null);
-                    if (from >= 0 && from < ordered.length) moveTool(from, i);
-                  }}
-                  onDragEnd={() => {
-                    dragFromRef.current = null;
-                    setDragIdx(null);
+                    setDragOver(i);
                   }}
                 >
                   <span className="toolbar-sort-handle" aria-hidden>

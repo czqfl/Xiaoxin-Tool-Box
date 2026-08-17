@@ -1,7 +1,7 @@
 import { listNotes, deleteNote, openNoteWindow, closeWindow, startDragging, getOpenNotes, setAcrylic } from "./api";
 import { getSettings } from "./settings";
 import { applyPanelBackground } from "./panel-bg";
-import { applyGlassBlur, parseColorToRgbInt } from "./glass";
+import { applyGlassBlur } from "./glass";
 import type { Settings } from "./types";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -63,17 +63,20 @@ export function mountHistoryApp() {
     if (!root) return;
     const transparent = s.theme === "transparent";
     if (transparent) {
-      root.classList.remove("has-bg", "on-dark-bg", "glass");
-      root.classList.add("bg-transparent");
+      // 集成版差异：历史窗口为非透明窗口（规避透明 WebView2 挂起），
+      // transparent 主题降级为实色 var(--bg)，不再切 bg-transparent 也不上亚克力
+      root.classList.remove("has-bg", "on-dark-bg", "glass", "bg-transparent");
       root.style.removeProperty("--note-bg-img");
       root.style.removeProperty("--note-bg-opacity");
       root.style.removeProperty("--glass-blur");
-      const o = Math.min(100, Math.max(0, Number(s.transparent_opacity ?? 65)));
-      const capped = Math.round(o * 0.6);
-      document.documentElement.style.setProperty("--trans-opacity", String(capped));
-      root.style.setProperty("--trans-opacity", String(capped));
-      const tint = parseColorToRgbInt(getComputedStyle(root).getPropertyValue("--bg")) ?? 0;
-      setAcrylic(true, 1, tint).catch((e) => console.error("应用实时模糊失败:", e));
+      document.documentElement.style.removeProperty("--trans-opacity");
+      root.style.removeProperty("--trans-opacity");
+      setAcrylic(false, 0, 0).catch(() => {});
+      await applyPanelBackground(root, s);
+      const hasBg = root.classList.contains("has-bg");
+      const pct = s.glass_blur ?? 55;
+      const enabled = s.glass_enabled !== false;
+      applyGlassBlur({ target: root, strength: hasBg ? pct : 0, enabled: hasBg && enabled });
     } else {
       root.classList.remove("bg-transparent");
       document.documentElement.style.removeProperty("--trans-opacity");

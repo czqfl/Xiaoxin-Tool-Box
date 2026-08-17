@@ -682,6 +682,8 @@ fn window_label(id: &str) -> String {
 }
 
 /// 确保便签窗口存在并展示；不存在则新建（沿用记忆的尺寸/位置）。
+/// 【主线程创建】命令线程直接 build WebView2 透明窗口在部分环境会挂起，
+/// 阻塞后续全部 IPC（用户反馈"点击便签后工具栏全部失效"的根因）。
 pub fn ensure_note_window(app: &AppHandle, id: &str) {
     let label = window_label(id);
     if let Some(win) = app.get_webview_window(&label) {
@@ -690,17 +692,34 @@ pub fn ensure_note_window(app: &AppHandle, id: &str) {
         let _ = win.set_focus();
         return;
     }
-    let Some(paths) = app.try_state::<AppPaths>() else {
-        return;
-    };
-    let saved = load_note(paths, id.to_string()).ok().flatten();
-    let (w, h) = saved
-        .as_ref()
-        .map(|n| (n.width.max(220) as f64, n.height.max(150) as f64))
-        .unwrap_or((420.0, 440.0));
-    let saved_pos = saved.as_ref().and_then(|n| Some((n.pos_x?, n.pos_y?)));
-    let url = format!("index.html?noteId={id}");
-    let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::App(url.into()))
+    let app2 = app.clone();
+    let id2 = id.to_string();
+    let _ = app.run_on_main_thread(move || {
+        let Some(paths) = app2.try_state::<AppPaths>() else {
+            return;
+        };
+        // 读取便签存档（用于恢复窗口尺寸/位置；失败则用默认）
+        let saved: Option<NoteData> = {
+            let path = note_path(&paths, &id2);
+            if path.exists() {
+                std::fs::read_to_string(&path)
+                    .ok()
+                    .and_then(|s| serde_json::from_str(&s).ok())
+            } else {
+                None
+            }
+        };
+        let (w, h) = saved
+            .as_ref()
+            .map(|n| (n.width.max(220) as f64, n.height.max(150) as f64))
+            .unwrap_or((420.0, 440.0));
+        let saved_pos = saved.as_ref().and_then(|n| Some((n.pos_x?, n.pos_y?)));
+        let url = format!("index.html?noteId={id2}");
+        let mut builder = WebviewWindowBuilder::new(
+            &app2,
+            &window_label(&id2),
+            WebviewUrl::App(url.into()),
+        )
         .title("便签")
         .decorations(false)
         .transparent(true)
@@ -711,22 +730,23 @@ pub fn ensure_note_window(app: &AppHandle, id: &str) {
         .visible(false)
         .shadow(false)
         .skip_taskbar(true);
-    builder = match saved_pos {
-        Some((px, py)) => {
-            let scale = app
-                .primary_monitor()
-                .ok()
-                .flatten()
-                .map(|m| m.scale_factor())
-                .unwrap_or(1.0);
-            builder.position(px as f64 / scale, py as f64 / scale)
+        builder = match saved_pos {
+            Some((px, py)) => {
+                let scale = app2
+                    .primary_monitor()
+                    .ok()
+                    .flatten()
+                    .map(|m| m.scale_factor())
+                    .unwrap_or(1.0);
+                builder.position(px as f64 / scale, py as f64 / scale)
+            }
+            None => builder.center(),
+        };
+        if let Ok(win) = builder.build() {
+            let _ = win.show();
+            let _ = win.set_focus();
         }
-        None => builder.center(),
-    };
-    if let Ok(win) = builder.build() {
-        let _ = win.show();
-        let _ = win.set_focus();
-    }
+    });
 }
 
 #[tauri::command]
@@ -750,8 +770,16 @@ pub fn create_note_window(
     let pos = window.outer_position().unwrap_or_default();
     let x = pos.x as f64 + 30.0;
     let y = pos.y as f64 + 30.0;
-    let url = format!("index.html?noteId={id}");
-    let win = WebviewWindowBuilder::new(&app, &window_label(&id), WebviewUrl::App(url.into()))
+    // 主线程创建（与 ensure_note_window 同理，避免透明窗口创建挂起阻塞 IPC）
+    let app2 = app.clone();
+    let id2 = id.clone();
+    let _ = app.run_on_main_thread(move || {
+        let url = format!("index.html?noteId={id2}");
+        let win = WebviewWindowBuilder::new(
+            &app2,
+            &window_label(&id2),
+            WebviewUrl::App(url.into()),
+        )
         .title("便签")
         .decorations(false)
         .transparent(true)
@@ -763,14 +791,18 @@ pub fn create_note_window(
         .visible(false)
         .shadow(false)
         .skip_taskbar(true)
-        .build()
-        .map_err(|e| e.to_string())?;
-    let _ = win.show();
-    let _ = win.set_focus();
+        .build();
+        if let Ok(win) = win {
+            let _ = win.show();
+            let _ = win.set_focus();
+        }
+    });
     Ok(())
 }
 
 /// 打开便签历史/管理窗口（工具栏"便签"入口）。
+/// 【主线程创建 + 非透明】历史列表窗口无需透明，进一步规避透明 WebView2
+/// 初始化的挂起风险。
 #[tauri::command]
 pub fn open_history_window(app: AppHandle) -> Result<(), String> {
     const LABEL: &str = HISTORY_WINDOW;
@@ -779,22 +811,26 @@ pub fn open_history_window(app: AppHandle) -> Result<(), String> {
         let _ = win.set_focus();
         return Ok(());
     }
-    let win = WebviewWindowBuilder::new(&app, LABEL, WebviewUrl::App("index.html".into()))
-        .title("历史便签")
-        .decorations(false)
-        .transparent(true)
-        .resizable(false)
-        .always_on_top(true)
-        .inner_size(340.0, 460.0)
-        .min_inner_size(300.0, 180.0)
-        .center()
-        .visible(false)
-        .shadow(false)
-        .skip_taskbar(true)
-        .build()
-        .map_err(|e| e.to_string())?;
-    let _ = win.show();
-    let _ = win.set_focus();
+    let app2 = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let win = WebviewWindowBuilder::new(&app2, LABEL, WebviewUrl::App("index.html".into()))
+            .title("历史便签")
+            .decorations(false)
+            .transparent(false)
+            .resizable(false)
+            .always_on_top(true)
+            .inner_size(340.0, 460.0)
+            .min_inner_size(300.0, 180.0)
+            .center()
+            .visible(false)
+            .shadow(false)
+            .skip_taskbar(true)
+            .build();
+        if let Ok(win) = win {
+            let _ = win.show();
+            let _ = win.set_focus();
+        }
+    });
     Ok(())
 }
 
