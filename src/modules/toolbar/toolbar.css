@@ -10,12 +10,20 @@
   gap: 2px;
   padding: 4px;
   border-radius: var(--radius-panel);
-  border: 1px solid var(--border-subtle);
+  /* 边框用 strong 档：轮廓清晰，浅色/复杂壁纸上不至于隐形 */
+  border: 1px solid var(--border-strong);
   background: rgba(var(--bg-panel-rgb), var(--panel-opacity));
-  box-shadow: var(--shadow-item), var(--panel-highlight);
+  /* 悬浮感三件套：明显投影（--shadow-toolbar）+ 顶部高光（strong 档），
+     让贴边的工具条在任意壁纸上都"浮起来" */
+  box-shadow: var(--shadow-toolbar), var(--panel-highlight-strong);
+  transition: background var(--dur-fast) var(--ease-out);
   user-select: none;
   cursor: default;
   will-change: transform;
+}
+/* 鼠标接近整条工具栏：底色提实一档"亮起来"，强化可发现性 */
+.toolbar:hover {
+  background: rgba(var(--bg-panel-rgb), calc(var(--panel-opacity) + 0.1));
 }
 
 .toolbar-btn {

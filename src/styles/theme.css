@@ -75,6 +75,9 @@
   --shadow-item: 0 2px 8px rgba(15, 23, 42, 0.07);
   --shadow-menu: 0 12px 32px rgba(15, 23, 42, 0.16);
   --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.05), 0 6px 20px rgba(15, 23, 42, 0.08);
+  /* 悬浮工具栏投影：比 shadow-item 明显一档——让常驻贴边的小工具条在
+     任意壁纸上都能"浮起来"、一眼可辨 */
+  --shadow-toolbar: 0 4px 18px rgba(15, 23, 42, 0.2), 0 1px 3px rgba(15, 23, 42, 0.12);
 
   /* 控件 */
   --switch-knob: #ffffff;
@@ -170,6 +173,8 @@
   --shadow-item: 0 2px 8px rgba(0, 0, 0, 0.3);
   --shadow-menu: 0 12px 32px rgba(0, 0, 0, 0.48);
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 20px rgba(0, 0, 0, 0.32);
+  /* 悬浮工具栏投影（深色：重一档，暗壁纸上轮廓清晰） */
+  --shadow-toolbar: 0 4px 18px rgba(0, 0, 0, 0.55), 0 1px 3px rgba(0, 0, 0, 0.4);
 
   /* 控件 */
   --switch-knob: #e8eaef;
