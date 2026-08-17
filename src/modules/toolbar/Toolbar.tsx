@@ -99,19 +99,19 @@ export function Toolbar() {
     key: ToolKey | null;
     dragged: boolean;
   } | null>(null);
-  /** 当前打开的面板（高亮对应图标）；null = 无面板打开 */
-  const [activeKey, setActiveKey] = useState<ToolKey | null>(null);
+  /** 当前打开的面板集合（高亮对应图标）。各面板独立开合、可同时显示多个，
+   *  故用集合而非单个 key（后打开的覆盖前一个的旧实现已移除） */
+  const [activeKeys, setActiveKeys] = useState<ReadonlySet<ToolKey>>(new Set());
 
   /** 刷新高亮：全量查询当前可见面板（比增量维护事件状态更可靠，杜绝漂移） */
   const refreshActive = async () => {
     const labels = await panelActive();
-    // 取最后一个可见面板（通常同时只开一个；后打开的覆盖先打开的）
-    let key: ToolKey | null = null;
+    const keys = new Set<ToolKey>();
     for (const label of labels) {
       const k = PANEL_LABEL_TO_KEY[label];
-      if (k) key = k;
+      if (k) keys.add(k);
     }
-    setActiveKey(key);
+    setActiveKeys(keys);
   };
 
   // 面板显隐事件 → 刷新高亮（覆盖后端 toggle_panel / translate 关闭 / 前端 hide 全路径）；
@@ -257,7 +257,7 @@ export function Toolbar() {
       {tools.map((key, i) => {
         const tool = TOOLS[key];
         if (!tool) return null;
-        const active = activeKey === key;
+        const active = activeKeys.has(key);
         return (
           <button
             key={key}
