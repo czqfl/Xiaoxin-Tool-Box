@@ -174,6 +174,7 @@ pub fn panel_toggle(app: tauri::AppHandle, label: String) -> Result<(), String> 
     }
     // 便签：可见 → 关闭（隐藏）；不可见 → 打开历史/管理窗口
     if label == "sticky" {
+        crate::storage::diag_write("[panel_toggle] sticky -> open_history_window");
         if let Some(w) = app.get_webview_window(crate::sticky::HISTORY_WINDOW) {
             if w.is_visible().unwrap_or(false) {
                 let _ = w.hide();

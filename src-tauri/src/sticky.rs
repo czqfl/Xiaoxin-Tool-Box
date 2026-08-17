@@ -692,10 +692,12 @@ pub fn ensure_note_window(app: &AppHandle, id: &str) {
         let _ = win.set_focus();
         return;
     }
+    crate::storage::diag_write(&format!("[sticky] ensure_note_window: creating {label}"));
     let app2 = app.clone();
     let id2 = id.to_string();
     let _ = app.run_on_main_thread(move || {
         let Some(paths) = app2.try_state::<AppPaths>() else {
+            crate::storage::diag_write("[sticky] ensure_note_window: no AppPaths state");
             return;
         };
         // 读取便签存档（用于恢复窗口尺寸/位置；失败则用默认）
@@ -745,6 +747,9 @@ pub fn ensure_note_window(app: &AppHandle, id: &str) {
         if let Ok(win) = builder.build() {
             let _ = win.show();
             let _ = win.set_focus();
+            crate::storage::diag_write(&format!("[sticky] ensure_note_window: {label} built+shown"));
+        } else {
+            crate::storage::diag_write(&format!("[sticky] ensure_note_window: {label} BUILD FAILED"));
         }
     });
 }
@@ -806,7 +811,9 @@ pub fn create_note_window(
 #[tauri::command]
 pub fn open_history_window(app: AppHandle) -> Result<(), String> {
     const LABEL: &str = HISTORY_WINDOW;
+    crate::storage::diag_write("[sticky] open_history_window called");
     if let Some(win) = app.get_webview_window(LABEL) {
+        crate::storage::diag_write("[sticky] open_history_window: existing, show");
         let _ = win.show();
         let _ = win.set_focus();
         return Ok(());
@@ -826,9 +833,15 @@ pub fn open_history_window(app: AppHandle) -> Result<(), String> {
             .shadow(false)
             .skip_taskbar(true)
             .build();
-        if let Ok(win) = win {
-            let _ = win.show();
-            let _ = win.set_focus();
+        match win {
+            Ok(w) => {
+                let _ = w.show();
+                let _ = w.set_focus();
+                crate::storage::diag_write("[sticky] open_history_window: built+shown");
+            }
+            Err(e) => {
+                crate::storage::diag_write(&format!("[sticky] open_history_window: BUILD FAILED: {e}"));
+            }
         }
     });
     Ok(())

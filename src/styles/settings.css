@@ -395,8 +395,17 @@
 .toolbar-sort-item:active {
   cursor: grabbing;
 }
+/* 拖拽中的源项：缩小 + 半透明 + 投影（"被提起"；transform 与 FLIP 无冲突——
+   源项不参与让位动画，由 pointer 拖拽直接控制） */
 .toolbar-sort-item.dragging {
-  opacity: 0.5;
+  opacity: 0.45;
+  transform: scale(0.96);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: var(--shadow-item);
+}
+/* 悬停目标项：品牌色高亮（表示将插入此处） */
+.toolbar-sort-item.drag-target {
   border-color: var(--accent);
   background: var(--accent-soft);
 }

@@ -1,24 +1,32 @@
 /** 悬浮工具栏设置页：启用开关 + 勾选显示哪些工具 + 拖拽排序图标顺序
- *  拖拽用 pointer 事件自实现（WebView2 在 Tauri 下拦截 HTML5 drag，
- *  原生 draggable 会显示"禁用"光标且无法 drop）。 */
-import { useEffect, useRef, useState } from "react";
+ *  拖拽用 pointer 事件自实现（WebView2 在 Tauri 下拦截 HTML5 drag），
+ *  排序过程带 FLIP 让位动画（与剪贴板面板一致：旧位置→重排→位移过渡）。 */
+import { useCallback, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useConfigStore } from "../stores/configStore";
 import { setToolbarVisible } from "../core/tauri";
 import type { ToolKey } from "../types";
 import { SettingGroup, SettingRow, Switch } from "./components";
 import { TOOL_KEYS, TOOLS } from "../modules/toolbar/Toolbar";
 
+const FLIP_MS = 160;
+
 export function ToolbarPage() {
   const config = useConfigStore((s) => s.config);
   const update = useConfigStore((s) => s.update);
-  /** 拖拽源下标（ref 同步，pointer 事件链里可靠读取） */
-  const dragFromRef = useRef<number | null>(null);
+  /** 拖拽中的源工具 key（ref 同步，pointer 事件链里可靠读取） */
+  const dragKeyRef = useRef<ToolKey | null>(null);
+  /** 拖拽中的视觉顺序（null = 未拖拽，按配置顺序） */
+  const [visualOrder, setVisualOrder] = useState<ToolKey[] | null>(null);
   /** 当前悬停目标下标（视觉高亮） */
   const [dragOver, setDragOver] = useState<number | null>(null);
-  /** 排序列表容器 ref（pointermove 里取各项位置） */
+  /** 排序项 DOM 引用（FLIP 测量用） */
+  const itemRefs = useRef<Map<ToolKey, HTMLDivElement>>(new Map());
   const listRef = useRef<HTMLDivElement>(null);
 
   if (!config.toolbar) return null;
+
+  const ordered = config.toolbar.tools;
 
   const toggleEnabled = (on: boolean) => {
     void update({ ...config, toolbar: { ...config.toolbar, enabled: on } });
@@ -33,13 +41,39 @@ export function ToolbarPage() {
     void update({ ...config, toolbar: { ...config.toolbar, tools } });
   };
 
-  /** 把 from 下标移动到 to 下标；保存即广播给工具栏窗口即时生效 */
-  const moveTool = (from: number, to: number) => {
-    if (from === to) return;
-    const tools = [...config.toolbar.tools];
-    const [item] = tools.splice(from, 1);
-    tools.splice(to, 0, item);
-    void update({ ...config, toolbar: { ...config.toolbar, tools } });
+  /** FLIP 让位动画：目标顺序 keys 渲染后，各元素从旧位置平滑过渡到新位置 */
+  const reorderTo = (fromKey: ToolKey, over: number) => {
+    const base = visualOrder ?? ordered;
+    const from = base.indexOf(fromKey);
+    if (from < 0 || from === over) return;
+    const next = [...base];
+    const [moved] = next.splice(from, 1);
+    next.splice(over, 0, moved);
+    // flushSync 同步提交 DOM 顺序，保证 FLIP 的 last 位置测量正确
+    const els = next
+      .filter((k) => k !== fromKey)
+      .map((k) => itemRefs.current.get(k))
+      .filter((el): el is HTMLDivElement => !!el);
+    const first = els.map((el) => el.getBoundingClientRect().top);
+    flushSync(() => setVisualOrder(next));
+    requestAnimationFrame(() => {
+      const last = els.map((el) => el.getBoundingClientRect().top);
+      els.forEach((el, i) => {
+        const dy = first[i] - last[i];
+        if (Math.abs(dy) > 0.5) {
+          el.style.transition = "none";
+          el.style.transform = `translateY(${dy}px)`;
+          void el.getBoundingClientRect();
+          el.style.transition = `transform ${FLIP_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`;
+          el.style.transform = "";
+          const done = () => {
+            el.style.transition = "";
+            el.removeEventListener("transitionend", done);
+          };
+          el.addEventListener("transitionend", done);
+        }
+      });
+    });
   };
 
   /** 根据鼠标 Y 计算悬停目标下标（按各项垂直中点判定） */
@@ -56,31 +90,41 @@ export function ToolbarPage() {
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
-    if (dragFromRef.current == null) return;
+    const key = dragKeyRef.current;
+    if (!key) return;
     const over = hoverIndexAt(e.clientY);
-    setDragOver((cur) => (cur === over ? cur : over));
+    if (over == null) return;
+    setDragOver(over);
+    reorderTo(key, over);
   };
 
-  const endDrag = () => {
-    const from = dragFromRef.current;
-    dragFromRef.current = null;
-    if (from != null && dragOver != null) moveTool(from, dragOver);
+  const endDrag = useCallback(() => {
+    const key = dragKeyRef.current;
+    dragKeyRef.current = null;
     setDragOver(null);
-  };
+    if (key && visualOrder) {
+      // 落定：以拖拽结束时的视觉顺序作为最终顺序保存（广播后工具栏即时生效）
+      const final = visualOrder.filter((k) => ordered.includes(k));
+      if (final.length === ordered.length) {
+        void update({ ...config, toolbar: { ...config.toolbar, tools: final } });
+      }
+    }
+    setVisualOrder(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visualOrder, ordered, update]);
 
   // 兜底：pointer 在容器外松开时也结束拖拽
   useEffect(() => {
-    const up = () => endDrag();
-    window.addEventListener("pointerup", up);
-    window.addEventListener("pointercancel", up);
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
     return () => {
-      window.removeEventListener("pointerup", up);
-      window.removeEventListener("pointercancel", up);
+      window.removeEventListener("pointerup", endDrag);
+      window.removeEventListener("pointercancel", endDrag);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dragOver]);
+  }, [endDrag]);
 
-  const ordered = config.toolbar.tools;
+  const displayKeys = visualOrder ?? ordered;
+  const draggingKey = dragKeyRef.current;
 
   return (
     <div className="settings-page">
@@ -131,29 +175,30 @@ export function ToolbarPage() {
           title="图标顺序"
           desc={ordered.length ? "按住左侧手柄上下拖动调整排列顺序" : "请先在上方勾选工具"}
         >
-          <div
-            className="toolbar-sort"
-            ref={listRef}
-            onPointerMove={onPointerMove}
-            onPointerUp={endDrag}
-          >
+          <div className="toolbar-sort" ref={listRef} onPointerMove={onPointerMove}>
             {ordered.length === 0 && (
               <div className="empty-state" style={{ padding: "12px 0" }}>
                 未勾选任何工具
               </div>
             )}
-            {ordered.map((key, i) => {
+            {displayKeys.map((key, i) => {
               const tool = TOOLS[key];
               if (!tool) return null;
+              const isDragging = draggingKey === key;
               return (
                 <div
                   key={key}
-                  className={`toolbar-sort-item${dragOver === i && dragFromRef.current != null ? " dragging" : ""}`}
+                  ref={(el) => {
+                    if (el) itemRefs.current.set(key, el);
+                    else itemRefs.current.delete(key);
+                  }}
+                  className={`toolbar-sort-item${isDragging ? " dragging" : ""}${dragOver === i && !isDragging && draggingKey ? " drag-target" : ""}`}
                   onPointerDown={(e) => {
                     if (e.button !== 0) return;
                     e.preventDefault();
-                    dragFromRef.current = i;
+                    dragKeyRef.current = key;
                     setDragOver(i);
+                    setVisualOrder(null);
                   }}
                 >
                   <span className="toolbar-sort-handle" aria-hidden>
