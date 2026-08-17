@@ -29,6 +29,8 @@ use tauri_plugin_global_shortcut::ShortcutState;
 /// 圆角由 DWM 直接裁剪窗口物理边角，从根上消除"圆角面板后露出矩形背景"；
 /// 模糊走 SetWindowCompositionAttribute + ACCENT_ENABLE_ACRYLICBLURBEHIND
 /// （与窗口是否激活无关，窗口可见即出模糊，无需点击、失焦也保持）。
+/// 亚克力色调跟随当前有效主题（浅色白调/深色黑调），避免不透明度调低时
+/// 内容叠在错误的深浅底上看不清。
 #[cfg(windows)]
 pub(crate) fn apply_panel_effects_for<R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
@@ -40,12 +42,26 @@ pub(crate) fn apply_panel_effects_for<R: tauri::Runtime>(
             let hwnd = windows::Win32::Foundation::HWND(h.hwnd.get() as _);
             let _ = acrylic::apply_rounded_corners(hwnd);
             if acrylic {
-                let _ = acrylic::apply_acrylic(hwnd);
+                let _ = acrylic::apply_acrylic(hwnd, window_theme_is_light(window));
             } else {
                 let _ = acrylic::clear_acrylic(hwnd);
             }
         }
     }
+}
+
+/// 当前有效主题是否为浅色：配置手动主题优先；system 模式用窗口主题
+/// （Tauri 窗口主题跟随 Windows 系统深浅，无需读注册表）。
+fn window_theme_is_light<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> bool {
+    use crate::config::{ConfigState, ThemeMode};
+    if let Some(cfg) = window.app_handle().try_state::<ConfigState>() {
+        match cfg.0.lock().unwrap().general.theme {
+            ThemeMode::Light => return true,
+            ThemeMode::Dark => return false,
+            ThemeMode::System => {}
+        }
+    }
+    window.theme().map(|t| t == tauri::Theme::Light).unwrap_or(true)
 }
 
 /// 启动时给两个悬浮面板窗口应用效果，并把 webview 默认背景设为全透明。

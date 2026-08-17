@@ -55,30 +55,30 @@
   --accent-rgb: 47, 128, 237;
 
   /* 背景：通透冷白 */
-  --bg-app: #f2f4f8;
-  --bg-panel: rgba(252, 253, 255, 0.82);
+  --bg-app: #f4f6f9;
+  --bg-panel: rgba(251, 252, 254, 0.78);
   /* 面板底色 RGB（不含 alpha），透明度由 --panel-opacity 控制（配置可调 0-100%） */
-  --bg-panel-rgb: 252, 253, 255;
+  --bg-panel-rgb: 251, 252, 254;
   /* 面板外壳底色不透明度：0 = 全透（纯玻璃），1 = 全不透明 */
   --panel-opacity: 0.75;
-  --bg-elevated: rgba(255, 255, 255, 0.95);
+  --bg-elevated: rgba(255, 255, 255, 0.94);
   --bg-input: rgba(255, 255, 255, 0.92);
   /* 玻璃输入底：与面板底色同色调（非纯白）、透明度更低——悬浮在亚克力
      面板上的输入框/下拉框用，通透融入背景，不再突兀发白 */
-  --bg-input-glass: rgba(252, 253, 255, 0.34);
+  --bg-input-glass: rgba(251, 252, 254, 0.32);
   --bg-item-hover: rgba(15, 23, 42, 0.05);
   --bg-item-active: rgba(15, 23, 42, 0.09);
   --bg-badge: rgba(15, 23, 42, 0.06);
 
-  /* 文本：中性墨灰（冷调） */
-  --text-primary: #151822;
-  --text-secondary: #4f5766;
-  --text-tertiary: #939bad;
+  /* 文本：中性墨灰 */
+  --text-primary: #171a21;
+  --text-secondary: #545b68;
+  --text-tertiary: #99a1af;
   --text-inverse: #ffffff;
 
   /* 边框与分割 */
-  --border-subtle: rgba(15, 23, 42, 0.07);
-  --border-strong: rgba(15, 23, 42, 0.14);
+  --border-subtle: rgba(15, 23, 42, 0.08);
+  --border-strong: rgba(15, 23, 42, 0.16);
 
   /* 阴影：轻柔冷调 */
   --shadow-panel: 0 24px 64px rgba(15, 23, 42, 0.18), 0 4px 16px rgba(15, 23, 42, 0.08);

@@ -75,13 +75,16 @@ unsafe fn set_window_composition_attribute(
 
 /// 给窗口应用背景模糊（ACRYLICBLURBEHIND，与激活无关，窗口可见即出）。
 /// 失败（如系统不支持）返回 false，调用方保持普通窗口，不黑。
-pub fn apply_acrylic(hwnd: HWND) -> bool {
+/// light：亚克力色调跟随主题——浅色=白色调（面板不透明度调低时透出白调模糊，
+/// 深色文字仍清晰可读），深色=黑色调（白字可读）。
+pub fn apply_acrylic(hwnd: HWND, light: bool) -> bool {
     let mut policy = AccentPolicy {
         accent_state: ACCENT_ENABLE_ACRYLICBLURBEHIND,
         accent_flags: 0,
         // ABGR：alpha=1 的透明底色（alpha 不能为 0，否则渲染异常）；
-        // 色调由前端半透明外壳负责，主题自适应。
-        gradient_color: 0x0100_0000,
+        // 色调由主题决定：浅色白调 / 深色黑调（此前固定黑色调，
+        // 不透明度调低时黑色透出，浅色主题下内容看不清且显"黑色工具栏"）。
+        gradient_color: if light { 0x01FF_FFFF } else { 0x0100_0000 },
         animation_id: 0,
     };
     let mut data = WindowCompositionAttrData {

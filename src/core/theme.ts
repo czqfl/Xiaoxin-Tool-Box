@@ -1,5 +1,6 @@
 /** 主题应用：system 模式移除 data-theme 交由媒体查询，light/dark 手动覆盖 */
 import type { ThemeMode } from "../types";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export function applyTheme(mode: ThemeMode) {
   const root = document.documentElement;
@@ -8,6 +9,12 @@ export function applyTheme(mode: ThemeMode) {
   } else {
     root.setAttribute("data-theme", mode);
   }
+  // 系统标题栏（设置窗口有原生边框）颜色跟随应用主题——否则浅色主题下
+  // 窗口顶部仍是 Windows 系统深色标题栏（黑色一条）。无边框窗口调用无副作用。
+  // system 模式传 null（Tauri 语义：跟随系统默认）
+  getCurrentWindow()
+    .setTheme(mode === "system" ? null : mode)
+    .catch(() => undefined);
 }
 
 /**
