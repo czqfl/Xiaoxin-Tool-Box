@@ -11,6 +11,7 @@ mod keyhook;
 mod panel;
 mod port;
 mod shortcut;
+mod sticky;
 mod storage;
 mod translate;
 mod tray;
@@ -134,6 +135,8 @@ pub fn run() {
         storage::load_json(&paths.folders_file, vec![]);
     let creds: Vec<credentials::Credential> =
         storage::load_json(&paths.creds_file, vec![]);
+    // 便签集成：首次启动把旧 StickyNote 应用的数据迁移到工具箱数据目录
+    sticky::migrate_legacy_sticky(&paths);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -249,6 +252,31 @@ pub fn run() {
             panel::panel_toggle,
             panel::panel_active,
             panel::toolbar_set_visible,
+            sticky::load_note,
+            sticky::save_note,
+            sticky::list_notes,
+            sticky::delete_note,
+            sticky::new_note_id,
+            sticky::load_settings,
+            sticky::save_settings,
+            sticky::effective_notes_dir,
+            sticky::save_md_custom,
+            sticky::read_md_custom,
+            sticky::open_file,
+            sticky::open_folder,
+            sticky::save_bg_image,
+            sticky::read_bg_image,
+            sticky::delete_bg_image,
+            sticky::get_wallpaper,
+            sticky::open_note_window,
+            sticky::create_note_window,
+            sticky::open_history_window,
+            sticky::mark_note_open,
+            sticky::mark_note_closed,
+            sticky::get_open_notes,
+            sticky::sticky_close_window,
+            sticky::sticky_set_acrylic,
+            sticky::capture_screen_region,
             port::port_query,
             port::port_kill,
             port::port_search,

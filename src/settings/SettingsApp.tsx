@@ -10,6 +10,7 @@ import { GeneralPage } from "./GeneralPage";
 import { AboutPage } from "./AboutPage";
 import { TranslationPage } from "./TranslationPage";
 import { ToolbarPage } from "./ToolbarPage";
+import { StickyNotePage } from "./StickyNotePage";
 import { SettingsErrorBoundary } from "./ErrorBoundary";
 import {
   IconClipboard,
@@ -18,6 +19,7 @@ import {
   IconInfo,
   IconKeyboard,
   IconSettings,
+  IconSticky,
   IconTranslate,
 } from "../components/icons";
 import "../styles/settings.css";
@@ -29,6 +31,7 @@ type Page =
   | "general"
   | "translation"
   | "toolbar"
+  | "sticky"
   | "about";
 
 const NAV_ITEMS: Array<{ key: Page; label: string; icon: React.ReactNode }> = [
@@ -37,6 +40,7 @@ const NAV_ITEMS: Array<{ key: Page; label: string; icon: React.ReactNode }> = [
   { key: "shortcut", label: "快捷键设置", icon: <IconKeyboard size={15} /> },
   { key: "translation", label: "翻译设置", icon: <IconTranslate size={15} /> },
   { key: "toolbar", label: "悬浮工具栏", icon: <IconGrid size={15} /> },
+  { key: "sticky", label: "便签设置", icon: <IconSticky size={15} /> },
   { key: "general", label: "通用设置", icon: <IconSettings size={15} /> },
   { key: "about", label: "关于", icon: <IconInfo size={15} /> },
 ];
@@ -116,6 +120,7 @@ export function SettingsApp() {
         {page === "general" && <GeneralPage />}
         {page === "translation" && <TranslationPage />}
         {page === "toolbar" && <ToolbarPage />}
+        {page === "sticky" && <StickyNotePage />}
         {page === "about" && <AboutPage />}
       </main>
       </div>

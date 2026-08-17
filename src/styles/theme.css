@@ -51,6 +51,7 @@
   --tool-translation: #a855f7;
   --tool-port: #f97316;
   --tool-settings: #6366f1;
+  --tool-sticky: #8b5cf6;
   /* 品牌色 RGB（供轻渐变/半透明叠加使用） */
   --accent-rgb: 47, 128, 237;
 
@@ -167,6 +168,7 @@
   --tool-translation: #cd96ff;
   --tool-port: #ffab5e;
   --tool-settings: #97a1fb;
+  --tool-sticky: #a78bfa;
   --accent-rgb: 76, 158, 255;
 
   /* 背景：冷蓝灰（charcoal，Linear/Arc 式高级暗色——非纯黑非石墨，
@@ -246,6 +248,7 @@
   --tool-translation: #7c3aed;
   --tool-port: #ea580c;
   --tool-settings: #4f46e5;
+  --tool-sticky: #7c3aed;
   --accent-rgb: 15, 159, 140;
 
   /* 背景：淡青灰（app 底与面板拉开明度差） */
@@ -325,6 +328,7 @@
     --tool-translation: #cd96ff;
     --tool-port: #ffab5e;
     --tool-settings: #97a1fb;
+  --tool-sticky: #a78bfa;
     --accent-rgb: 76, 158, 255;
 
     /* 背景：冷蓝灰（charcoal，Linear/Arc 式高级暗色——非纯黑非石墨，

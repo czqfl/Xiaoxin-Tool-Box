@@ -79,13 +79,24 @@ unsafe fn set_window_composition_attribute(
 /// light：亚克力色调跟随主题——浅色=白色调（面板不透明度调低时透出白调模糊，
 /// 深色文字仍清晰可读），深色=黑色调（白字可读）。
 pub fn apply_acrylic(hwnd: HWND, light: bool) -> bool {
+    apply_acrylic_impl(hwnd, if light { 0x01FF_FFFF } else { 0x0100_0000 })
+}
+
+/// 便签用：带自定义着色的亚克力（tint_rgb = 0xRRGGBB，alpha 固定 1 最小可用值，
+/// 面板深浅由前端 CSS 控制——与 StickyNote 原实现一致）。
+pub fn apply_acrylic_tinted(hwnd: HWND, tint_rgb: u32) -> bool {
+    let r = (tint_rgb >> 16) & 0xff;
+    let g = (tint_rgb >> 8) & 0xff;
+    let b = tint_rgb & 0xff;
+    let gradient = (1u32 << 24) | (b << 16) | (g << 8) | r;
+    apply_acrylic_impl(hwnd, gradient)
+}
+
+fn apply_acrylic_impl(hwnd: HWND, gradient_color: u32) -> bool {
     let mut policy = AccentPolicy {
         accent_state: ACCENT_ENABLE_ACRYLICBLURBEHIND,
         accent_flags: 0,
-        // ABGR：alpha=1 的透明底色（alpha 不能为 0，否则渲染异常）；
-        // 色调由主题决定：浅色白调 / 深色黑调（此前固定黑色调，
-        // 不透明度调低时黑色透出，浅色主题下内容看不清且显"黑色工具栏"）。
-        gradient_color: if light { 0x01FF_FFFF } else { 0x0100_0000 },
+        gradient_color,
         animation_id: 0,
     };
     let mut data = WindowCompositionAttrData {

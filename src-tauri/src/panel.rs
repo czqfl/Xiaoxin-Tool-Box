@@ -117,7 +117,7 @@ pub fn panel_active(app: tauri::AppHandle) -> Vec<String> {
             labels.push((*label).to_string());
         }
     }
-    for label in ["settings", crate::translate::TRANSLATE_PANEL] {
+    for label in ["settings", crate::translate::TRANSLATE_PANEL, crate::sticky::HISTORY_WINDOW] {
         if app
             .get_webview_window(label)
             .and_then(|w| w.is_visible().ok())
@@ -170,6 +170,19 @@ pub fn panel_toggle(app: tauri::AppHandle, label: String) -> Result<(), String> 
         }
         crate::translate::trigger_selection_translate(&app);
         broadcast_panel_visibility(&app, crate::translate::TRANSLATE_PANEL, true);
+        return Ok(());
+    }
+    // 便签：可见 → 关闭（隐藏）；不可见 → 打开历史/管理窗口
+    if label == "sticky" {
+        if let Some(w) = app.get_webview_window(crate::sticky::HISTORY_WINDOW) {
+            if w.is_visible().unwrap_or(false) {
+                let _ = w.hide();
+                broadcast_panel_visibility(&app, crate::sticky::HISTORY_WINDOW, false);
+                return Ok(());
+            }
+        }
+        crate::sticky::open_history_window(app.clone()).ok();
+        broadcast_panel_visibility(&app, crate::sticky::HISTORY_WINDOW, true);
         return Ok(());
     }
     let full = match label.as_str() {

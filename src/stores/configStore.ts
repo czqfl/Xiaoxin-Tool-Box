@@ -57,7 +57,7 @@ const defaultConfig: AppConfig = {
   },
   toolbar: {
     enabled: true,
-    tools: ["clipboard", "folder", "credentials", "translation", "port", "settings"],
+    tools: ["clipboard", "folder", "credentials", "translation", "port", "settings", "sticky"],
   },
   panel_positions: {},
 };
