@@ -182,6 +182,8 @@ pub enum ThemeMode {
     System,
     Light,
     Dark,
+    /// 浅青色主题（淡青背景 + 青绿品牌色，浅色系）
+    Mint,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -314,6 +316,10 @@ pub fn config_save(
         if let Some(w) = app.get_webview_window(label) {
             crate::apply_panel_effects_for(&w, config.general.acrylic_enabled);
         }
+    }
+    // 设置窗口（带原生边框）：主题切换后立即同步标题栏深浅
+    if let Some(w) = app.get_webview_window("settings") {
+        crate::apply_titlebar_theme(&w);
     }
     Ok(())
 }

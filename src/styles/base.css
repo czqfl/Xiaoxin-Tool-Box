@@ -199,6 +199,11 @@ button {
 .icon-btn:active {
   transform: scale(0.9);
 }
+/* 图标按钮不显示焦点外环：hover 底色反馈已足够，避免 WebView2 中
+   点击后按钮保持焦点、常驻一圈边框（用户反馈"关闭按钮一直有边框"） */
+.icon-btn:focus-visible {
+  outline: none;
+}
 .icon-btn.active {
   color: var(--accent);
   background: var(--accent-soft);

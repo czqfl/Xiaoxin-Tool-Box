@@ -52,16 +52,31 @@ pub(crate) fn apply_panel_effects_for<R: tauri::Runtime>(
 
 /// 当前有效主题是否为浅色：配置手动主题优先；system 模式用窗口主题
 /// （Tauri 窗口主题跟随 Windows 系统深浅，无需读注册表）。
-fn window_theme_is_light<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> bool {
+pub(crate) fn window_theme_is_light<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> bool {
     use crate::config::{ConfigState, ThemeMode};
     if let Some(cfg) = window.app_handle().try_state::<ConfigState>() {
         match cfg.0.lock().unwrap().general.theme {
-            ThemeMode::Light => return true,
+            ThemeMode::Light | ThemeMode::Mint => return true,
             ThemeMode::Dark => return false,
             ThemeMode::System => {}
         }
     }
     window.theme().map(|t| t == tauri::Theme::Light).unwrap_or(true)
+}
+
+/// 按当前有效主题设置窗口标题栏深浅（设置窗口等带原生边框的窗口用，
+/// 让标题栏跟随应用主题而非 Windows 系统主题）。
+pub(crate) fn apply_titlebar_theme<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+    #[cfg(windows)]
+    {
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        if let Ok(handle) = window.window_handle() {
+            if let RawWindowHandle::Win32(h) = handle.as_raw() {
+                let hwnd = windows::Win32::Foundation::HWND(h.hwnd.get() as *mut _);
+                acrylic::set_titlebar_theme(hwnd, !window_theme_is_light(window));
+            }
+        }
+    }
 }
 
 /// 启动时给两个悬浮面板窗口应用效果，并把 webview 默认背景设为全透明。

@@ -65,6 +65,8 @@ pub fn show_settings_window<R: Runtime>(app: &AppHandle<R>) {
         w.is_visible().unwrap_or(false),
         w.is_focused().unwrap_or(false)
     ));
+    // 标题栏跟随应用主题（浅色=浅色标题栏，而非 Windows 系统深色）
+    crate::apply_titlebar_theme(&w);
     // 确保置顶样式在位（同步生效），再显示
     let _ = w.set_always_on_top(true);
     let _ = w.unminimize();

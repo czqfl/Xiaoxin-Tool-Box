@@ -186,6 +186,24 @@
 .translate-btn:disabled::after {
   animation-duration: 1.2s;
 }
+/* 无内容不可翻译（empty）：去彩色 + 停流动 + 降透明——明确"当前不能翻译"。
+   与"翻译中"（保持水彩流动）区分：翻译中是工作中，这是不可用 */
+.translate-btn.empty {
+  filter: grayscale(1);
+  opacity: 0.5;
+  animation: none;
+}
+.translate-btn.empty::after {
+  display: none;
+}
+.translate-btn.empty:hover {
+  filter: grayscale(1);
+  box-shadow: var(--shadow-item);
+}
+.translate-btn.empty:disabled {
+  opacity: 0.5;
+  box-shadow: var(--shadow-item);
+}
 /* 深色/系统深色主题适配：由 theme.css 的 --water-* / --btn-text 变量自动完成
    （不再用 :root[data-theme="dark"] 选择器——系统深色模式无 data-theme 属性，
    选择器不生效，会错误地沿用浅色样式导致"黑薄膜+黑字"） */

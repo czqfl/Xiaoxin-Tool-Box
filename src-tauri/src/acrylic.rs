@@ -25,7 +25,8 @@
 use std::ffi::c_void;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Dwm::{
-    DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+    DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE,
+    DWMWCP_ROUND,
 };
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 
@@ -124,6 +125,21 @@ pub fn apply_rounded_corners(hwnd: HWND) -> bool {
             std::mem::size_of_val(&pref) as u32,
         )
         .is_ok()
+    }
+}
+
+/// 设置窗口标题栏深浅（DWMWA_USE_IMMERSIVE_DARK_MODE）。
+/// 让有原生边框的窗口（设置窗口）标题栏跟随【应用主题】而非 Windows 系统
+/// 主题——否则浅色主题下窗口顶部仍顶一条系统深色标题栏（用户反馈）。
+pub fn set_titlebar_theme(hwnd: HWND, dark: bool) {
+    let value: i32 = if dark { 1 } else { 0 };
+    unsafe {
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            &value as *const i32 as *const c_void,
+            std::mem::size_of::<i32>() as u32,
+        );
     }
 }
 
