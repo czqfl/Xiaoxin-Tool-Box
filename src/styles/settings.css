@@ -367,6 +367,65 @@
   font-weight: 700;
 }
 
+/* 图标顺序拖拽排序列表 */
+.toolbar-sort {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 420px;
+}
+.toolbar-sort-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-item-hover);
+  color: var(--text-primary);
+  cursor: grab;
+  user-select: none;
+  transition: border-color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    opacity var(--dur-fast) var(--ease-out);
+}
+.toolbar-sort-item:hover {
+  border-color: var(--border-strong);
+}
+.toolbar-sort-item:active {
+  cursor: grabbing;
+}
+.toolbar-sort-item.dragging {
+  opacity: 0.5;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.toolbar-sort-handle {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  font-size: 14px;
+  line-height: 1;
+  letter-spacing: -2px;
+}
+.toolbar-sort-item .toolbar-tool-icon {
+  display: flex;
+}
+.toolbar-sort-item .toolbar-tool-name {
+  flex: 1;
+  font-size: 13px;
+}
+.toolbar-sort-index {
+  flex-shrink: 0;
+  width: 20px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  background: var(--bg-badge);
+  border-radius: 10px;
+  padding: 1px 0;
+}
+
 /* ---- 彩色点缀：导航 active 渐变 + 分组左侧色条 + 标题 ---- */
 .settings-nav-item.active {
   /* 天蓝淡底渐变 + 左侧靛蓝色条，比纯色块更有层次 */
