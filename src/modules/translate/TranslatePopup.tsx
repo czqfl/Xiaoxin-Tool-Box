@@ -334,7 +334,7 @@ export function TranslatePopup() {
             />
           </div>
           <button
-            className="btn btn-primary btn-sm translate-btn"
+            className="translate-btn"
             disabled={busy != null || !text.trim()}
             onClick={() => void doTranslate()}
           >

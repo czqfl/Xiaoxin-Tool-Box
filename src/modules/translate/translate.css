@@ -74,6 +74,8 @@
   transform: rotate(180deg) scale(0.88);
 }
 /* ---- 翻译按钮：流动水彩（色彩交融 + 旋转流动 + 光泽扫过）----
+   完全自定义样式（不再挂 btn/btn-primary/btn-sm 全局类，避免优先级纠缠：
+   此前 vite 重排 CSS 后 .btn-primary:hover/:disabled 把背景盖成蓝/黑）。
    两层动画叠加，肉眼明显可感知：
    1) @property 驱动 conic 渐变角度旋转——色带绕圆心流动，色彩自然交融；
    2) ::after 斜向光泽带反复扫过（transform 驱动，GPU 友好）——"水流"的
@@ -83,17 +85,24 @@
   inherits: false;
   initial-value: 0deg;
 }
-.translate-btn.translate-btn {
+.translate-btn {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   flex-shrink: 0;
   /* 按钮组靠右：语言组绝对居中后，用 auto 左边距把翻译/置顶/关闭推回
      头部右侧（保持原位置，不被居中布局挤偏） */
   margin-left: auto;
+  height: 30px;
+  padding: 0 16px;
   border-radius: 9px;
-  /* 【双类提升优先级】按钮同时有 btn btn-primary 类：vite 打包后 CSS 顺序
-     与源码 import 顺序不一致，.btn-primary 会排在水彩背景规则之后、
-     同优先级胜出把渐变盖成纯蓝——双类选择器（0,2,0 > 0,1,0）确保水彩生效。
-     双层合成：玻璃高光罩（上）+ conic 水彩带（下，角度动画流动）。
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  /* 双层合成：玻璃高光罩（上）+ conic 水彩带（下，角度动画流动）。
      色带在 紫→蓝→青绿→琥珀→玫红 之间连续过渡，色彩自然交融；
      alpha 提高一档保证小按钮上色彩可见 */
   background:
@@ -107,10 +116,9 @@
       rgba(229, 138, 165, 0.6),
       rgba(167, 139, 250, 0.68)
     );
-  border: 1px solid rgba(255, 255, 255, 0.45);
   /* 文字对比：浅色主题深字 + 白高光；深色主题白字（见 dark 覆盖） */
-  color: rgba(23, 26, 33, 0.9);
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
+  color: #171a21;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.55);
   box-shadow: var(--shadow-item);
   overflow: hidden;
   animation: translate-flow 6s linear infinite;
@@ -149,6 +157,7 @@
     transform: translateX(300%) skewX(-18deg);
   }
 }
+/* hover：保持水彩背景，仅提亮 + 光晕（背景由主规则声明，无全局类覆盖） */
 .translate-btn:hover {
   filter: brightness(1.1);
   box-shadow: var(--shadow-item), 0 0 14px rgba(167, 139, 250, 0.3);
@@ -165,22 +174,19 @@
 .translate-btn:active::after {
   animation-duration: 0.8s;
 }
-/* 翻译中（disabled）：不清淡不透明，两层动画都加速 + 柔和光晕脉冲 =
-   "工作中"的动感；background-color 清掉 base.css .btn-primary:disabled 的
-   accent-soft 底（否则会盖在水彩下层改变色调） */
-.translate-btn.translate-btn:disabled {
-  opacity: 0.92;
+/* 翻译中（disabled）：保持水彩可见（不清淡不黑化），两层动画加速 + 光晕脉冲 */
+.translate-btn:disabled {
+  opacity: 0.95;
   filter: none;
   cursor: default;
-  background-color: transparent;
   animation-duration: 1.4s;
   box-shadow: 0 0 0 3px rgba(76, 158, 255, 0.18), 0 0 18px rgba(167, 139, 250, 0.35);
 }
 .translate-btn:disabled::after {
   animation-duration: 1.2s;
 }
-/* 深色主题：水彩提亮一档、文字改白，保证对比与可见（同样双类提升） */
-:root[data-theme="dark"] .translate-btn.translate-btn {
+/* 深色主题：水彩提亮一档、文字改白，保证对比与可见 */
+:root[data-theme="dark"] .translate-btn {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.02)),
     conic-gradient(
@@ -193,7 +199,7 @@
       rgba(183, 154, 224, 0.75)
     );
   color: #fff;
-  text-shadow: 0 1px 3px rgba(15, 23, 42, 0.4);
+  text-shadow: 0 1px 3px rgba(15, 23, 42, 0.5);
 }
 .translate-close {
   flex-shrink: 0;
