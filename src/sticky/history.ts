@@ -2,7 +2,7 @@ import { listNotes, deleteNote, openNoteWindow, closeWindow, startDragging, getO
 import { getSettings } from "./settings";
 import { applyPanelBackground } from "./panel-bg";
 import { applyGlassBlur } from "./glass";
-import type { Settings } from "./types";
+import type { NoteMeta, Settings } from "./types";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
@@ -137,25 +137,30 @@ export function mountHistoryApp() {
   // 缩放：窗口为 resizable(true) + 无边框，Windows 提供隐形四边/四角拖拽
   // 热区（系统原生 resize），无需自定义手柄——上下左右均可自由调整大小。
 
+  /** 上次渲染的列表签名：轮询/事件刷新时若无实质变化则跳过 DOM 重建，
+   *  既省 IPC 后的渲染开销，也不打断用户的滚动/点击交互 */
+  let lastSig = "";
+
   async function render() {
-    let items;
+    // 列表 + 打开状态并行读取（两次 IPC 同时发出，比串行快近一倍）
+    let items: NoteMeta[];
+    let openSet = new Set<string>();
     try {
-      items = await listNotes();
+      const [notes, open] = await Promise.all([listNotes(), getOpenNotes().catch(() => [])]);
+      items = notes;
+      openSet = new Set(open);
     } catch (err) {
       console.error("加载列表失败:", err);
       listEl.innerHTML = `<div class="empty-state"><div class="empty-text">加载失败，请重试</div></div>`;
       return;
     }
 
-    // 读取“打开中”的便签集合：只有已关闭的便签才允许删除，
-    // 打开中的便签删除会导致窗口把内容写回而“复活”，故禁用其删除按钮。
-    let openSet = new Set<string>();
-    try {
-      const open = await getOpenNotes();
-      openSet = new Set(open);
-    } catch (err) {
-      console.error("读取打开状态失败:", err);
-    }
+    // 无实质变化（标题/摘要/时间/打开状态都一样）→ 跳过重建
+    const sig = items
+      .map((i) => `${i.id}|${i.updated}|${i.title}|${i.snippet}|${openSet.has(i.id) ? 1 : 0}`)
+      .join("~");
+    if (sig === lastSig) return;
+    lastSig = sig;
 
     listEl.innerHTML = "";
 
