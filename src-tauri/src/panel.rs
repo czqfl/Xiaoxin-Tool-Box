@@ -178,14 +178,26 @@ pub fn panel_toggle(app: tauri::AppHandle, label: String) -> Result<(), String> 
         broadcast_panel_visibility(&app, crate::translate::TRANSLATE_PANEL, true);
         return Ok(());
     }
-    // 便签：工具栏入口 = 始终打开历史/管理窗口（便签窗口各自独立显隐）。
-    // 修复：此前 toggle_sticky_notes 在"存在已隐藏的便签窗口"时会恢复便签
-    // 而非历史窗口——用户新建便签后关闭（便签=隐藏常驻）、再点工具栏想进
-    // 历史入口，却只恢复旧便签/打不开（反馈根因）。
+    // 便签：工具栏入口 toggle 历史窗口（可见 → 收起；不可见/无 → 打开）。
+    // 历史窗口关闭 = 隐藏常驻（close_window 语义），再次点击秒开，不重建。
+    // 便签窗口各自独立显隐，不受此开关影响。
     if label == "sticky" {
-        crate::storage::diag_write("[panel_toggle] sticky -> open_history_window");
-        let _ = crate::sticky::open_history_window(app.clone());
-        broadcast_panel_visibility(&app, crate::sticky::HISTORY_WINDOW, true);
+        let hist = app.get_webview_window(crate::sticky::HISTORY_WINDOW);
+        let visible = hist
+            .as_ref()
+            .map(|w| w.is_visible().unwrap_or(false))
+            .unwrap_or(false);
+        if visible {
+            crate::storage::diag_write("[panel_toggle] sticky -> hide history");
+            if let Some(w) = hist {
+                let _ = w.hide();
+            }
+            broadcast_panel_visibility(&app, crate::sticky::HISTORY_WINDOW, false);
+        } else {
+            crate::storage::diag_write("[panel_toggle] sticky -> open history");
+            let _ = crate::sticky::open_history_window(app.clone());
+            broadcast_panel_visibility(&app, crate::sticky::HISTORY_WINDOW, true);
+        }
         return Ok(());
     }
     let full = match label.as_str() {

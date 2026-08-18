@@ -1063,7 +1063,14 @@ pub fn close_window(window: tauri::WebviewWindow) -> Result<(), String> {
     let app = window.app_handle().clone();
     let label = window.label().to_string();
     match label.as_str() {
-        HISTORY_WINDOW | SETTINGS_WINDOW => {
+        HISTORY_WINDOW => {
+            // 历史窗口"关闭"= 隐藏常驻（不销毁）：再点击工具栏便签秒开；
+            // 广播不可见（工具栏取消高亮）
+            let _ = window.hide();
+            crate::panel::broadcast_panel_visibility(&app, &label, false);
+            Ok(())
+        }
+        SETTINGS_WINDOW => {
             let r = window.close();
             crate::panel::broadcast_panel_visibility(&app, &label, false);
             r.map_err(|e| e.to_string())
