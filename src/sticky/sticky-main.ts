@@ -2,6 +2,7 @@
  *  工具箱的 index.html 被多个窗口复用，按窗口 label 分流：
  *    note_<id>          → 便签本体（URL noteId 参数指定，如 noteId=main）
  *    sticky-history     → 便签历史/管理窗口
+ *    sticky-settings    → 便签自带“设置”窗口（原版完整设置面板）
  *    sticky-particles   → 全屏粒子层（关闭动画粒子可飘出便签窗口）
  *    sticky-imageviewer → 图片预览窗口
  *  便签样式（styles.css）由 main.tsx 在分流时动态 import，仅便签窗口加载，
@@ -20,6 +21,10 @@ export async function mountStickyByLabel() {
 
   if (label === "sticky-history") {
     mountHistoryApp();
+  } else if (label === "sticky-settings") {
+    // 独立“设置”窗口入口：settings-window.ts 自带样式与首帧兜底，顶层执行
+    // openSettingsModal()（standalone 路径），paint 完成后自行 show 窗口。
+    await import("./settings-window");
   } else if (label === "sticky-imageviewer") {
     mountImageViewer().catch((e) => console.error("图片预览加载失败:", e));
   } else if (label === "sticky-particles") {

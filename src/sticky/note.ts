@@ -12,7 +12,6 @@ import {
   newNoteId,
   readMdCustom,
   formatWithLLM,
-  openSettingsWindow,
   setAcrylic,
 } from "./api";
 import { NoteData, Settings } from "./types";
@@ -54,7 +53,6 @@ export function mountNoteApp(noteId: string, preset = "") {
     <div class="note-window">
       <div class="titlebar">
         <div class="titlebar-left">
-          <button class="icon-btn gear" id="btn-settings" title="设置">&#9881;</button>
           <input class="title-input" id="note-title" placeholder="便签" maxlength="40" spellcheck="false" title="点击编辑标题" />
           <span class="save-status" id="save-status"></span>
         </div>
@@ -129,7 +127,6 @@ export function mountNoteApp(noteId: string, preset = "") {
   const btnHistory = document.getElementById("btn-history")!;
   const btnClose = document.getElementById("btn-close")!;
   const btnTray = document.getElementById("btn-tray")!;
-  const btnSettings = document.getElementById("btn-settings")!;
   const titleInput = document.getElementById("note-title") as HTMLInputElement;
   const saveStatus = document.getElementById("save-status") as HTMLElement | null;
   // 关闭动画期间抑制「保存中/已保存」状态提示（关闭会触发一次保存，但不应打扰关闭过程）；
@@ -777,7 +774,17 @@ export function mountNoteApp(noteId: string, preset = "") {
     if (collapsed) expandFromEdge(false);
     // 防御：若便签仍残留“隐藏时空画面”样式（clip/mask 未清，可能上次呼出的异步复原未生效），
     // 立即复原显示——避免呼出后窗口空白、或需多次按键才显示。幂等，已正常显示时无害。
-    if (noteWindow.style.clipPath || noteWindow.style.webkitMaskImage || noteWindow.style.maskImage) {
+    // 关键：有残留空白样式 = 必然是从“隐藏态”呼出（无论隐藏方式是托盘/工具栏/关闭动画）。
+    // 此时无论 wasHidden 是否已在隐藏时置位，都必须把它视为隐藏→呼出转移并走恢复/成形路径，
+    // 否则“工具栏隐藏 → 再次点开”时 wasHidden 未置位，恢复被吞掉，窗口空白打不开（用户反馈的根因）。
+    const blanked =
+      !!noteWindow.style.clipPath ||
+      !!noteWindow.style.webkitMaskImage ||
+      !!noteWindow.style.maskImage ||
+      noteWindow.style.opacity === "0";
+    if (blanked) {
+      wasHidden = true;
+      // 粒子模式先清空 mask/clip，保证即便成形动画不启动，内容也立即可见
       restoreGlowSummoned();
     }
     // 呼出打断进行中的关闭动画：先取消关闭（取消会复原页面、且不会触发 finish/隐藏），
@@ -833,6 +840,20 @@ export function mountNoteApp(noteId: string, preset = "") {
     // 确保窗口真正激活/置顶：Windows 前台锁会令全局快捷键触发的 show 偶尔不激活窗口
     // （窗口可见却躲在别的窗口后面 → 看似“没呼出”，需多次按键）。从窗口自身上下文再 focus 一次。
     appWindow.setFocus().catch(() => {});
+    // 强制重绘：WebView2 透明窗口 hidden→shown 后偶发内容不复绘（窗口可见却空白），
+    // 轻微改动几何强制重排版/重绘，彻底根治「重新点开便签是空白」。
+    requestAnimationFrame(() => {
+      const n = noteWindow;
+      n.style.transform = "scale(0.9999)";
+      // 强制回流后再复位，触发一次完整的 layout + paint
+      void n.offsetHeight;
+      n.style.transform = "";
+      // 若 markdown 预览处于编辑态，确保编辑器内容区域重绘
+      editor.style.visibility = "hidden";
+      void editor.offsetHeight;
+      editor.style.visibility = "";
+      window.dispatchEvent(new Event("resize"));
+    });
   });
 
   // ---- 富文本格式化 ----
@@ -1714,10 +1735,6 @@ export function mountNoteApp(noteId: string, preset = "") {
   winResizer.addEventListener("pointercancel", endWinResize);
 
   // ---- 按钮事件 ----
-
-  btnSettings.addEventListener("click", () => {
-    openSettingsWindow().catch((e) => console.error("打开设置窗口失败:", e));
-  });
 
   btnPin.addEventListener("click", () => updatePin(!current.pinned));
 
