@@ -493,26 +493,29 @@ pub fn get_open_notes(app: AppHandle, paths: State<'_, AppPaths>) -> Vec<String>
 
 /// 工具栏"便签"入口：呼出便签应用（历史/管理窗口），便签可见时收起。
 /// - 有便签窗口可见 → 收起全部便签（历史窗口不动）；
-/// - 否则 → 呼出：有打开中的便签 → show 全部便签；否则 → 显示/创建历史窗口。
-/// 【呼出优先】历史窗口可见不再触发"收起"——用户从历史打开便签→关闭后，
-/// 点工具栏期望重新呼出便签应用，而不是把历史窗口收走（用户反复反馈的根因）。
+/// - 否则 → 呼出：有便签窗口（含隐藏常驻的）→ show 全部；否则 → 显示/创建历史窗口。
+/// 【关键修复】枚举"实际存在的 note_* 窗口"而非 persisted open_notes——
+/// 便签"关闭"只是隐藏常驻（窗口对象仍在），但 mark_note_closed 会把 id 从
+/// open_notes 移除，旧逻辑因此误判"没有便签窗口"→ 只弹历史窗口，用户关闭
+/// 便签后再次点击永远呼不回便签（diag.log 11:36 现场：created 后 open_ids=[]）。
 #[tauri::command]
 pub fn toggle_sticky_notes(
     app: AppHandle,
-    paths: State<'_, AppPaths>,
+    _paths: State<'_, AppPaths>,
 ) -> Result<bool, String> {
     crate::storage::diag_write("[sticky] toggle_sticky_notes called");
-    let ids = get_open_notes(app.clone(), paths);
-    let note_wins: Vec<tauri::WebviewWindow> = ids
-        .iter()
-        .filter_map(|id| app.get_webview_window(&window_label(id)))
+    let note_wins: Vec<tauri::WebviewWindow> = app
+        .webview_windows()
+        .values()
+        .filter(|w| w.label().starts_with(NOTE_PREFIX))
+        .cloned()
         .collect();
     let hist = app.get_webview_window(HISTORY_WINDOW);
     let notes_visible = note_wins
         .iter()
         .any(|w| w.is_visible().unwrap_or(false));
     crate::storage::diag_write(&format!(
-        "[sticky] toggle: open_ids={ids:?} note_wins={} hist_exists={} notes_visible={notes_visible}",
+        "[sticky] toggle: real_note_wins={} hist_exists={} notes_visible={notes_visible}",
         note_wins.len(),
         hist.is_some()
     ));
