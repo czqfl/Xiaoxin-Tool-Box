@@ -348,7 +348,12 @@ pub fn load_note(paths: State<'_, AppPaths>, id: String) -> Result<Option<NoteDa
 }
 
 #[tauri::command]
-pub fn save_note(paths: State<'_, AppPaths>, id: String, data: NoteData) -> Result<(), String> {
+pub fn save_note(
+    app: AppHandle,
+    paths: State<'_, AppPaths>,
+    id: String,
+    data: NoteData,
+) -> Result<(), String> {
     let _ = std::fs::create_dir_all(notes_dir(&paths));
     let path = note_path(&paths, &id);
     let plain = strip_html(&data.content);
@@ -359,7 +364,11 @@ pub fn save_note(paths: State<'_, AppPaths>, id: String, data: NoteData) -> Resu
         return Ok(());
     }
     let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
-    std::fs::write(&path, json).map_err(|e| e.to_string())
+    std::fs::write(&path, json).map_err(|e| e.to_string())?;
+    // 内容变化（标题/正文/编辑时间等）→ 通知历史面板刷新列表，
+    // 复用 open-changed 同款机制（历史窗口监听后重新 render）
+    let _ = app.emit("sticky://open-changed", ());
+    Ok(())
 }
 
 #[tauri::command]

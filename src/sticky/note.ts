@@ -17,10 +17,7 @@ import {
 import { NoteData, Settings } from "./types";
 import { renderMarkdown } from "./markdown";
 import { DEFAULT_MD_CSS, DEFAULT_MD_CSS_DARK, getThemeCss, MD_BG_CSS } from "./md-style";
-import { requestFlameDissolveClose, playFlameMaterialize, cancelFlame } from "./flame";
-import { requestGlowDissolveClose, cancelGlowParticles, bumpGlowGen } from "./glow-particles";
-import { requestInhaleDissolveClose, playInhaleMaterialize, cancelInhaleParticles } from "./glow-particles-inhale";
-import { requestGlassShardsClose, cancelGlassShards, restoreGlassSummoned } from "./glass-shatter";
+import { anim } from "./anim-loader";
 import { MAX_BLUR_PX, applyGlassBlur, parseColorToRgbInt } from "./glass";
 import { applyPanelBackground } from "./panel-bg";
 import {
@@ -750,7 +747,7 @@ export function mountNoteApp(noteId: string, preset = "") {
   let summonSeq = 0;
   // 「粒子光效」模式无呼出动画：隐藏时窗口保持空画面（clip/mask 全裁），呼出时直接复原显示
   const restoreGlowSummoned = (): void => {
-    bumpGlowGen(); // 作废上一轮关闭动画遗留的延时清理（否则 400ms 后 cleanupAfterHide 会把刚显示的便签再次裁空）
+    anim.glow?.bumpGlowGen(); // 作废上一轮关闭动画遗留的延时清理（否则 400ms 后 cleanupAfterHide 会把刚显示的便签再次裁空）；未加载 = 无动画在播，跳过
     try {
       noteWindow.style.clipPath = "";
       noteWindow.style.setProperty("-webkit-mask-image", "");
@@ -786,10 +783,11 @@ export function mountNoteApp(noteId: string, preset = "") {
     if (closing) {
       closing = false;
       finished = false;
-        cancelFlame();
-        cancelGlowParticles();
-        cancelGlassShards();
-        // 关闭动画已被打断：把窗口视为"从空画面呼出"，补播呼出成形动画——
+      // 打断关闭动画（懒加载：未加载 = 无动画在播，跳过）
+      anim.flame?.cancelFlame();
+      anim.glow?.cancelGlowParticles();
+      anim.glass?.cancelGlassShards();
+      // 关闭动画已被打断：把窗口视为"从空画面呼出"，补播呼出成形动画——
       // 否则 wasHidden 仍为 false（finish 未执行），呼出动画被吞掉、窗口空着。
       wasHidden = true;
     }
@@ -811,18 +809,17 @@ export function mountNoteApp(noteId: string, preset = "") {
         return;
       }
       // 非透明主题：按粒子数量/风格设置启动呼出动画（火焰模式（设置值 "erode"，历史命名）用火焰消散；
-      // 粒子吸入用吸入动画；默认「粒子光效」无呼出动画——直接复原便签显示）
-      const seq = summonSeq; // 快照：等待 getSettings 期间若被隐藏/关闭作废则跳过
-      getSettings()
-        .then((s) => {
-          // getSettings 是异步的：等待期间若又触发了关闭/托盘隐藏/删除，作废本次呼出，
-          // 避免呼出动画与关闭动画同时改 clip-path 打架导致“卡住”。
+      // 粒子吸入用吸入动画；默认「粒子光效」无呼出动画——直接复原便签显示）。
+      // 【懒加载】动画模块与 getSettings 并行加载：首次播放才动态 import（vite 分包）
+      const seq = summonSeq; // 快照：等待期间若被隐藏/关闭作废则跳过
+      void Promise.all([getSettings(), anim.load()])
+        .then(([s]) => {
           if (seq !== summonSeq || closing || deleted) return;
           const intensity = s.particle_count ?? 50;
           const speed = s.animation_speed ?? 100;
-          if (s.particle_mode === "erode") playFlameMaterialize(noteWindow, intensity, speed);
-          else if (s.particle_mode === "inhale") playInhaleMaterialize(noteWindow, intensity, speed);
-          else if (s.particle_mode === "glass") restoreGlassSummoned(); // 玻璃碎裂无成形动画：直接复原
+          if (s.particle_mode === "erode") anim.flame!.playFlameMaterialize(noteWindow, intensity, speed);
+          else if (s.particle_mode === "inhale") anim.inhale!.playInhaleMaterialize(noteWindow, intensity, speed);
+          else if (s.particle_mode === "glass") anim.glass?.restoreGlassSummoned(); // 玻璃碎裂无成形动画：直接复原
           else restoreGlowSummoned();
         })
         .catch(() => {
@@ -1705,11 +1702,11 @@ export function mountNoteApp(noteId: string, preset = "") {
       closing = false;
       finished = false;
     }
-      cancelFlame();
-      cancelGlowParticles();
-      cancelGlassShards();
-      noteWindow.style.clipPath = "inset(0 0 100% 0)";
-    noteWindow.style.boxShadow = "none";
+    // 取消进行中的动画（懒加载：未加载 = 无动画在播，跳过）
+    anim.flame?.cancelFlame();
+    anim.glow?.cancelGlowParticles();
+    anim.glass?.cancelGlassShards();
+    noteWindow.style.clipPath = "inset(0 0 100% 0)";    noteWindow.style.boxShadow = "none";
     wasHidden = true;
     minimizeToTray().catch((e) => console.error("最小化到托盘失败:", e));
   });
@@ -1758,10 +1755,11 @@ export function mountNoteApp(noteId: string, preset = "") {
     // 呼出/成形动画若在播放，先立即收尾复原页面，避免两个动画同时改 clip-path / mask；
     // 同时作废任何“等待 getSettings 的待播放呼出”，确保关闭能干净接管——
     // 与“关闭被呼出打断”完全对称：双向都随时可打断对方。
-      cancelGlowParticles(); // 取消进行中的粒子光效呼出/关闭动画
-      cancelInhaleParticles(); // 取消进行中的粒子吸入呼出/关闭动画
-      cancelFlame(); // 防御：清掉任何残留的火焰动画，避免叠加
-      cancelGlassShards(); // 防御：清掉任何残留的玻璃碎裂动画，避免叠加
+    // （懒加载：未加载 = 无动画在播，跳过）
+    anim.glow?.cancelGlowParticles();
+    anim.inhale?.cancelInhaleParticles();
+    anim.flame?.cancelFlame();
+    anim.glass?.cancelGlassShards();
     summonSeq++; // 作废进行中的呼出（其 getSettings().then 会检查 seq 后跳过）
     closing = true;
     finished = false;
@@ -1771,25 +1769,26 @@ export function mountNoteApp(noteId: string, preset = "") {
       return;
     }
     // 非透明主题：按粒子数量/风格设置启动关闭动画（数量从设置读取，失败回退默认 50）
-    getSettings()
-      .then((s) => {
+    // 【懒加载】动画模块与 getSettings 并行加载：首次关闭才动态 import（vite 分包）
+    void Promise.all([getSettings(), anim.load()])
+      .then(([s]) => {
         // getSettings 是异步的：等待期间若用户又呼出了（closing 已被复位/取消），
         // 作废本次关闭，避免关闭动画与呼出动画同时改 clip-path 打架导致“卡住”。
         if (!closing) return;
         const intensity = s.particle_count ?? 50;
         const speed = s.animation_speed ?? 100;
         // 关闭动画：默认粒子光效（鸿蒙通知删除同款·与呼出共用同一套粒子）；火焰模式（设置值 "erode"，历史命名）用火焰消散；inhale=粒子吸入。
-        if (s.particle_mode === "erode") requestFlameDissolveClose(finishClose, intensity, speed);
-        else if (s.particle_mode === "inhale") requestInhaleDissolveClose(finishClose, intensity, speed);
+        if (s.particle_mode === "erode") anim.flame!.requestFlameDissolveClose(finishClose, intensity, speed);
+        else if (s.particle_mode === "inhale") anim.inhale!.requestInhaleDissolveClose(finishClose, intensity, speed);
         // glass：玻璃碎裂 → 渐渐淡出（画布碎块动画，粒子数量滑块控制碎块多少）
-        else if (s.particle_mode === "glass") requestGlassShardsClose(finishClose, intensity, speed);
+        else if (s.particle_mode === "glass") anim.glass!.requestGlassShardsClose(finishClose, intensity, speed);
         // particle（默认粒子消散）：用全屏透明粒子层窗口渲染，粒子不被窗口框住（remote=true）——
         // 粒子可飘出便签边界、轨迹与 mask 同源（同一 T 场），是原本的正常行为，保留。
-        else requestGlowDissolveClose(finishClose, intensity, speed, true);
+        else anim.glow!.requestGlowDissolveClose(finishClose, intensity, speed, true);
       })
       .catch(() => {
         if (!closing) return;
-        requestGlowDissolveClose(finishClose);
+        anim.glow?.requestGlowDissolveClose(finishClose);
       });
   }
 
@@ -1849,10 +1848,11 @@ export function mountNoteApp(noteId: string, preset = "") {
   getCurrentWindow()
     .listen("play-close-anim", () => {
       if (closing) {
-        cancelGlowParticles();
-        cancelInhaleParticles();
-        cancelFlame();
-        cancelGlassShards();
+        // 懒加载：未加载 = 无动画在播，跳过
+        anim.glow?.cancelGlowParticles();
+        anim.inhale?.cancelInhaleParticles();
+        anim.flame?.cancelFlame();
+        anim.glass?.cancelGlassShards();
         finishClose();
         return;
       }
