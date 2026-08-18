@@ -140,8 +140,11 @@ pub fn run() {
 
     tauri::Builder::default()
         // 单实例保护：重复启动时新实例退出并唤起已有实例的设置窗口——
-        // 没有它时多实例会产出两个托盘图标/两个工具栏/热键互抢（用户实测）
+        // 没有它时多实例会产出两个托盘图标/两个工具栏/热键互抢（用户实测）。
+        // 回调在【已有实例】上执行（新实例静默退出），唤起设置窗口让
+        // "应用已在运行"可见，避免用户误以为启动失败。
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            crate::storage::diag_write("[single-instance] 已有实例在运行，唤起设置窗口");
             #[cfg(windows)]
             crate::tray::show_settings_window(app);
         }))
