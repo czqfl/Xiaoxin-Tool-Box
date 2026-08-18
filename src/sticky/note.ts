@@ -29,7 +29,7 @@ import {
   PhysicalSize,
   currentMonitor,
 } from "@tauri-apps/api/window";
-import { LogicalSize } from "@tauri-apps/api/dpi";
+import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
 import { invoke } from "@tauri-apps/api/core";
 import {
   getSettings,
@@ -111,11 +111,15 @@ export function mountNoteApp(noteId: string, preset = "") {
       </div>
       <div class="cc-panel" id="tool-fg-panel" hidden></div>
       <div class="cc-panel" id="tool-bg-panel" hidden></div>
-      <div class="win-resizer" id="win-resizer" title="拖动调整窗口大小">
-        <svg class="win-resizer-grip" viewBox="0 0 12 12" width="11" height="11" aria-hidden="true">
-          <path d="M2.5 9.5 L9.5 2.5 M5 12 L12 5 M0.5 6.5 L6.5 0.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-        </svg>
-      </div>
+      <!-- 全方向缩放手柄：四边 + 四角（透明窗口用程序化 resize 防白屏） -->
+      <div class="resize-hot resize-nw" data-dir="nw" title="调整大小"></div>
+      <div class="resize-hot resize-n" data-dir="n" title="调整大小"></div>
+      <div class="resize-hot resize-ne" data-dir="ne" title="调整大小"></div>
+      <div class="resize-hot resize-w" data-dir="w" title="调整大小"></div>
+      <div class="resize-hot resize-e" data-dir="e" title="调整大小"></div>
+      <div class="resize-hot resize-sw" data-dir="sw" title="调整大小"></div>
+      <div class="resize-hot resize-s" data-dir="s" title="调整大小"></div>
+      <div class="resize-hot resize-se" data-dir="se" title="调整大小"></div>
     </div>
   `;
 
@@ -147,7 +151,8 @@ export function mountNoteApp(noteId: string, preset = "") {
   const btnMdSplit = document.getElementById("btn-md-split")!;
   const btnFmt = document.getElementById("btn-fmt") as HTMLButtonElement;
   const noteWindow = document.querySelector(".note-window") as HTMLElement;
-  const winResizer = document.getElementById("win-resizer") as HTMLElement;
+  /** 全方向缩放手柄（8 个方向热点） */
+  const resizeHots = Array.from(document.querySelectorAll<HTMLElement>(".resize-hot"));
 
   let current: NoteData = {
     content: "",
@@ -1587,8 +1592,8 @@ export function mountNoteApp(noteId: string, preset = "") {
       const max = isMaximizedState || (await appWindow.isMaximized().catch(() => false));
       btnMax.innerHTML = max ? ICON_RESTORE : ICON_MAX;
       btnMax.title = max ? "还原窗口" : "最大化";
-      // 最大化时禁用右下角缩放手柄（此时无法手动改尺寸）
-      winResizer.style.display = max ? "none" : "";
+      // 最大化时禁用缩放手柄（此时无法手动改尺寸）
+      for (const hot of resizeHots) hot.style.display = max ? "none" : "";
     } catch (e) {
       console.error("读取最大化状态失败:", e);
     }
@@ -1682,57 +1687,105 @@ export function mountNoteApp(noteId: string, preset = "") {
     }
   });
 
-  // ---- 右下角自定义缩放手柄（替代系统 resize，避免透明窗口白屏 / 投影边框）----
-  // 用 appWindow.setSize 程序化改尺寸：不走系统 resize 边框，故无 WebView2 重建导致的白屏。
+  // ---- 全方向缩放手柄（四边 + 四角，8 个方向热点）----
+  // 透明窗口用程序化 setSize/setPosition：不走系统 resize 边框，无 WebView2
+  // 重建白屏。用屏幕坐标计算（窗口移动后 clientX 会变，screenX 稳定）。
   const MIN_W = 220;
   const MIN_H = 150;
-  let winResizing = false;
+  let winResizing: string | null = null; // 当前拖动方向 dir
   let resStartX = 0;
   let resStartY = 0;
   let resStartW = 0;
   let resStartH = 0;
-  winResizer.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    e.stopPropagation();
-    winResizing = true;
-    // 缩放期间临时切到 resizable+shadow（复刻稳定态），避免 transparent+shadow(false) 下 setSize 触发 WebView2 重建崩溃
-    appWindow.setResizable(true).catch(() => {});
-    appWindow.setShadow(true).catch(() => {});
-    resStartX = e.clientX;
-    resStartY = e.clientY;
-    resStartW = window.innerWidth;
-    resStartH = window.innerHeight;
-    try {
-      winResizer.setPointerCapture(e.pointerId);
-    } catch {
-      /* 部分环境不支持指针捕获，退化为 document 级监听仍可工作 */
-    }
-    document.body.style.userSelect = "none";
-    document.body.style.cursor = "nwse-resize";
-  });
-  winResizer.addEventListener("pointermove", (e) => {
-    if (!winResizing) return;
-    const nw = Math.max(MIN_W, resStartW + (e.clientX - resStartX));
-    const nh = Math.max(MIN_H, resStartH + (e.clientY - resStartY));
-    appWindow.setSize(new LogicalSize(nw, nh)).catch(() => {});
-  });
-  const endWinResize = (e: PointerEvent) => {
-    if (!winResizing) return;
-    winResizing = false;
-    // 缩放结束恢复：静止状态无投影、无系统缩放
-    appWindow.setResizable(false).catch(() => {});
-    appWindow.setShadow(false).catch(() => {});
-    try {
-      winResizer.releasePointerCapture(e.pointerId);
-    } catch {
-      /* 同上 */
-    }
-    document.body.style.userSelect = "";
-    document.body.style.cursor = "";
-  };
-  winResizer.addEventListener("pointerup", endWinResize);
-  winResizer.addEventListener("pointercancel", endWinResize);
+  let resStartPX = 0;
+  let resStartPY = 0;
+
+  for (const hot of resizeHots) {
+    const dir = hot.dataset.dir as string;
+    const setCursor = () => {
+      // 按方向设置光标：对角 nwse/nesw，边 ns/ew
+      document.body.style.cursor =
+        dir.includes("w") || dir.includes("e")
+          ? dir.includes("n") || dir.includes("s")
+            ? dir === "nw" || dir === "se"
+              ? "nwse-resize"
+              : "nesw-resize"
+            : "ew-resize"
+          : "ns-resize";
+    };
+    hot.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      winResizing = dir;
+      // 缩放期间临时切到 resizable+shadow（复刻稳定态），避免 transparent+shadow(false)
+      // 下 setSize 触发 WebView2 重建崩溃
+      appWindow.setResizable(true).catch(() => {});
+      appWindow.setShadow(true).catch(() => {});
+      resStartX = e.screenX;
+      resStartY = e.screenY;
+      void appWindow
+        .outerPosition()
+        .then((p) => {
+          resStartPX = p.x;
+          resStartPY = p.y;
+        })
+        .catch(() => {});
+      void appWindow
+        .outerSize()
+        .then((s) => {
+          resStartW = s.width;
+          resStartH = s.height;
+        })
+        .catch(() => {});
+      try {
+        hot.setPointerCapture(e.pointerId);
+      } catch {
+        /* 部分环境不支持指针捕获，退化为 document 级监听仍可工作 */
+      }
+      document.body.style.userSelect = "none";
+      setCursor();
+    });
+    hot.addEventListener("pointermove", (e) => {
+      if (!winResizing) return;
+      const dx = e.screenX - resStartX;
+      const dy = e.screenY - resStartY;
+      let w = resStartW;
+      let h = resStartH;
+      let px = resStartPX;
+      let py = resStartPY;
+      if (dir.includes("e")) w = Math.max(MIN_W, resStartW + dx);
+      if (dir.includes("s")) h = Math.max(MIN_H, resStartH + dy);
+      if (dir.includes("w")) {
+        w = Math.max(MIN_W, resStartW - dx);
+        px = resStartPX + (resStartW - w);
+      }
+      if (dir.includes("n")) {
+        h = Math.max(MIN_H, resStartH - dy);
+        py = resStartPY + (resStartH - h);
+      }
+      appWindow.setSize(new LogicalSize(w, h)).catch(() => {});
+      if (px !== resStartPX || py !== resStartPY) {
+        appWindow.setPosition(new LogicalPosition(px, py)).catch(() => {});
+      }
+    });
+    const endWinResize = (e: PointerEvent) => {
+      if (!winResizing) return;
+      winResizing = null;
+      // 缩放结束恢复：静止状态无投影、无系统缩放
+      appWindow.setResizable(false).catch(() => {});
+      appWindow.setShadow(false).catch(() => {});
+      try {
+        hot.releasePointerCapture(e.pointerId);
+      } catch {
+        /* 同上 */
+      }
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+    };
+    hot.addEventListener("pointerup", endWinResize);
+    hot.addEventListener("pointercancel", endWinResize);
+  }
 
   // ---- 按钮事件 ----
 

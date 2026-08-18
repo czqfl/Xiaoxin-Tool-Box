@@ -1008,7 +1008,9 @@ pub fn open_history_window(app: AppHandle) -> Result<(), String> {
             .title("历史便签")
             .decorations(false)
             .transparent(false)
-            .resizable(false)
+            // 系统缩放边框：无边框 + resizable 时 Windows 提供隐形四边/四角
+            // 拖拽热区——上下左右都能自由调大小（用户反馈自定义手柄失效 + 要全方向）
+            .resizable(true)
             .always_on_top(true)
             .inner_size(340.0, 460.0)
             .min_inner_size(300.0, 180.0)
@@ -1076,17 +1078,20 @@ pub fn close_window(window: tauri::WebviewWindow) -> Result<(), String> {
             r.map_err(|e| e.to_string())
         }
         _ => {
-            // 便签窗口：隐藏常驻 + 同步状态
+            // 便签窗口关闭 = 销毁（内容实时自动保存，不丢数据）。
+            // 修复：此前"隐藏常驻"，再次呼出走隐藏态粒子动画状态机，
+            // 用户反馈"便签只能呼出一次、再次点击卡住"——销毁重建最干净，
+            // 每次打开都是全新窗口。同步"打开中"集合 + 通知历史刷新 + 广播。
             if let Some(paths) = app.try_state::<AppPaths>() {
                 let id = label.strip_prefix(NOTE_PREFIX).unwrap_or(&label).to_string();
                 if id != MAIN_NOTE_ID {
                     mark_note_closed_inner(&paths, &id);
                 }
             }
-            let _ = window.hide();
+            let r = window.close();
             let _ = app.emit("sticky://open-changed", ());
             crate::panel::broadcast_panel_visibility(&app, &label, false);
-            Ok(())
+            r.map_err(|e| e.to_string())
         }
     }
 }

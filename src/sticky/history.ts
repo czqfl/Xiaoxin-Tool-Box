@@ -5,7 +5,6 @@ import { applyGlassBlur } from "./glass";
 import type { Settings } from "./types";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { LogicalSize } from "@tauri-apps/api/dpi";
 
 export function mountHistoryApp() {
   const app = document.getElementById("app")!;
@@ -22,11 +21,6 @@ export function mountHistoryApp() {
         </div>
       </div>
       <div class="history-list" id="history-list"></div>
-      <div class="win-resizer" id="win-resizer" title="拖动调整窗口大小">
-        <svg class="win-resizer-grip" viewBox="0 0 12 12" width="11" height="11" aria-hidden="true">
-          <path d="M2.5 9.5 L9.5 2.5 M5 12 L12 5 M0.5 6.5 L6.5 0.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-        </svg>
-      </div>
     </div>
   `;
 
@@ -34,8 +28,6 @@ export function mountHistoryApp() {
   const titlebar = document.querySelector(".titlebar")!;
   const btnClose = document.getElementById("btn-close")!;
   const btnNew = document.getElementById("btn-new")!;
-  const appWindow = getCurrentWindow();
-  const winResizer = document.getElementById("win-resizer") as HTMLElement;
 
   // 新建便签：生成新 id 并打开便签窗口（与便签页"＋"按钮同逻辑）
   btnNew.addEventListener("click", async () => {
@@ -117,54 +109,8 @@ export function mountHistoryApp() {
     closeWindow().catch((e) => console.error("关闭失败:", e));
   });
 
-  // ---- 右下角自定义缩放手柄（替代系统 resize，避免透明窗口白屏 / 投影边框）----
-  const MIN_W = 300;
-  const MIN_H = 180;
-  let winResizing = false;
-  let resStartX = 0;
-  let resStartY = 0;
-  let resStartW = 0;
-  let resStartH = 0;
-  winResizer.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    e.stopPropagation();
-    winResizing = true;
-    appWindow.setResizable(true).catch(() => {});
-    appWindow.setShadow(true).catch(() => {});
-    resStartX = e.clientX;
-    resStartY = e.clientY;
-    resStartW = window.innerWidth;
-    resStartH = window.innerHeight;
-    try {
-      winResizer.setPointerCapture(e.pointerId);
-    } catch {
-      /* 部分环境不支持指针捕获 */
-    }
-    document.body.style.userSelect = "none";
-    document.body.style.cursor = "nwse-resize";
-  });
-  winResizer.addEventListener("pointermove", (e) => {
-    if (!winResizing) return;
-    const nw = Math.max(MIN_W, resStartW + (e.clientX - resStartX));
-    const nh = Math.max(MIN_H, resStartH + (e.clientY - resStartY));
-    appWindow.setSize(new LogicalSize(nw, nh)).catch(() => {});
-  });
-  const endWinResize = (e: PointerEvent) => {
-    if (!winResizing) return;
-    winResizing = false;
-    appWindow.setResizable(false).catch(() => {});
-    appWindow.setShadow(false).catch(() => {});
-    try {
-      winResizer.releasePointerCapture(e.pointerId);
-    } catch {
-      /* 同上 */
-    }
-    document.body.style.userSelect = "";
-    document.body.style.cursor = "";
-  };
-  winResizer.addEventListener("pointerup", endWinResize);
-  winResizer.addEventListener("pointercancel", endWinResize);
+  // 缩放：窗口为 resizable(true) + 无边框，Windows 提供隐形四边/四角拖拽
+  // 热区（系统原生 resize），无需自定义手柄——上下左右均可自由调整大小。
 
   async function render() {
     let items;
