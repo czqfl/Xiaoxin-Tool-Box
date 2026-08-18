@@ -7,6 +7,7 @@
  *  「磁性牵引」——靠近的图标放大提亮，两侧图标被轻微拉向鼠标。
  *  用 requestAnimationFrame + 直接写 DOM transform，零 React 重渲染，最流畅。 */
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import type { AppConfig, ToolKey } from "../../types";
@@ -115,7 +116,10 @@ export function Toolbar() {
     const labels = await panelActive();
     const keys = new Set<ToolKey>();
     for (const label of labels) {
-      const k = PANEL_LABEL_TO_KEY[label];
+      // 便签窗口 label 是 note_<id>（id 不定），前缀匹配归入"便签"
+      const k =
+        PANEL_LABEL_TO_KEY[label] ??
+        (label.startsWith("note_") ? ("sticky" satisfies ToolKey) : undefined);
       if (k) keys.add(k);
     }
     setActiveKeys(keys);
@@ -224,6 +228,26 @@ export function Toolbar() {
       .setSize(new LogicalSize(tools.length * (BTN + GAP) + PAD * 2, BTN + PAD * 2))
       .catch(() => undefined);
   }, [tools.length]);
+
+  // 点击穿透：常驻工具条不遮挡屏幕点击。穿透时窗口收不到 mouseenter，
+  // 故用光标位置轮询：光标在窗口内 → 关穿透（按钮可交互）；否则 → 开穿透。
+  useEffect(() => {
+    let last = false;
+    const probe = async () => {
+      try {
+        const shouldThrough = await invoke<boolean>("toolbar_probe_click_through");
+        if (shouldThrough !== last) {
+          last = shouldThrough;
+          await invoke("toolbar_set_click_through", { on: shouldThrough });
+        }
+      } catch {
+        /* 后端未就绪时忽略 */
+      }
+    };
+    void probe();
+    const timer = window.setInterval(() => void probe(), 200);
+    return () => window.clearInterval(timer);
+  }, []);
 
   if (!config?.toolbar?.enabled) return null;
   if (!tools.length) return null;
