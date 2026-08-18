@@ -990,6 +990,7 @@ pub fn open_history_window(app: AppHandle) -> Result<(), String> {
         crate::storage::diag_write("[sticky] open_history_window: existing, show");
         let _ = win.show();
         let _ = win.set_focus();
+        crate::panel::broadcast_panel_visibility(&app, HISTORY_WINDOW, true);
         return Ok(());
     }
     let app2 = app.clone();
@@ -1009,11 +1010,15 @@ pub fn open_history_window(app: AppHandle) -> Result<(), String> {
             .build();
         match win {
             Ok(w) => {
-                let _ = w.show();
-                let _ = w.set_focus();
-                crate::storage::diag_write("[sticky] open_history_window: built+shown");
-                // 窗口此刻才真正可见，补发显隐事件让工具栏高亮“便签”图标
+                // 与面板一致的 DWM 原生圆角（窗口非透明，CSS 圆角会露白角）
+                crate::apply_panel_effects_for(&w, false);
+                // 不立即 show：等前端挂载完成（主题/背景就绪）后再显示——
+                // 立即 show 时 webview 尚未加载，非透明窗口会闪一下白底
+                // （用户反馈"变白闪一下"的根因）。前端 mountHistoryApp 会
+                // 在 getSettings 完成后自行 show + setFocus。
+                // 先广播可见性：窗口即将显示，让工具栏高亮"便签"图标
                 crate::panel::broadcast_panel_visibility(&app2, HISTORY_WINDOW, true);
+                crate::storage::diag_write("[sticky] open_history_window: built (front will show)");
             }
             Err(e) => {
                 crate::storage::diag_write(&format!("[sticky] open_history_window: BUILD FAILED: {e}"));

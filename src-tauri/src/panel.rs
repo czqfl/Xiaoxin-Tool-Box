@@ -178,14 +178,14 @@ pub fn panel_toggle(app: tauri::AppHandle, label: String) -> Result<(), String> 
         broadcast_panel_visibility(&app, crate::translate::TRANSLATE_PANEL, true);
         return Ok(());
     }
-    // 便签：呼出/收起全部便签窗口（无打开中的便签时打开历史/管理窗口）。
-    // 修复：此前只开关历史窗口——用户关掉便签后再次点击反而收起历史窗口，
-    // 便签无法重新呼出。改为统一管理所有便签窗口（hide 后仍能 show 回来）。
+    // 便签：工具栏入口 = 始终打开历史/管理窗口（便签窗口各自独立显隐）。
+    // 修复：此前 toggle_sticky_notes 在"存在已隐藏的便签窗口"时会恢复便签
+    // 而非历史窗口——用户新建便签后关闭（便签=隐藏常驻）、再点工具栏想进
+    // 历史入口，却只恢复旧便签/打不开（反馈根因）。
     if label == "sticky" {
-        crate::storage::diag_write("[panel_toggle] sticky -> toggle_sticky_notes");
-        let shown = crate::sticky::toggle_sticky_notes(app.clone(), app.state())
-            .unwrap_or(false);
-        broadcast_panel_visibility(&app, crate::sticky::HISTORY_WINDOW, shown);
+        crate::storage::diag_write("[panel_toggle] sticky -> open_history_window");
+        let _ = crate::sticky::open_history_window(app.clone());
+        broadcast_panel_visibility(&app, crate::sticky::HISTORY_WINDOW, true);
         return Ok(());
     }
     let full = match label.as_str() {
