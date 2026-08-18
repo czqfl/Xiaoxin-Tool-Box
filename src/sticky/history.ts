@@ -61,10 +61,35 @@ export function mountHistoryApp() {
     getSettings().then((s) => void applyHistoryBg(s)).catch(() => {});
   }).catch((e) => console.error("监听设置变更失败:", e));
 
-  // 便签开/关状态变化（打开/关闭/删除）→ 实时刷新列表（"打开中"标记同步）
-  listen("sticky://open-changed", () => {
+  // ---- 状态刷新（三重保障，绝不展示过期信息）----
+  // 1) 事件：后端统一广播 sticky://state-changed（打开/关闭/新建/保存/删除）
+  // 2) 聚焦：窗口每次获得焦点主动刷新
+  // 3) 轮询：窗口可见期间每 2s 兜底刷新（事件偶发丢失也被覆盖）
+  let pollTimer: number | undefined;
+  const stopPoll = () => {
+    if (pollTimer) {
+      window.clearInterval(pollTimer);
+      pollTimer = undefined;
+    }
+  };
+  const startPoll = () => {
+    stopPoll();
+    pollTimer = window.setInterval(() => void render(), 2000);
+  };
+  listen("sticky://state-changed", () => {
     void render();
   }).catch((e) => console.error("监听便签状态失败:", e));
+  getCurrentWindow()
+    .onFocusChanged(({ payload: focused }) => {
+      if (focused) {
+        void render();
+        startPoll();
+      } else {
+        stopPoll();
+      }
+    })
+    .catch((e) => console.error("监听窗口焦点失败:", e));
+  startPoll(); // 窗口已可见：立即启动轮询
 
   // 套用与便签一致的背景效果（背景图+毛玻璃 或 透明主题原生亚克力）
   async function applyHistoryBg(s: Settings): Promise<void> {
@@ -201,14 +226,6 @@ export function mountHistoryApp() {
   }
 
   render();
-  // 兜底同步：历史窗口每次获得焦点时刷新列表——即使 open-changed 事件
-  // 偶发丢失（如便签状态变化发生在窗口隐藏期间），聚焦时也能看到最新
-  // 打开/关闭状态与新增条目。
-  getCurrentWindow()
-    .onFocusChanged(({ payload: focused }) => {
-      if (focused) void render();
-    })
-    .catch((e) => console.error("监听窗口焦点失败:", e));
 }
 
 function escapeHtml(text: string): string {

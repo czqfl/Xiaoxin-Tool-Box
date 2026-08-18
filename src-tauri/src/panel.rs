@@ -197,7 +197,7 @@ pub fn panel_toggle(app: tauri::AppHandle, label: String) -> Result<(), String> 
             crate::storage::diag_write("[panel_toggle] sticky -> open history");
             let _ = crate::sticky::open_history_window(app.clone());
             // 呼出时强制刷新历史列表（兜底：任何便签开/关状态漂移都被覆盖）
-            let _ = app.emit("sticky://open-changed", ());
+            let _ = app.emit(crate::sticky::EVT_NOTE_STATE_CHANGED, ());
             broadcast_panel_visibility(&app, crate::sticky::HISTORY_WINDOW, true);
         }
         return Ok(());

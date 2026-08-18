@@ -17,6 +17,9 @@ use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder
 
 pub const NOTE_PREFIX: &str = "note_";
 pub const HISTORY_WINDOW: &str = "sticky-history";
+/// 便签状态统一广播事件：打开/关闭/新建/保存/删除任一变化都 emit 此事件，
+/// 历史面板监听后全量刷新列表（标题/摘要/时间/"打开中"状态）。
+pub const EVT_NOTE_STATE_CHANGED: &str = "sticky://state-changed";
 /// 便签自己的“设置”窗口（原版 StickyNote 同款完整设置面板）
 pub const SETTINGS_WINDOW: &str = "sticky-settings";
 /// 主便签 id（便签历史为空时默认打开它）
@@ -358,16 +361,23 @@ pub fn save_note(
     let path = note_path(&paths, &id);
     let plain = strip_html(&data.content);
     if plain.trim().is_empty() && data.title.trim().is_empty() {
-        if path.exists() {
-            let _ = std::fs::remove_file(&path);
+        // 内容为空：仅当用户从未移动/调整过（无位置/尺寸元数据）才视为"空便签"删除；
+        // 若已有 pos/size（用户拖过/调过），保留文件——否则每次打开都在默认位置
+        // 出现（用户反馈"位置大小固定"的根因之一）。
+        let has_geometry = data.pos_x.is_some()
+            && data.pos_y.is_some()
+            && (data.width > 0 || data.height > 0);
+        if !has_geometry {
+            if path.exists() {
+                let _ = std::fs::remove_file(&path);
+            }
+            return Ok(());
         }
-        return Ok(());
     }
     let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
     std::fs::write(&path, json).map_err(|e| e.to_string())?;
-    // 内容变化（标题/正文/编辑时间等）→ 通知历史面板刷新列表，
-    // 复用 open-changed 同款机制（历史窗口监听后重新 render）
-    let _ = app.emit("sticky://open-changed", ());
+    // 内容/元数据变化 → 广播状态变化：历史面板刷新列表（标题/摘要/时间/状态）
+    let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
     Ok(())
 }
 
@@ -476,7 +486,7 @@ fn mark_note_open_inner(paths: &AppPaths, id: &str) {
 #[tauri::command]
 pub fn mark_note_open(app: AppHandle, paths: State<'_, AppPaths>, id: String) {
     mark_note_open_inner(&paths, &id);
-    let _ = app.emit("sticky://open-changed", ());
+    let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
 }
 
 fn mark_note_closed_inner(paths: &AppPaths, id: &str) {
@@ -488,7 +498,7 @@ fn mark_note_closed_inner(paths: &AppPaths, id: &str) {
 #[tauri::command]
 pub fn mark_note_closed(app: AppHandle, paths: State<'_, AppPaths>, id: String) {
     mark_note_closed_inner(&paths, &id);
-    let _ = app.emit("sticky://open-changed", ());
+    let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
 }
 
 #[tauri::command]
@@ -804,7 +814,7 @@ pub fn ensure_note_window(app: &AppHandle, id: &str) {
         let _ = win.set_focus();
         // 状态同步：广播可见（工具栏高亮）+ 便签状态变化（历史列表刷新）
         crate::panel::broadcast_panel_visibility(app, &label, true);
-        let _ = app.emit("sticky://open-changed", ());
+        let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
         crate::storage::diag_write(&format!("[sticky] ensure_note_window: shown existing {label}"));
         return;
     }
@@ -878,7 +888,7 @@ pub fn open_note_window(app: AppHandle, paths: State<'_, AppPaths>, id: String) 
     mark_note_open_inner(&paths, &id);
     // 立即广播"打开中"：历史列表实时更新该便签状态（此前 open_note_window
     // 只调无广播的 inner，若窗口需新建（ensure 创建分支）则历史收不到事件）
-    let _ = app.emit("sticky://open-changed", ());
+    let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
     ensure_note_window(&app, &id);
     if let Some(win) = app.get_webview_window(&window_label(&id)) {
         let _ = win.emit("summoned", ());
@@ -979,7 +989,7 @@ pub fn create_note_window(
         );
     }
     // 立即广播：历史列表刷新（新条目 + 打开中）
-    let _ = app.emit("sticky://open-changed", ());
+    let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
     let pos = window.outer_position().unwrap_or_default();
     let x = pos.x as f64 + 30.0;
     let y = pos.y as f64 + 30.0;
@@ -1030,7 +1040,7 @@ pub fn create_note_window(
             let _ = win.set_focus();
             crate::panel::broadcast_panel_visibility(&app2, &window_label(&id2), true);
             // 新建即打开：通知历史列表刷新状态
-            let _ = app2.emit("sticky://open-changed", ());
+            let _ = app2.emit(EVT_NOTE_STATE_CHANGED, ());
         }
     });
     Ok(())
@@ -1128,17 +1138,34 @@ pub fn close_window(window: tauri::WebviewWindow) -> Result<(), String> {
         }
         _ => {
             // 便签窗口关闭 = 销毁（内容实时自动保存，不丢数据）。
-            // 已尝试"隐藏常驻"（秒开），但再次呼出的 summoned 状态机仍会
-            // 偶发卡住（"便签只能打开一次"）；销毁重建每次全新加载，保证
-            // 可反复打开。位置/大小记忆由 create/ensure 读存档实现。
+            // 位置/大小记忆由 create/ensure 读存档实现。
             if let Some(paths) = app.try_state::<AppPaths>() {
                 let id = label.strip_prefix(NOTE_PREFIX).unwrap_or(&label).to_string();
                 if id != MAIN_NOTE_ID {
                     mark_note_closed_inner(&paths, &id);
                 }
+                // 【销毁前几何回写】把窗口当前的位置/大小写回存档——
+                // 即使前端防抖保存未触发（拖动/调整大小后立即关闭），
+                // 下次打开也一定在最后出现的位置/大小。
+                let path = note_path(&paths, &id);
+                if let Ok(raw) = std::fs::read_to_string(&path) {
+                    if let Ok(mut note) = serde_json::from_str::<NoteData>(&raw) {
+                        if let Ok(p) = window.outer_position() {
+                            note.pos_x = Some(p.x as f64);
+                            note.pos_y = Some(p.y as f64);
+                        }
+                        if let Ok(s) = window.outer_size() {
+                            note.width = s.width;
+                            note.height = s.height;
+                        }
+                        if let Ok(json) = serde_json::to_string_pretty(&note) {
+                            let _ = std::fs::write(&path, json);
+                        }
+                    }
+                }
             }
             let r = window.close();
-            let _ = app.emit("sticky://open-changed", ());
+            let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
             crate::panel::broadcast_panel_visibility(&app, &label, false);
             r.map_err(|e| e.to_string())
         }
