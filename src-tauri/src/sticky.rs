@@ -491,54 +491,51 @@ pub fn get_open_notes(app: AppHandle, paths: State<'_, AppPaths>) -> Vec<String>
     result
 }
 
-/// 工具栏"便签"入口：呼出 / 收起已打开的便签窗口。
-/// - 有任意便签或历史窗口可见 → 全部收起（toggle）；
-/// - 否则全部呼出（show + 聚焦）；没有任何打开中的便签 → 打开历史/管理窗口。
-/// 修复：此前便签图标只开关历史窗口，用户关掉便签窗口后再次点击
-/// 反而把历史窗口收走了，便签无法重新呼出。
+/// 工具栏"便签"入口：呼出便签应用（历史/管理窗口），便签可见时收起。
+/// - 有便签窗口可见 → 收起全部便签（历史窗口不动）；
+/// - 否则 → 呼出：有打开中的便签 → show 全部便签；否则 → 显示/创建历史窗口。
+/// 【呼出优先】历史窗口可见不再触发"收起"——用户从历史打开便签→关闭后，
+/// 点工具栏期望重新呼出便签应用，而不是把历史窗口收走（用户反复反馈的根因）。
 #[tauri::command]
 pub fn toggle_sticky_notes(
     app: AppHandle,
     paths: State<'_, AppPaths>,
 ) -> Result<bool, String> {
+    crate::storage::diag_write("[sticky] toggle_sticky_notes called");
     let ids = get_open_notes(app.clone(), paths);
     let note_wins: Vec<tauri::WebviewWindow> = ids
         .iter()
         .filter_map(|id| app.get_webview_window(&window_label(id)))
         .collect();
     let hist = app.get_webview_window(HISTORY_WINDOW);
-    let hist_visible = hist
-        .as_ref()
-        .and_then(|w| w.is_visible().ok())
-        .unwrap_or(false);
-    let any_visible = hist_visible
-        || note_wins
-            .iter()
-            .any(|w| w.is_visible().unwrap_or(false));
+    let notes_visible = note_wins
+        .iter()
+        .any(|w| w.is_visible().unwrap_or(false));
+    crate::storage::diag_write(&format!(
+        "[sticky] toggle: open_ids={ids:?} note_wins={} hist_exists={} notes_visible={notes_visible}",
+        note_wins.len(),
+        hist.is_some()
+    ));
 
-    if any_visible {
-        // 全部收起
+    if notes_visible {
+        // 收起全部便签（历史窗口保持原样）
         for w in &note_wins {
             let _ = w.hide();
         }
-        if hist_visible {
-            if let Some(h) = &hist {
-                let _ = h.hide();
-            }
-        }
+        crate::storage::diag_write("[sticky] toggle: hid notes");
         return Ok(false);
     }
-    // 呼出：优先便签窗口；没有便签窗口 → 显示/创建历史窗口。
-    // （修复：此前 else 分支在"无便签窗口 + 历史窗口隐藏"时什么都不做——
-    // 表现为切换主题后便签按钮点了没反应）
+    // 呼出：优先便签窗口；没有便签窗口 → 显示/创建历史窗口（便签应用入口）
     if note_wins.is_empty() {
         match &hist {
             Some(h) => {
                 let _ = h.show();
                 let _ = h.unminimize();
                 let _ = h.set_focus();
+                crate::storage::diag_write("[sticky] toggle: shown history (existing)");
             }
             None => {
+                crate::storage::diag_write("[sticky] toggle: creating history window");
                 open_history_window(app.clone()).ok();
             }
         }
@@ -548,6 +545,7 @@ pub fn toggle_sticky_notes(
             let _ = w.unminimize();
             let _ = w.set_focus();
         }
+        crate::storage::diag_write("[sticky] toggle: shown notes");
     }
     Ok(true)
 }
@@ -788,6 +786,7 @@ pub fn ensure_note_window(app: &AppHandle, id: &str) {
         let _ = win.show();
         let _ = win.unminimize();
         let _ = win.set_focus();
+        crate::storage::diag_write(&format!("[sticky] ensure_note_window: shown existing {label}"));
         return;
     }
     crate::storage::diag_write(&format!("[sticky] ensure_note_window: creating {label}"));
@@ -856,10 +855,12 @@ pub fn ensure_note_window(app: &AppHandle, id: &str) {
 
 #[tauri::command]
 pub fn open_note_window(app: AppHandle, paths: State<'_, AppPaths>, id: String) -> Result<(), String> {
+    crate::storage::diag_write(&format!("[sticky] open_note_window called: id={id}"));
     mark_note_open_inner(&paths, &id);
     ensure_note_window(&app, &id);
     if let Some(win) = app.get_webview_window(&window_label(&id)) {
         let _ = win.emit("summoned", ());
+        crate::storage::diag_write(&format!("[sticky] open_note_window: emitted summoned to {id}"));
     }
     Ok(())
 }
