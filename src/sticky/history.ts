@@ -69,6 +69,11 @@ export function mountHistoryApp() {
     getSettings().then((s) => void applyHistoryBg(s)).catch(() => {});
   }).catch((e) => console.error("监听设置变更失败:", e));
 
+  // 便签开/关状态变化（打开/关闭/删除）→ 实时刷新列表（"打开中"标记同步）
+  listen("sticky://open-changed", () => {
+    void render();
+  }).catch((e) => console.error("监听便签状态失败:", e));
+
   // 套用与便签一致的背景效果（背景图+毛玻璃 或 透明主题原生亚克力）
   async function applyHistoryBg(s: Settings): Promise<void> {
     const root = document.querySelector(".history-window") as HTMLElement | null;

@@ -470,11 +470,15 @@ pub fn mark_note_open(app: AppHandle, paths: State<'_, AppPaths>, id: String) {
     let _ = app.emit("sticky://open-changed", ());
 }
 
+fn mark_note_closed_inner(paths: &AppPaths, id: &str) {
+    let mut v = load_open_notes(paths);
+    v.retain(|x| x != id);
+    let _ = save_open_notes(paths, &v);
+}
+
 #[tauri::command]
 pub fn mark_note_closed(app: AppHandle, paths: State<'_, AppPaths>, id: String) {
-    let mut v = load_open_notes(&paths);
-    v.retain(|x| x != &id);
-    let _ = save_open_notes(&paths, &v);
+    mark_note_closed_inner(&paths, &id);
     let _ = app.emit("sticky://open-changed", ());
 }
 
@@ -789,6 +793,9 @@ pub fn ensure_note_window(app: &AppHandle, id: &str) {
         let _ = win.show();
         let _ = win.unminimize();
         let _ = win.set_focus();
+        // 状态同步：广播可见（工具栏高亮）+ 便签状态变化（历史列表刷新）
+        crate::panel::broadcast_panel_visibility(app, &label, true);
+        let _ = app.emit("sticky://open-changed", ());
         crate::storage::diag_write(&format!("[sticky] ensure_note_window: shown existing {label}"));
         return;
     }
@@ -973,6 +980,8 @@ pub fn create_note_window(
             let _ = win.show();
             let _ = win.set_focus();
             crate::panel::broadcast_panel_visibility(&app2, &window_label(&id2), true);
+            // 新建即打开：通知历史列表刷新状态
+            let _ = app2.emit("sticky://open-changed", ());
         }
     });
     Ok(())
@@ -1030,11 +1039,33 @@ pub fn open_history_window(app: AppHandle) -> Result<(), String> {
 
 /// 便签窗口显示/隐藏/关闭（与 StickyNote 语义一致：便签窗口关闭 = 隐藏常驻，
 /// 辅助窗口（历史/设置）真正关闭）。
+/// 状态同步（用户反馈修复）：
+/// - 便签关闭（hide）：同步移除"打开中"集合、emit open-changed（历史列表
+///   实时刷新"打开中/已关闭"）、广播可见性（工具栏便签图标取消高亮）；
+/// - 历史/设置关闭：广播可见性 false（工具栏取消高亮）。
 #[tauri::command]
 pub fn close_window(window: tauri::WebviewWindow) -> Result<(), String> {
-    match window.label() {
-        HISTORY_WINDOW | SETTINGS_WINDOW => window.close().map_err(|e| e.to_string()),
-        _ => window.hide().map_err(|e| e.to_string()),
+    let app = window.app_handle().clone();
+    let label = window.label().to_string();
+    match label.as_str() {
+        HISTORY_WINDOW | SETTINGS_WINDOW => {
+            let r = window.close();
+            crate::panel::broadcast_panel_visibility(&app, &label, false);
+            r.map_err(|e| e.to_string())
+        }
+        _ => {
+            // 便签窗口：隐藏常驻 + 同步状态
+            if let Some(paths) = app.try_state::<AppPaths>() {
+                let id = label.strip_prefix(NOTE_PREFIX).unwrap_or(&label).to_string();
+                if id != MAIN_NOTE_ID {
+                    mark_note_closed_inner(&paths, &id);
+                }
+            }
+            let _ = window.hide();
+            let _ = app.emit("sticky://open-changed", ());
+            crate::panel::broadcast_panel_visibility(&app, &label, false);
+            Ok(())
+        }
     }
 }
 
