@@ -483,3 +483,77 @@
   height: 100%;
   border: none;
 }
+
+/* ---- 便签设置页（完整功能版）：输入/下拉/快捷键录制（工具箱风格） ---- */
+.settings-input,
+.settings-select {
+  box-sizing: border-box;
+  padding: 7px 11px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+  transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+.settings-input:focus,
+.settings-select:focus {
+  border-color: rgba(var(--accent-rgb), 0.5);
+  box-shadow: var(--ring);
+}
+.settings-select {
+  min-width: 160px;
+  cursor: pointer;
+}
+.shortcut-rec {
+  display: inline-flex;
+  align-items: center;
+  min-width: 132px;
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  border: 1px dashed var(--border-strong);
+  background: var(--bg-item-hover);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+.shortcut-rec:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.shortcut-rec.recording {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  animation: rec-pulse 1.2s ease-in-out infinite;
+}
+@keyframes rec-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.25); }
+  50% { box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.08); }
+}
+/* 便签背景图预览（完整功能版） */
+.sticky-bg-preview {
+  margin-top: 10px;
+  max-width: 360px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  overflow: hidden;
+  background: var(--bg-panel);
+  position: relative;
+}
+.sticky-bg-preview img {
+  display: block;
+  width: 100%;
+  max-height: 160px;
+  object-fit: cover;
+}
+.sticky-bg-preview span {
+  display: block;
+  padding: 14px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
