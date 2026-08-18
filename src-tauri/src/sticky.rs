@@ -1025,6 +1025,21 @@ pub fn open_history_window(app: AppHandle) -> Result<(), String> {
                 // 立即 show 时 webview 尚未加载，非透明窗口会闪一下白底
                 // （用户反馈"变白闪一下"的根因）。前端 mountHistoryApp 会
                 // 在 getSettings 完成后自行 show + setFocus。
+                // 【兜底】300ms 后若前端仍未显示（webview 加载慢），强制 show——
+                // 否则第一次点击可能"没反应"，用户需再点一次（反馈根因）。
+                // 本地资源加载通常 <300ms，兜底极少触发，不影响去白闪效果。
+                let app3 = app2.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                    if let Some(win3) = app3.get_webview_window(HISTORY_WINDOW) {
+                        if !win3.is_visible().unwrap_or(true) {
+                            let _ = win3.show();
+                            crate::storage::diag_write(
+                                "[sticky] open_history_window: fallback show after 300ms",
+                            );
+                        }
+                    }
+                });
                 // 先广播可见性：窗口即将显示，让工具栏高亮"便签"图标
                 crate::panel::broadcast_panel_visibility(&app2, HISTORY_WINDOW, true);
                 crate::storage::diag_write("[sticky] open_history_window: built (front will show)");
