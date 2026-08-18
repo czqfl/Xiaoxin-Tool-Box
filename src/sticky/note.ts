@@ -1718,9 +1718,9 @@ export function mountNoteApp(noteId: string, preset = "") {
       e.preventDefault();
       e.stopPropagation();
       winResizing = dir;
-      // 缩放期间临时切到 resizable+shadow（复刻稳定态），避免 transparent+shadow(false)
-      // 下 setSize 触发 WebView2 重建崩溃
-      appWindow.setResizable(true).catch(() => {});
+      // 缩放期间临时开阴影（复刻稳定态），避免 transparent+shadow(false) 下
+      // setSize 触发 WebView2 重建崩溃；resizable 保持 true（创建时即开启，
+      // setSize 始终可用——动态切换是异步的，会导致刚拖动时 setSize 无效）
       appWindow.setShadow(true).catch(() => {});
       // 【关键】起始尺寸/位置必须同步读取（window.innerWidth/screenX 为逻辑像素，
       // 与 LogicalSize/LogicalPosition 一致）：此前用异步 outerSize()/outerPosition()，
@@ -1765,8 +1765,7 @@ export function mountNoteApp(noteId: string, preset = "") {
     const onEnd = (e: PointerEvent) => {
       if (!winResizing) return;
       winResizing = null;
-      // 缩放结束恢复：静止状态无投影、无系统缩放
-      appWindow.setResizable(false).catch(() => {});
+      // 缩放结束恢复：静止状态无投影
       appWindow.setShadow(false).catch(() => {});
       try {
         hot.releasePointerCapture(e.pointerId);
