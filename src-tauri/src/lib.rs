@@ -277,6 +277,7 @@ pub fn run() {
             sticky::open_note_window,
             sticky::create_note_window,
             sticky::open_history_window,
+            sticky::toggle_sticky_notes,
             sticky::mark_note_open,
             sticky::mark_note_closed,
             sticky::get_open_notes,

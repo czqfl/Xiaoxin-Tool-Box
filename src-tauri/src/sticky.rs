@@ -17,6 +17,8 @@ use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder
 
 pub const NOTE_PREFIX: &str = "note_";
 pub const HISTORY_WINDOW: &str = "sticky-history";
+/// 便签自己的“设置”窗口（原版 StickyNote 同款完整设置面板）
+pub const SETTINGS_WINDOW: &str = "sticky-settings";
 /// 主便签 id（便签历史为空时默认打开它）
 pub const MAIN_NOTE_ID: &str = "main";
 
@@ -96,6 +98,13 @@ pub struct StickySettings {
     pub edge_snap: bool,
     #[serde(default)]
     pub notes_dir: String,
+    /// 大模型整理格式配置（与原版一致；format_with_llm 调用它做 OpenAI 兼容请求）
+    #[serde(default)]
+    pub llm_base_url: String,
+    #[serde(default)]
+    pub llm_api_key: String,
+    #[serde(default)]
+    pub llm_model: String,
     #[serde(default = "default_true")]
     pub glass_enabled: bool,
     #[serde(default = "default_glass_blur")]
@@ -126,7 +135,7 @@ fn default_particle_count() -> f64 {
     50.0
 }
 fn default_particle_mode() -> String {
-    "flame".into()
+    "particle".into()
 }
 fn default_animation_speed() -> f64 {
     100.0
@@ -150,6 +159,9 @@ impl Default for StickySettings {
             bg_glass_opacity: 0.3,
             edge_snap: true,
             notes_dir: String::new(),
+            llm_base_url: String::new(),
+            llm_api_key: String::new(),
+            llm_model: String::new(),
             glass_enabled: true,
             glass_blur: 55.0,
             transparent_opacity: 65.0,
@@ -221,7 +233,13 @@ fn load_settings_inner(paths: &AppPaths) -> StickySettings {
     }
     let raw = std::fs::read_to_string(&path).unwrap_or_default();
     let raw = raw.strip_prefix('\u{feff}').unwrap_or(&raw);
-    serde_json::from_str::<StickySettings>(raw).unwrap_or_default()
+    let mut s = serde_json::from_str::<StickySettings>(raw).unwrap_or_default();
+    // 迁移：旧值 "flame"（集成早期设置页的错误取值）归入原版命名 "erode"（火焰侵蚀），
+    // 否则便签前端的动画分发不认识 "flame"，会静默回退成粒子消散。
+    if s.particle_mode == "flame" {
+        s.particle_mode = "erode".into();
+    }
+    s
 }
 
 // ---------------------------------------------------------------------------
@@ -473,6 +491,61 @@ pub fn get_open_notes(app: AppHandle, paths: State<'_, AppPaths>) -> Vec<String>
     result
 }
 
+/// 工具栏"便签"入口：呼出 / 收起已打开的便签窗口。
+/// - 有任意便签或历史窗口可见 → 全部收起（toggle）；
+/// - 否则全部呼出（show + 聚焦）；没有任何打开中的便签 → 打开历史/管理窗口。
+/// 修复：此前便签图标只开关历史窗口，用户关掉便签窗口后再次点击
+/// 反而把历史窗口收走了，便签无法重新呼出。
+#[tauri::command]
+pub fn toggle_sticky_notes(
+    app: AppHandle,
+    paths: State<'_, AppPaths>,
+) -> Result<bool, String> {
+    let ids = get_open_notes(app.clone(), paths);
+    let note_wins: Vec<tauri::WebviewWindow> = ids
+        .iter()
+        .filter_map(|id| app.get_webview_window(&window_label(id)))
+        .collect();
+    let hist = app.get_webview_window(HISTORY_WINDOW);
+    let hist_visible = hist
+        .as_ref()
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(false);
+    let any_visible = hist_visible
+        || note_wins
+            .iter()
+            .any(|w| w.is_visible().unwrap_or(false));
+
+    if any_visible {
+        // 全部收起
+        for w in &note_wins {
+            let _ = w.hide();
+        }
+        if hist_visible {
+            if let Some(h) = &hist {
+                let _ = h.hide();
+            }
+        }
+        return Ok(false);
+    }
+    // 全部呼出；无任何打开中的便签窗口 → 打开历史/管理窗口
+    if note_wins.is_empty() && hist.is_none() {
+        open_history_window(app.clone()).ok();
+    } else {
+        for w in &note_wins {
+            let _ = w.show();
+            let _ = w.unminimize();
+            let _ = w.set_focus();
+        }
+        if hist_visible {
+            if let Some(h) = &hist {
+                let _ = h.show();
+            }
+        }
+    }
+    Ok(true)
+}
+
 // ---------------------------------------------------------------------------
 // 设置
 // ---------------------------------------------------------------------------
@@ -491,7 +564,10 @@ pub fn save_settings(
     let _ = std::fs::create_dir_all(&paths.data_dir);
     let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
     std::fs::write(settings_path(&paths), json).map_err(|e| e.to_string())?;
-    let _ = app.emit("sticky://settings-changed", ());
+    // 广播设置变更：所有便签/历史/设置窗口监听 "settings-changed"（与原版一致）。
+    // 注意不能发成 "sticky://settings-changed"——前端 settings.ts 监听的是 "settings-changed"，
+    // 事件名不匹配会导致“改了主题/背景，打开的便签不刷新”。
+    let _ = app.emit("settings-changed", ());
     Ok(())
 }
 
@@ -681,9 +757,25 @@ fn window_label(id: &str) -> String {
     format!("{NOTE_PREFIX}{id}")
 }
 
+/// 把窗口创建投递到主线程事件循环（空闲时执行），避免在 IPC 回调里重入建窗。
+/// 背景：Tauri v2 的同步命令运行在主线程的 WebView2 IPC 回调里；此时直接调
+/// `app.run_on_main_thread(...)` 会被【内联】执行（send_user_message 检测到
+/// 当前线程即主线程时同步执行任务），等于在主线程的 WebView2 回调中重入创建
+/// 新的 WebView2 窗口——部分环境直接挂死，阻塞整个应用（工具栏/悬浮窗点击
+/// 全部失效，即“点击便签后应用卡死”的根因）。从后台线程调用
+/// `run_on_main_thread` 才会走 EventLoopProxy 投递，由主循环空闲时执行，
+/// 与启动/托盘创建窗口是同一条安全路径（原版 StickyNote 用 async 命令同样
+/// 绕开了主线程 IPC 回调）。
+pub(crate) fn defer_to_main_loop<R: tauri::Runtime>(app: AppHandle<R>, f: impl FnOnce() + Send + 'static) {
+    std::thread::spawn(move || {
+        let _ = app.run_on_main_thread(f);
+    });
+}
+
 /// 确保便签窗口存在并展示；不存在则新建（沿用记忆的尺寸/位置）。
-/// 【主线程创建】命令线程直接 build WebView2 透明窗口在部分环境会挂起，
-/// 阻塞后续全部 IPC（用户反馈"点击便签后工具栏全部失效"的根因）。
+/// 【事件循环空闲时创建】窗口创建由后台线程发起、经 run_on_main_thread 投递，
+/// 在主线程事件循环空闲时执行——避免在同步命令的 IPC 回调内重入 build
+/// WebView2 窗口导致整个应用挂死（见 defer_to_main_loop 注释）。
 pub fn ensure_note_window(app: &AppHandle, id: &str) {
     let label = window_label(id);
     if let Some(win) = app.get_webview_window(&label) {
@@ -695,7 +787,7 @@ pub fn ensure_note_window(app: &AppHandle, id: &str) {
     crate::storage::diag_write(&format!("[sticky] ensure_note_window: creating {label}"));
     let app2 = app.clone();
     let id2 = id.to_string();
-    let _ = app.run_on_main_thread(move || {
+    defer_to_main_loop(app2.clone(), move || {
         let Some(paths) = app2.try_state::<AppPaths>() else {
             crate::storage::diag_write("[sticky] ensure_note_window: no AppPaths state");
             return;
@@ -748,6 +840,8 @@ pub fn ensure_note_window(app: &AppHandle, id: &str) {
             let _ = win.show();
             let _ = win.set_focus();
             crate::storage::diag_write(&format!("[sticky] ensure_note_window: {label} built+shown"));
+            // 窗口此刻才真正可见，补发显隐事件让工具栏高亮“便签”图标
+            crate::panel::broadcast_panel_visibility(&app2, &window_label(&id2), true);
         } else {
             crate::storage::diag_write(&format!("[sticky] ensure_note_window: {label} BUILD FAILED"));
         }
@@ -764,6 +858,74 @@ pub fn open_note_window(app: AppHandle, paths: State<'_, AppPaths>, id: String) 
     Ok(())
 }
 
+/// 挑选工具栏“便签”入口要打开的便签 id：
+/// 1) “打开中”集合里的便签（用户最近在用的）；2) 最近更新的便签文件；3) 兜底 main。
+fn pick_main_note_id(app: &AppHandle) -> String {
+    if let Some(paths) = app.try_state::<AppPaths>() {
+        let open = load_open_notes(&paths);
+        if let Some(id) = open.first() {
+            return id.clone();
+        }
+        let _ = std::fs::create_dir_all(notes_dir(&paths));
+        if let Ok(entries) = std::fs::read_dir(notes_dir(&paths)) {
+            let mut best: Option<(u64, String)> = None;
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.extension().and_then(|e| e.to_str()) != Some("json") {
+                    continue;
+                }
+                let name = p.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                if !name.starts_with("xiaoxin_sticky_note_") {
+                    continue;
+                }
+                let id = name
+                    .strip_prefix("xiaoxin_sticky_note_")
+                    .unwrap_or(name)
+                    .to_string();
+                let mtime = p
+                    .metadata()
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs())
+                    .unwrap_or(0);
+                if best.as_ref().map_or(true, |(t, _)| mtime > *t) {
+                    best = Some((mtime, id));
+                }
+            }
+            if let Some((_, id)) = best {
+                return id;
+            }
+        }
+    }
+    MAIN_NOTE_ID.to_string()
+}
+
+/// 工具栏"便签"入口将打开的便签窗口 label（用于先判断可见性做开关切换）。
+/// 当前工具栏入口已改用 toggle_sticky_notes（统一呼出/收起全部便签），
+/// 保留备用（供未来"打开最近便签"类入口使用）。
+#[allow(dead_code)]
+pub fn pick_main_note_label(app: &AppHandle) -> String {
+    window_label(&pick_main_note_id(app))
+}
+
+/// 打开最近使用的便签（打开中集合优先 → 最近更新的便签 → 默认 main），
+/// 标记为"打开中"并播放呼出成形动画。返回实际打开的窗口 label。
+#[allow(dead_code)]
+pub fn open_main_note(app: &AppHandle) -> String {
+    let id = pick_main_note_id(app);
+    // 真实便签才写入“打开中”集合；main 是特殊默认便签，与原版一致不持久化
+    if id != MAIN_NOTE_ID {
+        if let Some(paths) = app.try_state::<AppPaths>() {
+            mark_note_open_inner(&paths, &id);
+        }
+    }
+    ensure_note_window(app, &id);
+    if let Some(win) = app.get_webview_window(&window_label(&id)) {
+        let _ = win.emit("summoned", ());
+    }
+    window_label(&id)
+}
+
 #[tauri::command]
 pub fn create_note_window(
     app: AppHandle,
@@ -775,10 +937,10 @@ pub fn create_note_window(
     let pos = window.outer_position().unwrap_or_default();
     let x = pos.x as f64 + 30.0;
     let y = pos.y as f64 + 30.0;
-    // 主线程创建（与 ensure_note_window 同理，避免透明窗口创建挂起阻塞 IPC）
+    // 事件循环空闲时创建（与 ensure_note_window 同理，避免 IPC 回调内重入挂死）
     let app2 = app.clone();
     let id2 = id.clone();
-    let _ = app.run_on_main_thread(move || {
+    defer_to_main_loop(app2.clone(), move || {
         let url = format!("index.html?noteId={id2}");
         let win = WebviewWindowBuilder::new(
             &app2,
@@ -800,14 +962,16 @@ pub fn create_note_window(
         if let Ok(win) = win {
             let _ = win.show();
             let _ = win.set_focus();
+            crate::panel::broadcast_panel_visibility(&app2, &window_label(&id2), true);
         }
     });
     Ok(())
 }
 
 /// 打开便签历史/管理窗口（工具栏"便签"入口）。
-/// 【主线程创建 + 非透明】历史列表窗口无需透明，进一步规避透明 WebView2
-/// 初始化的挂起风险。
+/// 【事件循环空闲时创建 + 非透明】历史列表窗口无需透明，进一步规避透明
+/// WebView2 初始化的挂起风险；创建经 defer_to_main_loop 投递，避免在
+/// 同步命令的 IPC 回调内重入建窗导致整个应用卡死（用户反馈的根因）。
 #[tauri::command]
 pub fn open_history_window(app: AppHandle) -> Result<(), String> {
     const LABEL: &str = HISTORY_WINDOW;
@@ -819,7 +983,7 @@ pub fn open_history_window(app: AppHandle) -> Result<(), String> {
         return Ok(());
     }
     let app2 = app.clone();
-    let _ = app.run_on_main_thread(move || {
+    defer_to_main_loop(app2.clone(), move || {
         let win = WebviewWindowBuilder::new(&app2, LABEL, WebviewUrl::App("index.html".into()))
             .title("历史便签")
             .decorations(false)
@@ -838,6 +1002,8 @@ pub fn open_history_window(app: AppHandle) -> Result<(), String> {
                 let _ = w.show();
                 let _ = w.set_focus();
                 crate::storage::diag_write("[sticky] open_history_window: built+shown");
+                // 窗口此刻才真正可见，补发显隐事件让工具栏高亮“便签”图标
+                crate::panel::broadcast_panel_visibility(&app2, HISTORY_WINDOW, true);
             }
             Err(e) => {
                 crate::storage::diag_write(&format!("[sticky] open_history_window: BUILD FAILED: {e}"));
@@ -848,11 +1014,11 @@ pub fn open_history_window(app: AppHandle) -> Result<(), String> {
 }
 
 /// 便签窗口显示/隐藏/关闭（与 StickyNote 语义一致：便签窗口关闭 = 隐藏常驻，
-/// 辅助窗口（历史）真正关闭）。
+/// 辅助窗口（历史/设置）真正关闭）。
 #[tauri::command]
 pub fn close_window(window: tauri::WebviewWindow) -> Result<(), String> {
     match window.label() {
-        HISTORY_WINDOW => window.close().map_err(|e| e.to_string()),
+        HISTORY_WINDOW | SETTINGS_WINDOW => window.close().map_err(|e| e.to_string()),
         _ => window.hide().map_err(|e| e.to_string()),
     }
 }
@@ -902,18 +1068,152 @@ pub fn register_shortcuts() -> Result<(), String> {
     Ok(())
 }
 
-/// 打开便签设置：路由到工具箱设置窗口并跳转"便签设置"页。
+/// 打开便签设置：创建/显示便签自带的独立“设置”窗口（原版 StickyNote 同款，
+/// 完整设置面板：主题/透明/背景/毛玻璃/粒子动画/Markdown 样式/存储目录等）。
+/// 窗口创建同样经 defer_to_main_loop 投递（避免 IPC 回调内重入建窗挂死）；
+/// build 后不 show——可见性交由前端设置面板 paint 完成后自行 show（消除首帧闪烁）。
 #[tauri::command]
 pub fn open_settings_window(app: AppHandle) -> Result<(), String> {
-    crate::tray::show_settings_window(&app);
-    let _ = app.emit("sticky://goto-settings", ());
+    const LABEL: &str = SETTINGS_WINDOW;
+    crate::storage::diag_write("[sticky] open_settings_window called");
+    if let Some(win) = app.get_webview_window(LABEL) {
+        let _ = win.show();
+        let _ = win.set_focus();
+        return Ok(());
+    }
+    let app2 = app.clone();
+    defer_to_main_loop(app2.clone(), move || {
+        let win = WebviewWindowBuilder::new(&app2, LABEL, WebviewUrl::App("index.html".into()))
+            .title("便签设置")
+            .decorations(false)
+            .transparent(true)
+            .resizable(true)
+            .always_on_top(true)
+            .inner_size(800.0, 600.0)
+            .min_inner_size(680.0, 500.0)
+            .center()
+            .visible(false)
+            .shadow(true)
+            .skip_taskbar(true)
+            .build();
+        match win {
+            Ok(_) => crate::storage::diag_write("[sticky] open_settings_window: built"),
+            Err(e) => crate::storage::diag_write(&format!(
+                "[sticky] open_settings_window: BUILD FAILED: {e}"
+            )),
+        }
+    });
     Ok(())
 }
 
-/// 大模型整理便签：集成版暂未接入，返回明确错误（前端展示为提示）。
+/// 去掉模型输出外层可能包裹的 ```lang ... ``` 代码围栏。
+fn strip_code_fences(text: &str) -> String {
+    let t = text.trim();
+    let fence_start = t.find("```");
+    if let Some(start) = fence_start {
+        if t.ends_with("```") {
+            let after = &t[start + 3..];
+            // 去掉首行的语言标识（如 ```markdown）
+            let rest = if let Some(nl) = after.find('\n') { &after[nl + 1..] } else { after };
+            let inner = &rest[..rest.len() - 3];
+            return inner.trim().to_string();
+        }
+    }
+    text.trim().to_string()
+}
+
+/// 用大模型（OpenAI 兼容接口）整理便签文本格式（集成自原版 StickyNote）。
+/// output_format = "md" 时整理为干净的 Markdown；else 为纯文本。
+/// 读取 sticky_settings 里的 llm_base_url / llm_api_key / llm_model，未配置则报错提示。
 #[tauri::command]
-pub fn format_with_llm(_content: String, _output_format: String) -> Result<String, String> {
-    Err("集成版暂未接入大模型格式化".into())
+pub async fn format_with_llm(app: AppHandle, content: String, output_format: String) -> Result<String, String> {
+    let settings = app
+        .try_state::<AppPaths>()
+        .map(|p| load_settings_inner(&p))
+        .unwrap_or_default();
+    if settings.llm_api_key.trim().is_empty() {
+        return Err("请先在“便签设置”中填写大模型 API Key".into());
+    }
+    let base = if settings.llm_base_url.trim().is_empty() {
+        "https://api.openai.com/v1".to_string()
+    } else {
+        settings.llm_base_url.trim_end_matches('/').to_string()
+    };
+    let url = if base.ends_with("/chat/completions") {
+        base
+    } else {
+        format!("{}/chat/completions", base)
+    };
+    let model = if settings.llm_model.trim().is_empty() {
+        "gpt-4o-mini".to_string()
+    } else {
+        settings.llm_model.trim().to_string()
+    };
+
+    let of = output_format.trim();
+    let (sys_instr, user_instr) = if of == "md" {
+        (
+            "You are a formatting assistant. Reformat the user's note into clean, well-structured MARKDOWN.\n\
+             WHAT TO DO (this is the main task -- you MUST add Markdown structure):\n\
+             - Turn section titles/labels into Markdown headings, e.g. `## 8981环境账号密码`.\n\
+             - Turn repeated items into `-` bullet lists.\n\
+             - Wrap commands and code snippets in fenced code blocks (```bash ... ```).\n\
+             - Use tables or **bold** where it improves clarity.\n\
+             - Put a blank line between blocks so the Markdown renders correctly.\n\
+             CRITICAL -- PRESERVE ALL CONTENT (this must NOT override the structure above):\n\
+             - Keep EVERY line, number, name, URL, email, password, token, credential and code snippet EXACTLY as given. Do not drop, merge, deduplicate, reorder, translate, or alter any fact.\n\
+             - The note may contain passwords / API keys / credentials. This is the user's PRIVATE data: output ALL of it verbatim. Do NOT redact, mask, hide, refuse, or 'clean up' anything for safety reasons.\n\
+             - Adding `#`/`##`, `-`, or code fences is STRUCTURAL formatting and is REQUIRED here -- it is NOT 'rewriting' the user's wording; the text of each item stays exactly as written.\n\
+             - Output ONLY the Markdown text. No commentary, no explanation, no surrounding code fence."
+                .to_string(),
+            "Reformat the following note into clean Markdown:",
+        )
+    } else {
+        (
+            "You are a meticulous formatting assistant. Your ONLY job is to reformat the user's note into clean plain text. \
+             Strict rules: \
+             1) Preserve 100% of the original information VERBATIM. Every line, sentence, list item, number, name, URL, email, password, token, credential, and code snippet MUST appear in the output with its exact text. Do not drop, merge, deduplicate, or summarize any content. \
+             2) CRITICAL: The note may contain passwords, API keys, tokens, credentials, or other sensitive-looking text. This is the user's PRIVATE data. You MUST output ALL of it exactly as given. Do NOT redact, mask, hide, refuse, or \"clean up\" any part for safety reasons; preserving the user's content exactly is the top priority. \
+             3) Do NOT invent, guess, translate, or alter any facts. Keep the note's original language. \
+             4) Do NOT rewrite the meaning or wording of the content; only adjust its structure (clear paragraphs, consistent punctuation, simple indentation/lists). \
+             5) Do NOT use any Markdown symbols. Output ONLY the plain text, with no commentary or explanation."
+                .to_string(),
+            "Please reformat the following note into clean plain text:",
+        )
+    };
+
+    let messages = serde_json::json!([
+        { "role": "system", "content": sys_instr },
+        { "role": "user", "content": format!("{}\n\n{}", user_instr, content) }
+    ]);
+    let body = serde_json::json!({
+        "model": model,
+        "messages": messages,
+        "temperature": 0.0,
+    });
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&url)
+        .bearer_auth(settings.llm_api_key.trim())
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let detail = resp.text().await.unwrap_or_default();
+        return Err(format!("大模型请求失败 ({}): {}", status, detail));
+    }
+    let resp_json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    let formatted = resp_json["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+    if formatted.trim().is_empty() {
+        return Err("大模型返回为空，请重试".into());
+    }
+    Ok(strip_code_fences(&formatted))
 }
 
 /// 便签原生亚克力（着色跟随主题色；便签透明背景实时毛玻璃用）。

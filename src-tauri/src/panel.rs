@@ -126,6 +126,12 @@ pub fn panel_active(app: tauri::AppHandle) -> Vec<String> {
             labels.push(label.to_string());
         }
     }
+    // 便签窗口（note_*）可见时也算“面板打开”，工具栏据此点亮“便签”图标
+    for (label, w) in app.webview_windows() {
+        if label.starts_with(crate::sticky::NOTE_PREFIX) && w.is_visible().unwrap_or(false) {
+            labels.push(label);
+        }
+    }
     labels
 }
 
@@ -172,18 +178,14 @@ pub fn panel_toggle(app: tauri::AppHandle, label: String) -> Result<(), String> 
         broadcast_panel_visibility(&app, crate::translate::TRANSLATE_PANEL, true);
         return Ok(());
     }
-    // 便签：可见 → 关闭（隐藏）；不可见 → 打开历史/管理窗口
+    // 便签：呼出/收起全部便签窗口（无打开中的便签时打开历史/管理窗口）。
+    // 修复：此前只开关历史窗口——用户关掉便签后再次点击反而收起历史窗口，
+    // 便签无法重新呼出。改为统一管理所有便签窗口（hide 后仍能 show 回来）。
     if label == "sticky" {
-        crate::storage::diag_write("[panel_toggle] sticky -> open_history_window");
-        if let Some(w) = app.get_webview_window(crate::sticky::HISTORY_WINDOW) {
-            if w.is_visible().unwrap_or(false) {
-                let _ = w.hide();
-                broadcast_panel_visibility(&app, crate::sticky::HISTORY_WINDOW, false);
-                return Ok(());
-            }
-        }
-        crate::sticky::open_history_window(app.clone()).ok();
-        broadcast_panel_visibility(&app, crate::sticky::HISTORY_WINDOW, true);
+        crate::storage::diag_write("[panel_toggle] sticky -> toggle_sticky_notes");
+        let shown = crate::sticky::toggle_sticky_notes(app.clone(), app.state())
+            .unwrap_or(false);
+        broadcast_panel_visibility(&app, crate::sticky::HISTORY_WINDOW, shown);
         return Ok(());
     }
     let full = match label.as_str() {
@@ -330,6 +332,9 @@ pub fn hide_focused_panel<R: Runtime>(app: &AppHandle<R>) {
 /// 获取面板窗口；若已被销毁（旧版本/异常状态）则按 tauri.conf.json 配置自动重建。
 /// URL 跟随运行模式：dev 用 devUrl（vite dev server），生产用打包资源。
 /// 重建后重新应用亚克力效果，避免"面板窗口消失后所有入口静默失效"。
+/// 【重建走事件循环空闲时创建】同步命令运行在主线程 WebView2 IPC 回调里，
+/// 直接 build 会重入挂死（同便签窗口卡死问题）；经 defer_to_main_loop 投递，
+/// 主循环空闲时创建。本次调用返回 None，下一次 toggle 时窗口已就绪。
 fn ensure_panel_window<R: Runtime>(
     app: &AppHandle<R>,
     label: &str,
@@ -342,25 +347,20 @@ fn ensure_panel_window<R: Runtime>(
         Some(u) => tauri::WebviewUrl::External(u),
         None => tauri::WebviewUrl::App("index.html".into()),
     };
-    let _ = WebviewWindowBuilder::new(app, label, url)
-        .title(label)
-        .inner_size(640.0, 480.0)
-        .decorations(false)
-        .transparent(false)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .visible(false)
-        .build();
-    let w = app.get_webview_window(label)?;
-    #[cfg(windows)]
-    {
-        let acrylic = app
-            .try_state::<ConfigState>()
-            .map(|s| s.0.lock().unwrap().general.acrylic_enabled)
-            .unwrap_or(true);
-        crate::apply_panel_effects_for(&w, acrylic);
-    }
-    Some(w)
+    let app2 = app.clone();
+    let label2 = label.to_string();
+    crate::sticky::defer_to_main_loop(app2.clone(), move || {
+        let _ = WebviewWindowBuilder::new(&app2, label2.as_str(), url)
+            .title(label2.clone())
+            .inner_size(640.0, 480.0)
+            .decorations(false)
+            .transparent(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .visible(false)
+            .build();
+    });
+    app.get_webview_window(label)
 }
 
 /// 切换面板：可见 → 关闭；不可见 → 呼出（恢复上次位置/居中）+ 可靠置前。

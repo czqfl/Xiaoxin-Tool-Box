@@ -466,3 +466,26 @@
 .settings-page h2 {
   color: var(--accent);
 }
+
+/* 便签背景图预览 */
+.sticky-bg-preview {
+  margin-top: 10px;
+  max-width: 360px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  overflow: hidden;
+  background:
+    repeating-conic-gradient(var(--bg-badge) 0% 25%, transparent 0% 50%) 0 0 / 16px 16px;
+}
+.sticky-bg-preview img {
+  display: block;
+  width: 100%;
+  max-height: 180px;
+  object-fit: cover;
+}
+.sticky-bg-preview span {
+  display: block;
+  padding: 14px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
