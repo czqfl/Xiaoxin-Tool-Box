@@ -474,13 +474,28 @@
   border-radius: var(--radius-md);
   border: 1px solid var(--border-subtle);
   overflow: hidden;
-  background:
-    repeating-conic-gradient(var(--bg-badge) 0% 25%, transparent 0% 50%) 0 0 / 16px 16px;
+  /* 主题色底（非棋盘格）：透明背景图时观感干净，不会被误解为"上下排列" */
+  background: var(--bg-panel);
+  position: relative;
+}
+.sticky-bg-preview::after {
+  /* 角标：说明这是"当前背景"预览 */
+  content: "当前背景";
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 1px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  background: rgba(var(--bg-panel-rgb), 0.85);
+  border: 1px solid var(--border-subtle);
 }
 .sticky-bg-preview img {
   display: block;
   width: 100%;
-  max-height: 180px;
+  max-height: 160px;
   object-fit: cover;
 }
 .sticky-bg-preview span {

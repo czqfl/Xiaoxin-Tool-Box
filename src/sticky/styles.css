@@ -2237,3 +2237,81 @@ body,
 
 
 
+
+/* ===== 历史窗口视觉增强（工具箱集成版：非透明窗口观感打磨） ===== */
+.history-window .titlebar {
+  background: color-mix(in srgb, var(--bg-bar) 92%, transparent);
+  border-bottom: 1px solid var(--border);
+}
+.history-window .titlebar-left .dot {
+  color: var(--accent, #4c9eff);
+  font-size: 9px;
+  text-shadow: 0 0 6px currentColor;
+}
+.history-window .titlebar-right .icon-btn:hover {
+  background: color-mix(in srgb, var(--bg-hover) 80%, transparent);
+  color: var(--text);
+}
+.history-list {
+  padding: 14px;
+  gap: 10px;
+}
+/* 卡片：实色底 + 细边框 + 柔和阴影，hover 轻微抬升 */
+.history-card {
+  background: var(--bg-bar);
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 2px 10px rgba(0, 0, 0, 0.03);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease,
+    border-color 0.12s ease;
+}
+.history-card:hover {
+  background: var(--bg-hover);
+  border-color: color-mix(in srgb, var(--accent, #4c9eff) 35%, var(--border));
+  transform: translateY(-1px);
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.06), 0 6px 18px rgba(0, 0, 0, 0.05);
+}
+/* 有背景图/透明时仍是玻璃卡片（透出背景） */
+.history-window.has-bg .history-card,
+.history-window.bg-transparent .history-card {
+  border-color: color-mix(in srgb, var(--border) 50%, transparent);
+  box-shadow: none;
+}
+/* 打开中的便签：品牌色左边条 + 标签 */
+.history-card.open-note {
+  border-left: 3px solid var(--accent, #4c9eff);
+}
+.card-title {
+  letter-spacing: 0.1px;
+}
+.card-time {
+  font-size: 11px;
+  color: var(--text-hint);
+}
+.card-status {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 2px;
+  padding: 1px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.6;
+  border-radius: 8px;
+  color: var(--accent, #4c9eff);
+  background: color-mix(in srgb, var(--accent, #4c9eff) 14%, transparent);
+}
+.card-delete {
+  color: var(--text-hint);
+  transition: color 0.12s ease, background 0.12s ease;
+}
+.card-delete:hover {
+  color: #e5484d;
+  background: color-mix(in srgb, #e5484d 12%, transparent);
+}
+/* 空状态/加载提示 */
+.history-list .empty-tip {
+  color: var(--text-hint);
+  font-size: 12px;
+  text-align: center;
+  padding: 40px 12px;
+}

@@ -528,19 +528,25 @@ pub fn toggle_sticky_notes(
         }
         return Ok(false);
     }
-    // 全部呼出；无任何打开中的便签窗口 → 打开历史/管理窗口
-    if note_wins.is_empty() && hist.is_none() {
-        open_history_window(app.clone()).ok();
+    // 呼出：优先便签窗口；没有便签窗口 → 显示/创建历史窗口。
+    // （修复：此前 else 分支在"无便签窗口 + 历史窗口隐藏"时什么都不做——
+    // 表现为切换主题后便签按钮点了没反应）
+    if note_wins.is_empty() {
+        match &hist {
+            Some(h) => {
+                let _ = h.show();
+                let _ = h.unminimize();
+                let _ = h.set_focus();
+            }
+            None => {
+                open_history_window(app.clone()).ok();
+            }
+        }
     } else {
         for w in &note_wins {
             let _ = w.show();
             let _ = w.unminimize();
             let _ = w.set_focus();
-        }
-        if hist_visible {
-            if let Some(h) = &hist {
-                let _ = h.show();
-            }
         }
     }
     Ok(true)
