@@ -1722,22 +1722,15 @@ export function mountNoteApp(noteId: string, preset = "") {
       // 下 setSize 触发 WebView2 重建崩溃
       appWindow.setResizable(true).catch(() => {});
       appWindow.setShadow(true).catch(() => {});
+      // 【关键】起始尺寸/位置必须同步读取（window.innerWidth/screenX 为逻辑像素，
+      // 与 LogicalSize/LogicalPosition 一致）：此前用异步 outerSize()/outerPosition()，
+      // 用户开始拖动时值尚未就绪（=0），宽度被钳到最小值 → 表现为"拖不动"。
       resStartX = e.screenX;
       resStartY = e.screenY;
-      void appWindow
-        .outerPosition()
-        .then((p) => {
-          resStartPX = p.x;
-          resStartPY = p.y;
-        })
-        .catch(() => {});
-      void appWindow
-        .outerSize()
-        .then((s) => {
-          resStartW = s.width;
-          resStartH = s.height;
-        })
-        .catch(() => {});
+      resStartW = window.innerWidth;
+      resStartH = window.innerHeight;
+      resStartPX = window.screenX;
+      resStartPY = window.screenY;
       try {
         hot.setPointerCapture(e.pointerId);
       } catch {
@@ -1746,7 +1739,7 @@ export function mountNoteApp(noteId: string, preset = "") {
       document.body.style.userSelect = "none";
       setCursor();
     });
-    hot.addEventListener("pointermove", (e) => {
+    const onMove = (e: PointerEvent) => {
       if (!winResizing) return;
       const dx = e.screenX - resStartX;
       const dy = e.screenY - resStartY;
@@ -1768,8 +1761,8 @@ export function mountNoteApp(noteId: string, preset = "") {
       if (px !== resStartPX || py !== resStartPY) {
         appWindow.setPosition(new LogicalPosition(px, py)).catch(() => {});
       }
-    });
-    const endWinResize = (e: PointerEvent) => {
+    };
+    const onEnd = (e: PointerEvent) => {
       if (!winResizing) return;
       winResizing = null;
       // 缩放结束恢复：静止状态无投影、无系统缩放
@@ -1783,8 +1776,14 @@ export function mountNoteApp(noteId: string, preset = "") {
       document.body.style.userSelect = "";
       document.body.style.cursor = "";
     };
-    hot.addEventListener("pointerup", endWinResize);
-    hot.addEventListener("pointercancel", endWinResize);
+    // 同时绑 hot 与 document：指针捕获下事件重定向到 hot；
+    // 捕获失败的环境（部分 WebView2 配置）也能通过 document 级监听工作
+    hot.addEventListener("pointermove", onMove);
+    hot.addEventListener("pointerup", onEnd);
+    hot.addEventListener("pointercancel", onEnd);
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onEnd);
+    document.addEventListener("pointercancel", onEnd);
   }
 
   // ---- 按钮事件 ----
