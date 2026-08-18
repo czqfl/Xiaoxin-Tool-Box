@@ -241,7 +241,11 @@ export function Toolbar() {
           await invoke("toolbar_set_click_through", { on: shouldThrough });
         }
       } catch {
-        /* 后端未就绪时忽略 */
+        // 后端异常时强制恢复交互（工具栏可用优先，绝不"穿透死"）
+        if (last) {
+          last = false;
+          await invoke("toolbar_set_click_through", { on: false }).catch(() => {});
+        }
       }
     };
     void probe();

@@ -486,7 +486,10 @@ pub fn toolbar_set_click_through(
 }
 
 /// 探测光标是否位于工具栏窗口矩形内，返回"是否应该穿透"（true = 光标在窗外）。
-/// 前端每 ~200ms 轮询；坐标统一换算逻辑像素（cursor_position 是物理像素）。
+/// 前端每 ~200ms 轮询。
+/// 【坐标单位】cursor_position()、outer_position()、outer_size() 均为物理像素
+/// （Tauri 2 WebviewWindow 方法族），直接比较；此前误除以 scaleFactor 导致
+/// 矩形缩小、光标在窗口上也被判"在窗外"，穿透永不解除（工具栏失效）。
 #[tauri::command]
 pub fn toolbar_probe_click_through(window: tauri::WebviewWindow) -> Result<bool, String> {
     let cur = window
@@ -499,14 +502,8 @@ pub fn toolbar_probe_click_through(window: tauri::WebviewWindow) -> Result<bool,
     let Ok(size) = window.outer_size() else {
         return Ok(false);
     };
-    let Ok(scale) = window.scale_factor() else {
-        return Ok(false);
-    };
-    if scale <= 0.0 {
-        return Ok(false);
-    }
-    let px = cur.x as f64 / scale;
-    let py = cur.y as f64 / scale;
+    let px = cur.x as f64;
+    let py = cur.y as f64;
     let inside = px >= pos.x as f64
         && px <= pos.x as f64 + size.width as f64
         && py >= pos.y as f64
