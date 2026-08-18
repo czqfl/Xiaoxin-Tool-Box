@@ -1118,20 +1118,20 @@ pub fn close_window(window: tauri::WebviewWindow) -> Result<(), String> {
             r.map_err(|e| e.to_string())
         }
         _ => {
-            // 便签窗口关闭 = 隐藏常驻（不销毁）：再次呼出秒开（销毁重建要
-            // 重新加载前端，用户反馈"打开慢/卡顿"）。隐藏态再次呼出由前端
-            // summoned 的 blanked 防御处理（clip/mask 残留自动恢复），
-            // 不再出现"只能呼出一次"。同步"打开中"集合 + 通知历史 + 广播。
+            // 便签窗口关闭 = 销毁（内容实时自动保存，不丢数据）。
+            // 已尝试"隐藏常驻"（秒开），但再次呼出的 summoned 状态机仍会
+            // 偶发卡住（"便签只能打开一次"）；销毁重建每次全新加载，保证
+            // 可反复打开。位置/大小记忆由 create/ensure 读存档实现。
             if let Some(paths) = app.try_state::<AppPaths>() {
                 let id = label.strip_prefix(NOTE_PREFIX).unwrap_or(&label).to_string();
                 if id != MAIN_NOTE_ID {
                     mark_note_closed_inner(&paths, &id);
                 }
             }
-            let _ = window.hide();
+            let r = window.close();
             let _ = app.emit("sticky://open-changed", ());
             crate::panel::broadcast_panel_visibility(&app, &label, false);
-            Ok(())
+            r.map_err(|e| e.to_string())
         }
     }
 }
