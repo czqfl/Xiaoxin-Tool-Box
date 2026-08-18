@@ -867,6 +867,9 @@ pub fn ensure_note_window(app: &AppHandle, id: &str) {
 pub fn open_note_window(app: AppHandle, paths: State<'_, AppPaths>, id: String) -> Result<(), String> {
     crate::storage::diag_write(&format!("[sticky] open_note_window called: id={id}"));
     mark_note_open_inner(&paths, &id);
+    // 立即广播"打开中"：历史列表实时更新该便签状态（此前 open_note_window
+    // 只调无广播的 inner，若窗口需新建（ensure 创建分支）则历史收不到事件）
+    let _ = app.emit("sticky://open-changed", ());
     ensure_note_window(&app, &id);
     if let Some(win) = app.get_webview_window(&window_label(&id)) {
         let _ = win.emit("summoned", ());
@@ -951,6 +954,23 @@ pub fn create_note_window(
     id: String,
 ) -> Result<(), String> {
     mark_note_open_inner(&paths, &id);
+    // 【预建空便签存档】此前仅打开窗口、不写文件——历史列表读文件系统，
+    // 新建的便签要等首次保存才出现（用户反馈"新建便签历史里没新增"）。
+    // 立即落盘空模板：历史列表马上能看到新条目；便签前端加载时读到此文件
+    // 即为空便签，行为一致。
+    let path = note_path(&paths, &id);
+    if !path.exists() {
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let note = NoteData::default();
+        let _ = std::fs::write(
+            &path,
+            serde_json::to_string_pretty(&note).unwrap_or_else(|_| "{}".into()),
+        );
+    }
+    // 立即广播：历史列表刷新（新条目 + 打开中）
+    let _ = app.emit("sticky://open-changed", ());
     let pos = window.outer_position().unwrap_or_default();
     let x = pos.x as f64 + 30.0;
     let y = pos.y as f64 + 30.0;
