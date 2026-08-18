@@ -29,7 +29,7 @@ import {
   PhysicalSize,
   currentMonitor,
 } from "@tauri-apps/api/window";
-import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
+import { LogicalSize } from "@tauri-apps/api/dpi";
 import { invoke } from "@tauri-apps/api/core";
 import {
   getSettings,
@@ -111,15 +111,6 @@ export function mountNoteApp(noteId: string, preset = "") {
       </div>
       <div class="cc-panel" id="tool-fg-panel" hidden></div>
       <div class="cc-panel" id="tool-bg-panel" hidden></div>
-      <!-- 全方向缩放手柄：四边 + 四角（透明窗口用程序化 resize 防白屏） -->
-      <div class="resize-hot resize-nw" data-dir="nw" title="调整大小"></div>
-      <div class="resize-hot resize-n" data-dir="n" title="调整大小"></div>
-      <div class="resize-hot resize-ne" data-dir="ne" title="调整大小"></div>
-      <div class="resize-hot resize-w" data-dir="w" title="调整大小"></div>
-      <div class="resize-hot resize-e" data-dir="e" title="调整大小"></div>
-      <div class="resize-hot resize-sw" data-dir="sw" title="调整大小"></div>
-      <div class="resize-hot resize-s" data-dir="s" title="调整大小"></div>
-      <div class="resize-hot resize-se" data-dir="se" title="调整大小"></div>
     </div>
   `;
 
@@ -151,8 +142,6 @@ export function mountNoteApp(noteId: string, preset = "") {
   const btnMdSplit = document.getElementById("btn-md-split")!;
   const btnFmt = document.getElementById("btn-fmt") as HTMLButtonElement;
   const noteWindow = document.querySelector(".note-window") as HTMLElement;
-  /** 全方向缩放手柄（8 个方向热点） */
-  const resizeHots = Array.from(document.querySelectorAll<HTMLElement>(".resize-hot"));
 
   let current: NoteData = {
     content: "",
@@ -1592,8 +1581,8 @@ export function mountNoteApp(noteId: string, preset = "") {
       const max = isMaximizedState || (await appWindow.isMaximized().catch(() => false));
       btnMax.innerHTML = max ? ICON_RESTORE : ICON_MAX;
       btnMax.title = max ? "还原窗口" : "最大化";
-      // 最大化时禁用缩放手柄（此时无法手动改尺寸）
-      for (const hot of resizeHots) hot.style.display = max ? "none" : "";
+      // 最大化时无系统缩放边框可拖
+      btnMax.title = max ? "还原窗口" : "最大化";
     } catch (e) {
       console.error("读取最大化状态失败:", e);
     }
@@ -1686,104 +1675,6 @@ export function mountNoteApp(noteId: string, preset = "") {
       run(() => changeSelectionFontSize(-2));
     }
   });
-
-  // ---- 全方向缩放手柄（四边 + 四角，8 个方向热点）----
-  // 透明窗口用程序化 setSize/setPosition：不走系统 resize 边框，无 WebView2
-  // 重建白屏。用屏幕坐标计算（窗口移动后 clientX 会变，screenX 稳定）。
-  const MIN_W = 220;
-  const MIN_H = 150;
-  let winResizing: string | null = null; // 当前拖动方向 dir
-  let resStartX = 0;
-  let resStartY = 0;
-  let resStartW = 0;
-  let resStartH = 0;
-  let resStartPX = 0;
-  let resStartPY = 0;
-
-  for (const hot of resizeHots) {
-    const dir = hot.dataset.dir as string;
-    const setCursor = () => {
-      // 按方向设置光标：对角 nwse/nesw，边 ns/ew
-      document.body.style.cursor =
-        dir.includes("w") || dir.includes("e")
-          ? dir.includes("n") || dir.includes("s")
-            ? dir === "nw" || dir === "se"
-              ? "nwse-resize"
-              : "nesw-resize"
-            : "ew-resize"
-          : "ns-resize";
-    };
-    hot.addEventListener("pointerdown", (e) => {
-      if (e.button !== 0) return;
-      e.preventDefault();
-      e.stopPropagation();
-      winResizing = dir;
-      // 缩放期间临时开阴影（复刻稳定态），避免 transparent+shadow(false) 下
-      // setSize 触发 WebView2 重建崩溃；resizable 保持 true（创建时即开启，
-      // setSize 始终可用——动态切换是异步的，会导致刚拖动时 setSize 无效）
-      appWindow.setShadow(true).catch(() => {});
-      // 【关键】起始尺寸/位置必须同步读取（window.innerWidth/screenX 为逻辑像素，
-      // 与 LogicalSize/LogicalPosition 一致）：此前用异步 outerSize()/outerPosition()，
-      // 用户开始拖动时值尚未就绪（=0），宽度被钳到最小值 → 表现为"拖不动"。
-      resStartX = e.screenX;
-      resStartY = e.screenY;
-      resStartW = window.innerWidth;
-      resStartH = window.innerHeight;
-      resStartPX = window.screenX;
-      resStartPY = window.screenY;
-      try {
-        hot.setPointerCapture(e.pointerId);
-      } catch {
-        /* 部分环境不支持指针捕获，退化为 document 级监听仍可工作 */
-      }
-      document.body.style.userSelect = "none";
-      setCursor();
-    });
-    const onMove = (e: PointerEvent) => {
-      if (!winResizing) return;
-      const dx = e.screenX - resStartX;
-      const dy = e.screenY - resStartY;
-      let w = resStartW;
-      let h = resStartH;
-      let px = resStartPX;
-      let py = resStartPY;
-      if (dir.includes("e")) w = Math.max(MIN_W, resStartW + dx);
-      if (dir.includes("s")) h = Math.max(MIN_H, resStartH + dy);
-      if (dir.includes("w")) {
-        w = Math.max(MIN_W, resStartW - dx);
-        px = resStartPX + (resStartW - w);
-      }
-      if (dir.includes("n")) {
-        h = Math.max(MIN_H, resStartH - dy);
-        py = resStartPY + (resStartH - h);
-      }
-      appWindow.setSize(new LogicalSize(w, h)).catch(() => {});
-      if (px !== resStartPX || py !== resStartPY) {
-        appWindow.setPosition(new LogicalPosition(px, py)).catch(() => {});
-      }
-    };
-    const onEnd = (e: PointerEvent) => {
-      if (!winResizing) return;
-      winResizing = null;
-      // 缩放结束恢复：静止状态无投影
-      appWindow.setShadow(false).catch(() => {});
-      try {
-        hot.releasePointerCapture(e.pointerId);
-      } catch {
-        /* 同上 */
-      }
-      document.body.style.userSelect = "";
-      document.body.style.cursor = "";
-    };
-    // 同时绑 hot 与 document：指针捕获下事件重定向到 hot；
-    // 捕获失败的环境（部分 WebView2 配置）也能通过 document 级监听工作
-    hot.addEventListener("pointermove", onMove);
-    hot.addEventListener("pointerup", onEnd);
-    hot.addEventListener("pointercancel", onEnd);
-    document.addEventListener("pointermove", onMove);
-    document.addEventListener("pointerup", onEnd);
-    document.addEventListener("pointercancel", onEnd);
-  }
 
   // ---- 按钮事件 ----
 
