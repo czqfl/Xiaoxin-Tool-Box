@@ -1,15 +1,30 @@
 /** 全局入口：按窗口 label 分流——
  *  便签相关窗口（note_* / sticky-*）挂载 vanilla 便签应用（样式完全隔离），
- *  其余窗口挂载工具箱 React 应用。 */
+ *  其余窗口挂载工具箱 React 应用。
+ *  工具箱设置页"便签设置"菜单用 iframe 嵌入原版便签设置面板：
+ *  iframe 加载 index.html?view=sticky-settings（label 是父窗口的 "settings"，
+ *  故 URL 参数优先于 label 判断）。 */
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 async function bootstrap() {
+  const params = new URLSearchParams(window.location.search);
+  // 便签设置面板嵌入模式（iframe）：加载原版设置面板（settings.ts，
+  // 内部按 label=settings 走 standalone 全屏铺满模式），样式仅作用于 iframe
+  if (params.get("view") === "sticky-settings") {
+    document.documentElement.dataset.window = "sticky";
+    await import("./sticky/styles.css");
+    const { openSettingsModal } = await import("./sticky/settings");
+    openSettingsModal().catch((e) => console.error("便签设置面板加载失败:", e));
+    return;
+  }
+
   const label = getCurrentWindow().label;
   const isSticky =
     label.startsWith("note_") ||
     label === "sticky-history" ||
     label === "sticky-particles" ||
-    label === "sticky-imageviewer";
+    label === "sticky-imageviewer" ||
+    label === "sticky-settings";
 
   // 便签窗口：动态加载便签样式与应用（不注入工具箱 base.css，避免样式污染）
   if (isSticky) {

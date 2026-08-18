@@ -467,40 +467,19 @@
   color: var(--accent);
 }
 
-/* 便签背景图预览 */
-.sticky-bg-preview {
-  margin-top: 10px;
-  max-width: 360px;
-  border-radius: var(--radius-md);
+/* 便签设置面板（iframe 嵌入原版面板） */
+.sticky-settings-frame-wrap {
+  margin-top: 4px;
   border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
   overflow: hidden;
-  /* 主题色底（非棋盘格）：透明背景图时观感干净，不会被误解为"上下排列" */
+  height: calc(100vh - 240px);
+  min-height: 460px;
   background: var(--bg-panel);
-  position: relative;
 }
-.sticky-bg-preview::after {
-  /* 角标：说明这是"当前背景"预览 */
-  content: "当前背景";
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  padding: 1px 8px;
-  font-size: 10px;
-  font-weight: 600;
-  border-radius: 8px;
-  color: var(--text-secondary);
-  background: rgba(var(--bg-panel-rgb), 0.85);
-  border: 1px solid var(--border-subtle);
-}
-.sticky-bg-preview img {
+.sticky-settings-frame-wrap iframe {
   display: block;
   width: 100%;
-  max-height: 160px;
-  object-fit: cover;
-}
-.sticky-bg-preview span {
-  display: block;
-  padding: 14px;
-  font-size: 12px;
-  color: var(--text-tertiary);
+  height: 100%;
+  border: none;
 }

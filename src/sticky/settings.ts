@@ -332,14 +332,21 @@ export async function openSettingsModal(): Promise<void> {
   const existing = document.getElementById("settings-overlay");
   if (existing) existing.remove();
 
-  // 独立“设置”窗口：面板铺满窗口、无暗色遮罩（窗口自带系统标题栏与关闭按钮）
+  // 独立"设置"窗口：面板铺满窗口、无暗色遮罩（窗口自带系统标题栏与关闭按钮）
   let standalone = false;
   try {
     const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    standalone = getCurrentWindow().label === "settings";
+    const label = getCurrentWindow().label;
+    // "settings" = 原版便签设置窗口 label；"sticky-settings" = 工具箱集成版便签设置窗口
+    standalone = label === "settings" || label === "sticky-settings";
   } catch {
     /* 忽略 */
   }
+  // 工具箱设置页 iframe 嵌入模式（index.html?view=sticky-settings）：
+  // 面板铺满 iframe（standalone），但隐藏关闭按钮（切换菜单即重新加载面板），
+  // Esc 也不关闭（避免 iframe 内面板被关掉后空白）
+  const EMBED_VIEW =
+    new URLSearchParams(window.location.search).get("view") === "sticky-settings";
 
   // 立即挂载浮层骨架
   const overlay = document.createElement("div");
@@ -397,7 +404,7 @@ export async function openSettingsModal(): Promise<void> {
     <div class="settings-modal settings-layout">
       <div class="settings-header">
         <span class="settings-title">设置</span>
-        <button class="icon-btn close" id="set-close" title="关闭">\u2715</button>
+        ${EMBED_VIEW ? "" : `<button class="icon-btn close" id="set-close" title="关闭">\u2715</button>`}
       </div>
       <div class="settings-body settings-layout-body">
         <div class="settings-content" id="settings-content">
@@ -1141,14 +1148,20 @@ export async function openSettingsModal(): Promise<void> {
       console.error("关闭设置窗口失败:", e);
     }
   }
-  // Esc 关闭设置面板：若自定义下拉正打开则先关下拉，否则关闭面板
+  // Esc 关闭设置面板：若自定义下拉正打开则先关下拉，否则关闭面板。
+  // 嵌入模式（iframe）下不绑定——避免面板被关掉后 iframe 内空白
   const onEscKey = (e: KeyboardEvent) => {
     if (e.key !== "Escape") return;
     if (openCs) { openCs.close(); return; }
     close();
   };
-  document.addEventListener("keydown", onEscKey);
-  (overlay.querySelector("#set-close") as HTMLButtonElement).addEventListener("click", close);
+  if (!EMBED_VIEW) {
+    document.addEventListener("keydown", onEscKey);
+    (overlay.querySelector("#set-close") as HTMLButtonElement | null)?.addEventListener(
+      "click",
+      close
+    );
+  }
   // 独立“设置”窗口里整窗就是面板本体，不存在“点遮罩关闭”的概念。
   // 旧写法按 e.target === overlay 判断，会把窗口四周的空白边缘（16px padding 区）
   // 误当成遮罩点击，导致“抓窗口边缘/标题栏想拖动”时面板直接关闭。
