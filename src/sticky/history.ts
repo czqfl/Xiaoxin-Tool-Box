@@ -201,6 +201,14 @@ export function mountHistoryApp() {
   }
 
   render();
+  // 兜底同步：历史窗口每次获得焦点时刷新列表——即使 open-changed 事件
+  // 偶发丢失（如便签状态变化发生在窗口隐藏期间），聚焦时也能看到最新
+  // 打开/关闭状态与新增条目。
+  getCurrentWindow()
+    .onFocusChanged(({ payload: focused }) => {
+      if (focused) void render();
+    })
+    .catch((e) => console.error("监听窗口焦点失败:", e));
 }
 
 function escapeHtml(text: string): string {

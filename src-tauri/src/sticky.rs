@@ -978,6 +978,26 @@ pub fn create_note_window(
     let app2 = app.clone();
     let id2 = id.clone();
     defer_to_main_loop(app2.clone(), move || {
+        // 读取存档：新便签也要记住自己的位置/大小（原版特性——每次在
+        // 上次出现的位置打开）；预写的空存档无 pos 时回退"从当前窗口偏移"
+        let saved: Option<NoteData> = {
+            let p = note_path(&app2.state::<AppPaths>(), &id2);
+            if p.exists() {
+                std::fs::read_to_string(&p)
+                    .ok()
+                    .and_then(|s| serde_json::from_str(&s).ok())
+            } else {
+                None
+            }
+        };
+        let (w, h) = saved
+            .as_ref()
+            .map(|n| (n.width.max(220) as f64, n.height.max(150) as f64))
+            .unwrap_or((420.0, 440.0));
+        let (px, py) = saved
+            .as_ref()
+            .and_then(|n| Some((n.pos_x?, n.pos_y?)))
+            .unwrap_or((x, y));
         let url = format!("index.html?noteId={id2}");
         let win = WebviewWindowBuilder::new(
             &app2,
@@ -989,9 +1009,9 @@ pub fn create_note_window(
         .transparent(true)
         .resizable(true)
         .always_on_top(true)
-        .inner_size(420.0, 440.0)
+        .inner_size(w, h)
         .min_inner_size(220.0, 150.0)
-        .position(x, y)
+        .position(px, py)
         .visible(false)
         .shadow(false)
         .skip_taskbar(true)
@@ -1098,20 +1118,20 @@ pub fn close_window(window: tauri::WebviewWindow) -> Result<(), String> {
             r.map_err(|e| e.to_string())
         }
         _ => {
-            // 便签窗口关闭 = 销毁（内容实时自动保存，不丢数据）。
-            // 修复：此前"隐藏常驻"，再次呼出走隐藏态粒子动画状态机，
-            // 用户反馈"便签只能呼出一次、再次点击卡住"——销毁重建最干净，
-            // 每次打开都是全新窗口。同步"打开中"集合 + 通知历史刷新 + 广播。
+            // 便签窗口关闭 = 隐藏常驻（不销毁）：再次呼出秒开（销毁重建要
+            // 重新加载前端，用户反馈"打开慢/卡顿"）。隐藏态再次呼出由前端
+            // summoned 的 blanked 防御处理（clip/mask 残留自动恢复），
+            // 不再出现"只能呼出一次"。同步"打开中"集合 + 通知历史 + 广播。
             if let Some(paths) = app.try_state::<AppPaths>() {
                 let id = label.strip_prefix(NOTE_PREFIX).unwrap_or(&label).to_string();
                 if id != MAIN_NOTE_ID {
                     mark_note_closed_inner(&paths, &id);
                 }
             }
-            let r = window.close();
+            let _ = window.hide();
             let _ = app.emit("sticky://open-changed", ());
             crate::panel::broadcast_panel_visibility(&app, &label, false);
-            r.map_err(|e| e.to_string())
+            Ok(())
         }
     }
 }
