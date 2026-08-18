@@ -2315,3 +2315,21 @@ body,
   text-align: center;
   padding: 40px 12px;
 }
+
+/* ---- 历史便签窗口：新建按钮（品牌蓝实底，显眼区别于普通图标按钮） ---- */
+.history-window .new-note {
+  width: auto;
+  padding: 0 12px;
+  margin-right: 2px;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+.history-window .new-note:hover {
+  filter: brightness(1.1);
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}

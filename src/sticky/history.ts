@@ -1,4 +1,4 @@
-import { listNotes, deleteNote, openNoteWindow, closeWindow, startDragging, getOpenNotes, setAcrylic } from "./api";
+import { listNotes, deleteNote, openNoteWindow, closeWindow, startDragging, getOpenNotes, setAcrylic, newNoteId, createNoteWindow } from "./api";
 import { getSettings } from "./settings";
 import { applyPanelBackground } from "./panel-bg";
 import { applyGlassBlur } from "./glass";
@@ -17,6 +17,7 @@ export function mountHistoryApp() {
           <span class="title-text">历史便签</span>
         </div>
         <div class="titlebar-right">
+          <button class="icon-btn new-note" id="btn-new" title="新建便签">\u2795</button>
           <button class="icon-btn close" id="btn-close" title="关闭">\u2715</button>
         </div>
       </div>
@@ -32,8 +33,19 @@ export function mountHistoryApp() {
   const listEl = document.getElementById("history-list")!;
   const titlebar = document.querySelector(".titlebar")!;
   const btnClose = document.getElementById("btn-close")!;
+  const btnNew = document.getElementById("btn-new")!;
   const appWindow = getCurrentWindow();
   const winResizer = document.getElementById("win-resizer") as HTMLElement;
+
+  // 新建便签：生成新 id 并打开便签窗口（与便签页"＋"按钮同逻辑）
+  btnNew.addEventListener("click", async () => {
+    try {
+      const id = await newNoteId();
+      await createNoteWindow(id);
+    } catch (err) {
+      console.error("新建便签失败:", err);
+    }
+  });
 
   // 套用全局外观主题（浅色 / 深色），使历史窗口与便签配色一致。
   getSettings()
