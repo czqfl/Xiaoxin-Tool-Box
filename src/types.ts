@@ -115,6 +115,10 @@ export interface ToolbarConfig {
   enabled: boolean;
   /** 工具栏上显示的工具（顺序即排列顺序） */
   tools: ToolKey[];
+  /** 排列方向：水平横条 / 竖直竖条 */
+  orientation: "horizontal" | "vertical";
+  /** 贴边自动收起：工具栏贴到屏幕边缘后，鼠标离开自动滑出（靠近边缘自动弹出） */
+  auto_hide: boolean;
 }
 
 export interface GeneralConfig {

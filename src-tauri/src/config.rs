@@ -155,9 +155,27 @@ impl Default for PortConfig {
 #[serde(default)]
 pub struct ToolbarConfig {
     /// 是否启用（显示）悬浮工具栏
+    #[serde(default)]
     pub enabled: bool,
     /// 工具栏上显示的工具图标（顺序即排列顺序）
+    #[serde(default)]
     pub tools: Vec<String>,
+    /// 排列方向："horizontal" 水平横条 / "vertical" 竖直竖条
+    #[serde(default = "default_toolbar_orientation")]
+    pub orientation: String,
+    /// 贴边自动收起：贴到屏幕边缘后鼠标离开自动滑出、靠近边缘自动弹出
+    #[serde(default = "default_true")]
+    pub auto_hide: bool,
+}
+
+/// 工具栏排列方向默认值：水平
+pub fn default_toolbar_orientation() -> String {
+    "horizontal".into()
+}
+
+/// 布尔默认值 true（serde 字段级 default 用）
+pub fn default_true() -> bool {
+    true
 }
 
 impl Default for ToolbarConfig {
@@ -172,6 +190,8 @@ impl Default for ToolbarConfig {
                 "port".into(),
                 "settings".into(),
             ],
+            orientation: default_toolbar_orientation(),
+            auto_hide: default_true(),
         }
     }
 }

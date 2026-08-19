@@ -12,16 +12,17 @@ export function applyTheme(mode: ThemeMode) {
   // 系统标题栏（设置窗口有原生边框）颜色跟随应用主题——否则浅色主题下
   // 窗口顶部仍是 Windows 系统深色标题栏（黑色一条）。无边框窗口调用无副作用。
   // system 模式传 null（Tauri 语义：跟随系统默认）；mint/skyblue 属浅色系 → light。
-  // try/catch 兜底：setTheme 若有同步异常也不能中断配置保存链路
-  // （否则设置页"所有配置保存无效"）。
+  // 【注意】此调用依赖 capabilities 里的 core:window:allow-set-theme 权限，
+  // 缺失时会被权限系统拒绝（曾导致设置窗口标题栏切主题不变色）。
+  // catch 保留日志便于排查，但不中断配置保存链路。
   try {
     const windowTheme =
       mode === "mint" || mode === "skyblue" ? "light" : mode === "system" ? null : mode;
     getCurrentWindow()
       .setTheme(windowTheme)
-      .catch(() => undefined);
-  } catch {
-    /* 窗口不支持 setTheme 时忽略 */
+      .catch((e) => console.warn("[theme] setTheme 失败:", e));
+  } catch (e) {
+    console.warn("[theme] setTheme 异常:", e);
   }
 }
 

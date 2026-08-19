@@ -5,8 +5,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useConfigStore } from "../stores/configStore";
 import { setToolbarVisible } from "../core/tauri";
-import type { ToolKey } from "../types";
-import { SettingGroup, SettingRow, Switch } from "./components";
+import type { ToolKey, ToolbarConfig } from "../types";
+import { Segmented, SettingGroup, SettingRow, Switch } from "./components";
 import { TOOL_KEYS, TOOLS } from "../modules/toolbar/Toolbar";
 
 const FLIP_MS = 160;
@@ -31,6 +31,11 @@ export function ToolbarPage() {
   const toggleEnabled = (on: boolean) => {
     void update({ ...config, toolbar: { ...config.toolbar, enabled: on } });
     void setToolbarVisible(on);
+  };
+
+  /** 局部更新工具栏配置（排列方向/自动收起等） */
+  const patchToolbar = (patch: Partial<ToolbarConfig>) => {
+    void update({ ...config, toolbar: { ...config.toolbar, ...patch } });
   };
 
   const toggleTool = (key: ToolKey) => {
@@ -139,6 +144,27 @@ export function ToolbarPage() {
           desc="开启后屏幕右侧显示常驻工具条（也可从托盘菜单随时切换显示）"
         >
           <Switch checked={config.toolbar.enabled} onChange={toggleEnabled} />
+        </SettingRow>
+
+        <SettingRow title="排列方向" desc="水平横条或竖直竖条，切换后窗口自动调整尺寸">
+          <Segmented
+            value={config.toolbar.orientation}
+            options={[
+              { value: "horizontal", label: "水平" },
+              { value: "vertical", label: "竖直" },
+            ]}
+            onChange={(v) => patchToolbar({ orientation: v })}
+          />
+        </SettingRow>
+
+        <SettingRow
+          title="贴边自动收起"
+          desc="工具栏拖到屏幕边缘后，鼠标离开自动滑出屏幕（仅露一小条），鼠标靠近边缘自动弹出"
+        >
+          <Switch
+            checked={config.toolbar.auto_hide}
+            onChange={(on) => patchToolbar({ auto_hide: on })}
+          />
         </SettingRow>
       </SettingGroup>
 

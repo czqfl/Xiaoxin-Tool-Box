@@ -524,3 +524,64 @@ pub fn toolbar_probe_click_through(window: tauri::WebviewWindow) -> Result<bool,
         && py <= pos.y as f64 + size.height as f64;
     Ok(!inside)
 }
+
+/// 工具栏几何快照：光标 / 窗口位置尺寸 / 所在显示器——供前端实现
+/// 「贴边自动收起、靠近自动弹出」（与穿透探测同一轮询内完成，不另加 IPC）。
+/// 【坐标单位】全部物理像素（与 cursor_position / outer_position 一致）。
+#[derive(serde::Serialize)]
+pub struct ToolbarGeometry {
+    pub cursor_x: i32,
+    pub cursor_y: i32,
+    pub win_x: i32,
+    pub win_y: i32,
+    pub win_w: u32,
+    pub win_h: u32,
+    /// 工具栏所在显示器（判断"贴边"的基准矩形）
+    pub mon_x: i32,
+    pub mon_y: i32,
+    pub mon_w: u32,
+    pub mon_h: u32,
+}
+
+#[tauri::command]
+pub fn toolbar_geometry(window: tauri::WebviewWindow) -> Result<ToolbarGeometry, String> {
+    let app = window.app_handle();
+    let cursor = app.cursor_position().map_err(|e| e.to_string())?;
+    let pos = window.outer_position().map_err(|e| e.to_string())?;
+    let size = window.outer_size().map_err(|e| e.to_string())?;
+    // 工具栏所在显示器：窗口中心落在哪个显示器就用哪个（多屏贴边以本屏为基准）
+    let win_cx = pos.x as i64 + size.width as i64 / 2;
+    let win_cy = pos.y as i64 + size.height as i64 / 2;
+    let mon = app
+        .available_monitors()
+        .ok()
+        .and_then(|ms| {
+            ms.into_iter().find(|m| {
+                let p = m.position();
+                let s = m.size();
+                win_cx >= p.x as i64
+                    && win_cx < p.x as i64 + s.width as i64
+                    && win_cy >= p.y as i64
+                    && win_cy < p.y as i64 + s.height as i64
+            })
+        })
+        .map(|m| {
+            let p = m.position();
+            let s = m.size();
+            (p.x, p.y, s.width, s.height)
+        })
+        // 兜底：找不到显示器时用窗口自身几何当基准（单屏正常，多屏极端情况退化为不收起）
+        .unwrap_or((pos.x, pos.y, size.width, size.height));
+    Ok(ToolbarGeometry {
+        cursor_x: cursor.x,
+        cursor_y: cursor.y,
+        win_x: pos.x,
+        win_y: pos.y,
+        win_w: size.width,
+        win_h: size.height,
+        mon_x: mon.0,
+        mon_y: mon.1,
+        mon_w: mon.2,
+        mon_h: mon.3,
+    })
+}

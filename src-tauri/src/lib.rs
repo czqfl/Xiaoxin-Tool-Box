@@ -262,6 +262,7 @@ pub fn run() {
             folder::folder_copy_path,
             panel::toolbar_set_click_through,
             panel::toolbar_probe_click_through,
+            panel::toolbar_geometry,
             shortcut::shortcut_test,
             shortcut::shortcut_apply,
             shortcut::shortcut_capture_begin,
