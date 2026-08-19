@@ -100,7 +100,11 @@ const DRAG_THRESHOLD = 10;
 const SLIVER = 4; // 收起后露出的像素（屏幕内可见的一小条）
 const EDGE_PAD = 4; // 贴边判定容差（窗口距显示器边缘 ≤ 此值视为贴边）
 const NEAR_MARGIN = 14; // 靠近边缘自动弹出的判定容差（光标距边缘 ≤ 此值）
+/** 收起滞回阈值：光标距边缘超过此值才允许收起。弹出(14px)与收起(64px)
+ *  阈值不同 → 临界带内不动作，杜绝光标微动导致的"收起-弹出"循环闪烁 */
+const COLLAPSE_MARGIN = 64;
 const HIDE_DELAY = 350; // 光标离开贴边工具栏后，延时收起（ms）
+const SLIDE_MS = 220; // 收起/弹出的滑动动画时长（ms）
 
 /** Rust 返回的工具栏几何快照（物理像素） */
 interface ToolbarGeometry {
@@ -135,9 +139,9 @@ export function Toolbar() {
   const savedPosRef = useRef<{ x: number; y: number } | null>(null); // 收起前位置
   const edgeRef = useRef<Edge | null>(null); // 当前贴边方向
   const hideTimerRef = useRef<number | undefined>(undefined); // 收起延时
-  /** 已离开"边缘附近区域"：弹出后光标必须先真正离开边缘，收起计时才生效——
-   *  修复"收起前连闪"（收起→光标仍在边缘→弹出→再收起 的循环闪烁） */
-  const edgeLeftRef = useRef(true);
+  /** 收起/弹出动画进行中：动画期间跳过收起/弹出判定（避免动画中读到中间
+   *  位置触发反向操作）；同时保证动画是"移动窗口"而非瞬移 */
+  const animatingRef = useRef(false);
 
   /** 判断工具栏是否贴显示器边缘 */
   function detectEdge(g: ToolbarGeometry): Edge | null {
@@ -166,35 +170,80 @@ export function Toolbar() {
     return nearY && inX;
   }
 
-  /** 收起：把窗口滑出屏幕，仅露 SLIVER 像素（记住原位，弹出时恢复） */
+  /** 光标是否远离边缘（超过收起滞回阈值）——只有"真正离开"才允许收起 */
+  function cursorFarFromEdge(g: ToolbarGeometry, edge: Edge): boolean {
+    const cx = g.cursor_x;
+    const cy = g.cursor_y;
+    if (edge === "left" || edge === "right") {
+      return edge === "left"
+        ? cx >= g.mon_x + COLLAPSE_MARGIN
+        : cx <= g.mon_x + g.mon_w - COLLAPSE_MARGIN;
+    }
+    return edge === "top"
+      ? cy >= g.mon_y + COLLAPSE_MARGIN
+      : cy <= g.mon_y + g.mon_h - COLLAPSE_MARGIN;
+  }
+
+  /** 窗口位置滑动动画（easeInOutCubic，逐帧 setPosition——收起/弹出有平滑
+   *  滑入滑出的动效，而非瞬移） */
+  function animatePosition(from: { x: number; y: number }, to: { x: number; y: number }): Promise<void> {
+    return new Promise((resolve) => {
+      const start = Date.now();
+      const dur = SLIDE_MS;
+      const ease = (t: number) =>
+        t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      const step = () => {
+        const t = Math.min(1, (Date.now() - start) / dur);
+        const k = ease(t);
+        const x = Math.round(from.x + (to.x - from.x) * k);
+        const y = Math.round(from.y + (to.y - from.y) * k);
+        void getCurrentWindow()
+          .setPosition(new LogicalPosition(x, y))
+          .catch(() => {});
+        if (t < 1) {
+          requestAnimationFrame(step);
+        } else {
+          resolve();
+        }
+      };
+      requestAnimationFrame(step);
+    });
+  }
+
+  /** 收起：平滑滑出屏幕，仅露 SLIVER 像素（记住原位，弹出时恢复） */
   async function collapse(g: ToolbarGeometry, edge: Edge) {
-    if (collapsedRef.current) return;
+    if (collapsedRef.current || animatingRef.current) return;
     savedPosRef.current = { x: g.win_x, y: g.win_y };
     edgeRef.current = edge;
     collapsedRef.current = true;
+    animatingRef.current = true;
     let nx = g.win_x;
     let ny = g.win_y;
     if (edge === "left") nx = g.mon_x - g.win_w + SLIVER;
     else if (edge === "right") nx = g.mon_x + g.mon_w - SLIVER;
     else if (edge === "top") ny = g.mon_y - g.win_h + SLIVER;
     else ny = g.mon_y + g.mon_h - SLIVER;
-    await getCurrentWindow()
-      .setPosition(new LogicalPosition(nx, ny))
-      .catch(() => {});
+    await animatePosition({ x: g.win_x, y: g.win_y }, { x: nx, y: ny });
+    animatingRef.current = false;
   }
 
-  /** 弹出：恢复到收起前的位置 */
+  /** 弹出：平滑滑回收起前的位置 */
   async function expand() {
-    if (!collapsedRef.current) return;
+    if (!collapsedRef.current || animatingRef.current) return;
     const saved = savedPosRef.current;
+    if (!saved) return;
     collapsedRef.current = false;
     edgeRef.current = null;
+    animatingRef.current = true;
     savedPosRef.current = null;
-    if (saved) {
-      await getCurrentWindow()
-        .setPosition(new LogicalPosition(saved.x, saved.y))
-        .catch(() => {});
+    const win = getCurrentWindow();
+    const cur = await win.outerPosition().catch(() => null);
+    if (cur) {
+      await animatePosition({ x: cur.x, y: cur.y }, { x: saved.x, y: saved.y });
+    } else {
+      await win.setPosition(new LogicalPosition(saved.x, saved.y)).catch(() => {});
     }
+    animatingRef.current = false;
   }
   /** 按下状态：起点、目标工具、是否已进入拖动 */
   const pressRef = useRef<{
@@ -356,42 +405,39 @@ export function Toolbar() {
         // 2) 贴边自动收起 / 靠近弹出
         if (!autoHideRef.current) return;
         const edge = detectEdge(geo);
+        // 动画进行中：跳过收起/弹出判定（窗口正滑向目标，读到的位置是中间帧）
+        if (animatingRef.current) return;
         if (collapsedRef.current) {
           // 已收起：光标靠近屏幕边缘（或悬停露出的条）→ 弹出
           if (edge && (cursorNearEdge(geo, edge) || inside)) {
             await expand();
-            // 弹出后需光标"离开边缘附近"才允许再次收起（防收起-弹出循环闪烁）
-            edgeLeftRef.current = false;
           }
           return;
         }
         if (edge) {
-          // 贴边：光标离开 → 延时收起；回来 → 取消计时
+          // 贴边：光标真正远离边缘（滞回阈值）→ 延时收起；
+          // 停在"边缘附近但未进窗口"的临界带 → 不动作（不闪）；
+          // 光标回到窗口 → 取消计时
           if (!inside) {
-            // 只有"已离开边缘附近"才允许计时收起——光标停在贴边边缘不会
-            // 反复收起/弹出（修复"收起前连闪好几次"）
-            if (!cursorNearEdge(geo, edge)) edgeLeftRef.current = true;
-            if (edgeLeftRef.current && !hideTimerRef.current) {
-              hideTimerRef.current = window.setTimeout(() => {
-                hideTimerRef.current = undefined;
-                void collapse(geo, edge);
-              }, HIDE_DELAY);
-            }
-          } else {
-            // 光标回到窗口：允许下次离开时收起
-            edgeLeftRef.current = false;
-            if (hideTimerRef.current) {
+            if (cursorFarFromEdge(geo, edge)) {
+              if (!hideTimerRef.current) {
+                hideTimerRef.current = window.setTimeout(() => {
+                  hideTimerRef.current = undefined;
+                  void collapse(geo, edge);
+                }, HIDE_DELAY);
+              }
+            } else if (hideTimerRef.current) {
               window.clearTimeout(hideTimerRef.current);
               hideTimerRef.current = undefined;
             }
-          }
-        } else {
-          // 已离开边缘：允许收起，取消待执行的收起
-          edgeLeftRef.current = true;
-          if (hideTimerRef.current) {
+          } else if (hideTimerRef.current) {
             window.clearTimeout(hideTimerRef.current);
             hideTimerRef.current = undefined;
           }
+        } else if (hideTimerRef.current) {
+          // 已离开边缘：取消待执行的收起
+          window.clearTimeout(hideTimerRef.current);
+          hideTimerRef.current = undefined;
         }
       } catch {
         // 后端异常时强制恢复交互（工具栏可用优先，绝不"穿透死"）
