@@ -115,16 +115,15 @@ body,
   cursor: grabbing;
 }
 
-/* 抓取点阵：一排干净的小圆点（点阵图案，拖动把手指示）——
+/* 抓取点阵：多行点阵（3 行 × 4 列小圆点），拖动把手指示——
    无模糊、无渐变，纯圆点平铺，克制不脏 */
 .titlebar-grip .grip-dots {
-  width: 34px;
-  height: 8px;
-  border-radius: 4px;
-  background-image: radial-gradient(circle, var(--grip-dot) 2.4px, transparent 2.6px);
-  background-size: 8.5px 8px;
-  background-repeat: repeat-x;
-  background-position: 0 0;
+  width: 26px;
+  height: 18px;
+  border-radius: 5px;
+  background-image: radial-gradient(circle, var(--grip-dot) 1.8px, transparent 2.1px);
+  background-size: 7px 7px;
+  background-position: 2px 2px;
   opacity: 0.45;
   transition: opacity 0.15s ease;
   pointer-events: none;
@@ -2457,9 +2456,10 @@ body,
   height: 26px;
   padding: 0 14px;
   border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--accent, #4c9eff) 45%, transparent);
-  background: color-mix(in srgb, var(--accent, #4c9eff) 10%, transparent);
-  color: var(--accent, #4c9eff);
+  /* 固定纯蓝（用户要求：不要跟随主题的紫色调） */
+  border: 1px solid color-mix(in srgb, #3b82f6 45%, transparent);
+  background: color-mix(in srgb, #3b82f6 10%, transparent);
+  color: #3b82f6;
   font-family: inherit;
   font-size: 12px;
   font-weight: 600;
@@ -2474,13 +2474,13 @@ body,
   line-height: 1;
 }
 .history-window .titlebar .new-note-btn:hover {
-  background: var(--accent, #4c9eff);
-  border-color: var(--accent, #4c9eff);
+  background: #3b82f6;
+  border-color: #3b82f6;
   color: #fff;
   /* 保持水平居中：translate(-50%,-50%) 基础上仅上浮 1px */
   transform: translate(-50%, calc(-50% - 1px));
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent, #4c9eff) 16%, transparent),
-    0 4px 12px color-mix(in srgb, var(--accent, #4c9eff) 28%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, #3b82f6 16%, transparent),
+    0 4px 12px color-mix(in srgb, #3b82f6 28%, transparent);
 }
 .history-window .titlebar .new-note-btn:active {
   transform: translate(-50%, -50%) scale(0.95);

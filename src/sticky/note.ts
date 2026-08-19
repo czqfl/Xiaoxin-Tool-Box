@@ -206,14 +206,22 @@ export function mountNoteApp(noteId: string, preset = "") {
     void appWindow.startResizeDragging("SouthEast");
   });
 
-  // 标题栏自适应：窗口变窄时提前隐藏次级按钮（最大化），
-  // 保证中间抓取区（grid 恒居中）不被按钮挤压（抓取点始终保留可见）。
+  // 标题栏自适应【重写】：窗口变窄时右侧按钮从【左到右】逐个隐藏
+  // （Aa → 置顶 → 最大化 → 托盘，关闭永留），保证：
+  //  - 中间抓取区（grid 恒居中）永不被按钮挤压、不与按钮重合；
+  //  - 抓取区与右侧按钮之间始终留有间隔（预留 12px）；
+  //  - 左侧标题输入框也随之收缩让位。
+  const titlebarRightButtons = [btnToolbarToggle, btnPin, btnMax, btnTray];
+  const TB_BTN_W = 31; // 每个按钮 30px 宽 + 1px gap
   function adaptTitlebar() {
-    titlebar.classList.remove("crowded");
-    // 仅按“全部按钮显示时的真实内容宽度”是否超出可用宽度决定收起，
-    // 去掉固定 380px 硬门槛——否则窗口已宽到能容纳部分按钮时它们仍被隐藏。
-    const overflow = titlebar.scrollWidth > titlebar.clientWidth + 1;
-    titlebar.classList.toggle("crowded", overflow);
+    // 预留：左侧标题最小 40 + 抓取区 48 + 抓取区与按钮间隔 12 + 关闭 30 + 右边距 6
+    const reserve = 40 + 48 + 12 + 30 + 6;
+    const available = titlebar.clientWidth - reserve;
+    const keep = Math.max(0, Math.min(titlebarRightButtons.length, Math.floor(available / TB_BTN_W)));
+    titlebarRightButtons.forEach((btn, i) => {
+      btn.style.display = i < keep ? "" : "none";
+    });
+    btnClose.style.display = "";
   }
 
   // 工具栏自适应：窗口变窄放不下时，隐藏“预览/拆分/整理”等次级按钮，避免被裁切成半截。

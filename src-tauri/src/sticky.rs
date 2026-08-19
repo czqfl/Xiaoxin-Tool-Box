@@ -386,21 +386,10 @@ pub fn save_note(
 ) -> Result<(), String> {
     let _ = std::fs::create_dir_all(notes_dir(&paths));
     let path = note_path(&paths, &id);
-    let plain = strip_html(&data.content);
-    if plain.trim().is_empty() && data.title.trim().is_empty() {
-        // 内容为空：仅当用户从未移动/调整过（无位置/尺寸元数据）才视为"空便签"删除；
-        // 若已有 pos/size（用户拖过/调过），保留文件——否则每次打开都在默认位置
-        // 出现（用户反馈"位置大小固定"的根因之一）。
-        let has_geometry = data.pos_x.is_some()
-            && data.pos_y.is_some()
-            && (data.width > 0 || data.height > 0);
-        if !has_geometry {
-            if path.exists() {
-                let _ = std::fs::remove_file(&path);
-            }
-            return Ok(());
-        }
-    }
+    // 【不再自动删空文件】此前"内容为空即删文件"导致：新建便签窗口初始化
+    // 触发一次保存（空内容、尚未移动）→ 预写的存档被删 → 历史列表里的
+    // 新条目"出现一下又消失"（用户反馈根因）。空便签文件保留，删除统一
+    // 走历史面板的删除按钮（delete_note）。
     let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
     std::fs::write(&path, json).map_err(|e| e.to_string())?;
     // 内容/元数据变化 → 广播状态变化：历史面板刷新列表（标题/摘要/时间/状态）
@@ -1208,7 +1197,11 @@ fn hide_note_window(app: &AppHandle, label: &str) {
             }
         }
     }
-    let _ = win.hide();
+    // 【销毁而非隐藏】关闭便签 = 立即销毁窗口（destroy）：隐藏常驻再次呼出
+    // 走 summoned 动画状态机偶发失败（"关闭后再打开打不开"——用户反馈）。
+    // 销毁重建每次全新加载，保证任意次打开/关闭都正常；内容实时自动保存不丢，
+    // 位置/大小已在上面回写存档。
+    let _ = win.destroy();
     let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
     crate::panel::broadcast_panel_visibility(app, label, false);
     VISIBLE_NOTES.lock().unwrap().remove(label);
