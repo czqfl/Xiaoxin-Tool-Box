@@ -24,6 +24,7 @@ use crate::shortcut::ShortcutBindings;
 use crate::translate::TranslateStore;
 use std::sync::Mutex;
 use tauri::Manager;
+use tauri::Listener;
 use tauri_plugin_global_shortcut::ShortcutState;
 
 /// 面板窗口效果：不透明窗口 + DWM 系统原生圆角 +（可选）背景模糊。
