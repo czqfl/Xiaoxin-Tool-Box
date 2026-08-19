@@ -29,12 +29,15 @@ export async function mountStickyByLabel() {
   } else if (label === "sticky-imageviewer") {
     mountImageViewer().catch((e) => console.error("图片预览加载失败:", e));
   } else if (label === "particles") {
-    // 全屏透明粒子层（label "particles"，与 tauri.conf.json 声明一致）：
-    // 粒子消散动画的粒子可飘出便签矩形、在整个屏幕渲染（glow-particles 按
-    // 此 label 查找窗口）
+    // 全屏透明粒子层（label "particles"）：粒子消散动画的粒子可飘出便签矩形。
+    // 分阶段上报日志（排查挂载卡点：start → calibrate → ok/fail）
+    emit("sticky://particles-mount-start", {}).catch(() => {});
     mountParticlesLayer()
       .then(() => emit("sticky://particles-layer-ready", {}).catch(() => {}))
-      .catch((e) => console.error("粒子层初始化失败:", e));
+      .catch((e) => {
+        console.error("粒子层初始化失败:", e);
+        emit("sticky://particles-mount-fail", { msg: String(e) }).catch(() => {});
+      });
   } else {
     mountNoteApp(noteId, preset);
   }

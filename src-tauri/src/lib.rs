@@ -208,6 +208,22 @@ pub fn run() {
                 let _ = app2.listen("sticky://particles-layer-ready", move |_| {
                     crate::storage::diag_write("[sticky] particles layer ready");
                 });
+                let app3 = handle.clone();
+                let _ = app3.listen("sticky://particles-mount-start", move |_| {
+                    crate::storage::diag_write("[sticky] particles mount start");
+                });
+                let app4 = handle.clone();
+                let _ = app4.listen("sticky://particles-mount-fail", move |e| {
+                    let msg = e
+                        .payload()
+                        .as_object()
+                        .and_then(|m| m.get("msg"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?");
+                    crate::storage::diag_write(&format!(
+                        "[sticky] particles mount FAIL: {msg}"
+                    ));
+                });
             }
             // 启动后打印窗口清单（排查：确认粒子层窗口是否真实创建）
             {
