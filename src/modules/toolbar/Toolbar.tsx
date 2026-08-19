@@ -135,6 +135,9 @@ export function Toolbar() {
   const savedPosRef = useRef<{ x: number; y: number } | null>(null); // 收起前位置
   const edgeRef = useRef<Edge | null>(null); // 当前贴边方向
   const hideTimerRef = useRef<number | undefined>(undefined); // 收起延时
+  /** 已离开"边缘附近区域"：弹出后光标必须先真正离开边缘，收起计时才生效——
+   *  修复"收起前连闪"（收起→光标仍在边缘→弹出→再收起 的循环闪烁） */
+  const edgeLeftRef = useRef(true);
 
   /** 判断工具栏是否贴显示器边缘 */
   function detectEdge(g: ToolbarGeometry): Edge | null {
@@ -357,26 +360,38 @@ export function Toolbar() {
           // 已收起：光标靠近屏幕边缘（或悬停露出的条）→ 弹出
           if (edge && (cursorNearEdge(geo, edge) || inside)) {
             await expand();
+            // 弹出后需光标"离开边缘附近"才允许再次收起（防收起-弹出循环闪烁）
+            edgeLeftRef.current = false;
           }
           return;
         }
         if (edge) {
           // 贴边：光标离开 → 延时收起；回来 → 取消计时
           if (!inside) {
-            if (!hideTimerRef.current) {
+            // 只有"已离开边缘附近"才允许计时收起——光标停在贴边边缘不会
+            // 反复收起/弹出（修复"收起前连闪好几次"）
+            if (!cursorNearEdge(geo, edge)) edgeLeftRef.current = true;
+            if (edgeLeftRef.current && !hideTimerRef.current) {
               hideTimerRef.current = window.setTimeout(() => {
                 hideTimerRef.current = undefined;
                 void collapse(geo, edge);
               }, HIDE_DELAY);
             }
-          } else if (hideTimerRef.current) {
+          } else {
+            // 光标回到窗口：允许下次离开时收起
+            edgeLeftRef.current = false;
+            if (hideTimerRef.current) {
+              window.clearTimeout(hideTimerRef.current);
+              hideTimerRef.current = undefined;
+            }
+          }
+        } else {
+          // 已离开边缘：允许收起，取消待执行的收起
+          edgeLeftRef.current = true;
+          if (hideTimerRef.current) {
             window.clearTimeout(hideTimerRef.current);
             hideTimerRef.current = undefined;
           }
-        } else if (hideTimerRef.current) {
-          // 已离开边缘：取消待执行的收起
-          window.clearTimeout(hideTimerRef.current);
-          hideTimerRef.current = undefined;
         }
       } catch {
         // 后端异常时强制恢复交互（工具栏可用优先，绝不"穿透死"）
