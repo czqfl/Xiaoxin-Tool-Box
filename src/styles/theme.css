@@ -131,12 +131,12 @@
 }
 
 :root[data-theme="dark"] {
-  /* 品牌色：低饱和灰蓝（克制单一强调色，仅按钮/链接/焦点小面积使用——
-     深色主题整体收敛为黑灰调，不再"蓝"；避免大面积亮蓝 + 彩色图标堆叠） */
-  --accent: #8a9bb5;
-  --accent-hover: #9aabc4;
-  --accent-active: #7a8ba5;
-  --accent-soft: rgba(138, 155, 181, 0.16);
+  /* 品牌色：暗底提亮的天蓝（保留活力；配合中性黑背景与白色微光，
+     整体不再"蓝"，蓝只出现在按钮/链接/焦点等小面积交互处） */
+  --accent: #4c9eff;
+  --accent-hover: #3a8ef2;
+  --accent-active: #2c7de0;
+  --accent-soft: rgba(76, 158, 255, 0.16);
   --accent-text: #ffffff;
 
   --danger: #f2555a;
@@ -146,51 +146,49 @@
   --warning: #f7b955;
   --warning-soft: rgba(247, 185, 85, 0.17);
 
-  /* 水彩按钮色带：深色收敛为同色相灰蓝渐变（保留流动质感，去掉多彩）
-     + 白字，整体简洁统一 */
-  --water-a: rgba(160, 172, 190, 0.55);
-  --water-b: rgba(140, 155, 178, 0.5);
-  --water-c: rgba(122, 142, 168, 0.46);
-  --water-d: rgba(150, 162, 180, 0.45);
-  --water-e: rgba(170, 178, 192, 0.5);
+  /* 水彩按钮色带（深色提亮一档，通透不闷）+ 白字 */
+  --water-a: rgba(183, 154, 224, 0.88);
+  --water-b: rgba(96, 160, 255, 0.84);
+  --water-c: rgba(86, 196, 184, 0.78);
+  --water-d: rgba(240, 184, 96, 0.74);
+  --water-e: rgba(232, 134, 168, 0.82);
   --btn-text: #ffffff;
   --btn-text-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
 
-  /* 内容类型色（深色收敛：低饱和灰调，保留语义辨识但不抢眼） */
-  --c-cyan: #7fb3c9;
-  --c-green: #8fc4ab;
-  --c-amber: #cbb388;
-  --c-cyan-soft: rgba(127, 179, 201, 0.15);
-  --c-green-soft: rgba(143, 196, 171, 0.15);
-  --c-amber-soft: rgba(203, 179, 136, 0.16);
-  /* 工具栏图标：深色收敛为统一中性灰蓝（去彩色，界面简洁高雅——
-     辨识靠形状与位置，不靠颜色） */
-  --tool-clipboard: #9aa5b3;
-  --tool-folder: #9aa5b3;
-  --tool-credentials: #9aa5b3;
-  --tool-translation: #9aa5b3;
-  --tool-port: #9aa5b3;
-  --tool-settings: #9aa5b3;
-  --tool-sticky: #9aa5b3;
-  --accent-rgb: 138, 155, 181;
+  /* 内容类型色（深色提亮一档，保持低饱和） */
+  --c-cyan: #55b6d8;
+  --c-green: #6cd4a0;
+  --c-amber: #e8b558;
+  --c-cyan-soft: rgba(85, 182, 216, 0.16);
+  --c-green-soft: rgba(108, 212, 160, 0.16);
+  --c-amber-soft: rgba(232, 181, 88, 0.17);
+  /* 工具栏图标辨识色（深色提亮一档，保留彩色——辨识靠颜色而非形状） */
+  --tool-clipboard: #6cb3ff;
+  --tool-folder: #f6c453;
+  --tool-credentials: #4ed9a8;
+  --tool-translation: #cd96ff;
+  --tool-port: #ffab5e;
+  --tool-settings: #97a1fb;
+  --tool-sticky: #a78bfa;
+  --accent-rgb: 76, 158, 255;
 
-  /* 背景：中性高级黑（纯黑系、RGB 三通道接近、微暖中性，
-     层级靠明度差而非冷蓝倾向；app 底取 20,20,20 级纯黑） */
-  --bg-app: #141414;
-  --bg-panel: rgba(26, 26, 26, 0.82);
-  --bg-panel-rgb: 26, 26, 26;
-  --bg-elevated: rgba(33, 33, 33, 0.95);
-  --bg-input: rgba(38, 38, 38, 0.92);
-  --bg-input-glass: rgba(26, 26, 26, 0.42);
+  /* 背景：高级深灰蓝黑——有明度层次、微冷不偏蓝、不死黑一片
+     （纯黑 + 全灰图标会显得"死人界面"；冷蓝灰底 + 白微光 + 彩色点缀 = 简洁高雅） */
+  --bg-app: #16181d;
+  --bg-panel: rgba(30, 32, 38, 0.82);
+  --bg-panel-rgb: 30, 32, 38;
+  --bg-elevated: rgba(38, 40, 46, 0.95);
+  --bg-input: rgba(43, 45, 52, 0.92);
+  --bg-input-glass: rgba(30, 32, 38, 0.42);
   --bg-item-hover: rgba(255, 255, 255, 0.05);
   --bg-item-active: rgba(255, 255, 255, 0.09);
   --bg-badge: rgba(255, 255, 255, 0.08);
 
-  /* 文本：中性白 / 中性灰（去冷蓝倾向） */
+  /* 文本：中性白 / 中性灰（无蓝倾向） */
   --text-primary: #ececec;
   --text-secondary: #9b9b9b;
   --text-tertiary: #6b6b6b;
-  --text-inverse: #141414;
+  --text-inverse: #16181d;
 
   --border-subtle: rgba(255, 255, 255, 0.07);
   --border-strong: rgba(255, 255, 255, 0.14);
@@ -383,11 +381,11 @@
 /* 未手动指定主题时跟随系统 */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]):not([data-theme="dark"]):not([data-theme="mint"]):not([data-theme="skyblue"]) {
-    /* 品牌色：与 data-theme="dark" 同步——低饱和灰蓝，克制单一强调色 */
-    --accent: #8a9bb5;
-    --accent-hover: #9aabc4;
-    --accent-active: #7a8ba5;
-    --accent-soft: rgba(138, 155, 181, 0.16);
+    /* 品牌色：与 data-theme="dark" 同步——暗底提亮天蓝 */
+    --accent: #4c9eff;
+    --accent-hover: #3a8ef2;
+    --accent-active: #2c7de0;
+    --accent-soft: rgba(76, 158, 255, 0.16);
     --accent-text: #ffffff;
 
     --danger: #f2555a;
@@ -397,49 +395,49 @@
     --warning: #f7b955;
     --warning-soft: rgba(247, 185, 85, 0.17);
 
-    /* 水彩按钮色带：与 data-theme="dark" 同步——同色相灰蓝渐变 */
-    --water-a: rgba(160, 172, 190, 0.55);
-    --water-b: rgba(140, 155, 178, 0.5);
-    --water-c: rgba(122, 142, 168, 0.46);
-    --water-d: rgba(150, 162, 180, 0.45);
-    --water-e: rgba(170, 178, 192, 0.5);
+    /* 水彩按钮色带：与 data-theme="dark" 同步——提亮多彩 */
+    --water-a: rgba(183, 154, 224, 0.88);
+    --water-b: rgba(96, 160, 255, 0.84);
+    --water-c: rgba(86, 196, 184, 0.78);
+    --water-d: rgba(240, 184, 96, 0.74);
+    --water-e: rgba(232, 134, 168, 0.82);
     --btn-text: #ffffff;
     --btn-text-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
 
-    /* 内容类型色：与 data-theme="dark" 同步——低饱和灰调 */
-    --c-cyan: #7fb3c9;
-    --c-green: #8fc4ab;
-    --c-amber: #cbb388;
-    --c-cyan-soft: rgba(127, 179, 201, 0.15);
-    --c-green-soft: rgba(143, 196, 171, 0.15);
-    --c-amber-soft: rgba(203, 179, 136, 0.16);
-    /* 工具栏图标：统一中性灰蓝（去彩色） */
-    --tool-clipboard: #9aa5b3;
-    --tool-folder: #9aa5b3;
-    --tool-credentials: #9aa5b3;
-    --tool-translation: #9aa5b3;
-    --tool-port: #9aa5b3;
-    --tool-settings: #9aa5b3;
-    --tool-sticky: #9aa5b3;
-    --accent-rgb: 138, 155, 181;
+    /* 内容类型色：与 data-theme="dark" 同步——提亮低饱和 */
+    --c-cyan: #55b6d8;
+    --c-green: #6cd4a0;
+    --c-amber: #e8b558;
+    --c-cyan-soft: rgba(85, 182, 216, 0.16);
+    --c-green-soft: rgba(108, 212, 160, 0.16);
+    --c-amber-soft: rgba(232, 181, 88, 0.17);
+    /* 工具栏图标：与 data-theme="dark" 同步——保留彩色辨识 */
+    --tool-clipboard: #6cb3ff;
+    --tool-folder: #f6c453;
+    --tool-credentials: #4ed9a8;
+    --tool-translation: #cd96ff;
+    --tool-port: #ffab5e;
+    --tool-settings: #97a1fb;
+    --tool-sticky: #a78bfa;
+    --accent-rgb: 76, 158, 255;
 
-    /* 背景：中性高级黑（与 data-theme="dark" 一致——纯黑系、RGB 三通道接近，
-       层级靠明度差而非冷蓝倾向；app 底取 20,20,20 级纯黑） */
-    --bg-app: #141414;
-    --bg-panel: rgba(26, 26, 26, 0.82);
-    --bg-panel-rgb: 26, 26, 26;
-    --bg-elevated: rgba(33, 33, 33, 0.95);
-    --bg-input: rgba(38, 38, 38, 0.92);
-    --bg-input-glass: rgba(26, 26, 26, 0.42);
+    /* 背景：高级深灰蓝黑（与 data-theme="dark" 一致——有层次、微冷不偏蓝、
+       不死黑；悬浮栏 rgba(30,32,38)+panel-opacity 保留不透明与模糊质感） */
+    --bg-app: #16181d;
+    --bg-panel: rgba(30, 32, 38, 0.82);
+    --bg-panel-rgb: 30, 32, 38;
+    --bg-elevated: rgba(38, 40, 46, 0.95);
+    --bg-input: rgba(43, 45, 52, 0.92);
+    --bg-input-glass: rgba(30, 32, 38, 0.42);
     --bg-item-hover: rgba(255, 255, 255, 0.05);
     --bg-item-active: rgba(255, 255, 255, 0.09);
     --bg-badge: rgba(255, 255, 255, 0.08);
 
-    /* 文本：中性白 / 中性灰（去冷蓝倾向） */
+    /* 文本：中性白 / 中性灰（无蓝倾向） */
     --text-primary: #ececec;
     --text-secondary: #9b9b9b;
     --text-tertiary: #6b6b6b;
-    --text-inverse: #141414;
+    --text-inverse: #16181d;
 
     --border-subtle: rgba(255, 255, 255, 0.07);
     --border-strong: rgba(255, 255, 255, 0.14);
