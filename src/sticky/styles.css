@@ -114,16 +114,16 @@ body,
   cursor: grabbing;
 }
 
-/* 抓取点：三条细横线（iOS 指示条风格）——克制、精致，
-   取代原来的圆点阵+高斯模糊（观感脏且发蓝） */
+/* 抓取点阵：一排干净的小圆点（点阵图案，拖动把手指示）——
+   无模糊、无渐变，纯圆点平铺，克制不脏 */
 .titlebar-grip .grip-dots {
-  width: 30px;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--grip-dot);
-  box-shadow:
-    0 8px 0 -1px var(--grip-dot),
-    0 -8px 0 -1px var(--grip-dot);
+  width: 34px;
+  height: 8px;
+  border-radius: 4px;
+  background-image: radial-gradient(circle, var(--grip-dot) 2.4px, transparent 2.6px);
+  background-size: 8.5px 8px;
+  background-repeat: repeat-x;
+  background-position: 0 0;
   opacity: 0.45;
   transition: opacity 0.15s ease;
   pointer-events: none;
@@ -654,21 +654,28 @@ body,
   font-size: 14px;
 }
 
-/* 自动保存状态提示（标题栏内，输入停顿后短暂显示「保存中…」→「已保存」） */
+/* 自动保存状态提示（窗口左下角浮动，短暂显示「保存中…」→「已保存」） */
 .save-status {
-  flex: 0 0 auto;
+  position: absolute;
+  bottom: 8px;
+  left: 10px;
+  z-index: 25;
   font-size: 11px;
   line-height: 1;
   color: var(--text-hint);
-  margin-left: 4px;
   opacity: 0;
-  transform: translateY(1px);
-  transition: opacity 0.18s ease;
+  transform: translateY(2px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
   pointer-events: none;
   white-space: nowrap;
 }
 .save-status.show {
   opacity: 1;
+  transform: translateY(0);
+}
+/* 已保存 → 绿色成功态 */
+.save-status.ok {
+  color: #52c41a;
 }
 .save-status.error {
   color: var(--danger);

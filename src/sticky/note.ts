@@ -50,7 +50,6 @@ export function mountNoteApp(noteId: string, preset = "") {
       <div class="titlebar">
         <div class="titlebar-left">
           <input class="title-input" id="note-title" placeholder="便签" maxlength="40" spellcheck="false" title="点击编辑标题" />
-          <span class="save-status" id="save-status"></span>
         </div>
         <div class="titlebar-grip" id="drag-grip" title="拖动便签"><span class="grip-dots"></span></div>
         <div class="titlebar-right">
@@ -105,6 +104,8 @@ export function mountNoteApp(noteId: string, preset = "") {
       </div>
       <div class="cc-panel" id="tool-fg-panel" hidden></div>
       <div class="cc-panel" id="tool-bg-panel" hidden></div>
+      <!-- 自动保存提示（左下角浮动，短暂显示） -->
+      <span class="save-status" id="save-status"></span>
       <!-- 右下角缩放手柄：放大命中区 + 常驻对角 grip 图标，拖动改窗口大小 -->
       <div class="win-resizer" id="win-resizer" title="拖动调整大小">
         <svg class="win-resizer-grip" viewBox="0 0 13 13" width="13" height="13" aria-hidden="true">
@@ -571,6 +572,8 @@ export function mountNoteApp(noteId: string, preset = "") {
     if (!saveStatus) return;
     saveStatus.textContent = text;
     saveStatus.classList.toggle("error", isError);
+    // 已保存 → 绿色（成功态）；保存中/其他保持中性
+    saveStatus.classList.toggle("ok", !isError && text === "已保存");
     saveStatus.classList.add("show");
     if (savedStatusTimer) window.clearTimeout(savedStatusTimer);
     savedStatusTimer = window.setTimeout(
