@@ -384,9 +384,90 @@
   color-scheme: light;
 }
 
+/* 红色主题（red）：暖调中性底色 + 有质感的绛红品牌色（非大红、非暗红）。
+   红感来自「饱和但不过亮、带暖意的绛红」，底色用极淡暖白提亮，让红更显高级。 */
+:root[data-theme="red"] {
+  /* 品牌色：绛红（朱砂调，饱和但不刺眼；比纯红沉、比暗红亮） */
+  --accent: #cf3a43;
+  --accent-hover: #b9333c;
+  --accent-active: #9c2932;
+  --accent-soft: rgba(207, 58, 67, 0.12);
+  --accent-text: #ffffff;
+
+  --danger: #e5484d;
+  --danger-soft: rgba(229, 72, 77, 0.12);
+  --success: #2f9270;
+  --success-soft: rgba(47, 146, 112, 0.12);
+  --warning: #d97706;
+  --warning-soft: rgba(217, 119, 6, 0.14);
+
+  /* 水彩按钮色带（红/玫瑰/暖珊瑚系，红色主题下和谐） */
+  --water-a: rgba(208, 78, 86, 0.74);
+  --water-b: rgba(216, 58, 70, 0.68);
+  --water-c: rgba(222, 104, 96, 0.64);
+  --water-d: rgba(198, 86, 120, 0.62);
+  --water-e: rgba(190, 70, 88, 0.66);
+  --btn-text: #ffffff;
+  --btn-text-shadow: 0 1px 2px rgba(110, 0, 10, 0.32);
+
+  /* 内容类型色（保持语义：青/绿/琥珀低饱和，避免与红混淆） */
+  --c-cyan: #2a9bb4;
+  --c-green: #3aa581;
+  --c-amber: #c98d2b;
+  --c-cyan-soft: rgba(42, 155, 180, 0.13);
+  --c-green-soft: rgba(58, 165, 129, 0.13);
+  --c-amber-soft: rgba(201, 141, 43, 0.14);
+  /* 工具栏图标辨识色（600 级，暖白底上清晰） */
+  --tool-clipboard: #d6403f;
+  --tool-folder: #d97706;
+  --tool-credentials: #2f9270;
+  --tool-translation: #b8426f;
+  --tool-port: #e0623c;
+  --tool-settings: #c2407a;
+  --tool-sticky: #b8426f;
+  --accent-rgb: 207, 58, 67;
+
+  /* 背景：极淡暖白玫瑰灰（红韵但不抢内容，与浅青/浅蓝同构） */
+  --bg-app: #f6eded;
+  --bg-panel: rgba(252, 246, 245, 0.86);
+  --bg-panel-rgb: 252, 246, 245;
+  --panel-opacity: 0.75;
+  --bg-elevated: rgba(255, 252, 251, 0.96);
+  --bg-input: rgba(255, 250, 249, 0.92);
+  --bg-input-glass: rgba(252, 246, 245, 0.4);
+  --bg-item-hover: rgba(150, 40, 45, 0.05);
+  --bg-item-active: rgba(150, 40, 45, 0.1);
+  --bg-badge: rgba(150, 40, 45, 0.06);
+
+  /* 文本：暖墨红棕（中性偏暖，不偏蓝保持稳定可读性） */
+  --text-primary: #2a1417;
+  --text-secondary: #6b4a4e;
+  --text-tertiary: #a3858a;
+  --text-inverse: #ffffff;
+
+  --border-subtle: rgba(150, 45, 50, 0.08);
+  --border-strong: rgba(150, 45, 50, 0.18);
+
+  --shadow-panel: 0 24px 64px rgba(150, 45, 50, 0.16), 0 4px 16px rgba(150, 45, 50, 0.07);
+  --shadow-item: 0 2px 8px rgba(150, 45, 50, 0.07);
+  --shadow-menu: 0 12px 32px rgba(150, 45, 50, 0.14);
+  --shadow-card: 0 1px 2px rgba(150, 45, 50, 0.05), 0 6px 20px rgba(150, 45, 50, 0.07);
+  --shadow-toolbar: 0 4px 18px rgba(150, 45, 50, 0.18), 0 1px 3px rgba(150, 45, 50, 0.1);
+
+  /* 控件 */
+  --switch-knob: #ffffff;
+
+  /* 焦点环 / 面板高光（红系） */
+  --ring: 0 0 0 2px rgba(207, 58, 67, 0.28), 0 4px 18px rgba(207, 58, 67, 0.16);
+  --panel-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  --panel-highlight-strong: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+
+  color-scheme: light;
+}
+
 /* 未手动指定主题时跟随系统 */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]):not([data-theme="dark"]):not([data-theme="mint"]):not([data-theme="skyblue"]) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]):not([data-theme="mint"]):not([data-theme="skyblue"]):not([data-theme="red"]) {
     /* 品牌色：与 data-theme="dark" 同步——暗底提亮天蓝 */
     --accent: #4c9eff;
     --accent-hover: #3a8ef2;
@@ -468,7 +549,7 @@
   /* 系统深色下的 body 顶部微光：与 data-theme="dark" 一致——
      由 base.css 的「品牌色微光」改为「极淡中性白」，去掉整体蓝调。
      同样只作用于无 data-window 的普通窗口（panel/便签窗口 body 保持透明） */
-  :root:not([data-theme="light"]):not([data-theme="dark"]):not([data-theme="mint"]):not([data-theme="skyblue"]):not([data-window]) body {
+  :root:not([data-theme="light"]):not([data-theme="dark"]):not([data-theme="mint"]):not([data-theme="skyblue"]):not([data-theme="red"]):not([data-window]) body {
     background:
       radial-gradient(1100px 560px at 50% -8%, rgba(255, 255, 255, 0.022), transparent 62%),
       var(--bg-app);

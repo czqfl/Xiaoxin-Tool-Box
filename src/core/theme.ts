@@ -17,7 +17,11 @@ export function applyTheme(mode: ThemeMode) {
   // catch 保留日志便于排查，但不中断配置保存链路。
   try {
     const windowTheme =
-      mode === "mint" || mode === "skyblue" ? "light" : mode === "system" ? null : mode;
+      mode === "mint" || mode === "skyblue" || mode === "red"
+        ? "light"
+        : mode === "system"
+        ? null
+        : mode;
     getCurrentWindow()
       .setTheme(windowTheme)
       .catch((e) => console.warn("[theme] setTheme 失败:", e));

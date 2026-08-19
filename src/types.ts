@@ -54,7 +54,7 @@ export type FolderLayout = "grid" | "list" | "tree";
 export type TerminalShell = "wt" | "cmd" | "powershell";
 /** 面板分区排布：左右分栏 / 上下分栏 */
 export type FolderSplit = "columns" | "rows";
-export type ThemeMode = "system" | "light" | "dark" | "mint" | "skyblue";
+export type ThemeMode = "system" | "light" | "dark" | "mint" | "skyblue" | "red";
 
 export interface ClipboardConfig {
   max_history: number;

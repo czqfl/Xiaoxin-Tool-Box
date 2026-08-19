@@ -132,6 +132,7 @@ export function GeneralPage() {
               { value: "light", label: "浅色" },
               { value: "mint", label: "浅青" },
               { value: "skyblue", label: "浅蓝" },
+              { value: "red", label: "红" },
               { value: "dark", label: "深色" },
             ]}
             onChange={(v) => patchGeneral({ theme: v })}
