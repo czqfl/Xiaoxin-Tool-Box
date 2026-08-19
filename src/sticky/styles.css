@@ -92,15 +92,13 @@ body,
   overflow: hidden;
 }
 
-/* 标题栏居中拖动抓手：绝对定位锚在标题栏水平中点，缩窄便签宽度时抓取区域始终居中；
-   层级置于左右按钮组之下（z-index 1 < 3），绝不遮挡按钮/标题的点击 */
+/* 标题栏居中拖动抓手：作为标题栏的 flex 中间占位元素（flex:1），
+   自然填满「左侧标题组」与「右侧按钮组」之间的空隙，dots 在其中居中——
+   绝不溢出到按钮之上（旧方案用 absolute 居中，窄窗时会与右侧按钮重叠）。
+   拖拽仍可整条标题栏进行，抓手只是明确的视觉指引。 */
 .titlebar-grip {
-  position: absolute;
-  top: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 90px;
-  height: 100%;
+  flex: 1 1 0;
+  min-width: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -134,17 +132,6 @@ body,
   opacity: 1;
 }
 
-/* 便签缩窄（.crowded）：抓取区域收缩成小号抓点，避免与右侧按钮重叠；
-   拖拽仍可整条标题栏进行，抓取点始终可见 */
-.titlebar.crowded .titlebar-grip {
-  width: 36px;
-}
-.titlebar.crowded .titlebar-grip .grip-dots {
-  width: 26px;
-  height: 10px;
-  background-size: 8px 8px;
-}
-
 /* 左右按钮组置于抓取层之上，保证可点击 / 标题可编辑 */
 .titlebar-left,
 .titlebar-right {
@@ -159,11 +146,13 @@ body,
   display: none;
 }
 
-/* 标题栏变窄（动态测量加 .crowded）：提前隐藏次级按钮（历史/新建）。
+/* 标题栏变窄（动态测量加 .crowded）：隐藏更多次级按钮（历史/新建/最大化），
+   为中间抓取区与保留按钮（置顶/托盘/关闭）腾出空间，避免拥挤。
    注意：居中的抓取区域【始终保留】——它是拖动便签的核心入口，任何情况下都不能消失；
    拖拽本身整条标题栏都可用，但抓取点是明确的视觉抓手。 */
 .titlebar.crowded #btn-history,
-.titlebar.crowded #btn-new {
+.titlebar.crowded #btn-new,
+.titlebar.crowded #btn-max {
   display: none;
 }
 
@@ -640,16 +629,17 @@ body,
 }
 
 .titlebar-left {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   /* 有空间时尽量展示标题：整个左侧组（齿轮+标题）最多长到居中抓取点
      的圆点（50%±27px）前停下，留约 5px 间距——不固定死宽度，
      空间越大标题展示越完整；拖拽仍可用抓取点右侧区域 */
-  max-width: calc(50% - 32px);
+  max-width: calc(50% - 24px);
   gap: 2px;
 }
 
 .titlebar-right {
+  flex: 0 0 auto;
   gap: 1px;
 }
 
@@ -1262,30 +1252,34 @@ body,
 }
 
 /* ===== 右下角自定义缩放手柄（拖动改窗口大小）===== */
+/* 放大命中区到 24px（原生无边框窗口的角落热区太小、难触发），常驻显示对角 grip
+   小图标 → 视觉上明确「这里可以拖拽缩放」；hover 高亮品牌色。 */
 .win-resizer {
   position: absolute;
   right: 0;
   bottom: 0;
-  width: 14px;
-  height: 14px;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: flex-end;
   justify-content: flex-end;
-  padding: 2px;
+  padding: 4px;
   cursor: nwse-resize;
   z-index: 30;
   color: var(--text-hint);
-  opacity: 0.5;
+  opacity: 0.6;
   transition: opacity 0.12s ease, color 0.12s ease;
   touch-action: none; /* 触屏 / 笔不触发滚动，保证 pointer 拖拽缩放生效 */
 }
 .win-resizer:hover,
 .win-resizer:active {
-  opacity: 0.95;
+  opacity: 1;
   color: var(--accent);
 }
 .win-resizer-grip {
   display: block;
+  width: 13px;
+  height: 13px;
   pointer-events: none; /* 让 pointer 事件落到 .win-resizer 本身 */
 }
 

@@ -110,6 +110,12 @@ export function mountNoteApp(noteId: string, preset = "") {
       </div>
       <div class="cc-panel" id="tool-fg-panel" hidden></div>
       <div class="cc-panel" id="tool-bg-panel" hidden></div>
+      <!-- 右下角缩放手柄：放大命中区 + 常驻对角 grip 图标，拖动改窗口大小 -->
+      <div class="win-resizer" id="win-resizer" title="拖动调整大小">
+        <svg class="win-resizer-grip" viewBox="0 0 13 13" width="13" height="13" aria-hidden="true">
+          <path d="M12 4 L4 12 M12 8 L8 12 M12 12 L12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+        </svg>
+      </div>
     </div>
   `;
 
@@ -178,6 +184,15 @@ export function mountNoteApp(noteId: string, preset = "") {
   titlebar.addEventListener("mousedown", (e) => {
     if ((e.target as HTMLElement).closest(".icon-btn, input, select, textarea")) return;
     startDragging();
+  });
+
+  // 右下角缩放手柄：交给 Tauri 原生 resize（SouthEast 方向）。命中区已放大到
+  // 24px 并常驻对角 grip 图标（见 .win-resizer），比原生无边框窗口的角落热区好触发。
+  const winResizer = document.getElementById("win-resizer");
+  winResizer?.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    void appWindow.startResizeDragging("SouthEast");
   });
 
   // 标题栏自适应：窗口变窄时提前隐藏次级按钮（历史/新建），并把居中的抓取区域

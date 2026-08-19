@@ -21,8 +21,7 @@ const STICKY_ACTIONS: { key: string; label: string; global?: boolean }[] = [
   { key: "size_up", label: "增大字号" },
   { key: "size_down", label: "减小字号" },
   { key: "show_app", label: "呼出 / 收起便签", global: true },
-  { key: "open_history", label: "呼出历史便签面板", global: true },
-  { key: "close_all", label: "全部关闭便签", global: true },
+  { key: "open_history", label: "呼出 / 收起历史便签面板", global: true },
   { key: "new_note", label: "新建便签", global: true },
 ];
 
@@ -306,8 +305,8 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
 
   // ---- 便签快捷键分组（用户要求：统一移到本页，单独分组）----
   // 存储于便签设置（sticky_settings.json）的 shortcuts 字段，与便签前端
-  // getShortcut 一致；全局 3 项（呼出/全部关闭/新建）保存后调 register_shortcuts
-  // 重注册系统级热键。
+  // getShortcut 一致；全局项（呼出/收起便签、呼出/收起历史面板、新建）保存后
+  // 调 register_shortcuts 重注册系统级热键。
   const [stickyShortcuts, setStickyShortcuts] = useState<Record<string, string>>({});
   const [stickySaved, setStickySaved] = useState<Record<string, string>>({});
   const [stickySaving, setStickySaving] = useState<string | null>(null);
@@ -401,7 +400,7 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
       </SettingGroup>
       <div className="shortcut-hint">
         便签快捷键支持纯功能键（如 F2 / F4）与 Ctrl/Alt/Shift 组合；
-        建议「呼出」「全部关闭」用功能键，编辑区快捷键用组合键避免误触。
+        建议「呼出/收起便签」「呼出/收起历史面板」用功能键，编辑区快捷键用组合键避免误触。
       </div>
 
       <div className="shortcut-hint">

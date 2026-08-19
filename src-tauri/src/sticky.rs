@@ -11,10 +11,21 @@ use crate::storage::AppPaths;
 use base64::Engine;
 use chrono::TimeZone;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::{LazyLock, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
+
+/// 运行时「当前可见便签窗口」集合（label 集合，如 "note_abc123"）。
+/// 用于快捷键「呼出/收起便签」的切换决策——绕过 WebviewWindow::is_visible() 在
+/// 透明 / always-on-top / 无边框窗口上的不可靠性（show 后 is_visible 仍可能返回
+/// false，导致 toggle 永远走「显示」分支、表现为「能呼出、关不掉」）。
+/// 命中由全局快捷键 handler 触发，与 Tauri 命令同在主线程事件循环，Mutex 仅作保险。
+static VISIBLE_NOTES: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
+
+/// 历史窗口当前是否可见（同样绕过 is_visible 不可靠性，供 open_history 快捷键做 toggle）。
+static HISTORY_VISIBLE: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
 
 pub const NOTE_PREFIX: &str = "note_";
 pub const HISTORY_WINDOW: &str = "sticky-history";
@@ -149,7 +160,6 @@ impl Default for StickySettings {
     fn default() -> Self {
         let mut shortcuts = HashMap::new();
         shortcuts.insert("show_app".into(), "Ctrl+O".into());
-        shortcuts.insert("close_all".into(), "Ctrl+Shift+X".into());
         shortcuts.insert("new_note".into(), "Ctrl+Shift+N".into());
         Self {
             shortcuts,
@@ -528,16 +538,18 @@ pub fn toggle_sticky_notes(
     _paths: State<'_, AppPaths>,
 ) -> Result<bool, String> {
     crate::storage::diag_write("[sticky] toggle_sticky_notes called");
-    let note_wins: Vec<tauri::WebviewWindow> = app
+    let note_wins: Vec<(String, tauri::WebviewWindow)> = app
         .webview_windows()
-        .values()
-        .filter(|w| w.label().starts_with(NOTE_PREFIX))
-        .cloned()
+        .iter()
+        .filter(|(_, w)| w.label().starts_with(NOTE_PREFIX))
+        .map(|(l, w)| (l.clone(), w.clone()))
         .collect();
     let hist = app.get_webview_window(HISTORY_WINDOW);
-    let notes_visible = note_wins
-        .iter()
-        .any(|w| w.is_visible().unwrap_or(false));
+    // 与 show_all_open 一致：用运行时 VISIBLE_NOTES 判断（绕过 is_visible 不可靠性）
+    let notes_visible = {
+        let vis = VISIBLE_NOTES.lock().unwrap();
+        note_wins.iter().any(|(l, _)| vis.contains(l))
+    };
     crate::storage::diag_write(&format!(
         "[sticky] toggle: real_note_wins={} hist_exists={} notes_visible={notes_visible}",
         note_wins.len(),
@@ -546,9 +558,12 @@ pub fn toggle_sticky_notes(
 
     if notes_visible {
         // 收起全部便签（历史窗口保持原样）
-        for w in &note_wins {
-            let _ = w.hide();
+        for (l, w) in &note_wins {
+            if VISIBLE_NOTES.lock().unwrap().contains(l) {
+                let _ = w.hide();
+            }
         }
+        VISIBLE_NOTES.lock().unwrap().clear();
         crate::storage::diag_write("[sticky] toggle: hid notes");
         return Ok(false);
     }
@@ -567,10 +582,11 @@ pub fn toggle_sticky_notes(
             }
         }
     } else {
-        for w in &note_wins {
+        for (l, w) in &note_wins {
             let _ = w.show();
             let _ = w.unminimize();
             let _ = w.set_focus();
+            VISIBLE_NOTES.lock().unwrap().insert(l.clone());
         }
         crate::storage::diag_write("[sticky] toggle: shown notes");
     }
@@ -1055,6 +1071,8 @@ pub fn create_note_window(
 pub fn open_history_window(app: AppHandle) -> Result<(), String> {
     const LABEL: &str = HISTORY_WINDOW;
     crate::storage::diag_write("[sticky] open_history_window called");
+    // 快捷键 open_history 用此标志做 toggle（绕过 is_visible 不可靠性）
+    *HISTORY_VISIBLE.lock().unwrap() = true;
     if let Some(win) = app.get_webview_window(LABEL) {
         crate::storage::diag_write("[sticky] open_history_window: existing, show");
         let _ = win.show();
@@ -1130,6 +1148,8 @@ pub fn close_window(window: tauri::WebviewWindow) -> Result<(), String> {
             // 广播不可见（工具栏取消高亮）
             let _ = window.hide();
             crate::panel::broadcast_panel_visibility(&app, &label, false);
+            // 同步快捷键 open_history 的 toggle 状态（否则下次按下仍判为"可见"）
+            *HISTORY_VISIBLE.lock().unwrap() = false;
             Ok(())
         }
         SETTINGS_WINDOW => {
@@ -1174,6 +1194,8 @@ pub fn close_window(window: tauri::WebviewWindow) -> Result<(), String> {
             let r = window.close();
             let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
             crate::panel::broadcast_panel_visibility(&app, &label, false);
+            // 同步运行时可见集合（窗口已销毁，移除 stale 标记）
+            VISIBLE_NOTES.lock().unwrap().remove(&label);
             r.map_err(|e| e.to_string())
         }
     }
@@ -1231,7 +1253,7 @@ fn to_accelerator(combo: &str) -> String {
         .to_lowercase()
 }
 
-/// 注册便签全局快捷键：呼出（show_app）/ 全部关闭（close_all）/ 新建（new_note），
+/// 注册便签全局快捷键：呼出（show_app）/ 新建（new_note）/ 呼出历史面板（open_history），
 /// 组合键来自便签设置（现统一在工具箱「快捷键设置」的便签分组里配置）。
 /// 只注册便签自己的组合（不去 unregister_all，避免注销工具箱快捷键）；
 /// 与工具箱组合撞车时 register 失败被忽略。
@@ -1243,7 +1265,7 @@ pub fn register_all_shortcuts(app: &AppHandle) {
     };
     let settings = load_settings_inner(paths.inner());
     let mut seen = HashSet::new();
-    for key in ["show_app", "close_all", "new_note", "open_history"] {
+    for key in ["show_app", "new_note", "open_history"] {
         if let Some(combo) = settings.shortcuts.get(key) {
             let acc = to_accelerator(combo);
             if !acc.is_empty() && seen.insert(acc.clone()) {
@@ -1255,41 +1277,42 @@ pub fn register_all_shortcuts(app: &AppHandle) {
     }
 }
 
-/// 便签窗口是否有可见的。
-fn has_visible_note(app: &AppHandle) -> bool {
-    app.webview_windows()
-        .values()
-        .filter(|w| w.label().starts_with(NOTE_PREFIX))
-        .any(|w| w.is_visible().unwrap_or(false))
-}
-
 /// 快捷键「呼出 / 收起便签」：仅作用于便签窗口，绝不打开历史面板
 /// （历史面板由独立的 open_history 快捷键负责）。
-/// - 有可见便签窗口 → 收起（全部 hide）；
+/// 切换决策基于运行时 VISIBLE_NOTES 集合，而非 WebviewWindow::is_visible()
+/// （透明 / always-on-top / 无边框窗口上 is_visible 不可靠，show 后仍可能返回
+/// false，导致 toggle 永远走「显示」分支、表现成「能呼出、关不掉」）。
+/// - VISIBLE_NOTES 非空 → 收起（全部 hide 并清空集合）；
 /// - 否则 → 呼出：已有（含隐藏）便签窗口则 show 全部；
 ///   若没有任何活动窗口，从持久化 open_notes 重建，仍为空则新建一张。
 fn show_all_open(app: &AppHandle) {
-    let note_wins: Vec<tauri::WebviewWindow> = app
+    let note_wins: Vec<(String, tauri::WebviewWindow)> = app
         .webview_windows()
-        .values()
-        .filter(|w| w.label().starts_with(NOTE_PREFIX))
-        .cloned()
-        .collect();
-    let notes_visible = note_wins
         .iter()
-        .any(|w| w.is_visible().unwrap_or(false));
-    if notes_visible {
-        for w in &note_wins {
-            let _ = w.hide();
+        .filter(|(_, w)| w.label().starts_with(NOTE_PREFIX))
+        .map(|(l, w)| (l.clone(), w.clone()))
+        .collect();
+    // 决策：VISIBLE_NOTES 中仍有「当前显示中」的便签窗口 → 本次收起
+    let any_visible = {
+        let vis = VISIBLE_NOTES.lock().unwrap();
+        note_wins.iter().any(|(l, _)| vis.contains(l))
+    };
+    if any_visible {
+        for (l, w) in &note_wins {
+            if VISIBLE_NOTES.lock().unwrap().contains(l) {
+                let _ = w.hide();
+            }
         }
+        VISIBLE_NOTES.lock().unwrap().clear();
         let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
         return;
     }
     if !note_wins.is_empty() {
-        for w in &note_wins {
+        for (l, w) in &note_wins {
             let _ = w.show();
             let _ = w.unminimize();
             let _ = w.set_focus();
+            VISIBLE_NOTES.lock().unwrap().insert(l.clone());
         }
         let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
         return;
@@ -1301,6 +1324,7 @@ fn show_all_open(app: &AppHandle) {
             for id in ids {
                 crate::storage::diag_write(&format!("[sticky] show_all_open: rebuild {id}"));
                 ensure_note_window(app, &id);
+                VISIBLE_NOTES.lock().unwrap().insert(window_label(&id));
             }
             return;
         }
@@ -1310,18 +1334,6 @@ fn show_all_open(app: &AppHandle) {
     quick_new_note(app);
 }
 
-/// 全部关闭：向每个便签窗口广播 play-close-anim（前端：聚焦的播粒子动画，
-/// 其余直接隐藏），与"全部关闭"快捷键语义一致。
-fn close_all_with_anim(app: &AppHandle) {
-    for w in app
-        .webview_windows()
-        .values()
-        .filter(|w| w.label().starts_with(NOTE_PREFIX))
-    {
-        let _ = w.emit("play-close-anim", ());
-    }
-}
-
 /// 新建便签：生成 id、标记打开、主线程建窗并呼出。
 fn quick_new_note(app: &AppHandle) {
     let id = uuid::Uuid::new_v4().to_string().replace('-', "")[..6].to_string();
@@ -1329,15 +1341,17 @@ fn quick_new_note(app: &AppHandle) {
         mark_note_open_inner(paths.inner(), &id);
     }
     ensure_note_window(app, &id);
+    VISIBLE_NOTES.lock().unwrap().insert(window_label(&id));
     if let Some(win) = app.get_webview_window(&window_label(&id)) {
         let _ = win.emit("summoned", ());
     }
 }
 
-/// 分发便签全局快捷键：shortcut 命中便签设置的 show_app/close_all/new_note 之一
+/// 分发便签全局快捷键：shortcut 命中便签设置的 show_app/new_note/open_history 之一
 /// 则执行并返回 true（调用方短路，不再走工具箱快捷键逻辑）。
-/// 「呼出」与「全部关闭」绑定同一组合时做一次切换：有可见便签则全部关闭，
-/// 否则全部呼出（与原版语义一致，避免"先开再关"净效果为关闭）。
+/// - show_app：呼出/收起便签（基于 VISIBLE_NOTES 运行时集合做 toggle）
+/// - new_note：新建便签
+/// - open_history：呼出/收起历史便签面板（基于 HISTORY_VISIBLE 做 toggle）
 pub fn handle_sticky_shortcut(app: &AppHandle, shortcut: &tauri_plugin_global_shortcut::Shortcut) -> bool {
     use tauri_plugin_global_shortcut::Shortcut as GShortcut;
     let Some(paths) = app.try_state::<AppPaths>() else {
@@ -1345,7 +1359,7 @@ pub fn handle_sticky_shortcut(app: &AppHandle, shortcut: &tauri_plugin_global_sh
     };
     let settings = load_settings_inner(paths.inner());
     let mut matched: Vec<&str> = Vec::new();
-    for key in ["show_app", "close_all", "new_note", "open_history"] {
+    for key in ["show_app", "new_note", "open_history"] {
         if let Some(combo) = settings.shortcuts.get(key) {
             let acc = to_accelerator(combo);
             if !acc.is_empty() {
@@ -1360,26 +1374,23 @@ pub fn handle_sticky_shortcut(app: &AppHandle, shortcut: &tauri_plugin_global_sh
     if matched.is_empty() {
         return false;
     }
-    if matched.contains(&"show_app") && matched.contains(&"close_all") {
-        if has_visible_note(app) {
-            close_all_with_anim(app);
-        } else {
-            show_all_open(app);
-        }
-        if matched.contains(&"new_note") {
-            quick_new_note(app);
-        }
-    } else {
-        for m in matched {
-            match m {
-                "show_app" => show_all_open(app),
-                "close_all" => close_all_with_anim(app),
-                "new_note" => quick_new_note(app),
-                "open_history" => {
+    for m in matched {
+        match m {
+            "show_app" => show_all_open(app),
+            "new_note" => quick_new_note(app),
+            "open_history" => {
+                // toggle：历史窗口当前可见 → 收起；否则呼出
+                let visible = *HISTORY_VISIBLE.lock().unwrap();
+                if visible {
+                    if let Some(w) = app.get_webview_window(HISTORY_WINDOW) {
+                        let _ = w.hide();
+                    }
+                    *HISTORY_VISIBLE.lock().unwrap() = false;
+                } else {
                     let _ = open_history_window(app.clone());
                 }
-                _ => {}
             }
+            _ => {}
         }
     }
     true
