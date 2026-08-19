@@ -1382,7 +1382,7 @@ pub fn ensure_particles_window(app: &AppHandle) {
                 (m.size().width as f64 / sf, m.size().height as f64 / sf)
             })
             .unwrap_or((1920.0, 1080.0));
-        let _ = WebviewWindowBuilder::new(&app2, PL, WebviewUrl::App("index.html".into()))
+        let win = WebviewWindowBuilder::new(&app2, PL, WebviewUrl::App("index.html".into()))
             .title("粒子层")
             .decorations(false)
             .transparent(true)
@@ -1398,6 +1398,21 @@ pub fn ensure_particles_window(app: &AppHandle) {
         crate::storage::diag_write(&format!(
             "[sticky] ensure_particles_window: built {w}x{h}"
         ));
+        // 【关键】透明窗口 WebView2 初始化有挂起风险（工具箱历史窗口因此做
+        // 非透明；便签窗口靠创建后立即 show 强制初始化）。粒子层 visible:false
+        // 从不显示 → WebView 永不初始化 → 前端从不执行（ready 日志为 0 的
+        // 终极根因）。对策：创建后短暂 show 强制初始化（全屏透明无视觉），
+        // 800ms 后再隐藏——前端 mount 完成、事件监听就绪。
+        if let Ok(pw) = win {
+            let _ = pw.show();
+            let app3 = app2.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(800));
+                let _ = app3.run_on_main_thread(move || {
+                    let _ = pw.hide();
+                });
+            });
+        }
     });
 }
 
