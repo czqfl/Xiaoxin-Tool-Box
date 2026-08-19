@@ -136,9 +136,10 @@ export function mountHistoryApp() {
     }
   }
 
-  // 拖拽
+  // 拖拽：标题栏任意处按下拖动窗口，但图标按钮(.icon-btn)与新建便签按钮
+  // (.new-note-btn) 要排除——否则原生 startDragging 会吞掉 click，导致按钮失灵。
   titlebar.addEventListener("mousedown", (e) => {
-    if ((e.target as HTMLElement).closest(".icon-btn")) return;
+    if ((e.target as HTMLElement).closest(".icon-btn, .new-note-btn")) return;
     startDragging();
   });
 
