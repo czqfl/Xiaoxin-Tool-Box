@@ -21,6 +21,7 @@ const STICKY_ACTIONS: { key: string; label: string; global?: boolean }[] = [
   { key: "size_up", label: "增大字号" },
   { key: "size_down", label: "减小字号" },
   { key: "show_app", label: "呼出 / 收起便签", global: true },
+  { key: "open_history", label: "呼出历史便签面板", global: true },
   { key: "close_all", label: "全部关闭便签", global: true },
   { key: "new_note", label: "新建便签", global: true },
 ];

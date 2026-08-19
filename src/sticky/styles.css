@@ -2429,9 +2429,14 @@ body,
   transform: scale(0.96);
 }
 
-/* 标题栏"新建便签"胶囊按钮（历史窗口，与关闭按钮同一水平线）：
- * 保持胶囊样式（用户此前确认的视觉），仅移动到标题栏右侧 */
-.history-window .titlebar-right .new-note-btn {
+/* 标题栏"新建便签"胶囊按钮（历史窗口）：
+ * 保持胶囊样式（用户确认的视觉），【水平居中】显示在标题栏，
+ * 与右侧关闭按钮同一水平线 */
+.history-window .titlebar .new-note-btn {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -2450,18 +2455,19 @@ body,
   transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease,
     transform 0.15s ease, box-shadow 0.15s ease;
 }
-.history-window .titlebar-right .new-note-btn .btn-plus {
+.history-window .titlebar .new-note-btn .btn-plus {
   font-size: 14px;
   line-height: 1;
 }
-.history-window .titlebar-right .new-note-btn:hover {
+.history-window .titlebar .new-note-btn:hover {
   background: var(--accent, #4c9eff);
   border-color: var(--accent, #4c9eff);
   color: #fff;
-  transform: translateY(-1px);
+  /* 保持水平居中：translate(-50%,-50%) 基础上仅上浮 1px */
+  transform: translate(-50%, calc(-50% - 1px));
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent, #4c9eff) 16%, transparent),
     0 4px 12px color-mix(in srgb, var(--accent, #4c9eff) 28%, transparent);
 }
-.history-window .titlebar-right .new-note-btn:active {
-  transform: scale(0.95);
+.history-window .titlebar .new-note-btn:active {
+  transform: translate(-50%, -50%) scale(0.95);
 }

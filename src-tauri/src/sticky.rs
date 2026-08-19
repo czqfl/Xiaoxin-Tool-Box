@@ -1243,7 +1243,7 @@ pub fn register_all_shortcuts(app: &AppHandle) {
     };
     let settings = load_settings_inner(paths.inner());
     let mut seen = HashSet::new();
-    for key in ["show_app", "close_all", "new_note"] {
+    for key in ["show_app", "close_all", "new_note", "open_history"] {
         if let Some(combo) = settings.shortcuts.get(key) {
             let acc = to_accelerator(combo);
             if !acc.is_empty() && seen.insert(acc.clone()) {
@@ -1318,7 +1318,7 @@ pub fn handle_sticky_shortcut(app: &AppHandle, shortcut: &tauri_plugin_global_sh
     };
     let settings = load_settings_inner(paths.inner());
     let mut matched: Vec<&str> = Vec::new();
-    for key in ["show_app", "close_all", "new_note"] {
+    for key in ["show_app", "close_all", "new_note", "open_history"] {
         if let Some(combo) = settings.shortcuts.get(key) {
             let acc = to_accelerator(combo);
             if !acc.is_empty() {
@@ -1348,6 +1348,9 @@ pub fn handle_sticky_shortcut(app: &AppHandle, shortcut: &tauri_plugin_global_sh
                 "show_app" => show_all_open(app),
                 "close_all" => close_all_with_anim(app),
                 "new_note" => quick_new_note(app),
+                "open_history" => {
+                    let _ = open_history_window(app.clone());
+                }
                 _ => {}
             }
         }
