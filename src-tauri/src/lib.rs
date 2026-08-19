@@ -209,6 +209,19 @@ pub fn run() {
                     crate::storage::diag_write("[sticky] particles layer ready");
                 });
             }
+            // 启动后打印窗口清单（排查：确认粒子层窗口是否真实创建）
+            {
+                let app2 = handle.clone();
+                let labels: Vec<String> = app2
+                    .webview_windows()
+                    .keys()
+                    .map(|k| k.clone())
+                    .collect();
+                crate::storage::diag_write(&format!(
+                    "[sticky] windows after setup: {}",
+                    labels.join(",")
+                ));
+            }
             clipboard::start_watcher(handle.clone());
             #[cfg(windows)]
             explorer::start_explorer_watcher(handle.clone());
