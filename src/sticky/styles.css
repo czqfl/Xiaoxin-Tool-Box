@@ -115,15 +115,15 @@ body,
   cursor: grabbing;
 }
 
-/* 抓取点阵：多行点阵（4 行 × 4 列小圆点），拖动把手指示——
-   无模糊、无渐变，纯圆点平铺，克制不脏 */
+/* 抓取点阵：多行点阵，尺寸严格对齐格子（32÷8=4 列、24÷8=3 行），
+   每个点完整显示——此前 34×26 与格子 9px 不对齐，右侧/下侧被截半 */
 .titlebar-grip .grip-dots {
-  width: 34px;
-  height: 26px;
+  width: 32px;
+  height: 24px;
   border-radius: 6px;
-  background-image: radial-gradient(circle, var(--grip-dot) 2px, transparent 2.3px);
-  background-size: 9px 9px;
-  background-position: 2px 2px;
+  background-image: radial-gradient(circle, var(--grip-dot) 2.2px, transparent 2.6px);
+  background-size: 8px 8px;
+  background-position: 0 0;
   opacity: 0.45;
   transition: opacity 0.15s ease;
   pointer-events: none;
@@ -645,6 +645,8 @@ body,
   grid-column: 3;
   justify-self: end;
   gap: 1px;
+  /* 与中间抓取区保持强制间隔（缩放/变窄过程中也绝不挨近） */
+  margin-left: 16px;
 }
 
 /* 右侧操作按钮收紧：原 32px 宽、图标仅 15px，大量留白显得松散；此处仅缩右侧行 */

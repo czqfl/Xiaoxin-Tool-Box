@@ -197,59 +197,67 @@ export function mountNoteApp(noteId: string, preset = "") {
     startDragging();
   });
 
-  // 右下角缩放手柄：程序化 setSize 缩放（透明窗口下原生 startResizeDragging
-  // 偶发失效，用户反馈"拖不动"——改为 pointer 事件 + setSize，可靠）
-  // 【关键】缩放期间临时开 shadow（复刻稳定态）：transparent + shadow(false)
-  // 状态下 setSize 会触发 WebView2 重建导致无响应/崩溃（原版注释经验），
-  // 结束恢复 shadow(false)。
+  // 右下角缩放手柄【照原版 StickyNote 实现】：程序化 setSize。
+  // 关键点（原版验证可行）：
+  //  - 用 e.clientX（逻辑像素，与 LogicalSize 一致）而非 screenX（物理像素，
+  //    高 DPI 下会算错/失效——此前"时好时坏"的根因之一）；
+  //  - 缩放期间临时 setResizable(true)+setShadow(true)（复刻稳定态，避免
+  //    transparent+shadow(false) 下 setSize 触发 WebView2 重建崩溃），
+  //    结束恢复 resizable(false)+shadow(false)（静止态无投影无系统缩放）。
   const winResizer = document.getElementById("win-resizer");
-  const RS_MIN_W = 220;
-  const RS_MIN_H = 150;
-  let rsResizing = false;
-  let rsX = 0;
-  let rsY = 0;
-  let rsW = 0;
-  let rsH = 0;
+  const MIN_W = 220;
+  const MIN_H = 150;
+  let winResizing = false;
+  let resStartX = 0;
+  let resStartY = 0;
+  let resStartW = 0;
+  let resStartH = 0;
   winResizer?.addEventListener("pointerdown", (e) => {
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
-    rsResizing = true;
+    winResizing = true;
+    appWindow.setResizable(true).catch(() => {});
     appWindow.setShadow(true).catch(() => {});
-    rsX = e.screenX;
-    rsY = e.screenY;
-    rsW = window.innerWidth;
-    rsH = window.innerHeight;
+    resStartX = e.clientX;
+    resStartY = e.clientY;
+    resStartW = window.innerWidth;
+    resStartH = window.innerHeight;
     try {
       winResizer.setPointerCapture(e.pointerId);
     } catch {
-      /* 忽略 */
+      /* 部分环境不支持指针捕获，退化为 document 级监听仍可工作 */
     }
     document.body.style.userSelect = "none";
+    document.body.style.cursor = "nwse-resize";
   });
   const onRsMove = (e: PointerEvent) => {
-    if (!rsResizing) return;
-    const w = Math.max(RS_MIN_W, rsW + (e.screenX - rsX));
-    const h = Math.max(RS_MIN_H, rsH + (e.screenY - rsY));
-    appWindow.setSize(new LogicalSize(w, h)).catch(() => {});
+    if (!winResizing) return;
+    const nw = Math.max(MIN_W, resStartW + (e.clientX - resStartX));
+    const nh = Math.max(MIN_H, resStartH + (e.clientY - resStartY));
+    appWindow.setSize(new LogicalSize(nw, nh)).catch(() => {});
   };
-  const onRsEnd = (e: PointerEvent) => {
-    if (!rsResizing) return;
-    rsResizing = false;
+  const endWinResize = (e: PointerEvent) => {
+    if (!winResizing) return;
+    winResizing = false;
+    // 缩放结束恢复：静止状态无投影、无系统缩放
+    appWindow.setResizable(false).catch(() => {});
     appWindow.setShadow(false).catch(() => {});
     try {
       winResizer?.releasePointerCapture(e.pointerId);
     } catch {
-      /* 忽略 */
+      /* 同上 */
     }
     document.body.style.userSelect = "";
+    document.body.style.cursor = "";
   };
   if (winResizer) {
     winResizer.addEventListener("pointermove", onRsMove);
-    winResizer.addEventListener("pointerup", onRsEnd);
-    winResizer.addEventListener("pointercancel", onRsEnd);
+    winResizer.addEventListener("pointerup", endWinResize);
+    winResizer.addEventListener("pointercancel", endWinResize);
+    // 指针捕获失败的环境：document 级监听兜底
     document.addEventListener("pointermove", onRsMove);
-    document.addEventListener("pointerup", onRsEnd);
+    document.addEventListener("pointerup", endWinResize);
   }
 
   // 标题栏自适应【重写】：窗口变窄时右侧按钮从【左到右】逐个隐藏
