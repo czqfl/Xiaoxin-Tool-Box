@@ -53,6 +53,9 @@ export function mountNoteApp(noteId: string, preset = "") {
         </div>
         <div class="titlebar-grip" id="drag-grip" title="拖动便签"><span class="grip-dots"></span></div>
         <div class="titlebar-right">
+          <button class="icon-btn" id="btn-toolbar-toggle" title="显示/隐藏格式工具栏" aria-pressed="true">
+            <span class="tb-toggle-ico" aria-hidden="true">Aa</span>
+          </button>
           <button class="icon-btn" id="btn-pin" title="置顶" aria-pressed="true">
             <span class="nail" aria-hidden="true">
               <svg class="pin-icon" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
@@ -119,6 +122,7 @@ export function mountNoteApp(noteId: string, preset = "") {
   const appWindow = getCurrentWindow();
   const titlebar = document.querySelector(".titlebar")!;
   const btnPin = document.getElementById("btn-pin")!;
+  const btnToolbarToggle = document.getElementById("btn-toolbar-toggle")!;
   const btnClose = document.getElementById("btn-close")!;
   const btnTray = document.getElementById("btn-tray")!;
   const titleInput = document.getElementById("note-title") as HTMLInputElement;
@@ -162,7 +166,20 @@ export function mountNoteApp(noteId: string, preset = "") {
   // 工具栏交互前捕获的选区（字符偏移量）。点击工具栏按钮会令编辑器失焦、
   // 选区可能被改写，所以先在 mousedown 捕获阶段记下来，上色/改字号时据此还原。
   let toolbarOff: { start: number; end: number } | null = null;
-  const toolbar = document.querySelector(".toolbar")!;
+  const toolbar = document.querySelector(".toolbar") as HTMLElement;
+
+  /** 第二行格式工具栏显示/隐藏（每便签独立配置，undefined=默认显示） */
+  const applyToolbarVisible = (visible: boolean) => {
+    toolbar.style.display = visible ? "" : "none";
+    btnToolbarToggle.classList.toggle("active", visible);
+    btnToolbarToggle.setAttribute("aria-pressed", String(visible));
+  };
+  btnToolbarToggle.addEventListener("click", () => {
+    const visible = toolbar.style.display === "none";
+    applyToolbarVisible(visible);
+    current.toolbar_visible = visible;
+    saveNote(noteId, current).catch((e) => console.error("保存工具栏配置失败:", e));
+  });
 
   // 最大化/还原状态（手动最大化到监控器工作区，规避无边框透明窗口原生 maximize 不生效）
   let savedBounds: { x: number; y: number; w: number; h: number } | null = null;
@@ -365,8 +382,11 @@ export function mountNoteApp(noteId: string, preset = "") {
         editor.innerHTML = loaded.content || "";
         titleInput.value = loaded.title || "";
         updatePin(loaded.pinned, false);
+        // 应用每便签的格式工具栏显隐配置（undefined → 默认显示）
+        applyToolbarVisible(loaded.toolbar_visible ?? true);
       } else {
         updatePin(true, false);
+        applyToolbarVisible(true);
       }
       // 全局快捷速记带过来的预填文本（仅新建便签时生效）：直接写入编辑器并保存
       if (preset && !loaded) {

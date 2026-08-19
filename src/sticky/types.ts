@@ -14,6 +14,8 @@ export interface NoteData {
   pos_y?: number;
   /** 自定义背景图片（base64 data URL，可空） */
   bg_image?: string;
+  /** 第二行格式工具栏（字体颜色/背景色等）是否显示（每便签独立配置，undefined=默认显示） */
+  toolbar_visible?: boolean;
 }
 
 export interface NoteMeta {

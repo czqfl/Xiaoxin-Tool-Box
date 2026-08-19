@@ -682,21 +682,20 @@ body,
   color: var(--danger);
 }
 
-/* 可编辑的便签标题（自定义标题）。宽度随空间自动伸缩、尽量展示完整标题；
-   收缩下限 40px，窗口很窄时让位给按钮。 */
+/* 可编辑的便签标题（自定义标题）。
+   【重做】宽度适配内容（fit-content）而非撑满左列：长标题也不会伸到
+   中间抓取区上；上限 max(220px, 45% 窗口宽) 兜底，超长省略号截断。 */
 .title-input {
-  width: auto;
-  flex: 1 1 auto;
-  /* 关键：绝不超出左侧容器（grid 第 1 列），防止长标题把输入框撑到
-     中间抓取区上、盖住抓取区点不到（用户反馈重叠） */
-  max-width: 100%;
+  width: fit-content;
+  max-width: min(45%, 220px);
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   margin-left: 6px;
-  /* 与中间抓取区保持明确间隔（右侧留白） */
-  margin-right: 14px;
+  /* 与中间抓取区保持明确间隔 */
+  margin-right: 16px;
   border: 1px solid transparent;
   /* 与其余按钮同款“果冻”底（半透明主题色） */
   background: color-mix(in srgb, var(--bg-bar, var(--bg)) 28%, transparent);
@@ -2334,16 +2333,17 @@ body,
   width: auto;
   padding: 0 12px;
   margin-right: 2px;
-  border-color: var(--accent);
-  background: var(--accent);
+  /* 固定蓝色（用户要求：不要跟随主题的紫色调） */
+  border-color: #3b82f6;
+  background: #3b82f6;
   color: #fff;
   font-size: 13px;
   font-weight: 600;
 }
 .history-window .new-note:hover {
   filter: brightness(1.1);
-  border-color: var(--accent);
-  background: var(--accent);
+  border-color: #3b82f6;
+  background: #3b82f6;
   color: #fff;
 }
 
@@ -2484,4 +2484,17 @@ body,
 }
 .history-window .titlebar .new-note-btn:active {
   transform: translate(-50%, -50%) scale(0.95);
+}
+
+/* ---- 格式工具栏显示开关（置顶按钮左侧，"Aa" 图标）---- */
+#btn-toolbar-toggle .tb-toggle-ico {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1;
+  font-family: inherit;
+}
+#btn-toolbar-toggle.active {
+  color: var(--accent);
+  background: color-mix(in srgb, currentColor 14%, transparent);
 }

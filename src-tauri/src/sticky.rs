@@ -73,6 +73,9 @@ pub struct NoteData {
     pub pos_y: Option<f64>,
     #[serde(default)]
     pub bg_image: Option<String>,
+    /// 第二行格式工具栏（字体颜色/背景色等）是否显示（每便签独立配置）
+    #[serde(default)]
+    pub toolbar_visible: Option<bool>,
 }
 
 impl Default for NoteData {
@@ -91,6 +94,7 @@ impl Default for NoteData {
             pos_x: None,
             pos_y: None,
             bg_image: None,
+            toolbar_visible: None,
         }
     }
 }
