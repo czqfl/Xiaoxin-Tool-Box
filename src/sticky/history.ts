@@ -29,15 +29,17 @@ export function mountHistoryApp() {
   const btnClose = document.getElementById("btn-close")!;
   const btnNew = document.getElementById("btn-new")!;
 
-  // 新建便签：生成新 id 并打开便签窗口（与便签页"＋"按钮同逻辑）
-  btnNew.addEventListener("click", async () => {
+  // 新建便签：生成新 id 并打开便签窗口（与便签页"＋"按钮同逻辑）。
+  // 抽成公共函数：标题栏 + 按钮与空状态居中大按钮共用。
+  async function createNewNote() {
     try {
       const id = await newNoteId();
       await createNoteWindow(id);
     } catch (err) {
       console.error("新建便签失败:", err);
     }
-  });
+  }
+  btnNew.addEventListener("click", () => void createNewNote());
 
   // 套用全局外观主题（浅色 / 深色），使历史窗口与便签配色一致。
   getSettings()
@@ -171,12 +173,16 @@ export function mountHistoryApp() {
     listEl.innerHTML = "";
 
     if (items.length === 0) {
+      // 空状态：居中大号"新建便签"按钮（视觉重心 + 直接可点）
       listEl.innerHTML = `
         <div class="empty-state">
-          <div class="empty-icon">\u270e</div>
-          <div class="empty-text">还没有历史便签</div>
+          <button class="new-note-cta" id="new-note-cta" title="新建便签">
+            <span class="cta-icon">\u2795</span>
+            <span class="cta-text">新建便签</span>
+          </button>
         </div>
       `;
+      document.getElementById("new-note-cta")?.addEventListener("click", () => void createNewNote());
       return;
     }
 

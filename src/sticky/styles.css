@@ -2333,3 +2333,82 @@ body,
   background: var(--accent);
   color: #fff;
 }
+
+/* ===== 历史窗口：新建便签按钮美化 ===== */
+/* 标题栏 + 按钮：圆形品牌色，hover 旋转 90° + 光晕，不再是小方块 */
+.history-window .titlebar-right #btn-new {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--accent, #4c9eff) 38%, transparent);
+  background: color-mix(in srgb, var(--accent, #4c9eff) 10%, transparent);
+  color: var(--accent, #4c9eff);
+  transition: background 0.12s ease, color 0.12s ease, transform 0.18s ease,
+    box-shadow 0.12s ease;
+}
+.history-window .titlebar-right #btn-new:hover {
+  background: var(--accent, #4c9eff);
+  color: #fff;
+  transform: rotate(90deg);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent, #4c9eff) 16%, transparent);
+}
+.history-window .titlebar-right #btn-new:active {
+  transform: rotate(90deg) scale(0.9);
+}
+
+/* 空状态：整体居中，主视觉是大号虚线圆环新建按钮 */
+.history-window .empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 92px);
+  padding: 24px 12px;
+  color: var(--text-hint);
+}
+.history-window .new-note-cta {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--text-sub);
+  font-family: inherit;
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+.history-window .new-note-cta .cta-icon {
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  line-height: 1;
+  border-radius: 50%;
+  border: 1.5px dashed color-mix(in srgb, var(--accent, #4c9eff) 48%, transparent);
+  background: color-mix(in srgb, var(--accent, #4c9eff) 8%, transparent);
+  color: var(--accent, #4c9eff);
+  transition: background 0.15s ease, border-color 0.15s ease, border-style 0.15s ease,
+    transform 0.2s ease, box-shadow 0.15s ease;
+}
+.history-window .new-note-cta .cta-text {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+}
+.history-window .new-note-cta:hover {
+  color: var(--text);
+  transform: translateY(-2px);
+}
+.history-window .new-note-cta:hover .cta-icon {
+  background: color-mix(in srgb, var(--accent, #4c9eff) 16%, transparent);
+  border-style: solid;
+  border-color: var(--accent, #4c9eff);
+  transform: scale(1.06) rotate(90deg);
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--accent, #4c9eff) 24%, transparent);
+}
+.history-window .new-note-cta:active .cta-icon {
+  transform: scale(0.96);
+}
