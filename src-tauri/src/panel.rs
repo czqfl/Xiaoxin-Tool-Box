@@ -573,8 +573,8 @@ pub fn toolbar_geometry(window: tauri::WebviewWindow) -> Result<ToolbarGeometry,
         // 兜底：找不到显示器时用窗口自身几何当基准（单屏正常，多屏极端情况退化为不收起）
         .unwrap_or((pos.x, pos.y, size.width, size.height));
     Ok(ToolbarGeometry {
-        cursor_x: cursor.x,
-        cursor_y: cursor.y,
+        cursor_x: cursor.x as i32,
+        cursor_y: cursor.y as i32,
         win_x: pos.x,
         win_y: pos.y,
         win_w: size.width,
