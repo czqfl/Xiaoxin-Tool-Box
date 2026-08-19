@@ -233,6 +233,43 @@ pub fn run() {
                     labels.join(",")
                 ));
             }
+            // 【开发自检·自动模拟关闭动画】debug build 启动 5 秒后，对当前
+            // 打开的便签窗口广播一次 play-close-anim（+ 兜底强制关闭）——
+            // 完整走"关闭便签"的粒子动画链路，无需手动操作即可验证粒子层
+            // 是否参与渲染（粒子是否飘出便签矩形）。release 不触发。
+            #[cfg(debug_assertions)]
+            {
+                let app2 = handle.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                    let _ = app2.run_on_main_thread({
+                        let app3 = app2.clone();
+                        move || {
+                            crate::storage::diag_write("[sticky] autotest: close-sim start");
+                            let wins: Vec<(String, tauri::WebviewWindow)> = app3
+                                .webview_windows()
+                                .iter()
+                                .filter(|(_, w)| w.label().starts_with("note_"))
+                                .map(|(l, w)| (l.clone(), w.clone()))
+                                .collect();
+                            if wins.is_empty() {
+                                crate::storage::diag_write(
+                                    "[sticky] autotest: no note window, skip",
+                                );
+                                return;
+                            }
+                            let labels: Vec<String> =
+                                wins.iter().map(|(l, _)| l.clone()).collect();
+                            crate::storage::diag_write(&format!(
+                                "[sticky] autotest: close-anim -> {}",
+                                labels.join(",")
+                            ));
+                            crate::sticky::emit_close_anim(&wins);
+                            crate::sticky::schedule_force_close(&app3, labels);
+                        }
+                    });
+                });
+            }
             clipboard::start_watcher(handle.clone());
             #[cfg(windows)]
             explorer::start_explorer_watcher(handle.clone());

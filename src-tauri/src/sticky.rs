@@ -32,7 +32,7 @@ static HISTORY_VISIBLE: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(fals
 /// 不做"只有最后激活的便签播"的区分——用户明确要求快捷键关闭与手动点击一致
 /// 播放动画；多便签同时消散也符合"全部收起"的直觉（此前 isFocused / payload
 /// 区分任一环节判断失误都会吞掉动画，是"快捷键关闭无动画"的反复根因）。
-fn emit_close_anim(note_wins: &[(String, tauri::WebviewWindow)]) {
+pub fn emit_close_anim(note_wins: &[(String, tauri::WebviewWindow)]) {
     for (l, w) in note_wins {
         let _ = w.emit("play-close-anim", true);
         crate::storage::diag_write(&format!("[sticky] emit close-anim -> {l}"));
@@ -1224,7 +1224,7 @@ fn hide_note_window(app: &AppHandle, label: &str) {
 /// 向前端广播消散动画后，Rust 端延时强制隐藏每个便签窗口——不依赖前端动画回调。
 /// 前端若正常播完动画并自行 close_window（现为隐藏常驻），则到时窗口已隐藏，
 /// 本兜底变 no-op（幂等）；前端若异常未关，本兜底保证窗口一定隐藏（修「快捷键关不掉便签」）。
-fn schedule_force_close(app: &AppHandle, labels: Vec<String>) {
+pub fn schedule_force_close(app: &AppHandle, labels: Vec<String>) {
     let app2 = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(700));
