@@ -197,14 +197,55 @@ export function mountNoteApp(noteId: string, preset = "") {
     startDragging();
   });
 
-  // 右下角缩放手柄：交给 Tauri 原生 resize（SouthEast 方向）。命中区已放大到
-  // 24px 并常驻对角 grip 图标（见 .win-resizer），比原生无边框窗口的角落热区好触发。
+  // 右下角缩放手柄：程序化 setSize 缩放（透明窗口下原生 startResizeDragging
+  // 偶发失效，用户反馈"拖不动"——改为 pointer 事件 + setSize，可靠）
   const winResizer = document.getElementById("win-resizer");
-  winResizer?.addEventListener("mousedown", (e) => {
+  const RS_MIN_W = 220;
+  const RS_MIN_H = 150;
+  let rsResizing = false;
+  let rsX = 0;
+  let rsY = 0;
+  let rsW = 0;
+  let rsH = 0;
+  winResizer?.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
-    void appWindow.startResizeDragging("SouthEast");
+    rsResizing = true;
+    rsX = e.screenX;
+    rsY = e.screenY;
+    rsW = window.innerWidth;
+    rsH = window.innerHeight;
+    try {
+      winResizer.setPointerCapture(e.pointerId);
+    } catch {
+      /* 忽略 */
+    }
+    document.body.style.userSelect = "none";
   });
+  const onRsMove = (e: PointerEvent) => {
+    if (!rsResizing) return;
+    const w = Math.max(RS_MIN_W, rsW + (e.screenX - rsX));
+    const h = Math.max(RS_MIN_H, rsH + (e.screenY - rsY));
+    appWindow.setSize(new LogicalSize(w, h)).catch(() => {});
+  };
+  const onRsEnd = (e: PointerEvent) => {
+    if (!rsResizing) return;
+    rsResizing = false;
+    try {
+      winResizer?.releasePointerCapture(e.pointerId);
+    } catch {
+      /* 忽略 */
+    }
+    document.body.style.userSelect = "";
+  };
+  if (winResizer) {
+    winResizer.addEventListener("pointermove", onRsMove);
+    winResizer.addEventListener("pointerup", onRsEnd);
+    winResizer.addEventListener("pointercancel", onRsEnd);
+    document.addEventListener("pointermove", onRsMove);
+    document.addEventListener("pointerup", onRsEnd);
+  }
 
   // 标题栏自适应【重写】：窗口变窄时右侧按钮从【左到右】逐个隐藏
   // （Aa → 置顶 → 最大化 → 托盘，关闭永留），保证：

@@ -101,7 +101,7 @@ body,
 .titlebar-grip {
   grid-column: 2;
   justify-self: center;
-  width: 48px;
+  width: 76px;
   height: 100%;
   display: flex;
   align-items: center;
@@ -115,14 +115,14 @@ body,
   cursor: grabbing;
 }
 
-/* 抓取点阵：多行点阵（3 行 × 4 列小圆点），拖动把手指示——
+/* 抓取点阵：多行点阵（4 行 × 4 列小圆点），拖动把手指示——
    无模糊、无渐变，纯圆点平铺，克制不脏 */
 .titlebar-grip .grip-dots {
-  width: 26px;
-  height: 18px;
-  border-radius: 5px;
-  background-image: radial-gradient(circle, var(--grip-dot) 1.8px, transparent 2.1px);
-  background-size: 7px 7px;
+  width: 34px;
+  height: 26px;
+  border-radius: 6px;
+  background-image: radial-gradient(circle, var(--grip-dot) 2px, transparent 2.3px);
+  background-size: 9px 9px;
   background-position: 2px 2px;
   opacity: 0.45;
   transition: opacity 0.15s ease;
@@ -2456,10 +2456,10 @@ body,
   height: 26px;
   padding: 0 14px;
   border-radius: 999px;
-  /* 固定纯蓝（用户要求：不要跟随主题的紫色调） */
-  border: 1px solid color-mix(in srgb, #3b82f6 45%, transparent);
-  background: color-mix(in srgb, #3b82f6 10%, transparent);
-  color: #3b82f6;
+  /* 按钮本身跟随主题 accent；【加号图标】单独绿色（用户要求） */
+  border: 1px solid color-mix(in srgb, var(--accent, #4c9eff) 45%, transparent);
+  background: color-mix(in srgb, var(--accent, #4c9eff) 10%, transparent);
+  color: var(--accent, #4c9eff);
   font-family: inherit;
   font-size: 12px;
   font-weight: 600;
@@ -2470,17 +2470,22 @@ body,
     transform 0.15s ease, box-shadow 0.15s ease;
 }
 .history-window .titlebar .new-note-btn .btn-plus {
+  /* 加号图标：绿色 */
+  color: #22c55e;
   font-size: 14px;
   line-height: 1;
 }
 .history-window .titlebar .new-note-btn:hover {
-  background: #3b82f6;
-  border-color: #3b82f6;
+  background: var(--accent, #4c9eff);
+  border-color: var(--accent, #4c9eff);
   color: #fff;
   /* 保持水平居中：translate(-50%,-50%) 基础上仅上浮 1px */
   transform: translate(-50%, calc(-50% - 1px));
-  box-shadow: 0 0 0 4px color-mix(in srgb, #3b82f6 16%, transparent),
-    0 4px 12px color-mix(in srgb, #3b82f6 28%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent, #4c9eff) 16%, transparent),
+    0 4px 12px color-mix(in srgb, var(--accent, #4c9eff) 28%, transparent);
+}
+.history-window .titlebar .new-note-btn:hover .btn-plus {
+  color: #4ade80;
 }
 .history-window .titlebar .new-note-btn:active {
   transform: translate(-50%, -50%) scale(0.95);

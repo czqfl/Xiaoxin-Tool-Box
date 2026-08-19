@@ -79,3 +79,10 @@
   transform: translateX(-50%);
 }
 
+
+/* 收起态高亮边缘：露出屏幕的细条带亮蓝描边+柔光，深浅主题下都醒目 */
+.toolbar.edge-collapsed {
+  box-shadow:
+    0 0 0 2px rgba(120, 170, 240, 0.9),
+    0 0 14px rgba(120, 170, 240, 0.55);
+}

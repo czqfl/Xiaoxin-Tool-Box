@@ -200,6 +200,8 @@ export function Toolbar() {
       else y = geo.mon_y + geo.mon_h - SLIVER;
       await animateWindowTo(x, y, SLIDE_MS, easeInCubic);
       collapsedRef.current = true;
+      // 收起态：高亮边缘边框（露出的细条更醒目，深浅主题都可见）
+      barRef.current?.classList.add("edge-collapsed");
     } catch (e) {
       console.error("贴边收起失败:", e);
     } finally {
@@ -233,6 +235,8 @@ export function Toolbar() {
       collapsedRef.current = false;
       restorePosRef.current = null;
       restoreWaRef.current = null;
+      // 收起态解除：去掉高亮边缘
+      barRef.current?.classList.remove("edge-collapsed");
     } catch (e) {
       console.error("贴边弹出失败:", e);
     } finally {
