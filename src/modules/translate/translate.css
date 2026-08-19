@@ -170,7 +170,7 @@
 .translate-btn:active {
   animation-duration: 1.2s;
   filter: brightness(0.98);
-  box-shadow: 0 0 0 4px rgba(167, 139, 250, 0.22), 0 0 22px rgba(76, 158, 255, 0.4);
+  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.22), 0 0 22px rgba(var(--accent-rgb), 0.4);
 }
 .translate-btn:active::after {
   animation-duration: 0.8s;
@@ -181,7 +181,7 @@
   filter: none;
   cursor: default;
   animation-duration: 1.4s;
-  box-shadow: 0 0 0 3px rgba(76, 158, 255, 0.18), 0 0 18px rgba(167, 139, 250, 0.35);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.18), 0 0 18px rgba(var(--accent-rgb), 0.35);
 }
 .translate-btn:disabled::after {
   animation-duration: 1.2s;
