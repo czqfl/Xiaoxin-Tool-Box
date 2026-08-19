@@ -81,6 +81,10 @@ export function mountHistoryApp() {
     pollTimer = window.setInterval(() => void render(), 500);
   };
   listen("sticky://state-changed", () => {
+    // 诊断：确认历史窗口收到状态广播（若此日志缺失 → 事件未到达，需查后端 emit）
+    import("@tauri-apps/api/core")
+      .then(({ invoke }) => invoke("diag_log", { msg: "[history] state-changed received" }))
+      .catch(() => {});
     void render();
   }).catch((e) => console.error("监听便签状态失败:", e));
   // 【修复】轮询不再随失焦停止——用户从历史打开便签后历史窗口失焦但仍可见，

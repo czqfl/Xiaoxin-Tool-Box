@@ -1740,9 +1740,10 @@ export function mountNoteApp(noteId: string, preset = "") {
     acrylicOffPending = true;
     // 记录"已隐藏"：下次呼出时播放粒子成形动画（隐藏后窗口保持空画面）
     wasHidden = true;
-    // 先真正关闭/隐藏窗口（关键路径，绝不被标记逻辑阻断），再异步标记已关闭
+    // 先真正关闭/隐藏窗口（关键路径，绝不被标记逻辑阻断）。
+    // 注意：不再在此调 markNoteClosed——关闭状态已在 requestAnimatedClose
+    // 开始时立即标记（点 × 即更新历史列表），此处重复标记无意义且晚。
     closeWindow().catch((e) => console.error("关闭失败:", e));
-    markNoteClosed(noteId).catch(() => {});
     window.setTimeout(() => {
       applyAcrylic()
         .catch(() => {})
@@ -1754,6 +1755,12 @@ export function mountNoteApp(noteId: string, preset = "") {
 
   function requestAnimatedClose() {
     if (closing) return;
+    closing = true;
+    finished = false;
+    // 【立即标记关闭】点 × 的瞬间就把"打开中"状态移除并广播——历史列表
+    // 马上刷新，不等粒子动画播完（用户反馈"关闭完应该立马更新"；此前要等
+    // finishClose 才 markNoteClosed，动画 0.5~1s+ 的延迟全算在状态更新上）。
+    markNoteClosed(noteId).catch(() => {});
     // 关闭动画期间抑制「保存中/已保存」提示（关闭会触发一次保存，但不应打扰关闭过程）
     suppressSaveStatus = true;
     // 呼出/成形动画若在播放，先立即收尾复原页面，避免两个动画同时改 clip-path / mask；
@@ -1765,8 +1772,6 @@ export function mountNoteApp(noteId: string, preset = "") {
     anim.flame?.cancelFlame();
     anim.glass?.cancelGlassShards();
     summonSeq++; // 作废进行中的呼出（其 getSettings().then 会检查 seq 后跳过）
-    closing = true;
-    finished = false;
     // 透明主题：无粒子特效，直接隐藏（亚克力常驻整窗，无需动画遮罩）
     if (noteWindow.classList.contains("bg-transparent")) {
       finishClose();
