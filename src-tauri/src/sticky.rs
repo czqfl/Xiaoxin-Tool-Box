@@ -557,14 +557,15 @@ pub fn toggle_sticky_notes(
     ));
 
     if notes_visible {
-        // 收起全部便签（历史窗口保持原样）
+        // 收起全部便签（历史窗口保持原样）：广播关闭消散动画，特效交给前端——
+        // 聚焦窗口播粒子消散，其余立即收尾；动画结束由前端 finishClose →
+        // close_window 销毁窗口并自行清理 VISIBLE_NOTES。直接 hide() 没有特效。
         for (l, w) in &note_wins {
             if VISIBLE_NOTES.lock().unwrap().contains(l) {
-                let _ = w.hide();
+                let _ = w.emit("play-close-anim", ());
             }
         }
-        VISIBLE_NOTES.lock().unwrap().clear();
-        crate::storage::diag_write("[sticky] toggle: hid notes");
+        crate::storage::diag_write("[sticky] toggle: hid notes (animated)");
         return Ok(false);
     }
     // 呼出：优先便签窗口；没有便签窗口 → 显示/创建历史窗口（便签应用入口）
@@ -1298,12 +1299,14 @@ fn show_all_open(app: &AppHandle) {
         note_wins.iter().any(|(l, _)| vis.contains(l))
     };
     if any_visible {
+        // 收起：先让每个可见便签窗口播放关闭消散动画（聚焦的那个播粒子，
+        // 其余立即收尾），动画结束由前端 finishClose → close_window 销毁窗口
+        // 并自行清理 VISIBLE_NOTES。不要在这里直接 w.hide()/clear，否则没有特效。
         for (l, w) in &note_wins {
             if VISIBLE_NOTES.lock().unwrap().contains(l) {
-                let _ = w.hide();
+                let _ = w.emit("play-close-anim", ());
             }
         }
-        VISIBLE_NOTES.lock().unwrap().clear();
         let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
         return;
     }

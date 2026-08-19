@@ -199,8 +199,10 @@ export function mountNoteApp(noteId: string, preset = "") {
   // 收缩成小号抓点，避免抓取区域与右侧按钮重叠（抓取点始终保留可见）。
   function adaptTitlebar() {
     titlebar.classList.remove("crowded");
+    // 仅按“全部按钮显示时的真实内容宽度”是否超出可用宽度决定收起，
+    // 去掉固定 380px 硬门槛——否则窗口已宽到能容纳部分按钮时它们仍被隐藏。
     const overflow = titlebar.scrollWidth > titlebar.clientWidth + 1;
-    titlebar.classList.toggle("crowded", overflow || titlebar.clientWidth < 380);
+    titlebar.classList.toggle("crowded", overflow);
   }
 
   // 工具栏自适应：窗口变窄放不下时，隐藏“预览/拆分/整理”等次级按钮，避免被裁切成半截。
@@ -221,6 +223,18 @@ export function mountNoteApp(noteId: string, preset = "") {
     });
   } catch {
     /* 某些环境下 onResized 不支持，忽略（缩放时可能不更新，影响极小） */
+  }
+  // 更可靠的尺寸变化监听：原生 resize 拖拽有时不触发 onResized，
+  // 直接观察根节点（Webview 与窗口同尺寸），任何缩放都会触发重算，
+  // 保证变宽时收起的按钮能及时恢复显示。
+  try {
+    const ro = new ResizeObserver(() => {
+      adaptToolbar();
+      adaptTitlebar();
+    });
+    ro.observe(document.documentElement);
+  } catch {
+    /* 老旧环境无 ResizeObserver，忽略（onResized 兜底） */
   }
 
   // 编辑器失焦时保存选区，方便工具栏恢复
