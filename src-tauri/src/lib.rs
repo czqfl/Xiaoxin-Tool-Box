@@ -200,6 +200,14 @@ pub fn run() {
             // tauri.conf.json 已声明，此处运行时兜底——若 conf 声明未生效
             // （例如配置/打包差异）也能正常创建，粒子动画不丢失飘散能力。
             sticky::ensure_particles_window(&handle);
+            // 粒子层就绪自检日志：前端挂载成功后上报，日志可确认窗口存在
+            // 且渲染就绪（排查"粒子飘不出矩形"用）
+            {
+                let app2 = handle.clone();
+                let _ = app2.listen("sticky://particles-layer-ready", move |_| {
+                    crate::storage::diag_write("[sticky] particles layer ready");
+                });
+            }
             clipboard::start_watcher(handle.clone());
             #[cfg(windows)]
             explorer::start_explorer_watcher(handle.clone());

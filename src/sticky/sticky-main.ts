@@ -8,6 +8,7 @@
  *  便签样式（styles.css）由 main.tsx 在分流时动态 import，仅便签窗口加载，
  *  与工具箱 React 样式完全隔离，互不污染。 */
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { emit } from "@tauri-apps/api/event";
 import { mountHistoryApp } from "./history";
 import { mountImageViewer } from "./image-viewer";
 import { mountParticlesLayer } from "./particles-layer";
@@ -31,7 +32,9 @@ export async function mountStickyByLabel() {
     // 全屏透明粒子层（label "particles"，与 tauri.conf.json 声明一致）：
     // 粒子消散动画的粒子可飘出便签矩形、在整个屏幕渲染（glow-particles 按
     // 此 label 查找窗口）
-    mountParticlesLayer().catch((e) => console.error("粒子层初始化失败:", e));
+    mountParticlesLayer()
+      .then(() => emit("sticky://particles-layer-ready", {}).catch(() => {}))
+      .catch((e) => console.error("粒子层初始化失败:", e));
   } else {
     mountNoteApp(noteId, preset);
   }
