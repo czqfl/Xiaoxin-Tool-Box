@@ -649,7 +649,7 @@ body,
   justify-self: end;
   gap: 1px;
   /* 与中间抓取区保持强制间隔（缩放/变窄过程中也绝不挨近） */
-  margin-left: 16px;
+  margin-left: 8px;
 }
 
 /* 右侧操作按钮收紧：原 32px 宽、图标仅 15px，大量留白显得松散；此处仅缩右侧行 */

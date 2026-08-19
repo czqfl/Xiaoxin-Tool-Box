@@ -197,68 +197,16 @@ export function mountNoteApp(noteId: string, preset = "") {
     startDragging();
   });
 
-  // 右下角缩放手柄【照原版 StickyNote 实现】：程序化 setSize。
-  // 关键点（原版验证可行）：
-  //  - 用 e.clientX（逻辑像素，与 LogicalSize 一致）而非 screenX（物理像素，
-  //    高 DPI 下会算错/失效——此前"时好时坏"的根因之一）；
-  //  - 缩放期间临时 setResizable(true)+setShadow(true)（复刻稳定态，避免
-  //    transparent+shadow(false) 下 setSize 触发 WebView2 重建崩溃），
-  //    结束恢复 resizable(false)+shadow(false)（静止态无投影无系统缩放）。
+  // 右下角缩放手柄：转发给系统缩放拖拽（startResizeDragging("SouthEast")）。
+  // 窗口为 resizable(true)，与四边系统热区同一机制——拖动与热区一样可靠，
+  // 不再有"点图标不生效、点旁边才生效"的差异（此前程序化 setSize 在透明
+  // 窗口偶发失败，用户反馈）。
   const winResizer = document.getElementById("win-resizer");
-  const MIN_W = 220;
-  const MIN_H = 150;
-  let winResizing = false;
-  let resStartX = 0;
-  let resStartY = 0;
-  let resStartW = 0;
-  let resStartH = 0;
-  winResizer?.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0) return;
+  winResizer?.addEventListener("mousedown", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    winResizing = true;
-    appWindow.setResizable(true).catch(() => {});
-    appWindow.setShadow(true).catch(() => {});
-    resStartX = e.clientX;
-    resStartY = e.clientY;
-    resStartW = window.innerWidth;
-    resStartH = window.innerHeight;
-    try {
-      winResizer.setPointerCapture(e.pointerId);
-    } catch {
-      /* 部分环境不支持指针捕获，退化为 document 级监听仍可工作 */
-    }
-    document.body.style.userSelect = "none";
-    document.body.style.cursor = "nwse-resize";
+    void appWindow.startResizeDragging("SouthEast");
   });
-  const onRsMove = (e: PointerEvent) => {
-    if (!winResizing) return;
-    const nw = Math.max(MIN_W, resStartW + (e.clientX - resStartX));
-    const nh = Math.max(MIN_H, resStartH + (e.clientY - resStartY));
-    appWindow.setSize(new LogicalSize(nw, nh)).catch(() => {});
-  };
-  const endWinResize = (e: PointerEvent) => {
-    if (!winResizing) return;
-    winResizing = false;
-    // 缩放结束恢复：静止状态无投影、无系统缩放
-    appWindow.setResizable(false).catch(() => {});
-    appWindow.setShadow(false).catch(() => {});
-    try {
-      winResizer?.releasePointerCapture(e.pointerId);
-    } catch {
-      /* 同上 */
-    }
-    document.body.style.userSelect = "";
-    document.body.style.cursor = "";
-  };
-  if (winResizer) {
-    winResizer.addEventListener("pointermove", onRsMove);
-    winResizer.addEventListener("pointerup", endWinResize);
-    winResizer.addEventListener("pointercancel", endWinResize);
-    // 指针捕获失败的环境：document 级监听兜底
-    document.addEventListener("pointermove", onRsMove);
-    document.addEventListener("pointerup", endWinResize);
-  }
 
   // 标题栏自适应：窗口变窄时右侧按钮从【左到右】逐个隐藏
   // （Aa → 置顶 → 最大化 → 托盘，关闭永留）。
@@ -268,7 +216,7 @@ export function mountNoteApp(noteId: string, preset = "") {
   const titlebarRightButtons = [btnToolbarToggle, btnPin, btnMax, btnTray];
   const TB_GRIP_W = 76; // 抓取区宽度（grid 列2 auto）
   const TB_PAD = 16; // titlebar 左右 padding（10+6）
-  const TB_GRIP_GAP = 16; // 按钮组与抓取区强制间隔（margin-left）
+  const TB_GRIP_GAP = 8; // 按钮组与抓取区强制间隔（margin-left）
   const TB_CLOSE_W = 31; // 关闭按钮（30 + gap1）
   const TB_BTN_W = 31; // 每个次级按钮（30 + gap1）
   function adaptTitlebar() {
