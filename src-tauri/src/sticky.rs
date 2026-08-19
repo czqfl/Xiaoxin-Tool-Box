@@ -1263,7 +1263,11 @@ fn has_visible_note(app: &AppHandle) -> bool {
         .any(|w| w.is_visible().unwrap_or(false))
 }
 
-/// 呼出全部便签窗口；没有任何便签窗口时打开历史窗口（便签应用入口）。
+/// 快捷键「呼出 / 收起便签」：仅作用于便签窗口，绝不打开历史面板
+/// （历史面板由独立的 open_history 快捷键负责）。
+/// - 有可见便签窗口 → 收起（全部 hide）；
+/// - 否则 → 呼出：已有（含隐藏）便签窗口则 show 全部；
+///   若没有任何活动窗口，从持久化 open_notes 重建，仍为空则新建一张。
 fn show_all_open(app: &AppHandle) {
     let note_wins: Vec<tauri::WebviewWindow> = app
         .webview_windows()
@@ -1271,16 +1275,39 @@ fn show_all_open(app: &AppHandle) {
         .filter(|w| w.label().starts_with(NOTE_PREFIX))
         .cloned()
         .collect();
-    if note_wins.is_empty() {
-        open_history_window(app.clone()).ok();
+    let notes_visible = note_wins
+        .iter()
+        .any(|w| w.is_visible().unwrap_or(false));
+    if notes_visible {
+        for w in &note_wins {
+            let _ = w.hide();
+        }
+        let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
         return;
     }
-    for w in &note_wins {
-        let _ = w.show();
-        let _ = w.unminimize();
-        let _ = w.set_focus();
+    if !note_wins.is_empty() {
+        for w in &note_wins {
+            let _ = w.show();
+            let _ = w.unminimize();
+            let _ = w.set_focus();
+        }
+        let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
+        return;
     }
-    let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
+    // 没有任何活动便签窗口：从持久化 open_notes 重建（用户关闭后仍能呼回）
+    if let Some(paths) = app.try_state::<AppPaths>() {
+        let ids = load_open_notes(paths.inner());
+        if !ids.is_empty() {
+            for id in ids {
+                crate::storage::diag_write(&format!("[sticky] show_all_open: rebuild {id}"));
+                ensure_note_window(app, &id);
+            }
+            return;
+        }
+    }
+    // 实在没有任何便签：新建一张，给用户一个入口
+    crate::storage::diag_write("[sticky] show_all_open: no notes, create new");
+    quick_new_note(app);
 }
 
 /// 全部关闭：向每个便签窗口广播 play-close-anim（前端：聚焦的播粒子动画，

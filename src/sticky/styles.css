@@ -2436,6 +2436,7 @@ body,
   position: absolute;
   left: 50%;
   top: 50%;
+  z-index: 4; /* 高于居中拖动抓手(grip z1)与右侧按钮组(z3)，保证可点击 */
   transform: translate(-50%, -50%);
   display: inline-flex;
   align-items: center;

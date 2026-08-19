@@ -309,13 +309,18 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
   // getShortcut 一致；全局 3 项（呼出/全部关闭/新建）保存后调 register_shortcuts
   // 重注册系统级热键。
   const [stickyShortcuts, setStickyShortcuts] = useState<Record<string, string>>({});
+  const [stickySaved, setStickySaved] = useState<Record<string, string>>({});
   const [stickySaving, setStickySaving] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
     invoke<{ shortcuts?: Record<string, string> }>("load_settings")
       .then((s) => {
-        if (alive) setStickyShortcuts(s?.shortcuts ?? {});
+        if (alive) {
+          const sc = s?.shortcuts ?? {};
+          setStickyShortcuts(sc);
+          setStickySaved(sc); // 记录已保存值，用于判断「是否有改动」以禁用保存按钮
+        }
       })
       .catch(() => {});
     return () => {
@@ -325,13 +330,14 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
 
   const saveStickyOne = async (key: string) => {
     const combo = stickyShortcuts[key];
-    if (!combo) return;
+    if (!combo || combo === stickySaved[key]) return;
     setStickySaving(key);
     try {
       const s = await invoke<{ shortcuts?: Record<string, string> }>("load_settings");
       const next = { ...s, shortcuts: { ...(s?.shortcuts ?? {}), [key]: combo } };
       await invoke("save_settings", { settings: next });
       await invoke("register_shortcuts"); // 全局快捷键重注册（呼出/全部关闭/新建）
+      setStickySaved((d) => ({ ...d, [key]: combo })); // 更新已保存值 → 按钮恢复禁用
     } catch (err) {
       console.error("保存便签快捷键失败:", err);
     } finally {
@@ -380,7 +386,11 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
               />
               <button
                 className="btn btn-primary btn-sm"
-                disabled={stickySaving !== null || !stickyShortcuts[a.key]}
+                disabled={
+                  stickySaving !== null ||
+                  !stickyShortcuts[a.key] ||
+                  stickyShortcuts[a.key] === stickySaved[a.key]
+                }
                 onClick={() => void saveStickyOne(a.key)}
               >
                 {stickySaving === a.key ? "保存中…" : "保存"}

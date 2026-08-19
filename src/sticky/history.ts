@@ -15,11 +15,12 @@ export function mountHistoryApp() {
           <span class="dot">\u25cf</span>
           <span class="title-text">历史便签</span>
         </div>
+        <!-- 新建便签按钮：标题栏直接子元素，absolute 居中相对整个标题栏（非右侧容器） -->
+        <button class="new-note-btn" id="btn-new" title="新建便签">
+          <span class="btn-plus">\u2795</span>
+          <span class="btn-label">新建便签</span>
+        </button>
         <div class="titlebar-right">
-          <button class="new-note-btn" id="btn-new" title="新建便签">
-            <span class="btn-plus">\u2795</span>
-            <span class="btn-label">新建便签</span>
-          </button>
           <button class="icon-btn close" id="btn-close" title="关闭">\u2715</button>
         </div>
       </div>
