@@ -17,7 +17,13 @@ export function mountHistoryApp() {
         </div>
         <!-- 新建便签按钮：标题栏直接子元素，absolute 居中相对整个标题栏（非右侧容器） -->
         <button class="new-note-btn" id="btn-new" title="新建便签">
-          <span class="btn-plus">\u2795</span>
+          <!-- SVG 加号：颜色跟随 currentColor（可被 CSS 控制）——之前的 \u2795
+               是 emoji，自带颜色，CSS color 无效（用户反馈"没变绿"的根因） -->
+          <span class="btn-plus">
+            <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+              <path d="M8 3v10M3 8h10"/>
+            </svg>
+          </span>
           <span class="btn-label">新建便签</span>
         </button>
         <div class="titlebar-right">

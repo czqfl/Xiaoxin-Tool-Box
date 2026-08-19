@@ -199,6 +199,9 @@ export function mountNoteApp(noteId: string, preset = "") {
 
   // 右下角缩放手柄：程序化 setSize 缩放（透明窗口下原生 startResizeDragging
   // 偶发失效，用户反馈"拖不动"——改为 pointer 事件 + setSize，可靠）
+  // 【关键】缩放期间临时开 shadow（复刻稳定态）：transparent + shadow(false)
+  // 状态下 setSize 会触发 WebView2 重建导致无响应/崩溃（原版注释经验），
+  // 结束恢复 shadow(false)。
   const winResizer = document.getElementById("win-resizer");
   const RS_MIN_W = 220;
   const RS_MIN_H = 150;
@@ -212,6 +215,7 @@ export function mountNoteApp(noteId: string, preset = "") {
     e.preventDefault();
     e.stopPropagation();
     rsResizing = true;
+    appWindow.setShadow(true).catch(() => {});
     rsX = e.screenX;
     rsY = e.screenY;
     rsW = window.innerWidth;
@@ -232,6 +236,7 @@ export function mountNoteApp(noteId: string, preset = "") {
   const onRsEnd = (e: PointerEvent) => {
     if (!rsResizing) return;
     rsResizing = false;
+    appWindow.setShadow(false).catch(() => {});
     try {
       winResizer?.releasePointerCapture(e.pointerId);
     } catch {
