@@ -1353,6 +1353,37 @@ pub fn register_all_shortcuts(app: &AppHandle) {
 /// 快捷键「呼出 / 收起便签」：仅作用于便签窗口，绝不打开历史面板
 /// （历史面板由独立的 open_history 快捷键负责）。
 
+/// 确保全屏透明「粒子层」窗口存在（粒子消散可飘出便签矩形、满屏渲染）。
+/// tauri.conf.json 已声明该窗口（visible:false）；此处运行时兜底——若
+/// conf 声明未生效（配置/打包差异）也能创建，保证粒子动画不丢飘散能力。
+/// 幂等：已存在则 no-op。经 defer_to_main_loop 创建（透明窗口避免 IPC
+/// 回调内重入建窗挂起）。
+pub fn ensure_particles_window(app: &AppHandle) {
+    const PL: &str = "particles";
+    if app.get_webview_window(PL).is_some() {
+        return;
+    }
+    let app2 = app.clone();
+    defer_to_main_loop(app2.clone(), move || {
+        if app2.get_webview_window(PL).is_some() {
+            return;
+        }
+        let _ = WebviewWindowBuilder::new(&app2, PL, WebviewUrl::App("index.html".into()))
+            .title("粒子层")
+            .decorations(false)
+            .transparent(true)
+            .always_on_top(true)
+            .shadow(false)
+            .skip_taskbar(true)
+            .focusable(false)
+            .resizable(true)
+            .inner_size(1920.0, 1080.0)
+            .visible(false)
+            .build();
+        crate::storage::diag_write("[sticky] ensure_particles_window: built");
+    });
+}
+
 /// 新建便签：生成 id、标记打开、主线程建窗并呼出。
 fn quick_new_note(app: &AppHandle) {
     let id = uuid::Uuid::new_v4().to_string().replace('-', "")[..6].to_string();

@@ -196,6 +196,10 @@ pub fn run() {
             shortcut::register_initial(&handle, &config);
             // 便签全局快捷键（呼出/全部关闭/新建）：启动即注册（组合来自便签设置）
             sticky::register_all_shortcuts(&handle);
+            // 确保全屏透明「粒子层」窗口存在（粒子消散可飘出便签矩形）：
+            // tauri.conf.json 已声明，此处运行时兜底——若 conf 声明未生效
+            // （例如配置/打包差异）也能正常创建，粒子动画不丢失飘散能力。
+            sticky::ensure_particles_window(&handle);
             clipboard::start_watcher(handle.clone());
             #[cfg(windows)]
             explorer::start_explorer_watcher(handle.clone());
