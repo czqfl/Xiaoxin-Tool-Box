@@ -422,7 +422,12 @@ async function startLayer(p: ParticleLayerStart): Promise<void> {
  *  透明 + shadow(false) 窗口的这些调用可能挂起，导致前端初始化卡死
  *  （粒子层就绪日志缺失的根因），而它们本来就不需要（后端已建好）。 */
 async function calibrateLayerWindow(): Promise<void> {
-  const mon = await currentMonitor().catch(() => null);
+  // currentMonitor 在透明/未显示窗口上可能挂起（IPC 永不返回 → 前端初始化
+  // 卡死、ready 永远不发）——加 1.5s 超时，失败回退 window.screen 尺寸。
+  const mon = await Promise.race([
+    currentMonitor(),
+    new Promise<null>((res) => setTimeout(() => res(null), 1500)),
+  ]).catch(() => null);
   const fallbackW = Math.round((window.screen.width || window.innerWidth || 1920) * (window.devicePixelRatio || 1));
   const fallbackH = Math.round((window.screen.height || window.innerHeight || 1080) * (window.devicePixelRatio || 1));
   const pw = Math.max(1, mon?.size?.width ?? fallbackW);
@@ -567,10 +572,12 @@ export async function mountParticlesLayer(): Promise<void> {
     console.error("粒子层 WebGL 初始化失败");
     return;
   }
-  await listen<ParticleLayerStart>("particles-start", (e) => {
+  // listen 不 await：Tauri listen 注册是即时的（Promise 仅返回取消句柄），
+  // 不 await 可避免其挂起拖住初始化（粒子层就绪日志缺失的兜底防线）
+  void listen<ParticleLayerStart>("particles-start", (e) => {
     startLayer(e.payload).catch((err) => console.error("粒子层启动失败:", err));
   });
-  await listen<{ seq?: number; originX?: number; originY?: number }>("particles-cancel", (e) => {
+  void listen<{ seq?: number; originX?: number; originY?: number }>("particles-cancel", (e) => {
     const seq = e?.payload?.seq ?? 0;
     const ox = e?.payload?.originX;
     const oy = e?.payload?.originY;
