@@ -428,7 +428,18 @@ async function calibrateLayerWindow(): Promise<void> {
   const pw = Math.max(1, mon?.size?.width ?? fallbackW);
   const ph = Math.max(1, mon?.size?.height ?? fallbackH);
   await win.setPosition(new LogicalPosition(0, 0)).catch(() => {});
-  await win.setSize(new PhysicalSize(pw, ph)).catch(() => {});
+  // 【关键】当前尺寸已与目标一致则跳过 setSize——透明 + shadow(false) 窗口
+  // setSize 会触发 WebView2 重建、IPC 卡死（粒子层前端就绪日志缺失的根因）。
+  // 粒子层窗口由后端按显示器尺寸创建（ensure_particles_window），尺寸一致，
+  // 此路径不会执行；仅在异常情况下兜底。
+  try {
+    const cur = await win.innerSize().catch(() => null);
+    if (!cur || cur.width !== pw || cur.height !== ph) {
+      await win.setSize(new PhysicalSize(pw, ph)).catch(() => {});
+    }
+  } catch {
+    /* 保持当前尺寸 */
+  }
   if (canvas && (canvas.width !== pw || canvas.height !== ph)) {
     canvas.width = pw;
     canvas.height = ph;

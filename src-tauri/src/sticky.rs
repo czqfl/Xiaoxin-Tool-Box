@@ -1368,6 +1368,20 @@ pub fn ensure_particles_window(app: &AppHandle) {
         if app2.get_webview_window(PL).is_some() {
             return;
         }
+        // 用主显示器尺寸创建（而非 conf 固定 1920x1080）：
+        // 透明 + shadow(false) 窗口在 mount 时 setSize 会触发 WebView2 重建、
+        // IPC 卡死（粒子层前端就绪日志缺失的根因）——创建即正确尺寸，
+        // 前端 calibrate 时尺寸相同会跳过 setSize，彻底避免该路径。
+        // monitor.size() 为物理像素，inner_size 为逻辑像素 → /scale_factor。
+        let (w, h) = app2
+            .primary_monitor()
+            .ok()
+            .flatten()
+            .map(|m| {
+                let sf = m.scale_factor().max(0.01);
+                (m.size().width as f64 / sf, m.size().height as f64 / sf)
+            })
+            .unwrap_or((1920.0, 1080.0));
         let _ = WebviewWindowBuilder::new(&app2, PL, WebviewUrl::App("index.html".into()))
             .title("粒子层")
             .decorations(false)
@@ -1377,10 +1391,13 @@ pub fn ensure_particles_window(app: &AppHandle) {
             .skip_taskbar(true)
             .focusable(false)
             .resizable(true)
-            .inner_size(1920.0, 1080.0)
+            .inner_size(w, h)
+            .position(0.0, 0.0)
             .visible(false)
             .build();
-        crate::storage::diag_write("[sticky] ensure_particles_window: built");
+        crate::storage::diag_write(&format!(
+            "[sticky] ensure_particles_window: built {w}x{h}"
+        ));
     });
 }
 
