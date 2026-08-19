@@ -211,8 +211,13 @@
   color-scheme: dark;
 }
 
-/* 深色主题：顶部微光由「品牌蓝」改为「极淡中性白」，去掉整体蓝调 */
-:root[data-theme="dark"] body {
+/* 深色主题：顶部微光由「品牌蓝」改为「极淡中性白」，去掉整体蓝调。
+   【关键】只作用于无 data-window 的普通内容窗口（设置页等）：panel 窗口
+   （html[data-window="panel"]）与便签窗口（data-window="sticky"，
+   含粒子层/图片查看器）的 body 必须保持透明——分别透出窗口亚克力模糊
+   （panel.css）与便签自己的背景图/毛玻璃（styles.css），若此处把 body 盖成
+   不透明底色，悬浮栏/面板的「不透明+模糊」玻璃质感与便签背景会消失。 */
+:root[data-theme="dark"]:not([data-window]) body {
   background:
     radial-gradient(1100px 560px at 50% -8%, rgba(255, 255, 255, 0.022), transparent 62%),
     var(--bg-app);
@@ -461,8 +466,9 @@
   }
 
   /* 系统深色下的 body 顶部微光：与 data-theme="dark" 一致——
-     由 base.css 的「品牌色微光」改为「极淡中性白」，去掉整体蓝调 */
-  :root:not([data-theme="light"]):not([data-theme="dark"]):not([data-theme="mint"]):not([data-theme="skyblue"]) body {
+     由 base.css 的「品牌色微光」改为「极淡中性白」，去掉整体蓝调。
+     同样只作用于无 data-window 的普通窗口（panel/便签窗口 body 保持透明） */
+  :root:not([data-theme="light"]):not([data-theme="dark"]):not([data-theme="mint"]):not([data-theme="skyblue"]):not([data-window]) body {
     background:
       radial-gradient(1100px 560px at 50% -8%, rgba(255, 255, 255, 0.022), transparent 62%),
       var(--bg-app);
