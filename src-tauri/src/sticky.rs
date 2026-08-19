@@ -1221,19 +1221,28 @@ fn hide_note_window(app: &AppHandle, label: &str) {
 }
 
 /// 快捷键「收起便签 / 工具栏便签入口」的关闭兜底：
-/// 向前端广播消散动画后，Rust 端延时强制隐藏每个便签窗口——不依赖前端动画回调。
-/// 前端若正常播完动画并自行 close_window（现为隐藏常驻），则到时窗口已隐藏，
-/// 本兜底变 no-op（幂等）；前端若异常未关，本兜底保证窗口一定隐藏（修「快捷键关不掉便签」）。
+/// 向前端广播消散动画后，Rust 端延时兜底——但【仅当窗口仍可见时才销毁】，
+/// 绝不中途掐断正在播放的消散动画（此前 700ms 强制 destroy 会把粒子动画截断，
+/// 表现为「快捷键关闭无动画」）。前端动画播完 / 前端兜底（1500ms）都会先隐藏窗口，
+/// 届时本兜底看到窗口已隐藏即为 no-op；只有前端彻底未关（窗口仍可见）才兜底销毁，
+/// 保留「快捷键关不掉便签」的清理能力。
 pub fn schedule_force_close(app: &AppHandle, labels: Vec<String>) {
     let app2 = app.clone();
     std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(700));
+        // 大于前端 closeFailSafe（1500ms）：确保前端正常收尾后本兜底不误伤正在播放的动画
+        std::thread::sleep(std::time::Duration::from_millis(1800));
         let app3 = app2.clone();
         let _ = app3.run_on_main_thread({
             let app4 = app3.clone();
             move || {
                 for l in &labels {
-                    hide_note_window(&app4, l);
+                    // 仅当窗口仍可见（前端动画未正常完成）才强制销毁；
+                    // 动画已播完 / 已隐藏则跳过，避免打断粒子消散。
+                    if let Some(w) = app4.get_webview_window(l) {
+                        if w.is_visible().unwrap_or(false) {
+                            hide_note_window(&app4, l);
+                        }
+                    }
                 }
             }
         });
