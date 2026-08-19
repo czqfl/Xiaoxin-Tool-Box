@@ -566,6 +566,8 @@ export function mountNoteApp(noteId: string, preset = "") {
   }
 
   onSettingsChanged(() => {
+    // 诊断：确认便签窗口收到后端 settings-changed 广播（定位“改了设置不实时生效”）
+    invoke("diag_log", { msg: "[note] settings-changed fired, re-applying" }).catch(() => {});
     refreshSettingsUI();
     applyTheme();
     applyMdTheme();

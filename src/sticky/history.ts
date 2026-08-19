@@ -56,15 +56,19 @@ export function mountHistoryApp() {
       getCurrentWindow().show().catch(() => {});
     });
 
-  // 设置变更时实时同步背景（与便签窗口一致）
-  listen("xiaoxin-sticky-note-settings-changed", () => {
+  // 设置变更时实时同步背景（与便签窗口一致）。
+  // 【修复】此前监听 "xiaoxin-sticky-note-settings-changed"（原版便签“设置”窗口
+  // 在自身窗口内派发的 CustomEvent，非 Tauri 跨窗口事件）——工具箱集成版保存
+  // 设置走后端 save_settings 广播的是 "settings-changed"，事件名不匹配导致
+  // 历史窗口背景/主题永远不实时刷新（用户反馈“历史便签弹窗里背景不生效”）。
+  listen("settings-changed", () => {
     getSettings().then((s) => void applyHistoryBg(s)).catch(() => {});
   }).catch((e) => console.error("监听设置变更失败:", e));
 
   // ---- 状态刷新（三重保障，绝不展示过期信息）----
   // 1) 事件：后端统一广播 sticky://state-changed（打开/关闭/新建/保存/删除）
   // 2) 聚焦：窗口每次获得焦点主动刷新
-  // 3) 轮询：窗口可见期间每 2s 兜底刷新（事件偶发丢失也被覆盖）
+  // 3) 轮询：窗口可见期间每 1s 兜底刷新（事件偶发丢失也被覆盖）
   let pollTimer: number | undefined;
   const stopPoll = () => {
     if (pollTimer) {
@@ -74,19 +78,17 @@ export function mountHistoryApp() {
   };
   const startPoll = () => {
     stopPoll();
-    pollTimer = window.setInterval(() => void render(), 2000);
+    pollTimer = window.setInterval(() => void render(), 1000);
   };
   listen("sticky://state-changed", () => {
     void render();
   }).catch((e) => console.error("监听便签状态失败:", e));
+  // 【修复】轮询不再随失焦停止——用户从历史打开便签后历史窗口失焦但仍可见，
+  // 此前 stopPoll 导致事件偶发丢失时状态要等重新聚焦才刷新（“状态更新慢”根因）。
+  // 轮询持续跑，render 内部有列表签名去重，开销极小。
   getCurrentWindow()
     .onFocusChanged(({ payload: focused }) => {
-      if (focused) {
-        void render();
-        startPoll();
-      } else {
-        stopPoll();
-      }
+      if (focused) void render();
     })
     .catch((e) => console.error("监听窗口焦点失败:", e));
   startPoll(); // 窗口已可见：立即启动轮询
