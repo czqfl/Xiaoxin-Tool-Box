@@ -174,9 +174,14 @@ export function mountHistoryApp() {
       return;
     }
 
-    // 无实质变化（标题/摘要/时间/打开状态都一样）→ 跳过重建
+    // 无实质变化（标题/摘要/时间/打开状态/置顶状态都一样）→ 跳过重建
     const sig = items
-      .map((i) => `${i.id}|${i.updated}|${i.title}|${i.snippet}|${openSet.has(i.id) ? 1 : 0}`)
+      .map(
+        (i) =>
+          `${i.id}|${i.updated}|${i.title}|${i.snippet}|${openSet.has(i.id) ? 1 : 0}|${
+            i.top_priority ? 1 : 0
+          }`,
+      )
       .join("~");
     if (sig === lastSig) return;
     lastSig = sig;

@@ -1428,6 +1428,7 @@ fn quick_new_note(app: &AppHandle) {
 /// 设置置顶优先级便签（全局唯一互斥）：清除所有便签的置顶标记，再置位目标。
 #[tauri::command]
 pub fn set_note_priority(app: AppHandle, paths: State<'_, AppPaths>, id: String) -> Result<(), String> {
+    crate::storage::diag_write(&format!("[sticky] set_note_priority called: id={id}"));
     let _ = std::fs::create_dir_all(notes_dir(&paths));
     for entry in std::fs::read_dir(notes_dir(&paths)).map_err(|e| e.to_string())?.flatten() {
         let p = entry.path();
