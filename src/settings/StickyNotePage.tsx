@@ -53,17 +53,6 @@ const DEFAULT: StickySettings = {
   llm_model: "",
 };
 
-/** 与原版 SHORTCUT_ACTIONS 一致 */
-const SHORTCUT_ACTIONS: { key: string; label: string }[] = [
-  { key: "fg_color", label: "字体颜色" },
-  { key: "bg_color", label: "字体背景色" },
-  { key: "size_up", label: "增大字号" },
-  { key: "size_down", label: "减小字号" },
-  { key: "show_app", label: "呼出便签（全局）" },
-  { key: "close_all", label: "全部关闭（全局）" },
-  { key: "new_note", label: "新建便签（全局）" },
-];
-
 const MD_THEMES: { value: string; label: string }[] = [
   { value: "default", label: "默认（暖色）" },
   { value: "github", label: "GitHub" },
@@ -82,66 +71,6 @@ const PARTICLE_MODES: { value: string; label: string }[] = [
   { value: "erode", label: "火焰侵蚀" },
   { value: "glass", label: "玻璃碎裂" },
 ];
-
-/** 把一次按键事件解析为快捷键组合字符串（与原版一致） */
-function eventToCombo(e: KeyboardEvent): string | null {
-  const key = e.key;
-  if (key === "Control" || key === "Alt" || key === "Shift" || key === "Meta") return null;
-  const parts: string[] = [];
-  if (e.ctrlKey) parts.push("Ctrl");
-  if (e.altKey) parts.push("Alt");
-  if (e.shiftKey) parts.push("Shift");
-  if (e.metaKey) parts.push("Meta");
-  let main = "";
-  if (e.code === "Equal") main = "Plus";
-  else if (e.code === "Minus") main = "Minus";
-  else if (e.code === "Space") main = "Space";
-  else main = key.length === 1 ? key.toUpperCase() : key;
-  if (!main) return null;
-  parts.push(main);
-  return parts.join("+");
-}
-
-/** 快捷键录制：点击"录制"后监听按键，Esc 取消 / Enter 确认 */
-function ShortcutRecorder({
-  value,
-  onCommit,
-}: {
-  value: string;
-  onCommit: (v: string) => void;
-}) {
-  const [recording, setRecording] = useState(false);
-  const [pending, setPending] = useState("");
-
-  useEffect(() => {
-    if (!recording) return;
-    const onKey = (e: KeyboardEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (e.key === "Escape") {
-        setRecording(false);
-        setPending("");
-        return;
-      }
-      if (e.key === "Enter") {
-        if (pending) onCommit(pending);
-        setRecording(false);
-        setPending("");
-        return;
-      }
-      const combo = eventToCombo(e);
-      if (combo) setPending(combo);
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [recording, pending, onCommit]);
-
-  return (
-    <div className={`shortcut-rec${recording ? " recording" : ""}`} onClick={() => setRecording(true)}>
-      {recording ? (pending || "按下组合键…（Enter 确认 / Esc 取消）") : (value || "未设置")}
-    </div>
-  );
-}
 
 export function StickyNotePage() {
   const [settings, setSettings] = useState<StickySettings>(DEFAULT);
@@ -352,22 +281,15 @@ export function StickyNotePage() {
         )}
       </SettingGroup>
 
-      {/* ===== 快捷键 ===== */}
+      {/* ===== 快捷键 =====（已移至 设置 → 快捷键设置 的「便签」分组） */}
       <SettingGroup>
-        <SettingRow title="快捷键" desc="点击「录制」后按下组合键，再按 Enter 确认（Esc 取消）">
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, width: 300 }}>
-            {SHORTCUT_ACTIONS.map((a) => (
-              <div key={a.key} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span style={{ flex: 1, fontSize: 13, color: "var(--text-secondary)" }}>{a.label}</span>
-                <ShortcutRecorder
-                  value={settings.shortcuts?.[a.key] ?? ""}
-                  onCommit={(v) =>
-                    patch({ shortcuts: { ...settings.shortcuts, [a.key]: v } })
-                  }
-                />
-              </div>
-            ))}
-          </div>
+        <SettingRow
+          title="快捷键"
+          desc="便签快捷键已统一移至「设置 → 快捷键设置」页的「便签」分组中管理"
+        >
+          <span style={{ fontSize: 13, color: "var(--text-tertiary)" }}>
+            请前往「快捷键设置」配置：字体颜色 / 背景颜色 / 字号 / 呼出 / 全部关闭 / 新建
+          </span>
         </SettingRow>
       </SettingGroup>
 

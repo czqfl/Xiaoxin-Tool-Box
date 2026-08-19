@@ -13,6 +13,7 @@ use chrono::TimeZone;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::str::FromStr;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 pub const NOTE_PREFIX: &str = "note_";
@@ -1216,10 +1217,149 @@ pub fn quit_app(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// 便签全局快捷键：集成版暂不注册（避免与工具箱快捷键冲突），
-/// 入口走工具栏图标与设置页；前端保存设置后调用，stub 静默成功。
+/// 把便签设置里的组合串（如 "Ctrl+Shift+C"）转为 global-shortcut 可注册的
+/// accelerator 字符串（如 "ctrl+shift+c"）。
+fn to_accelerator(combo: &str) -> String {
+    combo
+        .replace("Ctrl", "ctrl")
+        .replace("Alt", "alt")
+        .replace("Shift", "shift")
+        .replace("Meta", "meta")
+        .replace("Plus", "+")
+        .replace("Minus", "-")
+        .replace("Space", "space")
+        .to_lowercase()
+}
+
+/// 注册便签全局快捷键：呼出（show_app）/ 全部关闭（close_all）/ 新建（new_note），
+/// 组合键来自便签设置（现统一在工具箱「快捷键设置」的便签分组里配置）。
+/// 只注册便签自己的组合（不去 unregister_all，避免注销工具箱快捷键）；
+/// 与工具箱组合撞车时 register 失败被忽略。
+pub fn register_all_shortcuts(app: &AppHandle) {
+    use std::collections::HashSet;
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut as GShortcut};
+    let Some(paths) = app.try_state::<AppPaths>() else {
+        return;
+    };
+    let settings = load_settings_inner(paths.inner());
+    let mut seen = HashSet::new();
+    for key in ["show_app", "close_all", "new_note"] {
+        if let Some(combo) = settings.shortcuts.get(key) {
+            let acc = to_accelerator(combo);
+            if !acc.is_empty() && seen.insert(acc.clone()) {
+                if let Ok(s) = GShortcut::from_str(&acc) {
+                    let _ = app.global_shortcut().register(s);
+                }
+            }
+        }
+    }
+}
+
+/// 便签窗口是否有可见的。
+fn has_visible_note(app: &AppHandle) -> bool {
+    app.webview_windows()
+        .values()
+        .filter(|w| w.label().starts_with(NOTE_PREFIX))
+        .any(|w| w.is_visible().unwrap_or(false))
+}
+
+/// 呼出全部便签窗口；没有任何便签窗口时打开历史窗口（便签应用入口）。
+fn show_all_open(app: &AppHandle) {
+    let note_wins: Vec<tauri::WebviewWindow> = app
+        .webview_windows()
+        .values()
+        .filter(|w| w.label().starts_with(NOTE_PREFIX))
+        .cloned()
+        .collect();
+    if note_wins.is_empty() {
+        open_history_window(app.clone()).ok();
+        return;
+    }
+    for w in &note_wins {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+    let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
+}
+
+/// 全部关闭：向每个便签窗口广播 play-close-anim（前端：聚焦的播粒子动画，
+/// 其余直接隐藏），与"全部关闭"快捷键语义一致。
+fn close_all_with_anim(app: &AppHandle) {
+    for w in app
+        .webview_windows()
+        .values()
+        .filter(|w| w.label().starts_with(NOTE_PREFIX))
+    {
+        let _ = w.emit("play-close-anim", ());
+    }
+}
+
+/// 新建便签：生成 id、标记打开、主线程建窗并呼出。
+fn quick_new_note(app: &AppHandle) {
+    let id = uuid::Uuid::new_v4().to_string().replace('-', "")[..6].to_string();
+    if let Some(paths) = app.try_state::<AppPaths>() {
+        mark_note_open_inner(paths.inner(), &id);
+    }
+    ensure_note_window(app, &id);
+    if let Some(win) = app.get_webview_window(&window_label(&id)) {
+        let _ = win.emit("summoned", ());
+    }
+}
+
+/// 分发便签全局快捷键：shortcut 命中便签设置的 show_app/close_all/new_note 之一
+/// 则执行并返回 true（调用方短路，不再走工具箱快捷键逻辑）。
+/// 「呼出」与「全部关闭」绑定同一组合时做一次切换：有可见便签则全部关闭，
+/// 否则全部呼出（与原版语义一致，避免"先开再关"净效果为关闭）。
+pub fn handle_sticky_shortcut(app: &AppHandle, shortcut: &tauri_plugin_global_shortcut::Shortcut) -> bool {
+    use tauri_plugin_global_shortcut::Shortcut as GShortcut;
+    let Some(paths) = app.try_state::<AppPaths>() else {
+        return false;
+    };
+    let settings = load_settings_inner(paths.inner());
+    let mut matched: Vec<&str> = Vec::new();
+    for key in ["show_app", "close_all", "new_note"] {
+        if let Some(combo) = settings.shortcuts.get(key) {
+            let acc = to_accelerator(combo);
+            if !acc.is_empty() {
+                if let Ok(hk) = GShortcut::from_str(&acc) {
+                    if hk.id() == shortcut.id() {
+                        matched.push(key);
+                    }
+                }
+            }
+        }
+    }
+    if matched.is_empty() {
+        return false;
+    }
+    if matched.contains(&"show_app") && matched.contains(&"close_all") {
+        if has_visible_note(app) {
+            close_all_with_anim(app);
+        } else {
+            show_all_open(app);
+        }
+        if matched.contains(&"new_note") {
+            quick_new_note(app);
+        }
+    } else {
+        for m in matched {
+            match m {
+                "show_app" => show_all_open(app),
+                "close_all" => close_all_with_anim(app),
+                "new_note" => quick_new_note(app),
+                _ => {}
+            }
+        }
+    }
+    true
+}
+
+/// 便签全局快捷键：注册全部（呼出/全部关闭/新建）。
+/// 设置保存后由前端调用重注册；启动时也在 setup 中注册一次。
 #[tauri::command]
-pub fn register_shortcuts() -> Result<(), String> {
+pub fn register_shortcuts(app: AppHandle) -> Result<(), String> {
+    register_all_shortcuts(&app);
     Ok(())
 }
 

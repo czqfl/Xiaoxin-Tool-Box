@@ -2428,3 +2428,40 @@ body,
 .history-window .new-note-cta:active .cta-icon {
   transform: scale(0.96);
 }
+
+/* 标题栏"新建便签"胶囊按钮（历史窗口，与关闭按钮同一水平线）：
+ * 保持胶囊样式（用户此前确认的视觉），仅移动到标题栏右侧 */
+.history-window .titlebar-right .new-note-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent, #4c9eff) 45%, transparent);
+  background: color-mix(in srgb, var(--accent, #4c9eff) 10%, transparent);
+  color: var(--accent, #4c9eff);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease,
+    transform 0.15s ease, box-shadow 0.15s ease;
+}
+.history-window .titlebar-right .new-note-btn .btn-plus {
+  font-size: 14px;
+  line-height: 1;
+}
+.history-window .titlebar-right .new-note-btn:hover {
+  background: var(--accent, #4c9eff);
+  border-color: var(--accent, #4c9eff);
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent, #4c9eff) 16%, transparent),
+    0 4px 12px color-mix(in srgb, var(--accent, #4c9eff) 28%, transparent);
+}
+.history-window .titlebar-right .new-note-btn:active {
+  transform: scale(0.95);
+}

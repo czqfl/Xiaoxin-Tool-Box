@@ -160,6 +160,11 @@ pub fn run() {
                     if event.state != ShortcutState::Pressed {
                         return;
                     }
+                    // 便签全局快捷键（呼出/全部关闭/新建）：命中便签设置组合则短路，
+                    // 不再走工具箱面板切换逻辑
+                    if sticky::handle_sticky_shortcut(app, shortcut) {
+                        return;
+                    }
                     shortcut::handle_shortcut_pressed(app, shortcut);
                 })
                 .build(),
@@ -189,6 +194,8 @@ pub fn run() {
             #[cfg(windows)]
             keyhook::start(handle.clone());
             shortcut::register_initial(&handle, &config);
+            // 便签全局快捷键（呼出/全部关闭/新建）：启动即注册（组合来自便签设置）
+            sticky::register_all_shortcuts(&handle);
             clipboard::start_watcher(handle.clone());
             #[cfg(windows)]
             explorer::start_explorer_watcher(handle.clone());
