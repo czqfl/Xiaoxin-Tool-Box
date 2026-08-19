@@ -107,7 +107,8 @@ body,
   align-items: center;
   justify-content: center;
   cursor: grab;
-  z-index: 1;
+  /* 抓取区层级高于左侧标题区（输入框即使聚焦有背景也不盖住它） */
+  z-index: 4;
 }
 
 .titlebar-grip:active {
@@ -686,12 +687,16 @@ body,
 .title-input {
   width: auto;
   flex: 1 1 auto;
+  /* 关键：绝不超出左侧容器（grid 第 1 列），防止长标题把输入框撑到
+     中间抓取区上、盖住抓取区点不到（用户反馈重叠） */
+  max-width: 100%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   margin-left: 6px;
-  margin-right: 10px;
+  /* 与中间抓取区保持明确间隔（右侧留白） */
+  margin-right: 14px;
   border: 1px solid transparent;
   /* 与其余按钮同款“果冻”底（半透明主题色） */
   background: color-mix(in srgb, var(--bg-bar, var(--bg)) 28%, transparent);
