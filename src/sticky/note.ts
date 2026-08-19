@@ -260,17 +260,24 @@ export function mountNoteApp(noteId: string, preset = "") {
     document.addEventListener("pointerup", endWinResize);
   }
 
-  // 标题栏自适应【重写】：窗口变窄时右侧按钮从【左到右】逐个隐藏
-  // （Aa → 置顶 → 最大化 → 托盘，关闭永留），保证：
-  //  - 中间抓取区（grid 恒居中）永不被按钮挤压、不与按钮重合；
-  //  - 抓取区与右侧按钮之间始终留有间隔（预留 12px）；
-  //  - 左侧标题输入框也随之收缩让位。
+  // 标题栏自适应：窗口变窄时右侧按钮从【左到右】逐个隐藏
+  // （Aa → 置顶 → 最大化 → 托盘，关闭永留）。
+  // 【按 grid 列3 实际宽度计算】——列3 = (总宽 - 抓取区 - 内边距) * 1.15/2.15，
+  // keep 严格受列3空间约束：按钮总数放得下才显示，放不下就从左隐藏，
+  // 从机制上保证按钮永不溢出到抓取区（"重叠"根治）。
   const titlebarRightButtons = [btnToolbarToggle, btnPin, btnMax, btnTray];
-  const TB_BTN_W = 31; // 每个按钮 30px 宽 + 1px gap
+  const TB_GRIP_W = 76; // 抓取区宽度（grid 列2 auto）
+  const TB_PAD = 16; // titlebar 左右 padding（10+6）
+  const TB_GRIP_GAP = 16; // 按钮组与抓取区强制间隔（margin-left）
+  const TB_CLOSE_W = 31; // 关闭按钮（30 + gap1）
+  const TB_BTN_W = 31; // 每个次级按钮（30 + gap1）
   function adaptTitlebar() {
-    // 预留：左侧标题最小 40 + 抓取区 48 + 抓取区与按钮间隔 12 + 关闭 30 + 右边距 6
-    const reserve = 40 + 48 + 12 + 30 + 6;
-    const available = titlebar.clientWidth - reserve;
+    const total = titlebar.clientWidth;
+    // 剩余宽度 = 总宽 - 抓取区 - padding，按 1 : 1.15 分给列1/列3
+    const rest = Math.max(0, total - TB_GRIP_W - TB_PAD);
+    const col3 = (rest * 1.15) / 2.15;
+    // 列3 内：先保证关闭按钮 + 与抓取区的强制间隔
+    const available = col3 - TB_GRIP_GAP - TB_CLOSE_W;
     const keep = Math.max(0, Math.min(titlebarRightButtons.length, Math.floor(available / TB_BTN_W)));
     titlebarRightButtons.forEach((btn, i) => {
       btn.style.display = i < keep ? "" : "none";

@@ -88,7 +88,10 @@ body,
      水平中心（无论左右内容多宽、窗口多窄，中间轨道中心 = 标题栏中心），
      不再依赖 flex space-between 下左右内容的实际宽度。 */
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  /* 三列：左(标题) 1fr、中(抓取区) auto、右(按钮) 1.15fr——右侧按钮优先
+     获得宽度，配合 adaptTitlebar 按列3实际宽度逐级隐藏按钮，任何时刻
+     按钮都不会溢出到抓取区（用户反馈"重叠"的根治） */
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.15fr);
   align-items: center;
   padding: 0 6px 0 10px;
   border-bottom: 1px solid var(--border);
