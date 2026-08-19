@@ -78,3 +78,51 @@
   background: var(--tool-color);
   transform: translateX(-50%);
 }
+
+/* ---- 收起指示条：贴边收起后留在屏幕内的品牌色圆角胶囊（QQ 贴边同款），
+   —— 不再是"露出的半截窗口"。纯视觉，pointer-events:none 不拦截交互。---- */
+.toolbar-snub {
+  position: absolute;
+  display: none;
+  z-index: 5;
+  pointer-events: none;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(120, 160, 240, 0.85), rgba(120, 160, 240, 0.45));
+  box-shadow: 0 0 10px rgba(120, 160, 240, 0.5);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.toolbar-snub.show {
+  display: block;
+  opacity: 1;
+}
+/* 贴左右边缘收起：条在窗口左/右边缘（滑出后露出的那一侧），竖条居中 */
+.toolbar-snub.snub-left {
+  left: 3px;
+  top: 50%;
+  width: 6px;
+  height: 34px;
+  transform: translateY(-50%);
+}
+.toolbar-snub.snub-right {
+  right: 3px;
+  top: 50%;
+  width: 6px;
+  height: 34px;
+  transform: translateY(-50%);
+}
+/* 贴上/下边缘收起：横条居中 */
+.toolbar-snub.snub-top {
+  top: 3px;
+  left: 50%;
+  width: 34px;
+  height: 6px;
+  transform: translateX(-50%);
+}
+.toolbar-snub.snub-bottom {
+  bottom: 3px;
+  left: 50%;
+  width: 34px;
+  height: 6px;
+  transform: translateX(-50%);
+}
