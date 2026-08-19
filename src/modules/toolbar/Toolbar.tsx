@@ -98,7 +98,7 @@ const DRAG_THRESHOLD = 10;
 
 /** 贴边自动收起参数（参考便签 XiaoxinStickyNote 的靠边收起语义：
  *  事件驱动——鼠标离开窗口收起、悬停收起条弹出、弹出后鼠标不在窗口内自动再收起） */
-const SLIVER = 12; // 收起后留在屏幕内的可见条宽度（够悬停，避免太窄误触弹出）
+const SLIVER = 4; // 收起后露出的窗口真实边缘宽度（细边，不显"半截身子"）
 const EDGE_MARGIN = 12; // 距屏幕边缘多少像素内算"贴边"
 const HIDE_DELAY = 250; // 鼠标离开贴边工具栏后，延时收起（ms）
 const SLIDE_MS = 160; // 收起/弹出的滑动动画时长（ms，轻快不拖沓）
@@ -200,9 +200,6 @@ export function Toolbar() {
       else y = geo.mon_y + geo.mon_h - SLIVER;
       await animateWindowTo(x, y, SLIDE_MS, easeInCubic);
       collapsedRef.current = true;
-      // 显示收起指示条（留在屏幕内的那侧，圆角小条）
-      const snub = snubRef.current;
-      if (snub) snub.className = `toolbar-snub snub-${edge} show`;
     } catch (e) {
       console.error("贴边收起失败:", e);
     } finally {
@@ -236,9 +233,6 @@ export function Toolbar() {
       collapsedRef.current = false;
       restorePosRef.current = null;
       restoreWaRef.current = null;
-      // 隐藏收起指示条
-      const snub = snubRef.current;
-      if (snub) snub.className = "toolbar-snub";
     } catch (e) {
       console.error("贴边弹出失败:", e);
     } finally {
@@ -291,8 +285,6 @@ export function Toolbar() {
 
   // ---- 磁吸交互：DOM 直写（refs + rAF），避免每帧 React 重渲染 ----
   const barRef = useRef<HTMLDivElement>(null);
-  /** 收起指示条（贴边收起后留在屏幕内的品牌色圆角小条） */
-  const snubRef = useRef<HTMLDivElement>(null);
   const btnRefs = useRef<(HTMLButtonElement | null)[]>([]);
   /** 鼠标相对工具栏中心的坐标（px）；null = 鼠标不在工具栏上。
    *  水平排列用 x、竖直排列用 y（见 applyMagnet）。 */
@@ -515,9 +507,6 @@ export function Toolbar() {
           </button>
         );
       })}
-      {/* 收起指示条：贴边收起后留在屏幕内的精致圆角小条（视觉上不再是
-          露出的"半截窗口"，而是品牌色圆角胶囊，QQ 贴边同款质感） */}
-      <div ref={snubRef} className="toolbar-snub" aria-hidden="true" />
     </div>
   );
 }
