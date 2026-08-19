@@ -148,12 +148,10 @@ body,
   display: none;
 }
 
-/* 标题栏变窄（动态测量加 .crowded）：隐藏更多次级按钮（历史/新建/最大化），
+/* 标题栏变窄（动态测量加 .crowded）：隐藏次级按钮（最大化），
    为中间抓取区与保留按钮（置顶/托盘/关闭）腾出空间，避免拥挤。
    注意：居中的抓取区域【始终保留】——它是拖动便签的核心入口，任何情况下都不能消失；
    拖拽本身整条标题栏都可用，但抓取点是明确的视觉抓手。 */
-.titlebar.crowded #btn-history,
-.titlebar.crowded #btn-new,
 .titlebar.crowded #btn-max {
   display: none;
 }

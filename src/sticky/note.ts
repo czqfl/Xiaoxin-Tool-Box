@@ -3,13 +3,10 @@ import {
   saveNote,
   setAlwaysOnTop,
   startDragging,
-  createNoteWindow,
-  openHistoryWindow,
   closeWindow,
   minimizeToTray,
   markNoteClosed,
   getOpenNotes,
-  newNoteId,
   readMdCustom,
   formatWithLLM,
   setAcrylic,
@@ -57,8 +54,6 @@ export function mountNoteApp(noteId: string, preset = "") {
         </div>
         <div class="titlebar-grip" id="drag-grip" title="拖动便签"><span class="grip-dots"></span></div>
         <div class="titlebar-right">
-          <button class="icon-btn" id="btn-history" title="历史便签">&#9776;</button>
-          <button class="icon-btn" id="btn-new" title="新建便签">&#xff0b;</button>
           <button class="icon-btn" id="btn-pin" title="置顶" aria-pressed="true">
             <span class="nail" aria-hidden="true">
               <svg class="pin-icon" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
@@ -123,8 +118,6 @@ export function mountNoteApp(noteId: string, preset = "") {
   const appWindow = getCurrentWindow();
   const titlebar = document.querySelector(".titlebar")!;
   const btnPin = document.getElementById("btn-pin")!;
-  const btnNew = document.getElementById("btn-new")!;
-  const btnHistory = document.getElementById("btn-history")!;
   const btnClose = document.getElementById("btn-close")!;
   const btnTray = document.getElementById("btn-tray")!;
   const titleInput = document.getElementById("note-title") as HTMLInputElement;
@@ -1711,19 +1704,6 @@ export function mountNoteApp(noteId: string, preset = "") {
   btnPin.addEventListener("click", () => updatePin(!current.pinned));
 
   // 每便签背景图改在设置弹窗中配置（见 settings.ts），便签页面不再提供入口
-
-  btnNew.addEventListener("click", async () => {
-    try {
-      const id = await newNoteId();
-      await createNoteWindow(id);
-    } catch (err) {
-      console.error("新建便签失败:", err);
-    }
-  });
-
-  btnHistory.addEventListener("click", () => {
-    openHistoryWindow().catch((e) => console.error("打开历史失败:", e));
-  });
 
   btnTray.addEventListener("click", () => {
     // 隐藏前先进入"空画面"状态：下次呼出时粒子成形动画从空开始，不闪出旧内容。

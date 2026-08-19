@@ -55,21 +55,22 @@
   /* 品牌色 RGB（供轻渐变/半透明叠加使用） */
   --accent-rgb: 47, 128, 237;
 
-  /* 背景：冷灰蓝层次（面板与 app 底拉开明度差，避免大面积死白"塑料味"） */
-  --bg-app: #eef1f6;
-  --bg-panel: rgba(247, 249, 253, 0.82);
+  /* 背景：中性冷灰（无蓝倾向——浅色主题收敛蓝色元素，
+     与浅蓝主题拉开区分；层次靠明度差） */
+  --bg-app: #f0f1f3;
+  --bg-panel: rgba(248, 249, 251, 0.82);
   /* 面板底色 RGB（不含 alpha），透明度由 --panel-opacity 控制（配置可调 0-100%） */
-  --bg-panel-rgb: 247, 249, 253;
+  --bg-panel-rgb: 248, 249, 251;
   /* 面板外壳底色不透明度：0 = 全透（纯玻璃），1 = 全不透明 */
   --panel-opacity: 0.75;
   --bg-elevated: rgba(255, 255, 255, 0.96);
   --bg-input: rgba(255, 255, 255, 0.92);
   /* 玻璃输入底：与面板底色同色调（非纯白）、透明度更低——悬浮在亚克力
      面板上的输入框/下拉框用，通透融入背景，不再突兀发白 */
-  --bg-input-glass: rgba(247, 249, 253, 0.36);
-  --bg-item-hover: rgba(15, 23, 42, 0.05);
-  --bg-item-active: rgba(15, 23, 42, 0.09);
-  --bg-badge: rgba(15, 23, 42, 0.06);
+  --bg-input-glass: rgba(248, 249, 251, 0.36);
+  --bg-item-hover: rgba(22, 24, 28, 0.05);
+  --bg-item-active: rgba(22, 24, 28, 0.09);
+  --bg-badge: rgba(22, 24, 28, 0.06);
 
   /* 文本：中性墨灰 */
   --text-primary: #171a21;
@@ -77,18 +78,18 @@
   --text-tertiary: #97a0ad;
   --text-inverse: #ffffff;
 
-  /* 边框与分割 */
-  --border-subtle: rgba(15, 23, 42, 0.06);
-  --border-strong: rgba(15, 23, 42, 0.13);
+  /* 边框与分割（中性，无蓝） */
+  --border-subtle: rgba(22, 24, 28, 0.06);
+  --border-strong: rgba(22, 24, 28, 0.13);
 
-  /* 阴影：轻柔冷调 */
-  --shadow-panel: 0 24px 64px rgba(15, 23, 42, 0.18), 0 4px 16px rgba(15, 23, 42, 0.08);
-  --shadow-item: 0 2px 8px rgba(15, 23, 42, 0.07);
-  --shadow-menu: 0 12px 32px rgba(15, 23, 42, 0.16);
-  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.05), 0 6px 20px rgba(15, 23, 42, 0.08);
+  /* 阴影：轻柔中性 */
+  --shadow-panel: 0 24px 64px rgba(22, 24, 28, 0.18), 0 4px 16px rgba(22, 24, 28, 0.08);
+  --shadow-item: 0 2px 8px rgba(22, 24, 28, 0.07);
+  --shadow-menu: 0 12px 32px rgba(22, 24, 28, 0.16);
+  --shadow-card: 0 1px 2px rgba(22, 24, 28, 0.05), 0 6px 20px rgba(22, 24, 28, 0.08);
   /* 悬浮工具栏投影：比 shadow-item 明显一档——让常驻贴边的小工具条在
      任意壁纸上都能"浮起来"、一眼可辨 */
-  --shadow-toolbar: 0 4px 18px rgba(15, 23, 42, 0.2), 0 1px 3px rgba(15, 23, 42, 0.12);
+  --shadow-toolbar: 0 4px 18px rgba(22, 24, 28, 0.2), 0 1px 3px rgba(22, 24, 28, 0.12);
 
   /* 控件 */
   --switch-knob: #ffffff;
@@ -300,11 +301,11 @@
 /* 浅蓝色主题（skyblue）：淡蓝背景 + 天蓝品牌色，通透清爽（与浅青 mint 对应，
    改动范围与浅青一致：完整令牌块，覆盖品牌/水彩/内容色/工具栏图标/背景/文本） */
 :root[data-theme="skyblue"] {
-  /* 品牌色：天蓝 */
-  --accent: #1a88f0;
-  --accent-hover: #1577d6;
-  --accent-active: #1066b8;
-  --accent-soft: rgba(26, 136, 240, 0.12);
+  /* 品牌色：鲜明天蓝（与浅色的品牌蓝拉开浓度，蓝感更足） */
+  --accent: #1677ff;
+  --accent-hover: #0f6ce8;
+  --accent-active: #0b5cc9;
+  --accent-soft: rgba(22, 119, 255, 0.14);
   --accent-text: #ffffff;
 
   --danger: #e5484d;
@@ -338,40 +339,40 @@
   --tool-port: #ea580c;
   --tool-settings: #4f46e5;
   --tool-sticky: #7c3aed;
-  --accent-rgb: 26, 136, 240;
+  --accent-rgb: 22, 119, 255;
 
-  /* 背景：淡蓝灰（app 底与面板拉开明度差） */
-  --bg-app: #e8eef6;
-  --bg-panel: rgba(246, 249, 253, 0.84);
-  --bg-panel-rgb: 246, 249, 253;
+  /* 背景：明显淡蓝（与浅色的中性灰一眼区分） */
+  --bg-app: #dbe6f5;
+  --bg-panel: rgba(234, 243, 253, 0.86);
+  --bg-panel-rgb: 234, 243, 253;
   --panel-opacity: 0.75;
-  --bg-elevated: rgba(255, 255, 255, 0.96);
-  --bg-input: rgba(255, 255, 255, 0.92);
-  --bg-input-glass: rgba(246, 249, 253, 0.36);
-  --bg-item-hover: rgba(15, 50, 100, 0.05);
-  --bg-item-active: rgba(15, 50, 100, 0.09);
-  --bg-badge: rgba(15, 50, 100, 0.06);
+  --bg-elevated: rgba(247, 251, 255, 0.96);
+  --bg-input: rgba(248, 252, 255, 0.92);
+  --bg-input-glass: rgba(234, 243, 253, 0.4);
+  --bg-item-hover: rgba(20, 70, 150, 0.06);
+  --bg-item-active: rgba(20, 70, 150, 0.11);
+  --bg-badge: rgba(20, 70, 150, 0.07);
 
-  /* 文本：蓝墨 */
-  --text-primary: #16243a;
-  --text-secondary: #4a5a72;
-  --text-tertiary: #8a99b0;
+  /* 文本：蓝墨（比浅色深一档，更蓝） */
+  --text-primary: #13203a;
+  --text-secondary: #43577a;
+  --text-tertiary: #7e93b5;
   --text-inverse: #ffffff;
 
-  --border-subtle: rgba(15, 50, 100, 0.08);
-  --border-strong: rgba(15, 50, 100, 0.16);
+  --border-subtle: rgba(25, 80, 160, 0.1);
+  --border-strong: rgba(25, 80, 160, 0.2);
 
-  --shadow-panel: 0 24px 64px rgba(15, 50, 100, 0.16), 0 4px 16px rgba(15, 50, 100, 0.07);
-  --shadow-item: 0 2px 8px rgba(15, 50, 100, 0.07);
-  --shadow-menu: 0 12px 32px rgba(15, 50, 100, 0.14);
-  --shadow-card: 0 1px 2px rgba(15, 50, 100, 0.05), 0 6px 20px rgba(15, 50, 100, 0.07);
-  --shadow-toolbar: 0 4px 18px rgba(15, 50, 100, 0.18), 0 1px 3px rgba(15, 50, 100, 0.1);
+  --shadow-panel: 0 24px 64px rgba(20, 70, 150, 0.18), 0 4px 16px rgba(20, 70, 150, 0.08);
+  --shadow-item: 0 2px 8px rgba(20, 70, 150, 0.08);
+  --shadow-menu: 0 12px 32px rgba(20, 70, 150, 0.16);
+  --shadow-card: 0 1px 2px rgba(20, 70, 150, 0.06), 0 6px 20px rgba(20, 70, 150, 0.08);
+  --shadow-toolbar: 0 4px 18px rgba(20, 70, 150, 0.2), 0 1px 3px rgba(20, 70, 150, 0.12);
 
   /* 控件 */
   --switch-knob: #ffffff;
 
   /* 焦点环 / 面板高光（天蓝系） */
-  --ring: 0 0 0 2px rgba(26, 136, 240, 0.28), 0 4px 18px rgba(26, 136, 240, 0.16);
+  --ring: 0 0 0 2px rgba(22, 119, 255, 0.28), 0 4px 18px rgba(22, 119, 255, 0.16);
   --panel-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.6);
   --panel-highlight-strong: inset 0 1px 0 rgba(255, 255, 255, 0.8);
 
