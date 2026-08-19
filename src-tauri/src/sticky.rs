@@ -453,7 +453,12 @@ pub fn list_notes(paths: State<'_, AppPaths>) -> Result<Vec<NoteMeta>, String> {
             top_priority: data.top_priority == Some(true),
         });
     }
-    items.sort_by(|a, b| b.updated.cmp(&a.updated));
+    // 置顶优先级便签排最前，其余按最近更新降序
+    items.sort_by(|a, b| {
+        b.top_priority
+            .cmp(&a.top_priority)
+            .then_with(|| b.updated.cmp(&a.updated))
+    });
     Ok(items)
 }
 
