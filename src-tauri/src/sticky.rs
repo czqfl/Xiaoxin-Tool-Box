@@ -27,27 +27,15 @@ static VISIBLE_NOTES: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex:
 /// 历史窗口当前是否可见（同样绕过 is_visible 不可靠性，供 open_history 快捷键做 toggle）。
 static HISTORY_VISIBLE: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
 
-/// 最近一次被激活（呼出/新建/聚焦）的便签窗口 label。
-/// 快捷键「全部收起」用它决定哪个便签播放消散动画——前端不再依赖 isFocused()：
-/// 全局快捷键按下时焦点几乎总在其他应用（便签窗口无焦点），isFocused 恒为 false
-/// 导致动画永远不播（用户反馈「快捷键关闭便签无法触发动画」的根因）。
-static LAST_ACTIVE_NOTE: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| Mutex::new(None));
-
-/// 登记最近激活的便签窗口（呼出/新建/聚焦后调用，最后一次调用者生效）。
-fn mark_note_active(label: &str) {
-    *LAST_ACTIVE_NOTE.lock().unwrap() = Some(label.to_string());
-}
-
-/// 收起时广播关闭动画：只有「最后激活」的便签播放消散动画（payload=true），
-/// 其余便签直接隐藏（payload=false）。与旧 isFocused 语义等价，但不依赖窗口焦点。
+/// 收起时广播关闭动画：每个便签走与手动点击「×」完全相同的
+/// 前端路径（play-close-anim → requestAnimatedClose），先播消散动画再自行隐藏。
+/// 不做"只有最后激活的便签播"的区分——用户明确要求快捷键关闭与手动点击一致
+/// 播放动画；多便签同时消散也符合"全部收起"的直觉（此前 isFocused / payload
+/// 区分任一环节判断失误都会吞掉动画，是"快捷键关闭无动画"的反复根因）。
 fn emit_close_anim(note_wins: &[(String, tauri::WebviewWindow)]) {
-    let mut active = LAST_ACTIVE_NOTE.lock().unwrap().clone();
-    // 兜底：从未登记过激活窗口（极端路径）时选第一个窗口播动画，保证至少有一个消散
-    if active.is_none() {
-        active = note_wins.first().map(|(l, _)| l.clone());
-    }
     for (l, w) in note_wins {
-        let _ = w.emit("play-close-anim", active.as_deref() == Some(l.as_str()));
+        let _ = w.emit("play-close-anim", true);
+        crate::storage::diag_write(&format!("[sticky] emit close-anim -> {l}"));
     }
 }
 
@@ -611,13 +599,11 @@ pub fn toggle_sticky_notes(
             let _ = w.unminimize();
             let _ = w.set_focus();
             VISIBLE_NOTES.lock().unwrap().insert(l.clone());
-            // 登记最近激活（呼出即视为"正在查看"，收起时由它播动画）
-            mark_note_active(l);
         }
         // 【关键】窗口是隐藏常驻的（收起不销毁）：呼出必须广播 summoned，前端据此
         // 恢复显示 + 播放呼出成形动画（此前窗口每次都重建、新页面无残留样式，
         // 无需此事件；隐藏常驻后缺失会导致呼出窗口空白/裁切态）。
-        for (l, w) in &note_wins {
+        for (_, w) in &note_wins {
             let _ = w.emit("summoned", ());
         }
         crate::storage::diag_write("[sticky] toggle: shown notes");
@@ -861,8 +847,6 @@ pub fn ensure_note_window(app: &AppHandle, id: &str) {
         let _ = win.show();
         let _ = win.unminimize();
         let _ = win.set_focus();
-        // 登记最近激活（收起时由它播消散动画）
-        mark_note_active(&label);
         // 登记到运行时可见集合：无论经由历史面板点击、工具栏入口还是快捷键打开，
         // toggle/快捷键「收起」都能在第一次按下即识别到"有可见便签"（此前仅快捷键
         // 路径登记，导致历史面板打开的便签要按两次才关得掉）。
@@ -931,8 +915,6 @@ pub fn ensure_note_window(app: &AppHandle, id: &str) {
             crate::storage::diag_write(&format!("[sticky] ensure_note_window: {label} built+shown"));
             // 窗口此刻才真正可见，补发显隐事件让工具栏高亮“便签”图标
             crate::panel::broadcast_panel_visibility(&app2, &window_label(&id2), true);
-            // 登记最近激活（收起时由它播消散动画）
-            mark_note_active(&window_label(&id2));
             // 登记到运行时可见集合（与"已存在"分支一致，保证收起 toggle 一次即生效）
             VISIBLE_NOTES.lock().unwrap().insert(window_label(&id2));
         } else {
@@ -1098,8 +1080,6 @@ pub fn create_note_window(
             let _ = win.show();
             let _ = win.set_focus();
             crate::panel::broadcast_panel_visibility(&app2, &window_label(&id2), true);
-            // 登记最近激活（收起时由它播消散动画）
-            mark_note_active(&window_label(&id2));
             // 登记到运行时可见集合（新建即打开，需保证收起 toggle 一次生效）
             VISIBLE_NOTES.lock().unwrap().insert(window_label(&id2));
             // 新建即打开：通知历史列表刷新状态
@@ -1311,8 +1291,6 @@ pub fn show_window(app: AppHandle, label: String) -> Result<(), String> {
         // 便签窗口：登记到运行时可见集合，保证收起 toggle 可靠识别
         if label.starts_with(NOTE_PREFIX) {
             VISIBLE_NOTES.lock().unwrap().insert(label.clone());
-            // 登记最近激活（收起时由它播消散动画）
-            mark_note_active(&label);
         }
     }
     Ok(())
@@ -1402,13 +1380,11 @@ fn show_all_open(app: &AppHandle) {
             let _ = w.unminimize();
             let _ = w.set_focus();
             VISIBLE_NOTES.lock().unwrap().insert(l.clone());
-            // 登记最近激活：快捷键收起时由它播消散动画（最后一次调用者生效）
-            mark_note_active(l);
         }
         // 【关键】窗口是隐藏常驻的（收起不销毁）：呼出必须广播 summoned，前端据此
         // 恢复显示 + 播放呼出成形动画（此前窗口每次都重建、新页面无残留样式，
         // 无需此事件；隐藏常驻后缺失会导致呼出窗口空白/裁切态）。
-        for (l, w) in &note_wins {
+        for (_, w) in &note_wins {
             let _ = w.emit("summoned", ());
         }
         let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
@@ -1422,8 +1398,6 @@ fn show_all_open(app: &AppHandle) {
                 crate::storage::diag_write(&format!("[sticky] show_all_open: rebuild {id}"));
                 ensure_note_window(app, &id);
                 VISIBLE_NOTES.lock().unwrap().insert(window_label(&id));
-                // 登记最近激活（呼出即视为"正在查看"，收起时播动画）
-                mark_note_active(&window_label(&id));
             }
             return;
         }
@@ -1441,8 +1415,6 @@ fn quick_new_note(app: &AppHandle) {
     }
     ensure_note_window(app, &id);
     VISIBLE_NOTES.lock().unwrap().insert(window_label(&id));
-    // 登记最近激活（收起时由它播消散动画）
-    mark_note_active(&window_label(&id));
     if let Some(win) = app.get_webview_window(&window_label(&id)) {
         let _ = win.emit("summoned", ());
     }
