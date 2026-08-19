@@ -1753,6 +1753,9 @@ export function mountNoteApp(noteId: string, preset = "") {
    * 关闭完成后复位，否则主窗口再次显示后关闭按钮会永久失效。 */
   let closing = false;
   let finished = false;
+  // 关闭兜底定时器：动画模块异常或回调未触发时，到时强制 finishClose，
+  // 确保快捷键「收起」不会卡在「窗口残留下」的状态（见 requestAnimatedClose）。
+  let closeFailSafe: number | undefined;
   /** 关闭后亚克力尚未恢复的窗口期：此期间呼出需立即补上亚克力，
    *  否则窗口显示时无模糊、等定时器在可见窗口上触发 SWCA 才模糊（卡顿+模糊晚到）。 */
   let acrylicOffPending = false;
@@ -1760,6 +1763,10 @@ export function mountNoteApp(noteId: string, preset = "") {
    *  打断正在播放的关闭动画）共用。复位 closing、关亚克力、隐藏窗口、标记已关闭。 */
   const finishClose = () => {
     closing = false; // 复位：主窗口隐藏后上下文仍在，必须复位
+    if (closeFailSafe) {
+      window.clearTimeout(closeFailSafe);
+      closeFailSafe = undefined;
+    }
     if (finished) return;
     finished = true;
     // 透明主题的 DWM 亚克力在窗口隐藏时会重新合成，出现"便签缩小一下"的残影：
@@ -1786,6 +1793,14 @@ export function mountNoteApp(noteId: string, preset = "") {
     if (closing) return;
     closing = true;
     finished = false;
+    // 兜底：动画模块加载/回调异常时，到时强制完成关闭，避免窗口残留
+    // （快捷键「收起便签」尤其依赖此逻辑——它走的是 play-close-anim → 本函数路径）
+    closeFailSafe = window.setTimeout(() => {
+      if (!finished) {
+        console.warn("[sticky] close fail-safe triggered");
+        finishClose();
+      }
+    }, 1500);
     // 【立即标记关闭】点 × 的瞬间就把"打开中"状态移除并广播——历史列表
     // 马上刷新，不等粒子动画播完（用户反馈"关闭完应该立马更新"；此前要等
     // finishClose 才 markNoteClosed，动画 0.5~1s+ 的延迟全算在状态更新上）。

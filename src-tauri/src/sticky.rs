@@ -557,13 +557,12 @@ pub fn toggle_sticky_notes(
     ));
 
     if notes_visible {
-        // 收起全部便签（历史窗口保持原样）：广播关闭消散动画，特效交给前端——
-        // 聚焦窗口播粒子消散，其余立即收尾；动画结束由前端 finishClose →
-        // close_window 销毁窗口并自行清理 VISIBLE_NOTES。直接 hide() 没有特效。
-        for (l, w) in &note_wins {
-            if VISIBLE_NOTES.lock().unwrap().contains(l) {
-                let _ = w.emit("play-close-anim", ());
-            }
+        // 收起全部便签（历史窗口保持原样）：向【所有】便签窗口广播关闭消散动画，
+        // 特效交给前端——聚焦窗口播粒子消散，其余立即收尾；动画结束由前端
+        // finishClose → close_window 销毁窗口并自行清理 VISIBLE_NOTES。
+        // 直接 hide() 没有特效；立即 clear 集合会让动画途中二次按下误判为"已收起"。
+        for (_, w) in &note_wins {
+            let _ = w.emit("play-close-anim", ());
         }
         crate::storage::diag_write("[sticky] toggle: hid notes (animated)");
         return Ok(false);
@@ -830,6 +829,10 @@ pub fn ensure_note_window(app: &AppHandle, id: &str) {
         let _ = win.show();
         let _ = win.unminimize();
         let _ = win.set_focus();
+        // 登记到运行时可见集合：无论经由历史面板点击、工具栏入口还是快捷键打开，
+        // toggle/快捷键「收起」都能在第一次按下即识别到"有可见便签"（此前仅快捷键
+        // 路径登记，导致历史面板打开的便签要按两次才关得掉）。
+        VISIBLE_NOTES.lock().unwrap().insert(label.clone());
         // 状态同步：广播可见（工具栏高亮）+ 便签状态变化（历史列表刷新）
         crate::panel::broadcast_panel_visibility(app, &label, true);
         let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
@@ -894,6 +897,8 @@ pub fn ensure_note_window(app: &AppHandle, id: &str) {
             crate::storage::diag_write(&format!("[sticky] ensure_note_window: {label} built+shown"));
             // 窗口此刻才真正可见，补发显隐事件让工具栏高亮“便签”图标
             crate::panel::broadcast_panel_visibility(&app2, &window_label(&id2), true);
+            // 登记到运行时可见集合（与"已存在"分支一致，保证收起 toggle 一次即生效）
+            VISIBLE_NOTES.lock().unwrap().insert(window_label(&id2));
         } else {
             crate::storage::diag_write(&format!("[sticky] ensure_note_window: {label} BUILD FAILED"));
         }
@@ -1057,6 +1062,8 @@ pub fn create_note_window(
             let _ = win.show();
             let _ = win.set_focus();
             crate::panel::broadcast_panel_visibility(&app2, &window_label(&id2), true);
+            // 登记到运行时可见集合（新建即打开，需保证收起 toggle 一次生效）
+            VISIBLE_NOTES.lock().unwrap().insert(window_label(&id2));
             // 新建即打开：通知历史列表刷新状态
             let _ = app2.emit(EVT_NOTE_STATE_CHANGED, ());
         }
@@ -1230,6 +1237,10 @@ pub fn show_window(app: AppHandle, label: String) -> Result<(), String> {
         let _ = win.show();
         let _ = win.unminimize();
         let _ = win.set_focus();
+        // 便签窗口：登记到运行时可见集合，保证收起 toggle 可靠识别
+        if label.starts_with(NOTE_PREFIX) {
+            VISIBLE_NOTES.lock().unwrap().insert(label.clone());
+        }
     }
     Ok(())
 }
@@ -1299,13 +1310,13 @@ fn show_all_open(app: &AppHandle) {
         note_wins.iter().any(|(l, _)| vis.contains(l))
     };
     if any_visible {
-        // 收起：先让每个可见便签窗口播放关闭消散动画（聚焦的那个播粒子，
-        // 其余立即收尾），动画结束由前端 finishClose → close_window 销毁窗口
-        // 并自行清理 VISIBLE_NOTES。不要在这里直接 w.hide()/clear，否则没有特效。
-        for (l, w) in &note_wins {
-            if VISIBLE_NOTES.lock().unwrap().contains(l) {
-                let _ = w.emit("play-close-anim", ());
-            }
+        // 收起：向【所有】便签窗口广播关闭消散动画（不局限于 VISIBLE_NOTES 成员，
+        // 防止某些路径下未登记到的窗口收不掉）；聚焦窗口播粒子、其余立即收尾，
+        // 动画结束由前端 finishClose → close_window 销毁窗口并自行清理 VISIBLE_NOTES。
+        // 不要在这里直接 w.hide()，否则没有特效；也不要立即 clear 集合——由各窗口
+        // close_window 自行移除，避免动画播放途中二次按下被误判为"已收起"而重新呼出。
+        for (_, w) in &note_wins {
+            let _ = w.emit("play-close-anim", ());
         }
         let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
         return;
