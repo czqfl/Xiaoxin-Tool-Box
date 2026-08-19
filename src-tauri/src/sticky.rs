@@ -1147,6 +1147,12 @@ pub fn close_window(window: tauri::WebviewWindow) -> Result<(), String> {
                 // 【销毁前几何回写】把窗口当前的位置/大小写回存档——
                 // 即使前端防抖保存未触发（拖动/调整大小后立即关闭），
                 // 下次打开也一定在最后出现的位置/大小。
+                // 【单位约定】pos 存物理像素（ensure 创建时 position(pos/scale)
+                // 转逻辑，与前端 onMoved 的 outerPosition 物理值一致）；
+                // size 存逻辑像素（inner_size 直接用逻辑）——此前 size 直接存
+                // outer_size 物理值，下次创建 inner_size(物理) 被当逻辑 → 每次
+                // 打开放大 scale 倍（实测存档从默认 420×440 滚到 1296×1626）。
+                let scale = window.scale_factor().unwrap_or(1.0).max(0.01);
                 let path = note_path(&paths, &id);
                 if let Ok(raw) = std::fs::read_to_string(&path) {
                     if let Ok(mut note) = serde_json::from_str::<NoteData>(&raw) {
@@ -1155,8 +1161,8 @@ pub fn close_window(window: tauri::WebviewWindow) -> Result<(), String> {
                             note.pos_y = Some(p.y as f64);
                         }
                         if let Ok(s) = window.outer_size() {
-                            note.width = s.width;
-                            note.height = s.height;
+                            note.width = (s.width as f64 / scale).round() as u32;
+                            note.height = (s.height as f64 / scale).round() as u32;
                         }
                         if let Ok(json) = serde_json::to_string_pretty(&note) {
                             let _ = std::fs::write(&path, json);

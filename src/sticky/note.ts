@@ -1875,6 +1875,9 @@ export function mountNoteApp(noteId: string, preset = "") {
     .catch((e) => console.error("监听关闭动画事件失败:", e));
 
   // ---- 窗口尺寸记忆：拖拽改变大小后保存，下次打开沿用该便签自己的尺寸 ----
+  // 【单位统一】存档 width/height 用逻辑像素（Rust inner_size 直接消费）——
+  // 此前用 window.innerWidth（在用户 150% 缩放环境实测返回物理像素），
+  // 与 Rust 端 inner_size(逻辑) 混用导致"每次重新打开变大一圈"。
   (async () => {
     try {
       await appWindow.onResized(() => {
@@ -1883,9 +1886,17 @@ export function mountNoteApp(noteId: string, preset = "") {
         if (sizeSaveTimer) window.clearTimeout(sizeSaveTimer);
         sizeSaveTimer = window.setTimeout(() => {
           if (deleted) return;
-          current.width = Math.round(window.innerWidth);
-          current.height = Math.round(window.innerHeight);
-          saveNote(noteId, current).catch(() => {});
+          void (async () => {
+            try {
+              const size = await appWindow.outerSize();
+              const scale = await appWindow.scaleFactor();
+              current.width = Math.round(size.width / scale);
+              current.height = Math.round(size.height / scale);
+              saveNote(noteId, current).catch(() => {});
+            } catch {
+              /* 忽略 */
+            }
+          })();
         }, 500);
       });
     } catch (e) {

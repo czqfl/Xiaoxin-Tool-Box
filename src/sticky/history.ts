@@ -68,7 +68,7 @@ export function mountHistoryApp() {
   // ---- 状态刷新（三重保障，绝不展示过期信息）----
   // 1) 事件：后端统一广播 sticky://state-changed（打开/关闭/新建/保存/删除）
   // 2) 聚焦：窗口每次获得焦点主动刷新
-  // 3) 轮询：窗口可见期间每 1s 兜底刷新（事件偶发丢失也被覆盖）
+  // 3) 轮询：窗口可见期间每 500ms 兜底刷新（事件偶发丢失也被覆盖，基本无感）
   let pollTimer: number | undefined;
   const stopPoll = () => {
     if (pollTimer) {
@@ -78,7 +78,7 @@ export function mountHistoryApp() {
   };
   const startPoll = () => {
     stopPoll();
-    pollTimer = window.setInterval(() => void render(), 1000);
+    pollTimer = window.setInterval(() => void render(), 500);
   };
   listen("sticky://state-changed", () => {
     void render();
