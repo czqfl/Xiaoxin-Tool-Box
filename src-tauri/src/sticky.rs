@@ -1515,8 +1515,16 @@ fn toggle_priority_note(app: &AppHandle) {
         .map(|w| w.is_visible().unwrap_or(false))
         .unwrap_or(false);
     if visible {
-        // 关闭（销毁，与 close_window 语义一致）
-        hide_note_window(app, &label);
+        // 关闭：先广播粒子消散动画（前端播放），再 Rust 兜底强制关闭——
+        // 与"收起全部便签"同机制（不依赖前端动画回调，700ms 后强制销毁）。
+        // 修复：此前直接 hide_note_window（destroy）无动画（用户反馈）。
+        if let Some(win) = app.get_webview_window(&label) {
+            let wins = vec![(label.clone(), win)];
+            emit_close_anim(&wins);
+            schedule_force_close(app, vec![label.clone()]);
+        } else {
+            hide_note_window(app, &label);
+        }
     } else {
         // 呼出
         mark_note_open_inner(paths.inner(), &id);
