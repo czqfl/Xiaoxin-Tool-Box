@@ -557,14 +557,16 @@ pub fn toggle_sticky_notes(
     ));
 
     if notes_visible {
-        // 收起全部便签（历史窗口保持原样）：向【所有】便签窗口广播关闭消散动画，
-        // 特效交给前端——聚焦窗口播粒子消散，其余立即收尾；动画结束由前端
-        // finishClose → close_window 销毁窗口并自行清理 VISIBLE_NOTES。
-        // 直接 hide() 没有特效；立即 clear 集合会让动画途中二次按下误判为"已收起"。
+        // 收起全部便签（历史窗口保持原样）：
+        // ① 先广播 play-close-anim 让前端播消散特效（聚焦窗口粒子、其余立即收尾）；
+        // ② 再启动 Rust 端兜底定时器（700ms 后强制销毁）——关闭不再依赖前端动画
+        //    回调是否触发（此前回调异常即"关不掉"）。前端若正常播完会先关，兜底变 no-op。
+        let labels: Vec<String> = note_wins.iter().map(|(l, _)| l.clone()).collect();
         for (_, w) in &note_wins {
             let _ = w.emit("play-close-anim", ());
         }
-        crate::storage::diag_write("[sticky] toggle: hid notes (animated)");
+        schedule_force_close(&app, labels);
+        crate::storage::diag_write("[sticky] toggle: hid notes (animated + force-close safety)");
         return Ok(false);
     }
     // 呼出：优先便签窗口；没有便签窗口 → 显示/创建历史窗口（便签应用入口）
@@ -1146,6 +1148,71 @@ pub fn open_history_window(app: AppHandle) -> Result<(), String> {
 /// - 便签关闭（hide）：同步移除"打开中"集合、emit open-changed（历史列表
 ///   实时刷新"打开中/已关闭"）、广播可见性（工具栏便签图标取消高亮）；
 /// - 历史/设置关闭：广播可见性 false（工具栏取消高亮）。
+
+/// 按 label 销毁一个便签窗口并清理全部状态（几何回写 / 打开集合 / 可见集合 / 广播）。
+/// 供「关闭」命令与快捷键「收起」的兜底定时器共用，使关闭不依赖前端动画回调是否触发——
+/// 此前关闭完全托付给前端 play-close-anim 的动画回调，回调异常即「关不掉」。
+/// 窗口不存在时仅清理残留的运行时可见标记（幂等安全）。
+fn close_note_window_by_label(app: &AppHandle, label: &str) {
+    let win = match app.get_webview_window(label) {
+        Some(w) => w,
+        None => {
+            VISIBLE_NOTES.lock().unwrap().remove(label);
+            return;
+        }
+    };
+    if let Some(paths) = app.try_state::<AppPaths>() {
+        let id = label.strip_prefix(NOTE_PREFIX).unwrap_or(label).to_string();
+        if id != MAIN_NOTE_ID {
+            mark_note_closed_inner(&paths, &id);
+        }
+        // 销毁前几何回写（与 close_window 命令原逻辑一致）：
+        // 即使前端防抖保存未触发（拖动/调整大小后立即关闭），下次打开也在最后位置/大小。
+        let scale = win.scale_factor().unwrap_or(1.0).max(0.01);
+        let path = note_path(&paths, &id);
+        if let Ok(raw) = std::fs::read_to_string(&path) {
+            if let Ok(mut note) = serde_json::from_str::<NoteData>(&raw) {
+                if let Ok(p) = win.outer_position() {
+                    note.pos_x = Some(p.x as f64);
+                    note.pos_y = Some(p.y as f64);
+                }
+                if let Ok(s) = win.outer_size() {
+                    note.width = (s.width as f64 / scale).round() as u32;
+                    note.height = (s.height as f64 / scale).round() as u32;
+                }
+                if let Ok(json) = serde_json::to_string_pretty(&note) {
+                    let _ = std::fs::write(&path, json);
+                }
+            }
+        }
+    }
+    let apph = win.app_handle().clone();
+    let _ = win.close();
+    let _ = apph.emit(EVT_NOTE_STATE_CHANGED, ());
+    crate::panel::broadcast_panel_visibility(&apph, label, false);
+    VISIBLE_NOTES.lock().unwrap().remove(label);
+}
+
+/// 快捷键「收起便签 / 工具栏便签入口」的关闭兜底：
+/// 向前端广播消散动画后，Rust 端延时强制销毁每个便签窗口——不依赖前端动画回调。
+/// 前端若正常播完动画并自行 close_window，则到时窗口已不存在、本兜底变 no-op（幂等）；
+/// 前端若异常未关，本兜底保证窗口一定关闭（修「快捷键关不掉便签」）。
+fn schedule_force_close(app: &AppHandle, labels: Vec<String>) {
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(700));
+        let app3 = app2.clone();
+        let _ = app3.run_on_main_thread({
+            let app4 = app3.clone();
+            move || {
+                for l in &labels {
+                    close_note_window_by_label(&app4, l);
+                }
+            }
+        });
+    });
+}
+
 #[tauri::command]
 pub fn close_window(window: tauri::WebviewWindow) -> Result<(), String> {
     let app = window.app_handle().clone();
@@ -1167,44 +1234,10 @@ pub fn close_window(window: tauri::WebviewWindow) -> Result<(), String> {
         }
         _ => {
             // 便签窗口关闭 = 销毁（内容实时自动保存，不丢数据）。
-            // 位置/大小记忆由 create/ensure 读存档实现。
-            if let Some(paths) = app.try_state::<AppPaths>() {
-                let id = label.strip_prefix(NOTE_PREFIX).unwrap_or(&label).to_string();
-                if id != MAIN_NOTE_ID {
-                    mark_note_closed_inner(&paths, &id);
-                }
-                // 【销毁前几何回写】把窗口当前的位置/大小写回存档——
-                // 即使前端防抖保存未触发（拖动/调整大小后立即关闭），
-                // 下次打开也一定在最后出现的位置/大小。
-                // 【单位约定】pos 存物理像素（ensure 创建时 position(pos/scale)
-                // 转逻辑，与前端 onMoved 的 outerPosition 物理值一致）；
-                // size 存逻辑像素（inner_size 直接用逻辑）——此前 size 直接存
-                // outer_size 物理值，下次创建 inner_size(物理) 被当逻辑 → 每次
-                // 打开放大 scale 倍（实测存档从默认 420×440 滚到 1296×1626）。
-                let scale = window.scale_factor().unwrap_or(1.0).max(0.01);
-                let path = note_path(&paths, &id);
-                if let Ok(raw) = std::fs::read_to_string(&path) {
-                    if let Ok(mut note) = serde_json::from_str::<NoteData>(&raw) {
-                        if let Ok(p) = window.outer_position() {
-                            note.pos_x = Some(p.x as f64);
-                            note.pos_y = Some(p.y as f64);
-                        }
-                        if let Ok(s) = window.outer_size() {
-                            note.width = (s.width as f64 / scale).round() as u32;
-                            note.height = (s.height as f64 / scale).round() as u32;
-                        }
-                        if let Ok(json) = serde_json::to_string_pretty(&note) {
-                            let _ = std::fs::write(&path, json);
-                        }
-                    }
-                }
-            }
-            let r = window.close();
-            let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
-            crate::panel::broadcast_panel_visibility(&app, &label, false);
-            // 同步运行时可见集合（窗口已销毁，移除 stale 标记）
-            VISIBLE_NOTES.lock().unwrap().remove(&label);
-            r.map_err(|e| e.to_string())
+            // 统一走 close_note_window_by_label：与快捷键「收起」兜底销毁共用同一套
+            // 清理逻辑（几何回写 / 打开集合 / 可见集合 / 广播），单一真相来源，避免不一致。
+            close_note_window_by_label(&app, &label);
+            Ok(())
         }
     }
 }
@@ -1310,14 +1343,15 @@ fn show_all_open(app: &AppHandle) {
         note_wins.iter().any(|(l, _)| vis.contains(l))
     };
     if any_visible {
-        // 收起：向【所有】便签窗口广播关闭消散动画（不局限于 VISIBLE_NOTES 成员，
-        // 防止某些路径下未登记到的窗口收不掉）；聚焦窗口播粒子、其余立即收尾，
-        // 动画结束由前端 finishClose → close_window 销毁窗口并自行清理 VISIBLE_NOTES。
-        // 不要在这里直接 w.hide()，否则没有特效；也不要立即 clear 集合——由各窗口
-        // close_window 自行移除，避免动画播放途中二次按下被误判为"已收起"而重新呼出。
+        // 收起：① 向【所有】便签窗口广播关闭消散动画（聚焦播粒子、其余立即收尾，
+        //    不局限于 VISIBLE_NOTES 成员，防止某些路径下未登记到的窗口收不掉）；
+        // ② 启动 Rust 端兜底定时器（700ms 后强制销毁）——关闭不再依赖前端动画回调，
+        //    彻底修「快捷键关不掉便签」。前端若正常播完会先关，兜底到时变 no-op。
+        let labels: Vec<String> = note_wins.iter().map(|(l, _)| l.clone()).collect();
         for (_, w) in &note_wins {
             let _ = w.emit("play-close-anim", ());
         }
+        schedule_force_close(app, labels);
         let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
         return;
     }

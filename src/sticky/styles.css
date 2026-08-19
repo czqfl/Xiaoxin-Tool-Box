@@ -89,7 +89,6 @@ body,
   padding: 0 6px 0 10px;
   border-bottom: 1px solid var(--border);
   user-select: none;
-  overflow: hidden;
 }
 
 /* 标题栏居中拖动抓手：作为标题栏的 flex 中间占位元素（flex:1），
@@ -97,15 +96,15 @@ body,
    绝不溢出到按钮之上（旧方案用 absolute 居中，窄窗时会与右侧按钮重叠）。
    拖拽仍可整条标题栏进行，抓手只是明确的视觉指引。 */
 .titlebar-grip {
-  flex: 1 1 0;
-  min-width: 4px;
+  /* 固定宽度（非弹性占位）的 flex 兄弟元素：与左右按钮天然并排，绝不重叠；
+     窄窗下左右按钮组收缩、抓取区保持 54px 居中（justify-content: space-between），
+     不会出现旧方案 flex:1 占位在中等宽度下与右侧按钮边界打架的情况。 */
+  flex: 0 0 54px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: grab;
   z-index: 1;
-  /* 裁剪溢出：窄窗下 grip 被压到极小，圆点不再向左右溢出盖住两侧按钮 */
-  overflow: hidden;
 }
 
 .titlebar-grip:active {
@@ -115,7 +114,7 @@ body,
 /* 抓取点：一排“被高斯模糊”的柔和圆点（带光晕的毛玻璃质感），
    取代原本边缘锐利的硬点阵 */
 .titlebar-grip .grip-dots {
-  width: min(54px, 100%);
+  width: 100%;
   height: 16px;
   background-image: radial-gradient(circle, var(--grip-dot) 1.5px, transparent 2.4px);
   background-size: 9px 9px;
@@ -633,10 +632,9 @@ body,
 .titlebar-left {
   flex: 0 1 auto;
   min-width: 0;
-  /* 有空间时尽量展示标题：整个左侧组（齿轮+标题）最多长到居中抓取点
-     的圆点（50%±27px）前停下，留约 5px 间距——不固定死宽度，
-     空间越大标题展示越完整；拖拽仍可用抓取点右侧区域 */
-  max-width: calc(50% - 24px);
+  /* 标题区域超长时裁剪，避免把右侧按钮挤出去；去掉原 max-width 限制，
+     让左侧在窄窗下能完整收缩，配合固定宽度的抓取区稳定并排 */
+  overflow: hidden;
   gap: 2px;
 }
 
@@ -677,7 +675,10 @@ body,
 .title-input {
   width: auto;
   flex: 1 1 auto;
-  min-width: 40px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   margin-left: 6px;
   margin-right: 10px;
   border: 1px solid transparent;
