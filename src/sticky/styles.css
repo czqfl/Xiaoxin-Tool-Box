@@ -8,7 +8,7 @@
   --text-sub: #a39c90;
   --text-hint: #c8c2b6;
   --accent: #6b9fd9;
-  --grip-dot: #95c1f2;
+  --grip-dot: #9a9a9a;
   --pin-on: #5bae6f;
   --pin-off: #c8c2b6;
   --danger: #dd5247;
@@ -84,23 +84,25 @@ body,
   height: var(--bar-h);
   min-height: var(--bar-h);
   background: var(--bg-bar);
-  display: flex;
+  /* 三列网格：左右 1fr 等宽轨道夹住中间 auto 轨道——抓取区永远位于窗口
+     水平中心（无论左右内容多宽、窗口多窄，中间轨道中心 = 标题栏中心），
+     不再依赖 flex space-between 下左右内容的实际宽度。 */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
   padding: 0 6px 0 10px;
   border-bottom: 1px solid var(--border);
   user-select: none;
 }
 
-/* 标题栏居中拖动抓手：作为标题栏的 flex 中间占位元素（flex:1），
-   自然填满「左侧标题组」与「右侧按钮组」之间的空隙，dots 在其中居中——
-   绝不溢出到按钮之上（旧方案用 absolute 居中，窄窗时会与右侧按钮重叠）。
+/* 标题栏居中拖动抓手：网格中间轨道，justify-self 居中——
+   不依赖左右内容宽度，宽度变化始终水平居中。
    拖拽仍可整条标题栏进行，抓手只是明确的视觉指引。 */
 .titlebar-grip {
-  /* 固定宽度（非弹性占位）的 flex 兄弟元素：与左右按钮天然并排，绝不重叠；
-     窄窗下左右按钮组收缩、抓取区保持 54px 居中（justify-content: space-between），
-     不会出现旧方案 flex:1 占位在中等宽度下与右侧按钮边界打架的情况。 */
-  flex: 0 0 54px;
+  grid-column: 2;
+  justify-self: center;
+  width: 48px;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -112,22 +114,23 @@ body,
   cursor: grabbing;
 }
 
-/* 抓取点：一排“被高斯模糊”的柔和圆点（带光晕的毛玻璃质感），
-   取代原本边缘锐利的硬点阵 */
+/* 抓取点：三条细横线（iOS 指示条风格）——克制、精致，
+   取代原来的圆点阵+高斯模糊（观感脏且发蓝） */
 .titlebar-grip .grip-dots {
-  width: 100%;
-  height: 16px;
-  background-image: radial-gradient(circle, var(--grip-dot) 1.5px, transparent 2.4px);
-  background-size: 9px 9px;
-  background-position: center;
-  filter: blur(0.8px);
-  opacity: 0.55;
+  width: 30px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--grip-dot);
+  box-shadow:
+    0 8px 0 -1px var(--grip-dot),
+    0 -8px 0 -1px var(--grip-dot);
+  opacity: 0.45;
   transition: opacity 0.15s ease;
   pointer-events: none;
 }
 
 .titlebar-grip:hover .grip-dots {
-  opacity: 0.9;
+  opacity: 0.85;
 }
 
 .titlebar-grip:active .grip-dots {
@@ -629,16 +632,18 @@ body,
 }
 
 .titlebar-left {
-  flex: 0 1 auto;
+  grid-column: 1;
+  justify-self: start;
   min-width: 0;
-  /* 标题区域超长时裁剪，避免把右侧按钮挤出去；去掉原 max-width 限制，
-     让左侧在窄窗下能完整收缩，配合固定宽度的抓取区稳定并排 */
+  /* 标题区域超长时裁剪，避免把右侧按钮挤出去；配合 minmax(0,1fr) 轨道
+     让左侧在窄窗下能完整收缩，中间抓取区恒在窗口中心 */
   overflow: hidden;
   gap: 2px;
 }
 
 .titlebar-right {
-  flex: 0 0 auto;
+  grid-column: 3;
+  justify-self: end;
   gap: 1px;
 }
 

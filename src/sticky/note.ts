@@ -188,8 +188,8 @@ export function mountNoteApp(noteId: string, preset = "") {
     void appWindow.startResizeDragging("SouthEast");
   });
 
-  // 标题栏自适应：窗口变窄时提前隐藏次级按钮（历史/新建），并把居中的抓取区域
-  // 收缩成小号抓点，避免抓取区域与右侧按钮重叠（抓取点始终保留可见）。
+  // 标题栏自适应：窗口变窄时提前隐藏次级按钮（最大化），
+  // 保证中间抓取区（grid 恒居中）不被按钮挤压（抓取点始终保留可见）。
   function adaptTitlebar() {
     titlebar.classList.remove("crowded");
     // 仅按“全部按钮显示时的真实内容宽度”是否超出可用宽度决定收起，
