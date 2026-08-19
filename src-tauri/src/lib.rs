@@ -214,14 +214,9 @@ pub fn run() {
                 });
                 let app4 = handle.clone();
                 let _ = app4.listen("sticky://particles-mount-fail", move |e| {
-                    let msg = e
-                        .payload()
-                        .as_object()
-                        .and_then(|m| m.get("msg"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("?");
                     crate::storage::diag_write(&format!(
-                        "[sticky] particles mount FAIL: {msg}"
+                        "[sticky] particles mount FAIL payload: {}",
+                        e.payload()
                     ));
                 });
             }
