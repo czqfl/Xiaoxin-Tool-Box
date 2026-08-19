@@ -25,6 +25,8 @@ export interface NoteMeta {
   snippet: string;
   updatedStr: string;
   updated: number;
+  /** 是否为置顶优先级便签（全局唯一） */
+  top_priority: boolean;
 }
 
 export interface Settings {

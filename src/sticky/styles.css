@@ -1273,38 +1273,6 @@ body,
   transform: translateX(-50%) translateY(0);
 }
 
-/* ===== 右下角自定义缩放手柄（拖动改窗口大小）===== */
-/* 放大命中区到 24px（原生无边框窗口的角落热区太小、难触发），常驻显示对角 grip
-   小图标 → 视觉上明确「这里可以拖拽缩放」；hover 高亮品牌色。 */
-.win-resizer {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: flex-end;
-  justify-content: flex-end;
-  padding: 4px;
-  cursor: nwse-resize;
-  z-index: 30;
-  color: var(--text-hint);
-  opacity: 0.6;
-  transition: opacity 0.12s ease, color 0.12s ease;
-  touch-action: none; /* 触屏 / 笔不触发滚动，保证 pointer 拖拽缩放生效 */
-}
-.win-resizer:hover,
-.win-resizer:active {
-  opacity: 1;
-  color: var(--accent);
-}
-.win-resizer-grip {
-  display: block;
-  width: 13px;
-  height: 13px;
-  pointer-events: none; /* 让 pointer 事件落到 .win-resizer 本身 */
-}
-
 /* ===== 编辑器（contenteditable） ===== */
 .editor {
   flex: 1;
@@ -2507,4 +2475,38 @@ body,
 #btn-toolbar-toggle.active {
   color: var(--accent);
   background: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+/* ---- 历史卡片右侧操作组（置顶 + 删除） ---- */
+.card-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+.card-pin {
+  width: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: -6px -2px -6px 0;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  color: var(--text-hint);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, transform 0.12s ease;
+}
+.card-pin:hover {
+  background: color-mix(in srgb, #f59e0b 16%, transparent);
+  color: #f59e0b;
+}
+.card-pin:active {
+  transform: scale(0.88);
+}
+/* 当前置顶：琥珀色实底高亮 */
+.card-pin.active {
+  background: color-mix(in srgb, #f59e0b 18%, transparent);
+  color: #f59e0b;
 }

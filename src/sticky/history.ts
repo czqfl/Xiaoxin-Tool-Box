@@ -1,4 +1,4 @@
-import { listNotes, deleteNote, openNoteWindow, closeWindow, startDragging, getOpenNotes, setAcrylic, newNoteId, createNoteWindow } from "./api";
+import { listNotes, deleteNote, openNoteWindow, closeWindow, startDragging, getOpenNotes, setAcrylic, newNoteId, createNoteWindow, setNotePriority } from "./api";
 import { getSettings } from "./settings";
 import { applyPanelBackground } from "./panel-bg";
 import { applyGlassBlur } from "./glass";
@@ -209,6 +209,10 @@ export function mountHistoryApp() {
       // 所有便签都显示删除按钮：后端 delete_note 会先向窗口发 note-deleted
       // （前端停止保存并关闭窗口），再删文件，故即使便签还开着也能安全删除、不会复活。
       const delBtnHtml = `<button class="card-delete" title="删除">\u2715</button>`;
+      // 置顶优先级按钮（标准图钉图标，SVG 可被 CSS 着色）：全局唯一，快捷键优先操作
+      const pinBtnHtml = `<button class="card-pin${item.top_priority ? " active" : ""}" title="${
+        item.top_priority ? "已置顶（快捷键优先操作此便签）" : "设为置顶（快捷键优先操作此便签）"
+      }"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg></button>`;
       card.innerHTML = `
         <div class="card-info">
           <div class="card-title">${escapeHtml(primary)}</div>
@@ -216,11 +220,21 @@ export function mountHistoryApp() {
           <div class="card-time">${escapeHtml(item.updatedStr)}</div>
           ${statusTag}
         </div>
-        ${delBtnHtml}
+        <div class="card-actions">
+          ${pinBtnHtml}
+          ${delBtnHtml}
+        </div>
       `;
 
       card.addEventListener("click", () => {
         openNoteWindow(item.id).catch((e) => console.error("打开便签失败:", e));
+      });
+
+      // 置顶按钮：设置该便签为唯一置顶（互斥，后端统一处理）
+      const pinBtn = card.querySelector(".card-pin") as HTMLButtonElement;
+      pinBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        setNotePriority(item.id).catch((err) => console.error("设置置顶失败:", err));
       });
 
       const delBtn = card.querySelector(".card-delete")! as HTMLButtonElement;

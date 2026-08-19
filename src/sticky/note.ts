@@ -109,12 +109,6 @@ export function mountNoteApp(noteId: string, preset = "") {
       <div class="cc-panel" id="tool-bg-panel" hidden></div>
       <!-- 自动保存提示（左下角浮动，短暂显示） -->
       <span class="save-status" id="save-status"></span>
-      <!-- 右下角缩放手柄：放大命中区 + 常驻对角 grip 图标，拖动改窗口大小 -->
-      <div class="win-resizer" id="win-resizer" title="拖动调整大小">
-        <svg class="win-resizer-grip" viewBox="0 0 13 13" width="13" height="13" aria-hidden="true">
-          <path d="M12 4 L4 12 M12 8 L8 12 M12 12 L12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-        </svg>
-      </div>
     </div>
   `;
 
@@ -197,16 +191,9 @@ export function mountNoteApp(noteId: string, preset = "") {
     startDragging();
   });
 
-  // 右下角缩放手柄：转发给系统缩放拖拽（startResizeDragging("SouthEast")）。
-  // 窗口为 resizable(true)，与四边系统热区同一机制——拖动与热区一样可靠，
-  // 不再有"点图标不生效、点旁边才生效"的差异（此前程序化 setSize 在透明
-  // 窗口偶发失败，用户反馈）。
-  const winResizer = document.getElementById("win-resizer");
-  winResizer?.addEventListener("mousedown", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    void appWindow.startResizeDragging("SouthEast");
-  });
+  // 右下角缩放：交由系统热区（窗口 resizable(true)，右下角是原生四角热区，
+  // 与四边一致可靠）。此前自绘手柄/图标 + startResizeDragging 在透明窗口
+  // 偶发失效（用户反馈"点图标拖不动"）——已删除手柄元素，完全走系统缩放。
 
   // 标题栏自适应：窗口变窄时右侧按钮从【左到右】逐个隐藏
   // （Aa → 置顶 → 最大化 → 托盘，关闭永留）。

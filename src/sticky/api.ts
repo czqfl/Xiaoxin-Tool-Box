@@ -23,6 +23,11 @@ export async function deleteNote(id: string): Promise<void> {
   return invoke("delete_note", { id });
 }
 
+/** 设置置顶优先级便签（全局唯一互斥）：快捷键呼出时优先操作 */
+export async function setNotePriority(id: string): Promise<void> {
+  return invoke("set_note_priority", { id });
+}
+
 export async function newNoteId(): Promise<string> {
   return invoke<string>("new_note_id");
 }

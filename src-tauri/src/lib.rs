@@ -276,6 +276,7 @@ pub fn run() {
             sticky::list_notes,
             sticky::delete_note,
             sticky::new_note_id,
+            sticky::set_note_priority,
             sticky::load_settings,
             sticky::save_settings,
             sticky::effective_notes_dir,

@@ -76,6 +76,9 @@ pub struct NoteData {
     /// 第二行格式工具栏（字体颜色/背景色等）是否显示（每便签独立配置）
     #[serde(default)]
     pub toolbar_visible: Option<bool>,
+    /// 置顶优先级标记：全局唯一（互斥），快捷键呼出时优先操作此便签
+    #[serde(default)]
+    pub top_priority: Option<bool>,
 }
 
 impl Default for NoteData {
@@ -95,6 +98,7 @@ impl Default for NoteData {
             pos_y: None,
             bg_image: None,
             toolbar_visible: None,
+            top_priority: None,
         }
     }
 }
@@ -106,6 +110,9 @@ pub struct NoteMeta {
     pub snippet: String,
     pub updated_str: String,
     pub updated: u64,
+    /// 是否为置顶优先级便签（全局唯一）
+    #[serde(default)]
+    pub top_priority: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -443,6 +450,7 @@ pub fn list_notes(paths: State<'_, AppPaths>) -> Result<Vec<NoteMeta>, String> {
             snippet,
             updated_str,
             updated: data.updated,
+            top_priority: data.top_priority == Some(true),
         });
     }
     items.sort_by(|a, b| b.updated.cmp(&a.updated));
@@ -1417,6 +1425,119 @@ fn quick_new_note(app: &AppHandle) {
     }
 }
 
+/// 设置置顶优先级便签（全局唯一互斥）：清除所有便签的置顶标记，再置位目标。
+#[tauri::command]
+pub fn set_note_priority(app: AppHandle, paths: State<'_, AppPaths>, id: String) -> Result<(), String> {
+    let _ = std::fs::create_dir_all(notes_dir(&paths));
+    for entry in std::fs::read_dir(notes_dir(&paths)).map_err(|e| e.to_string())?.flatten() {
+        let p = entry.path();
+        if p.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        if let Ok(raw) = std::fs::read_to_string(&p) {
+            if let Ok(mut data) = serde_json::from_str::<NoteData>(&raw) {
+                if data.top_priority.take().is_some() {
+                    if let Ok(json) = serde_json::to_string_pretty(&data) {
+                        let _ = std::fs::write(&p, json);
+                    }
+                }
+            }
+        }
+    }
+    // 目标便签置位
+    let path = note_path(&paths, &id);
+    if let Ok(raw) = std::fs::read_to_string(&path) {
+        if let Ok(mut data) = serde_json::from_str::<NoteData>(&raw) {
+            data.top_priority = Some(true);
+            if let Ok(json) = serde_json::to_string_pretty(&data) {
+                std::fs::write(&path, json).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
+    Ok(())
+}
+
+/// 呼出/关闭"优先级便签"（show_app 快捷键的新语义，用户要求）：
+/// 1) 有置顶便签 → 操作它；2) 无置顶 → 操作第一条（最近更新）；3) 无便签 → 新建。
+/// 操作 = toggle：该便签可见 → 关闭（销毁）；否则 → 呼出（打开/聚焦）。
+fn toggle_priority_note(app: &AppHandle) {
+    let Some(paths) = app.try_state::<AppPaths>() else {
+        return;
+    };
+    // 找置顶便签
+    let mut target: Option<String> = None;
+    if let Ok(entries) = std::fs::read_dir(notes_dir(paths.inner())) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            if let Ok(raw) = std::fs::read_to_string(&p) {
+                if let Ok(data) = serde_json::from_str::<NoteData>(&raw) {
+                    if data.top_priority == Some(true) {
+                        let name = p.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                        target = Some(
+                            name.strip_prefix("xiaoxin_sticky_note_").unwrap_or(name).to_string(),
+                        );
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    // 无置顶 → 第一条（最近更新，与 list_notes 排序一致）
+    if target.is_none() {
+        if let Ok(entries) = std::fs::read_dir(notes_dir(paths.inner())) {
+            let mut best: Option<(u64, String)> = None;
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.extension().and_then(|e| e.to_str()) != Some("json") {
+                    continue;
+                }
+                let name = p.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                if !name.starts_with("xiaoxin_sticky_note_") {
+                    continue;
+                }
+                let id = name
+                    .strip_prefix("xiaoxin_sticky_note_")
+                    .unwrap_or(name)
+                    .to_string();
+                if let Ok(raw) = std::fs::read_to_string(&p) {
+                    if let Ok(data) = serde_json::from_str::<NoteData>(&raw) {
+                        if best.as_ref().map_or(true, |(t, _)| data.updated > *t) {
+                            best = Some((data.updated, id));
+                        }
+                    }
+                }
+            }
+            target = best.map(|(_, id)| id);
+        }
+    }
+    let Some(id) = target else {
+        // 无便签 → 新建
+        quick_new_note(app);
+        return;
+    };
+    let label = window_label(&id);
+    let visible = app
+        .get_webview_window(&label)
+        .map(|w| w.is_visible().unwrap_or(false))
+        .unwrap_or(false);
+    if visible {
+        // 关闭（销毁，与 close_window 语义一致）
+        hide_note_window(app, &label);
+    } else {
+        // 呼出
+        mark_note_open_inner(paths.inner(), &id);
+        ensure_note_window(app, &id);
+        VISIBLE_NOTES.lock().unwrap().insert(label.clone());
+        if let Some(win) = app.get_webview_window(&label) {
+            let _ = win.emit("summoned", ());
+        }
+    }
+}
+
 /// 分发便签全局快捷键：shortcut 命中便签设置的 show_app/new_note/open_history 之一
 /// 则执行并返回 true（调用方短路，不再走工具箱快捷键逻辑）。
 /// - show_app：呼出/收起便签（基于 VISIBLE_NOTES 运行时集合做 toggle）
@@ -1446,7 +1567,8 @@ pub fn handle_sticky_shortcut(app: &AppHandle, shortcut: &tauri_plugin_global_sh
     }
     for m in matched {
         match m {
-            "show_app" => show_all_open(app),
+            // show_app：呼出/关闭"优先级便签"（置顶 → 第一条 → 新建，toggle）
+            "show_app" => toggle_priority_note(app),
             "new_note" => quick_new_note(app),
             "open_history" => {
                 // toggle：历史窗口当前可见 → 收起；否则呼出
