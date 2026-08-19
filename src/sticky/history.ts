@@ -16,15 +16,9 @@ export function mountHistoryApp() {
           <span class="title-text">历史便签</span>
         </div>
         <div class="titlebar-right">
+          <button class="icon-btn new-note" id="btn-new" title="新建便签">\u2795</button>
           <button class="icon-btn close" id="btn-close" title="关闭">\u2715</button>
         </div>
-      </div>
-      <!-- 新建便签按钮：面板顶部居中（用户要求"居中显示"，不再放标题栏右上角） -->
-      <div class="new-note-bar">
-        <button class="new-note-btn" id="btn-new" title="新建便签">
-          <span class="btn-plus">\u2795</span>
-          <span class="btn-label">新建便签</span>
-        </button>
       </div>
       <div class="history-list" id="history-list"></div>
     </div>
