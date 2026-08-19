@@ -11,7 +11,7 @@
 // 「particles-cancel」按 (seq + origin) 精确匹配移除对应实例，过期事件忽略。
 // 全部实例播完自隐藏；窗口隐藏时无循环。
 
-import { getCurrentWindow, LogicalPosition, PhysicalSize, currentMonitor } from "@tauri-apps/api/window";
+import { getCurrentWindow, currentMonitor } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 
 type LayerKind = "particle";
@@ -416,30 +416,17 @@ async function startLayer(p: ParticleLayerStart): Promise<void> {
   }, 120);
 }
 
-/** 校准粒子层窗口几何：锚定屏幕左上角 (0,0) 并铺满整屏，同步 canvas 缓冲尺寸。
- *  mount 时（app 启动、窗口未就绪）setSize 可能静默失败 → 窗口停在 tauri.conf.json
- *  固定尺寸，粒子屏幕坐标与窗口错位。启动时校准一次（currentMonitor 物理分辨率），
- *  resizable:true 时 setSize 才生效。动画中不再 setSize。 */
+/** 计算粒子层目标尺寸（物理像素）：仅计算，不移动/改窗口。
+ *  【窗口几何由后端保证】ensure_particles_window 创建时已按主显示器尺寸
+ *  建窗并定位 (0,0)——这里不再调用 setPosition/setSize/innerSize 等 IPC：
+ *  透明 + shadow(false) 窗口的这些调用可能挂起，导致前端初始化卡死
+ *  （粒子层就绪日志缺失的根因），而它们本来就不需要（后端已建好）。 */
 async function calibrateLayerWindow(): Promise<void> {
-  const win = getCurrentWindow();
   const mon = await currentMonitor().catch(() => null);
   const fallbackW = Math.round((window.screen.width || window.innerWidth || 1920) * (window.devicePixelRatio || 1));
   const fallbackH = Math.round((window.screen.height || window.innerHeight || 1080) * (window.devicePixelRatio || 1));
   const pw = Math.max(1, mon?.size?.width ?? fallbackW);
   const ph = Math.max(1, mon?.size?.height ?? fallbackH);
-  await win.setPosition(new LogicalPosition(0, 0)).catch(() => {});
-  // 【关键】当前尺寸已与目标一致则跳过 setSize——透明 + shadow(false) 窗口
-  // setSize 会触发 WebView2 重建、IPC 卡死（粒子层前端就绪日志缺失的根因）。
-  // 粒子层窗口由后端按显示器尺寸创建（ensure_particles_window），尺寸一致，
-  // 此路径不会执行；仅在异常情况下兜底。
-  try {
-    const cur = await win.innerSize().catch(() => null);
-    if (!cur || cur.width !== pw || cur.height !== ph) {
-      await win.setSize(new PhysicalSize(pw, ph)).catch(() => {});
-    }
-  } catch {
-    /* 保持当前尺寸 */
-  }
   if (canvas && (canvas.width !== pw || canvas.height !== ph)) {
     canvas.width = pw;
     canvas.height = ph;
