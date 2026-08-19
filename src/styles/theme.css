@@ -171,23 +171,23 @@
   --tool-sticky: #a78bfa;
   --accent-rgb: 76, 158, 255;
 
-  /* 背景：冷蓝灰（charcoal，Linear/Arc 式高级暗色——非纯黑非石墨，
-     带冷蓝倾向，层次靠明度差而非对比度） */
-  --bg-app: #12141a;
-  --bg-panel: rgba(23, 26, 33, 0.82);
-  --bg-panel-rgb: 23, 26, 33;
-  --bg-elevated: rgba(32, 36, 45, 0.95);
-  --bg-input: rgba(39, 43, 53, 0.92);
-  --bg-input-glass: rgba(23, 26, 33, 0.42);
+  /* 背景：中性高级黑（纯黑系、RGB 三通道接近、微暖中性，
+     层级靠明度差而非冷蓝倾向；app 底取 20,20,20 级纯黑） */
+  --bg-app: #141414;
+  --bg-panel: rgba(26, 26, 26, 0.82);
+  --bg-panel-rgb: 26, 26, 26;
+  --bg-elevated: rgba(33, 33, 33, 0.95);
+  --bg-input: rgba(38, 38, 38, 0.92);
+  --bg-input-glass: rgba(26, 26, 26, 0.42);
   --bg-item-hover: rgba(255, 255, 255, 0.05);
   --bg-item-active: rgba(255, 255, 255, 0.09);
   --bg-badge: rgba(255, 255, 255, 0.08);
 
-  /* 文本：冷白 / 冷灰蓝 */
-  --text-primary: #e8ebf1;
-  --text-secondary: #9aa2b1;
-  --text-tertiary: #626b7b;
-  --text-inverse: #12141a;
+  /* 文本：中性白 / 中性灰（去冷蓝倾向） */
+  --text-primary: #ececec;
+  --text-secondary: #9b9b9b;
+  --text-tertiary: #6b6b6b;
+  --text-inverse: #141414;
 
   --border-subtle: rgba(255, 255, 255, 0.07);
   --border-strong: rgba(255, 255, 255, 0.14);
@@ -207,6 +207,13 @@
   --panel-highlight-strong: inset 0 1px 0 rgba(255, 255, 255, 0.14);
 
   color-scheme: dark;
+}
+
+/* 深色主题：顶部微光由「品牌蓝」改为「极淡中性白」，去掉整体蓝调 */
+:root[data-theme="dark"] body {
+  background:
+    radial-gradient(1100px 560px at 50% -8%, rgba(255, 255, 255, 0.022), transparent 62%),
+    var(--bg-app);
 }
 
 /* 浅青色主题（mint）：淡青背景 + 青绿品牌色，通透清爽 */

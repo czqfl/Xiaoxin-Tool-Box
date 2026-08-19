@@ -22,21 +22,22 @@
    仅在 <html> 上挂 .theme-dark 时启用；所有组件均走 var()，故一套变量即可整体换肤。
    配色为冷调中性深灰，与浅色的暖白风格相呼应。 */
 :root.theme-dark {
-  --bg: #23232a;
-  --bg-bar: #2d2d35;
-  --bg-hover: #36363f;
-  --bg-active: #40404a;
-  --border: #3c3c45;
-  --text: #e6e4df;
-  --text-sub: #9a948b;
-  --text-hint: #6b665f;
+  /* 中性高级黑：RGB 三通道接近、去冷蓝倾向，与工具箱主深色主题统一 */
+  --bg: #1a1a1a;
+  --bg-bar: #222222;
+  --bg-hover: #2a2a2a;
+  --bg-active: #303030;
+  --border: #3a3a3a;
+  --text: #ececec;
+  --text-sub: #9b9b9b;
+  --text-hint: #6b6b6b;
   --accent: #7fb0e6;
-  --grip-dot: #7fb0e6;
+  --grip-dot: #8a8a8a;
   --pin-on: #5fbf74;
-  --pin-off: #6b665f;
+  --pin-off: #6b6b6b;
   --danger: #ec6a5f;
-  --danger-bg: #432a28;
-  --select-bg: #3a4a5e;
+  --danger-bg: #3a2320;
+  --select-bg: #3a3a3a;
   color-scheme: dark;
 }
 
