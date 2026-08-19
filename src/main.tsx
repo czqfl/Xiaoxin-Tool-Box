@@ -22,7 +22,8 @@ async function bootstrap() {
   const isSticky =
     label.startsWith("note_") ||
     label === "sticky-history" ||
-    label === "sticky-particles" ||
+    // 全屏透明粒子层窗口（label 与 tauri.conf.json / glow-particles 查找一致）
+    label === "particles" ||
     label === "sticky-imageviewer" ||
     label === "sticky-settings";
 
