@@ -80,9 +80,34 @@
 }
 
 
-/* 收起态高亮边缘：露出屏幕的细条带亮蓝描边+柔光，深浅主题下都醒目 */
+/* 收起态：露出屏幕的细边加宽为品牌色「亮轨」+ 呼吸柔光。
+   亮轨用 border 画在停靠的那一侧（窗口大部分在屏外，露出的就是这条轨），
+   配合 --accent-rgb 柔光呼吸，深浅主题/任意壁纸上都一眼可见。 */
 .toolbar.edge-collapsed {
-  box-shadow:
-    0 0 0 2px rgba(120, 170, 240, 0.9),
-    0 0 14px rgba(120, 170, 240, 0.55);
+  animation: toolbar-edge-breathe 2.6s ease-in-out infinite;
+}
+.toolbar.edge-collapsed.edge-left {
+  border-left: 8px solid var(--accent);
+}
+.toolbar.edge-collapsed.edge-right {
+  border-right: 8px solid var(--accent);
+}
+.toolbar.edge-collapsed.edge-top {
+  border-top: 8px solid var(--accent);
+}
+.toolbar.edge-collapsed.edge-bottom {
+  border-bottom: 8px solid var(--accent);
+}
+@keyframes toolbar-edge-breathe {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2px rgba(var(--accent-rgb), 0.5),
+      0 0 10px rgba(var(--accent-rgb), 0.3);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2px rgba(var(--accent-rgb), 0.85),
+      0 0 22px rgba(var(--accent-rgb), 0.65);
+  }
 }

@@ -98,7 +98,7 @@ const DRAG_THRESHOLD = 10;
 
 /** 贴边自动收起参数（参考便签 XiaoxinStickyNote 的靠边收起语义：
  *  事件驱动——鼠标离开窗口收起、悬停收起条弹出、弹出后鼠标不在窗口内自动再收起） */
-const SLIVER = 4; // 收起后露出的窗口真实边缘宽度（细边，不显"半截身子"）
+const SLIVER = 12; // 收起后露出的窗口真实边缘宽度（12px：够宽够显眼，配品牌色亮轨）
 const EDGE_MARGIN = 12; // 距屏幕边缘多少像素内算"贴边"
 const HIDE_DELAY = 250; // 鼠标离开贴边工具栏后，延时收起（ms）
 const SLIDE_MS = 160; // 收起/弹出的滑动动画时长（ms，轻快不拖沓）
@@ -218,8 +218,8 @@ export function Toolbar() {
       else y = geo.mon_y + geo.mon_h - SLIVER;
       await animateWindowTo(x, y, SLIDE_MS, easeInCubic);
       collapsedRef.current = true;
-      // 收起态：高亮边缘边框（露出的细条更醒目，深浅主题都可见）
-      barRef.current?.classList.add("edge-collapsed");
+      // 收起态：加品牌色亮轨 + 呼吸柔光（露出的细条在任何壁纸上都醒目）
+      barRef.current?.classList.add("edge-collapsed", `edge-${edge}`);
     } catch (e) {
       console.error("贴边收起失败:", e);
     } finally {
@@ -253,8 +253,14 @@ export function Toolbar() {
       collapsedRef.current = false;
       restorePosRef.current = null;
       restoreWaRef.current = null;
-      // 收起态解除：去掉高亮边缘
-      barRef.current?.classList.remove("edge-collapsed");
+      // 收起态解除：去掉亮轨与高亮（edge-* 类按四边全清，避免残留错位）
+      barRef.current?.classList.remove(
+        "edge-collapsed",
+        "edge-left",
+        "edge-right",
+        "edge-top",
+        "edge-bottom"
+      );
     } catch (e) {
       console.error("贴边弹出失败:", e);
     } finally {
