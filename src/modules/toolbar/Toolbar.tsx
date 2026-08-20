@@ -9,7 +9,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
+import { LogicalSize, PhysicalPosition } from "@tauri-apps/api/dpi";
 import type { AppConfig, ToolKey } from "../../types";
 import { panelActive, panelToggle } from "../../core/tauri";
 import { EVT_CONFIG_CHANGED, EVT_PANEL_VISIBILITY, onEvent } from "../../core/events";
@@ -191,7 +191,7 @@ export function Toolbar() {
             const e = easing(t);
             const x = Math.round(sx + (tx - sx) * e);
             const y = Math.round(sy + (ty - sy) * e);
-            void win.setPosition(new LogicalPosition(x, y)).catch(() => {});
+            void win.setPosition(new PhysicalPosition(x, y)).catch(() => {});
             if (t < 1) requestAnimationFrame(step);
             else resolve();
           };
@@ -444,7 +444,7 @@ export function Toolbar() {
         if (!size) return;
         const x = Math.min(Math.max(geo.win_x, geo.mon_x), geo.mon_x + geo.mon_w - size.width);
         const y = Math.min(Math.max(geo.win_y, geo.mon_y), geo.mon_y + geo.mon_h - size.height);
-        await win.setPosition(new LogicalPosition(Math.round(x), Math.round(y))).catch(() => {});
+        await win.setPosition(new PhysicalPosition(Math.round(x), Math.round(y))).catch(() => {});
       } catch {
         /* 探测异常时不强制移动，避免干扰正常启动 */
       }
