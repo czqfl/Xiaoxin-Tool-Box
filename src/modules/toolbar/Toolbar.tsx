@@ -237,6 +237,16 @@ export function Toolbar() {
     if (!collapsedRef.current || !restorePosRef.current || snappingRef.current) return;
     try {
       snappingRef.current = true;
+      // 收起态视觉（亮轨/呼吸柔光）只在完全收起时存在：弹出一开始就摘掉，
+      // 否则滑入动画的 160ms 里亮轨还挂在窗口上（贴右收起=右侧一道蓝边），
+      // 看着就像「弹出时右侧突然变蓝、之后恢复正常」。
+      barRef.current?.classList.remove(
+        "edge-collapsed",
+        "edge-left",
+        "edge-right",
+        "edge-top",
+        "edge-bottom"
+      );
       const saved = restorePosRef.current;
       const wa = restoreWaRef.current;
       const win = getCurrentWindow();
@@ -253,14 +263,6 @@ export function Toolbar() {
       collapsedRef.current = false;
       restorePosRef.current = null;
       restoreWaRef.current = null;
-      // 收起态解除：去掉亮轨与高亮（edge-* 类按四边全清，避免残留错位）
-      barRef.current?.classList.remove(
-        "edge-collapsed",
-        "edge-left",
-        "edge-right",
-        "edge-top",
-        "edge-bottom"
-      );
     } catch (e) {
       console.error("贴边弹出失败:", e);
     } finally {
