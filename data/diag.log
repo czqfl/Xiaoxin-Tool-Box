@@ -1,0 +1,64 @@
+2026-08-20T05:49:32.228044500+00:00 App mounted: settings
+2026-08-20T05:49:32.500573900+00:00 App mounted: clipboard-panel
+2026-08-20T05:49:32.752991200+00:00 App mounted: folder-panel
+2026-08-20T05:49:32.977209300+00:00 App mounted: credential-panel
+2026-08-20T05:49:33.195791100+00:00 App mounted: port-panel
+2026-08-20T05:49:33.342964800+00:00 [keyhook] hotkey set: clipboard alt=true vk=0x43
+2026-08-20T05:49:33.343721800+00:00 [keyhook] hotkey set: folder alt=true vk=0x46
+2026-08-20T05:49:33.344210900+00:00 [keyhook] hotkey set: credentials alt=true vk=0x41
+2026-08-20T05:49:33.344629100+00:00 [keyhook] hotkey set: translation alt=true vk=0x53
+2026-08-20T05:49:33.344954500+00:00 [keyhook] hotkey set: port alt=true vk=0x50
+2026-08-20T05:49:33.345659900+00:00 [sticky] windows after setup: clipboard-panel,credential-panel,particles,port-panel,translate-popup,folder-panel,toolbar,settings
+2026-08-20T05:49:33.411922300+00:00 App mounted: toolbar
+2026-08-20T05:49:33.480253700+00:00 App mounted: translate-popup
+2026-08-20T05:49:33.533223900+00:00 TranslatePopup mounted
+2026-08-20T05:49:36.046397800+00:00 [toolbar] click settings
+2026-08-20T05:49:36.048566800+00:00 show_settings_window: visible=false focused=false
+2026-08-20T05:49:44.602766500+00:00 [toolbar] click sticky
+2026-08-20T05:49:44.603502500+00:00 [panel_toggle] sticky -> open history
+2026-08-20T05:49:44.603734200+00:00 [sticky] open_history_window called
+2026-08-20T05:49:44.738149300+00:00 [sticky] open_history_window: built (front will show)
+2026-08-20T05:49:45.038904700+00:00 [sticky] open_history_window: fallback show after 300ms
+2026-08-20T05:49:46.862797900+00:00 [note] init show: noteId=e69926 open=["e69926"]
+2026-08-20T05:49:51.068744700+00:00 [sticky] open_note_window called: id=e69926
+2026-08-20T05:49:51.069381+00:00 [sticky] ensure_note_window: creating note_e69926
+2026-08-20T05:49:51.218734700+00:00 [sticky] ensure_note_window: note_e69926 built (frontend shows after visuals ready)
+2026-08-20T05:49:51.299602800+00:00 [note] init show: noteId=e69926 open=["e69926"]
+2026-08-20T05:49:54.937835200+00:00 [sticky] open_note_window called: id=e69926
+2026-08-20T05:49:54.938358200+00:00 [sticky] ensure_note_window: creating note_e69926
+2026-08-20T05:49:55.098399400+00:00 [sticky] ensure_note_window: note_e69926 built (frontend shows after visuals ready)
+2026-08-20T05:49:55.178813700+00:00 [note] init show: noteId=e69926 open=["e69926"]
+2026-08-20T05:50:00.286331500+00:00 [toolbar] click settings
+2026-08-20T05:50:00.287676700+00:00 show_settings_window: visible=false focused=false
+2026-08-20T05:50:16.791174800+00:00 [toolbar] click settings
+2026-08-20T05:50:16.792700800+00:00 show_settings_window: visible=false focused=false
+2026-08-20T05:52:02.835707700+00:00 [keyhook] alt+key vk=0x9 slots=cb:0x43/fd:0x46/cr:0x41/tr:0x53/pt:0x50
+2026-08-20T05:52:03.367980400+00:00 [keyhook] alt+key vk=0x9 slots=cb:0x43/fd:0x46/cr:0x41/tr:0x53/pt:0x50
+2026-08-20T05:52:04.358104700+00:00 [keyhook] alt+key vk=0x9 slots=cb:0x43/fd:0x46/cr:0x41/tr:0x53/pt:0x50
+2026-08-20T05:52:04.954514700+00:00 [toolbar] click credentials
+2026-08-20T05:52:04.955847200+00:00 [toggle_panel] credential-panel visible=false
+2026-08-20T05:52:07.473030200+00:00 [toolbar] click folder
+2026-08-20T05:52:07.474130700+00:00 [toggle_panel] folder-panel visible=false
+2026-08-20T05:52:10.988586500+00:00 [toolbar] click port
+2026-08-20T05:52:10.989666800+00:00 [toggle_panel] port-panel visible=false
+2026-08-20T05:52:13.951138900+00:00 [toolbar] click translation
+2026-08-20T05:52:14.075937500+00:00 [translate] source=clipboard-fallback
+2026-08-20T05:52:14.689891600+00:00 [translate] clipboard-fallback: clip_len=0 copied=false
+2026-08-20T05:52:14.690643500+00:00 [translate] no selection -> keep content
+2026-08-20T05:52:14.848229+00:00 close click
+2026-08-20T06:06:33.454804100+00:00 [keyhook] alt+key vk=0x9 slots=cb:0x43/fd:0x46/cr:0x41/tr:0x53/pt:0x50
+2026-08-20T06:06:44.913163700+00:00 [keyhook] alt+key vk=0x9 slots=cb:0x43/fd:0x46/cr:0x41/tr:0x53/pt:0x50
+2026-08-20T06:11:41.266107700+00:00 [invoke error] 读取失败：系统找不到指定的文件。 (os error 2)
+2026-08-20T06:11:46.764880500+00:00 [keyhook] alt+key vk=0x9 slots=cb:0x43/fd:0x46/cr:0x41/tr:0x53/pt:0x50
+2026-08-20T06:12:58.877810400+00:00 [keyhook] alt+key vk=0x9 slots=cb:0x43/fd:0x46/cr:0x41/tr:0x53/pt:0x50
+2026-08-20T06:15:13.358890300+00:00 [keyhook] alt+key vk=0x9 slots=cb:0x43/fd:0x46/cr:0x41/tr:0x53/pt:0x50
+2026-08-20T06:15:57.347598200+00:00 show_settings_window: visible=false focused=false
+2026-08-20T06:15:57.444823700+00:00 show_settings_window: visible=true focused=false
+2026-08-20T06:18:47.018538500+00:00 [keyhook] alt+key vk=0x9 slots=cb:0x43/fd:0x46/cr:0x41/tr:0x53/pt:0x50
+2026-08-20T06:20:21.235569200+00:00 [keyhook] alt+key vk=0x9 slots=cb:0x43/fd:0x46/cr:0x41/tr:0x53/pt:0x50
+2026-08-20T06:29:33.532241800+00:00 [keyhook] alt+key vk=0x9 slots=cb:0x43/fd:0x46/cr:0x41/tr:0x53/pt:0x50
+2026-08-20T06:29:35.255544200+00:00 [keyhook] alt+key vk=0x46 slots=cb:0x43/fd:0x46/cr:0x41/tr:0x53/pt:0x50
+2026-08-20T06:29:35.257117900+00:00 [keyhook] alt hotkey matched vk=0x46
+2026-08-20T06:29:35.259409600+00:00 [toggle_panel] folder-panel visible=false
+2026-08-20T06:29:43.009193600+00:00 [toolbar] click folder
+2026-08-20T06:29:43.010131900+00:00 [toggle_panel] folder-panel visible=false

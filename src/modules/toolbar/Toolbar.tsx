@@ -490,6 +490,34 @@ export function Toolbar() {
           if (cursorNearEdge(geo, pinnedEdgeRef.current, EDGE_REVEAL)) {
             void expandFromEdge();
           }
+          return; // 已收起：本轮不处理"再收起"
+        }
+        // 【修复"快速离开无法收起"】展开态下，除了事件驱动（handleLeave），
+        // 再由轮询兜底检测：光标确实离开贴边方向（超出 EDGE_REVEAL）、且已不在
+        // 工具栏窗口内时 → 重新收起。
+        // 根因：靠近贴边触发弹出走的是「光标靠近边沿」分轮（cursorNearEdge），
+        // 此时光标从未真正进入工具栏窗口，handleLeave 永远不会触发 —— 只有事件驱动的
+        // 收起路径被跳过，导致快速移开光标后工具栏一直展开找不到收起。轮询补一条
+        // 对称的"离开即收起"，两条路径互相兜底（并避开 snapping 防止与动画打架）。
+        if (
+          !collapsedRef.current &&
+          autoHideRef.current &&
+          pinnedEdgeRef.current
+        ) {
+          // 光标仍在窗口内 / 仍贴着停靠边沿 → 保持展开，并取消遗留的收起延时
+          // （轮询路径没有 DOM mouseenter 兜底，需在此主动清掉，否则"在窗口内却误收起"）。
+          if (inside || cursorNearEdge(geo, pinnedEdgeRef.current, EDGE_REVEAL)) {
+            if (hideTimerRef.current) {
+              window.clearTimeout(hideTimerRef.current);
+              hideTimerRef.current = undefined;
+            }
+          } else if (!snappingRef.current && !hideTimerRef.current) {
+            // 光标已离开窗口且已离开贴边方向 → 延时收起（与 handleLeave 同款延迟）
+            hideTimerRef.current = window.setTimeout(() => {
+              hideTimerRef.current = undefined;
+              void collapseToEdge();
+            }, HIDE_DELAY);
+          }
         }
       } catch {
         // 后端异常时强制恢复交互（工具栏可用优先，绝不"穿透死"）

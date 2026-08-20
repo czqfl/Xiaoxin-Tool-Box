@@ -1229,11 +1229,15 @@ fn hide_note_window(app: &AppHandle, label: &str) {
             }
         }
     }
-    // 【销毁而非隐藏】关闭便签 = 立即销毁窗口（destroy）：隐藏常驻再次呼出
-    // 走 summoned 动画状态机偶发失败（"关闭后再打开打不开"——用户反馈）。
-    // 销毁重建每次全新加载，保证任意次打开/关闭都正常；内容实时自动保存不丢，
-    // 位置/大小已在上面回写存档。
-    let _ = win.destroy();
+    // 【隐藏而非销毁】关闭便签 = 隐藏常驻（窗口对象与 WebView2 进程保留），
+    // 下次呼出直接 show（<50ms 秒开），避免「每次开关便签都重建 WebView2 → 呼出反应慢」
+    // 的冷启动成本。
+    // 历史背景：此前用 destroy()，导致快捷键「收起→呼出」每次都冷启动重建（用户反馈
+    // "快捷键呼出便签慢"）；又因早期前端把关闭态窗口裁成"空画面"而未在呼出时复原，
+    // 出现过"关闭后再打开打不开"。该残留态现已由前端 note.ts 的 summoned 处理
+    // （blanked 检测 + restoreGlowSummoned + 强制重绘 shim）妥善复原，故恢复隐藏常驻是安全的。
+    let _ = win.hide();
+    crate::storage::diag_write(&format!("[sticky] hide_note_window: hidden (persistent) {label}"));
     let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
     crate::panel::broadcast_panel_visibility(app, label, false);
     VISIBLE_NOTES.lock().unwrap().remove(label);
@@ -1317,6 +1321,16 @@ pub fn minimize_to_taskbar(window: tauri::WebviewWindow) -> Result<(), String> {
 
 #[tauri::command]
 pub fn minimize_to_tray(window: tauri::WebviewWindow) -> Result<(), String> {
+    // 【关键】托盘隐藏后必须从 VISIBLE_NOTES 移除，否则 show_app / toggle 快捷键
+    // 会用运行时可见集合判定"便签仍可见"→ 误走"收起"分支，而不是重新呼出已隐藏的便签
+    // （配合 toggle_priority_note 改用 VISIBLE_NOTES 的修复）。同时广播不可见，
+    // 让工具栏等 UI 高亮同步熄灭。
+    let app = window.app_handle().clone();
+    let label = window.label().to_string();
+    if label.starts_with(NOTE_PREFIX) {
+        VISIBLE_NOTES.lock().unwrap().remove(&label);
+    }
+    crate::panel::broadcast_panel_visibility(&app, &label, false);
     window.hide().map_err(|e| e.to_string())
 }
 
@@ -1381,66 +1395,89 @@ pub fn register_all_shortcuts(app: &AppHandle) {
 /// 快捷键「呼出 / 收起便签」：仅作用于便签窗口，绝不打开历史面板
 /// （历史面板由独立的 open_history 快捷键负责）。
 
-/// 确保全屏透明「粒子层」窗口存在（粒子消散可飘出便签矩形、满屏渲染）。
-/// tauri.conf.json 已声明该窗口（visible:false）；此处运行时兜底——若
-/// conf 声明未生效（配置/打包差异）也能创建，保证粒子动画不丢飘散能力。
-/// 幂等：已存在则 no-op。经 defer_to_main_loop 创建（透明窗口避免 IPC
-/// 回调内重入建窗挂起）。
+/// 粒子层前端是否已就绪（收到 sticky://particles-layer-ready 置 true）。
+/// 供前端 remote 粒子判定实时查询：仅窗口存在不代表前端已挂载监听（见
+/// ensure_particles_window 注释——conf 声明的 visible:false 窗口可能从未初始化前端）。
+static PARTICLES_READY: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
+
+/// 标记粒子层前端就绪（监听 sticky://particles-layer-ready 时调用）。
+pub fn mark_particles_ready() {
+    *PARTICLES_READY.lock().unwrap() = true;
+    crate::storage::diag_write("[sticky] particles layer marked ready");
+}
+
+/// 查询粒子层前端是否已就绪（配合 ensure_particles_window 的强制初始化）。
+#[tauri::command]
+pub fn particles_layer_ready() -> bool {
+    *PARTICLES_READY.lock().unwrap()
+}
+
+/// 确保全屏透明「粒子层」窗口存在且其前端已挂载（粒子消散可飘出便签矩形、满屏渲染）。
+/// tauri.conf.json 已声明该窗口（visible:false）；此处运行时兜底并【强制初始化】。
+/// 【关键修复】仅"窗口存在"是不够的：conf 声明的窗口 visible:false → WebView2 从不
+/// 显示 → 前端从不执行 → particles-start 监听永不注册 → 便签关闭时 remote 粒子层
+/// 收到事件但无人处理（emit 被静默丢弃），粒子动画退回"画在便签窗口内"的自渲染模式、
+/// 被便签矩形裁切（用户反馈"粒子飘散没突破便签矩形"）。因此无论窗口是否已存在，
+/// 都必须走一遍 show→隐藏 的强制初始化（全屏透明、实时隐藏无视觉），保证前端 mount。
+/// 幂等：已挂载的窗口再次短暂 show/hide 无害（本就透明、pointer-events 穿透）。
 pub fn ensure_particles_window(app: &AppHandle) {
     const PL: &str = "particles";
-    if app.get_webview_window(PL).is_some() {
-        return;
-    }
-    let app2 = app.clone();
-    defer_to_main_loop(app2.clone(), move || {
-        if app2.get_webview_window(PL).is_some() {
-            return;
-        }
-        // 用主显示器尺寸创建（而非 conf 固定 1920x1080）：
-        // 透明 + shadow(false) 窗口在 mount 时 setSize 会触发 WebView2 重建、
-        // IPC 卡死（粒子层前端就绪日志缺失的根因）——创建即正确尺寸，
-        // 前端 calibrate 时尺寸相同会跳过 setSize，彻底避免该路径。
-        // monitor.size() 为物理像素，inner_size 为逻辑像素 → /scale_factor。
-        let (w, h) = app2
-            .primary_monitor()
-            .ok()
-            .flatten()
-            .map(|m| {
-                let sf = m.scale_factor().max(0.01);
-                (m.size().width as f64 / sf, m.size().height as f64 / sf)
-            })
-            .unwrap_or((1920.0, 1080.0));
-        let win = WebviewWindowBuilder::new(&app2, PL, WebviewUrl::App("index.html".into()))
-            .title("粒子层")
-            .decorations(false)
-            .transparent(true)
-            .always_on_top(true)
-            .shadow(false)
-            .skip_taskbar(true)
-            .focusable(false)
-            .resizable(true)
-            .inner_size(w, h)
-            .position(0.0, 0.0)
-            .visible(false)
-            .build();
-        crate::storage::diag_write(&format!(
-            "[sticky] ensure_particles_window: built {w}x{h}"
-        ));
-        // 【关键】透明窗口 WebView2 初始化有挂起风险（工具箱历史窗口因此做
-        // 非透明；便签窗口靠创建后立即 show 强制初始化）。粒子层 visible:false
-        // 从不显示 → WebView 永不初始化 → 前端从不执行（ready 日志为 0 的
-        // 终极根因）。对策：创建后短暂 show 强制初始化（全屏透明无视觉），
-        // 800ms 后再隐藏——前端 mount 完成、事件监听就绪。
-        if let Ok(pw) = win {
-            let _ = pw.show();
-            let app3 = app2.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(800));
-                let _ = app3.run_on_main_thread(move || {
-                    let _ = pw.hide();
-                });
+    let app_owned = app.clone();
+    defer_to_main_loop(app_owned.clone(), move || {
+        let app2 = app_owned;
+        let win = if let Some(w) = app2.get_webview_window(PL) {
+            w
+        } else {
+            // conf 声明未生效（配置/打包差异）时兜底创建：用主显示器尺寸（透明 +
+            // shadow(false) 窗口在 mount 时 setSize 会触发 WebView2 重建/IPC 卡死，
+            // 故创建即正确尺寸，前端 calibrate 时尺寸相同会跳过 setSize）。
+            let (w, h) = app2
+                .primary_monitor()
+                .ok()
+                .flatten()
+                .map(|m| {
+                    let sf = m.scale_factor().max(0.01);
+                    (m.size().width as f64 / sf, m.size().height as f64 / sf)
+                })
+                .unwrap_or((1920.0, 1080.0));
+            crate::storage::diag_write(&format!(
+                "[sticky] ensure_particles_window: built {w}x{h}"
+            ));
+            #[allow(clippy::let_and_return)]
+            let w = WebviewWindowBuilder::new(&app2, PL, WebviewUrl::App("index.html".into()))
+                .title("粒子层")
+                .decorations(false)
+                .transparent(true)
+                .always_on_top(true)
+                .shadow(false)
+                .skip_taskbar(true)
+                .focusable(false)
+                .resizable(true)
+                .inner_size(w, h)
+                .position(0.0, 0.0)
+                .visible(false)
+                .build();
+            match w {
+                Ok(w) => w,
+                Err(e) => {
+                    crate::storage::diag_write(&format!(
+                        "[sticky] ensure_particles_window: BUILD FAILED: {e}"
+                    ));
+                    return;
+                }
+            }
+        };
+        // 【强制初始化】透明窗口 WebView2 初始化有挂起风险：visible:false 从不显示 →
+        // WebView 永不初始化 → 前端从不执行（ready 日志缺失、remote 事件被丢弃的根因）。
+        // 对策：短暂 show 强制初始化（全屏透明无视觉），800ms 后再隐藏——前端 mount
+        // 完成、particles-start 监听就绪。已挂载的窗口再 show/hide 一次也无害。
+        let _ = win.show();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(800));
+            let _ = app2.run_on_main_thread(move || {
+                let _ = win.hide();
             });
-        }
+        });
     });
 }
 
@@ -1553,14 +1590,16 @@ fn toggle_priority_note(app: &AppHandle) {
         return;
     };
     let label = window_label(&id);
-    let visible = app
-        .get_webview_window(&label)
-        .map(|w| w.is_visible().unwrap_or(false))
-        .unwrap_or(false);
+    // 【关键】用运行时 VISIBLE_NOTES 判断"便签当前是否可见"，而非 is_visible()。
+    // is_visible() 在透明 / always-on-top / 无边框便签窗口上不可靠（show 后仍可能返回
+    // false），会导致 show_app 快捷键"明明便签在屏幕上却判定为不可见"→ 走呼出分支、
+    // 永远不会触发关闭动画（用户反馈"快捷键关闭时不播放动画"，对比工具栏入口
+    // toggle_sticky_notes 已改用 VISIBLE_NOTES）。统一两处判定，保证收起/呼出 toggle 稳定。
+    let visible = VISIBLE_NOTES.lock().unwrap().contains(&label);
     if visible {
-        // 关闭：先广播粒子消散动画（前端播放），再 Rust 兜底强制关闭——
-        // 与"收起全部便签"同机制（不依赖前端动画回调，700ms 后强制销毁）。
-        // 修复：此前直接 hide_note_window（destroy）无动画（用户反馈）。
+        // 关闭：先广播粒子消散动画（前端播放），再 Rust 兜底关闭——
+        // 与"收起全部便签"同机制（不依赖前端动画回调，1800ms 后若仍未关闭才兜底隐藏）。
+        // 修复：此前直接 hide_note_window 无动画（用户反馈"快捷键关闭无动画"）。
         if let Some(win) = app.get_webview_window(&label) {
             let wins = vec![(label.clone(), win)];
             emit_close_anim(&wins);

@@ -25,8 +25,22 @@
 // 看门狗强制收尾，杜绝动画卡死导致窗口无法关闭。
 
 import { emit } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+
+/** 查询粒子层前端是否已就绪（Rust 侧跟踪 sticky://particles-layer-ready，见 sticky.rs）。
+ *  window "particles" 存在 ≠ 前端就绪：conf 声明的窗口 visible:false → WebView 可能
+ *  从未初始化、particles-start 监听未注册，remote 粒子会被静默丢弃 → 退回自渲染、
+ *  被便签矩形裁切（用户反馈"粒子飘散没突破便签矩形"的根因）。每次要 remote 前实时查，
+ *  避免"便签窗口较晚挂载错过就绪事件"造成的陈旧/丢失判断。 */
+async function isParticlesLayerReady(): Promise<boolean> {
+  try {
+    return !!(await invoke<boolean>("particles_layer_ready"));
+  } catch {
+    return false;
+  }
+}
 
 let glowActive = false;
 /** 动画代次：每次 runGlow 启动 +1。上一轮动画遗留的延时清理（cleanupAfterHide）凭此作废，
@@ -150,18 +164,29 @@ export function requestGlowDissolveClose(
     glowActive = false;
   };
   void (async () => {
-    // remote：先确认全屏粒子层窗口可用（存在且能 show），可用才把粒子交给它；
-    // 不可用则回退 self（粒子画在便签窗口内），保证动画不丢粒子。
+    // remote：粒子交给全屏透明粒子层窗口渲染（可飘出便签矩形）。前提是粒子层
+    // 【前端已就绪】（particlesLayerReady），而不仅是窗口存在——conf 声明的窗口
+    // visible:false 可能从未初始化前端（particles-start 监听未注册），emit 被静默
+    // 丢弃 → 无粒子或退回 self 被便签矩形裁切（用户反馈"粒子飘散没突破便签矩形"的根因）。
+    // 未就绪时回退 self（粒子画在便签窗口内），保证动画至少有粒子、可诊断。
     let useRemote = false;
     if (remote && !aborted) {
-      try {
-        const layer = await WebviewWindow.getByLabel("particles");
-        if (layer) {
-          await layer.show();
-          useRemote = true;
+      const ready = await isParticlesLayerReady();
+      if (!ready) {
+        console.warn("[glow] 粒子层未就绪（particles-start 监听未注册），粒子退回便签窗口内渲染（受矩形约束）");
+      } else {
+        try {
+          const layer = await WebviewWindow.getByLabel("particles");
+          if (layer) {
+            await layer.show();
+            useRemote = true;
+          } else {
+            console.warn("[glow] 找不到全屏粒子层窗口，粒子退回便签窗口内渲染");
+          }
+        } catch {
+          useRemote = false;
+          console.warn("[glow] 粒子层窗口 show 失败，粒子退回便签窗口内渲染");
         }
-      } catch {
-        useRemote = false;
       }
     }
     if (aborted) return;

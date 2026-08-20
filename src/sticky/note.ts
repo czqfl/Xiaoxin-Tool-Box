@@ -440,6 +440,12 @@ export function mountNoteApp(noteId: string, preset = "") {
     setInterval(probeEdge, 400);
     editor.focus();
     setupImagePreview();
+    // 【快捷键呼出/关闭变慢】关闭动画模块（火焰/粒子光效/吸入/玻璃碎裂，含 WebGL
+    // shader 编译）体积大且按需懒加载。首次呼出/关闭会在关键路径上动态 import + 编译，
+    // 表现就是「快捷键呼出慢 / 快捷键关闭动画迟迟不出现」。这里在便签显示就绪后
+    // 立即fire-and-forget 预热（幂等缓存，后续 anim.load() 同步返回）：
+    // 把模块加载与 shader 编译从「点击/快捷键触发时刻」移到「便签打开后空闲期」。
+    void anim.load();
   }
 
   function updatePin(pinned: boolean, animate = true) {

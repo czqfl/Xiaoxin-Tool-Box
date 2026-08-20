@@ -206,6 +206,7 @@ pub fn run() {
                 let app2 = handle.clone();
                 let _ = app2.listen("sticky://particles-layer-ready", move |_| {
                     crate::storage::diag_write("[sticky] particles layer ready");
+                    crate::sticky::mark_particles_ready();
                 });
             }
             // 启动后打印窗口清单（排查：确认粒子层窗口是否真实创建）
@@ -332,6 +333,7 @@ pub fn run() {
             sticky::quit_app,
             sticky::register_shortcuts,
             sticky::open_settings_window,
+            sticky::particles_layer_ready,
             sticky::set_acrylic,
             sticky::format_with_llm,
             sticky::capture_screen_region,
