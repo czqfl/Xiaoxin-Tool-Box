@@ -314,6 +314,45 @@ fn position_toolbar_default<R: Runtime>(app: &AppHandle<R>, window: &WebviewWind
     let _ = window.set_position(LogicalPosition::new(x, y));
 }
 
+/// 工具栏启动位置：主显示器右下角（距边 16px）。
+/// 保证每次启动都在一个确定、可见的位置——既不依赖光标位置，也不恢复可能
+/// 落到屏外/边缘的「记忆位置」（那正是「启动后工具栏找不到」的根因之一）。
+fn position_toolbar_bottom_right<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) {
+    let Ok(monitor) = app.primary_monitor() else {
+        return;
+    };
+    let Some(monitor) = monitor else {
+        return;
+    };
+    let scale = monitor.scale_factor();
+    let Ok(wsize) = window.outer_size() else {
+        return;
+    };
+    if scale <= 0.0 {
+        return;
+    }
+    let mw = monitor.size().width as f64 / scale;
+    let mh = monitor.size().height as f64 / scale;
+    let mx = monitor.position().x as f64 / scale;
+    let my = monitor.position().y as f64 / scale;
+    let ww = wsize.width as f64 / scale;
+    let wh = wsize.height as f64 / scale;
+    let margin = 16.0;
+    let x = mx + mw - ww - margin;
+    let y = my + mh - wh - margin;
+    let _ = window.set_position(LogicalPosition::new(x, y));
+}
+
+/// 启动显示工具栏：强制放在主显示器右下角（确定、可见）再 show。
+/// 调用方：lib.rs 启动流程（`config.toolbar.enabled` 时）。
+pub fn show_toolbar_at_bottom_right<R: Runtime>(app: &AppHandle<R>) {
+    let Some(window) = app.get_webview_window(TOOLBAR_WINDOW) else {
+        return;
+    };
+    position_toolbar_bottom_right(app, &window);
+    let _ = window.show();
+}
+
 /// 切换面板置顶状态。
 /// 透明窗口 z-order 变化可能使亚克力层失效，切换后补刷一次。
 #[tauri::command]

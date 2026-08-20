@@ -225,9 +225,11 @@ pub fn run() {
             #[cfg(windows)]
             explorer::start_explorer_watcher(handle.clone());
 
-            // 悬浮工具栏启用时启动即显示（常驻工具条，配置开关可随时收起）
+            // 悬浮工具栏启用时启动即显示（常驻工具条，配置开关可随时收起）。
+            // 固定放到主显示器右下角，保证每次启动都在确定、可见的位置，
+            // 不再恢复可能落到屏外/边缘的记忆位置（避免「启动后找不到工具栏」）。
             if config.toolbar.enabled {
-                let _ = panel::toolbar_set_visible(handle.clone(), true);
+                panel::show_toolbar_at_bottom_right(&handle);
             }
             // 工具栏保持置顶（盖过任务栏等系统级置顶窗口，300ms 周期顶置）
             panel::start_keep_on_top(handle.clone());
