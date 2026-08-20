@@ -243,6 +243,7 @@ pub fn run() {
             config::config_save,
             config::config_export_to,
             config::config_import_from,
+            tray::set_settings_caption_color,
             storage::diag_log,
             clipboard::clipboard_list,
             clipboard::clipboard_delete,

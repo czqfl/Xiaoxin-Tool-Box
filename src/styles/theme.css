@@ -61,6 +61,9 @@
   --bg-panel: rgba(248, 249, 251, 0.82);
   /* 面板底色 RGB（不含 alpha），透明度由 --panel-opacity 控制（配置可调 0-100%） */
   --bg-panel-rgb: 248, 249, 251;
+  /* 设置界面侧栏（外部菜单）/ 自定义标题栏底色：比内容区(app)略深一档，
+     形成两色层次；标题栏复用此色，保证「标题栏=侧栏」在任何主题下一致 */
+  --bg-sidebar: #eaecef;
   /* 面板外壳底色不透明度：0 = 全透（纯玻璃），1 = 全不透明 */
   --panel-opacity: 0.75;
   --bg-elevated: rgba(255, 255, 255, 0.96);
@@ -179,6 +182,8 @@
   --bg-app: #141414;
   --bg-panel: rgba(31, 31, 31, 0.82);
   --bg-panel-rgb: 31, 31, 31;
+  /* 设置界面侧栏/标题栏底色：纯中性 31,31,31（比内容区 20,20,20 略亮一档） */
+  --bg-sidebar: #1f1f1f;
   --bg-elevated: rgba(38, 38, 38, 0.95);
   --bg-input: rgba(43, 43, 43, 0.92);
   --bg-input-glass: rgba(31, 31, 31, 0.42);
@@ -270,6 +275,8 @@
   --bg-app: #e8f1ef;
   --bg-panel: rgba(246, 251, 250, 0.84);
   --bg-panel-rgb: 246, 251, 250;
+  /* 设置界面侧栏/标题栏底色（淡青调，比内容区略深） */
+  --bg-sidebar: #dde9e6;
   --panel-opacity: 0.75;
   --bg-elevated: rgba(255, 255, 255, 0.96);
   --bg-input: rgba(255, 255, 255, 0.92);
@@ -351,6 +358,8 @@
   --bg-app: #dbe6f5;
   --bg-panel: rgba(234, 243, 253, 0.86);
   --bg-panel-rgb: 234, 243, 253;
+  /* 设置界面侧栏/标题栏底色（淡蓝调，比内容区略深） */
+  --bg-sidebar: #d2ddec;
   --panel-opacity: 0.75;
   --bg-elevated: rgba(247, 251, 255, 0.96);
   --bg-input: rgba(248, 252, 255, 0.92);
@@ -432,6 +441,8 @@
   --bg-app: #f6eded;
   --bg-panel: rgba(252, 246, 245, 0.86);
   --bg-panel-rgb: 252, 246, 245;
+  /* 设置界面侧栏/标题栏底色（暖白调，比内容区略深） */
+  --bg-sidebar: #efe3e3;
   --panel-opacity: 0.75;
   --bg-elevated: rgba(255, 252, 251, 0.96);
   --bg-input: rgba(255, 250, 249, 0.92);
@@ -514,6 +525,8 @@
     --bg-app: #141414;
     --bg-panel: rgba(31, 31, 31, 0.82);
     --bg-panel-rgb: 31, 31, 31;
+    /* 设置界面侧栏/标题栏底色：纯中性 31,31,31（与 data-theme="dark" 一致） */
+    --bg-sidebar: #1f1f1f;
     --bg-elevated: rgba(38, 38, 38, 0.95);
     --bg-input: rgba(43, 43, 43, 0.92);
     --bg-input-glass: rgba(31, 31, 31, 0.42);

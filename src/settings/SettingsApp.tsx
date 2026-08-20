@@ -1,6 +1,7 @@
 /** 设置中心：左侧边栏导航 + 右侧内容区 */
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
 import { useConfigStore } from "../stores/configStore";
 import { EVT_SHORTCUT_FAILED, onEvent } from "../core/events";
 import { ClipboardPage } from "./ClipboardPage";
@@ -45,9 +46,31 @@ const NAV_ITEMS: Array<{ key: Page; label: string; icon: React.ReactNode }> = [
   { key: "about", label: "关于", icon: <IconInfo size={15} /> },
 ];
 
+/** 把 CSS 颜色（#rgb / #rrggbb / rgb()）解析成 "r,g,b" 字符串；失败返回 null */
+function cssColorToRgb(input: string): string | null {
+  const s = input.trim();
+  if (s.startsWith("#")) {
+    if (s.length === 7) {
+      const r = parseInt(s.slice(1, 3), 16);
+      const g = parseInt(s.slice(3, 5), 16);
+      const b = parseInt(s.slice(5, 7), 16);
+      if ([r, g, b].every((v) => !Number.isNaN(v))) return `${r},${g},${b}`;
+    } else if (s.length === 4) {
+      const r = parseInt(s[1] + s[1], 16);
+      const g = parseInt(s[2] + s[2], 16);
+      const b = parseInt(s[3] + s[3], 16);
+      if ([r, g, b].every((v) => !Number.isNaN(v))) return `${r},${g},${b}`;
+    }
+  }
+  const m = s.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+  if (m) return `${m[1]},${m[2]},${m[3]}`;
+  return null;
+}
+
 export function SettingsApp() {
   const load = useConfigStore((s) => s.load);
   const loaded = useConfigStore((s) => s.loaded);
+  const theme = useConfigStore((s) => s.config.general.theme);
   const [page, setPage] = useState<Page>("general");
   const [shortcutFailed, setShortcutFailed] = useState<string | null>(null);
 
@@ -76,6 +99,30 @@ export function SettingsApp() {
       cleanup.forEach((fn) => fn());
     };
   }, [load]);
+
+  // 设置窗口原生标题栏底色精确跟随侧栏 --bg-sidebar（任何主题一致）。
+  // 原生 setTheme 只能 light/dark，浅色主题下 Windows 默认标题栏纯白、与浅灰侧栏
+  // 有可见差异；改用 Rust 命令 set_settings_caption_color（DWMWA_CAPTION_COLOR）
+  // 把标题栏底色设为与侧栏完全相同的色。theme 变化（含 system 跟随系统切换）后重设，
+  // 并监听系统深浅变化，保证 system 模式实时一致。
+  useEffect(() => {
+    if (!loaded) return;
+    const apply = () => {
+      try {
+        const raw = getComputedStyle(document.documentElement)
+          .getPropertyValue("--bg-sidebar")
+          .trim();
+        const rgb = cssColorToRgb(raw);
+        if (rgb) void invoke("set_settings_caption_color", { rgb }).catch(() => {});
+      } catch {
+        /* 非 Windows / 不支持则忽略 */
+      }
+    };
+    apply();
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, [loaded, theme]);
 
   if (!loaded) return null;
 

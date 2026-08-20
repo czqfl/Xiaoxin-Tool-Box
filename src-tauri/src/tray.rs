@@ -205,3 +205,53 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .build(app)?;
     Ok(())
 }
+
+/// 设置窗口标题栏精确配色（DWMWA_CAPTION_COLOR，Windows 11 22000+，属性值 35）：
+/// 让原生标题栏底色精确等于侧栏 --bg-sidebar，实现"任何主题下标题栏=侧栏"。
+/// 原生 setTheme 只能 light/dark，浅色主题下 Windows 默认标题栏纯白、与浅灰侧栏
+/// 有可见差异；此命令按需精确着色。旧系统不支持该 DWM 属性则静默失败（沿用 setTheme）。
+#[cfg(windows)]
+#[tauri::command]
+pub fn set_settings_caption_color(app: AppHandle, rgb: String) -> bool {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows::Win32::Graphics::Dwm::DwmSetWindowAttribute;
+
+    // 解析 "r,g,b"（0-255），长度必须恰好三段
+    let mut parts = [0u8; 3];
+    let mut it = rgb.split(',');
+    for slot in parts.iter_mut() {
+        match it.next().and_then(|s| s.trim().parse::<u8>().ok()) {
+            Some(v) => *slot = v,
+            None => return false,
+        }
+    }
+    if it.next().is_some() {
+        return false;
+    }
+    let colorref: u32 = (parts[0] as u32) | ((parts[1] as u32) << 8) | ((parts[2] as u32) << 16);
+
+    let Some(w) = app.get_webview_window("settings") else {
+        return false;
+    };
+    let handle = match w.window_handle() {
+        Ok(h) => h,
+        Err(_) => return false,
+    };
+    let RawWindowHandle::Win32(h) = handle.as_raw() else {
+        return false;
+    };
+    let hwnd = HWND(h.hwnd.get() as *mut _);
+    // DWMWA_CAPTION_COLOR 在 windows crate 枚举中未必稳定暴露，直接用原始值 35
+    let attr = unsafe {
+        std::mem::transmute::<u32, windows::Win32::Graphics::Dwm::DWMWINDOWATTRIBUTE>(35u32)
+    };
+    unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            attr,
+            &colorref as *const u32 as *const _,
+            std::mem::size_of::<u32>() as u32,
+        )
+        .is_ok()
+    }
+}

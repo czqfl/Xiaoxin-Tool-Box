@@ -14,6 +14,9 @@
   flex-shrink: 0;
   padding: 16px 10px;
   border-right: 1px solid var(--border-subtle);
+  /* 外部菜单底色：比内容区(app)略深一档，形成两色层次（深色 31,31,31 / 浅色 #eaecef）；
+     原生标题栏通过 DWM 精确取同一色，保证「标题栏=侧栏」任何主题一致 */
+  background: var(--bg-sidebar);
   gap: 2px;
 }
 .settings-brand {
@@ -69,11 +72,12 @@
   color: var(--text-tertiary);
 }
 
-/* 右侧内容区 */
+/* 右侧内容区：选中菜单展示区域，用 app 底色（深色 20,20,20）与侧栏拉开层次 */
 .settings-content {
   flex: 1;
   overflow-y: auto;
   padding: 28px 36px;
+  background: var(--bg-app);
 }
 .settings-page {
   max-width: 640px;
@@ -544,6 +548,11 @@
   overflow: hidden;
   background: var(--bg-panel);
   position: relative;
+}
+/* 整行独占预览：脱离控件列，占满分组宽度（图片单独一行，文字另占一行） */
+.sticky-bg-preview--full {
+  max-width: none;
+  margin: 0 16px 16px;
 }
 .sticky-bg-preview img {
   display: block;
