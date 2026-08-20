@@ -102,6 +102,10 @@ const SLIVER = 4; // 收起后露出的窗口真实边缘宽度（细边，不�
 const EDGE_MARGIN = 12; // 距屏幕边缘多少像素内算"贴边"
 const HIDE_DELAY = 250; // 鼠标离开贴边工具栏后，延时收起（ms）
 const SLIDE_MS = 160; // 收起/弹出的滑动动画时长（ms，轻快不拖沓）
+/** 收起后：光标靠近屏幕边缘多少像素内自动弹出（物理像素）。
+ *  关键修复：此前恢复只靠 onMouseEnter 命中 4px 细边，几乎不可达 → 工具栏"消失找不到"。
+ *  改为轮询检测光标靠近停靠边缘即弹出，无需精确戳中细边。 */
+const EDGE_REVEAL = 70;
 
 /** Rust 返回的工具栏几何快照（物理像素） */
 interface ToolbarGeometry {
@@ -147,6 +151,20 @@ export function Toolbar() {
     if (Math.abs(g.win_y - g.mon_y) <= EDGE_MARGIN) return "top";
     if (Math.abs(g.win_y + g.win_h - (g.mon_y + g.mon_h)) <= EDGE_MARGIN) return "bottom";
     return null;
+  }
+
+  /** 判断光标是否靠近某条边（阈值内，物理像素）——用于"靠近自动弹出"恢复 */
+  function cursorNearEdge(g: ToolbarGeometry, edge: Edge, threshold: number): boolean {
+    switch (edge) {
+      case "left":
+        return g.cursor_x <= g.mon_x + threshold;
+      case "right":
+        return g.cursor_x >= g.mon_x + g.mon_w - threshold;
+      case "top":
+        return g.cursor_y <= g.mon_y + threshold;
+      case "bottom":
+        return g.cursor_y >= g.mon_y + g.mon_h - threshold;
+    }
   }
 
   // ---- 靠边收起/弹出（XiaoxinStickyNote 同款）----
@@ -211,11 +229,11 @@ export function Toolbar() {
     }
   }
 
-  /** 弹出：滑回收起前的位置（夹取到工作区内，保证完全可见）；
-   *  byHover=true（悬停条触发）：完全弹出后若鼠标已不在窗口内 → 自动再收起，
-   *  避免便签/工具栏"弹出后空挂"；也因此不会反复弹出——收起后光标不在窗口
-   *  上（无 mouseenter），不再触发弹出。 */
-  async function expandFromEdge(byHover = false) {
+  /** 弹出：滑回收起前的位置（夹取到工作区内，保证完全可见）。
+   *  收起态由 collapsedRef 内存控制；收起/弹出的「再收起」统一交给鼠标离开
+   *  （handleLeave）+ 轮询兜底，不再在此处按 pointerInside 秒收，避免静止光标下
+   *  弹出来又瞬间消失、工具栏彻底找不到。 */
+  async function expandFromEdge() {
     if (!collapsedRef.current || !restorePosRef.current || snappingRef.current) return;
     try {
       snappingRef.current = true;
@@ -242,10 +260,6 @@ export function Toolbar() {
     } finally {
       window.setTimeout(() => {
         snappingRef.current = false;
-        // 悬停触发的弹出：弹出完成时鼠标若已不在窗口内 → 自动收起
-        if (byHover && autoHideRef.current && pinnedEdgeRef.current && !pointerInsideRef.current && !collapsedRef.current) {
-          void collapseToEdge();
-        }
       }, SLIDE_MS + 60);
     }
   }
@@ -351,7 +365,7 @@ export function Toolbar() {
       hideTimerRef.current = undefined;
     }
     if (collapsedRef.current && autoHideRef.current && !snappingRef.current) {
-      void expandFromEdge(true);
+      void expandFromEdge();
     }
   };
 
@@ -412,6 +426,31 @@ export function Toolbar() {
       .catch(() => undefined);
   }, [tools.length, isVertical]);
 
+  // 启动兜底：若工具栏因历史 off-screen 残留等完全落在显示器外，夹回屏内，
+  // 避免「开启收起后 / 重启后完全找不到」。收起态由 collapsedRef 内存控制，重启本应
+  // 展开，这里只是保险——仅当窗口完全不可见时才移动，正常位置不受影响。
+  useEffect(() => {
+    void (async () => {
+      try {
+        const geo = await invoke<ToolbarGeometry>("toolbar_geometry");
+        const fullyOut =
+          geo.win_x + geo.win_w <= geo.mon_x ||
+          geo.win_x >= geo.mon_x + geo.mon_w ||
+          geo.win_y + geo.win_h <= geo.mon_y ||
+          geo.win_y >= geo.mon_y + geo.mon_h;
+        if (!fullyOut) return;
+        const win = getCurrentWindow();
+        const size = await win.outerSize().catch(() => null);
+        if (!size) return;
+        const x = Math.min(Math.max(geo.win_x, geo.mon_x), geo.mon_x + geo.mon_w - size.width);
+        const y = Math.min(Math.max(geo.win_y, geo.mon_y), geo.mon_y + geo.mon_h - size.height);
+        await win.setPosition(new LogicalPosition(Math.round(x), Math.round(y))).catch(() => {});
+      } catch {
+        /* 探测异常时不强制移动，避免干扰正常启动 */
+      }
+    })();
+  }, []);
+
   // 点击穿透 + 贴边自动收起：统一轮询（~200ms）。
   // 穿透：光标在窗口内 → 关穿透（按钮可交互）；否则 → 开穿透（不挡桌面点击）。
   // 自动收起：工具栏贴边且光标离开 → 延时滑出屏幕（露一小条）；
@@ -435,6 +474,14 @@ export function Toolbar() {
         // 贴边方向记录（供鼠标离开时收起用）；收起态保持原方向，不覆盖
         if (!collapsedRef.current) {
           pinnedEdgeRef.current = detectEdge(geo);
+        }
+        // 贴边收起恢复：已收起时，光标靠近停靠的那条边 → 自动弹出。
+        // 这是修复「工具栏消失找不到」的核心：不再要求精确命中 4px 细边，
+        // 只要把鼠标移到屏幕边缘附近就会滑出。
+        if (autoHideRef.current && collapsedRef.current && pinnedEdgeRef.current) {
+          if (cursorNearEdge(geo, pinnedEdgeRef.current, EDGE_REVEAL)) {
+            void expandFromEdge();
+          }
         }
       } catch {
         // 后端异常时强制恢复交互（工具栏可用优先，绝不"穿透死"）
