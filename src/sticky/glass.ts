@@ -60,10 +60,13 @@ export function applyGlassBlur(opts: GlassOptions): void {
     return;
   }
   const px = Math.round((pct / 100) * MAX_BLUR_PX);
-  // 刚开启且无内联值时先归零，防止 CSS 默认 16px 闪现后再动画
+  // 首次开启（尚无 .glass）：直接落定目标模糊半径——呼出/打开窗口时「一出现就是磨砂」，
+  // 不做 0→目标 的 280ms 渐变（否则先清晰后糊上来）。已在磨砂态下改强度/开关则仍走
+  // rAF 平滑过渡，滑块拖动、开关切换不跳变。
   if (!target.classList.contains("glass")) {
-    target.style.setProperty("--glass-blur", "0px");
+    target.classList.add("glass");
+    target.style.setProperty("--glass-blur", px + "px");
+    return;
   }
-  target.classList.add("glass");
   tweenGlassBlur(target, px);
 }
