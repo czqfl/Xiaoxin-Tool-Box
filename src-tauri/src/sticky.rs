@@ -960,8 +960,39 @@ pub fn open_note_window(app: AppHandle, paths: State<'_, AppPaths>, id: String) 
     // 只调无广播的 inner，若窗口需新建（ensure 创建分支）则历史收不到事件）
     let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
     ensure_note_window(&app, &id);
-    if let Some(win) = app.get_webview_window(&window_label(&id)) {
+    let label = window_label(&id);
+    if let Some(win) = app.get_webview_window(&label) {
+        // 再兜底一次：确保窗口可见、未最小化、压在其他置顶窗（历史面板）之上
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_always_on_top(true);
+        // 【修复·打开状态异常】summoned 必须确保送达：新建窗口经 defer_to_main_loop
+        // 延迟构建，此刻 get_webview_window 可能还是 None → 首帧 summoned 丢失，
+        // 便签被 show 出来却是空白/不复原（用户反馈"显示打开中但内容没渲染"）。
+        // 分时多次补发（立即 + 120ms + 600ms），无论 JS 何时就绪都能收到并复原内容。
         let _ = win.emit("summoned", ());
+        let app2 = app.clone();
+        let app3 = app2.clone();
+        let label3 = label.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            let _ = app2.run_on_main_thread(move || {
+                if let Some(w) = app3.get_webview_window(&label3) {
+                    let _ = w.emit("summoned", ());
+                }
+            });
+        });
+        let app4 = app.clone();
+        let app5 = app4.clone();
+        let label5 = label.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(600));
+            let _ = app4.run_on_main_thread(move || {
+                if let Some(w) = app5.get_webview_window(&label5) {
+                    let _ = w.emit("summoned", ());
+                }
+            });
+        });
         crate::storage::diag_write(&format!("[sticky] open_note_window: emitted summoned to {id}"));
     }
     Ok(())
@@ -1338,8 +1369,18 @@ pub fn minimize_to_tray(window: tauri::WebviewWindow) -> Result<(), String> {
     let label = window.label().to_string();
     if label.starts_with(NOTE_PREFIX) {
         VISIBLE_NOTES.lock().unwrap().remove(&label);
+        // 【修复·状态一致】隐藏即视为"已关闭"：同步从持久化"打开中"集合移除，
+        // 否则历史列表永远显示"打开中"而便签实际是隐藏的（用户反馈"状态与实际不符"）。
+        // 与 hide_note_window 的 mark_note_closed_inner 行为对齐；main 是特殊便签不持久化。
+        if let Some(paths) = app.try_state::<AppPaths>() {
+            let id = label.strip_prefix(NOTE_PREFIX).unwrap_or(&label).to_string();
+            if id != MAIN_NOTE_ID {
+                mark_note_closed_inner(&paths, &id);
+            }
+        }
     }
     crate::panel::broadcast_panel_visibility(&app, &label, false);
+    let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
     window.hide().map_err(|e| e.to_string())
 }
 

@@ -81,6 +81,26 @@ export function mountHistoryApp() {
   // 1) 事件：后端统一广播 sticky://state-changed（打开/关闭/新建/保存/删除）
   // 2) 聚焦：窗口每次获得焦点主动刷新
   // 3) 轮询：窗口可见期间每 500ms 兜底刷新（事件偶发丢失也被覆盖，基本无感）
+  // 【修复】三路来源统一收口到 requestRender：并发去重 + 交互中延后重建，
+  // 彻底消除「轮询/事件同时触发 → 整表重建竞态 → 点击被吞 → 面板像卡死」的根因。
+  let renderPending = false;
+  let pointerActive = false;
+  const requestRender = (): void => {
+    if (renderPending) return;
+    renderPending = true;
+    // 用 setTimeout 而非 requestAnimationFrame：窗口隐藏时 rAF 不触发，
+    // 会让 renderPending 卡死、重开后不再刷新。
+    window.setTimeout(() => {
+      renderPending = false;
+      // 指针按下未松开时延后重建：防止重建把正在点的卡片换掉（点击丢失/误触）。
+      // pointerup/pointercancel 会再触发一次 requestRender，此处只是兜底。
+      if (pointerActive) {
+        window.setTimeout(requestRender, 60);
+        return;
+      }
+      void render();
+    }, 0);
+  };
   let pollTimer: number | undefined;
   const stopPoll = () => {
     if (pollTimer) {
@@ -90,21 +110,25 @@ export function mountHistoryApp() {
   };
   const startPoll = () => {
     stopPoll();
-    pollTimer = window.setInterval(() => void render(), 500);
+    pollTimer = window.setInterval(requestRender, 500);
   };
+  // 指针交互保护：按下期间禁止重建（捕获阶段，按钮点击同样生效）
+  listEl.addEventListener("pointerdown", () => { pointerActive = true; }, true);
+  window.addEventListener("pointerup", () => { pointerActive = false; requestRender(); }, true);
+  window.addEventListener("pointercancel", () => { pointerActive = false; requestRender(); }, true);
   listen("sticky://state-changed", () => {
     // 诊断：确认历史窗口收到状态广播（若此日志缺失 → 事件未到达，需查后端 emit）
     import("@tauri-apps/api/core")
       .then(({ invoke }) => invoke("diag_log", { msg: "[history] state-changed received" }))
       .catch(() => {});
-    void render();
+    requestRender();
   }).catch((e) => console.error("监听便签状态失败:", e));
   // 【修复】轮询不再随失焦停止——用户从历史打开便签后历史窗口失焦但仍可见，
   // 此前 stopPoll 导致事件偶发丢失时状态要等重新聚焦才刷新（“状态更新慢”根因）。
   // 轮询持续跑，render 内部有列表签名去重，开销极小。
   getCurrentWindow()
     .onFocusChanged(({ payload: focused }) => {
-      if (focused) void render();
+      if (focused) requestRender();
     })
     .catch((e) => console.error("监听窗口焦点失败:", e));
   startPoll(); // 窗口已可见：立即启动轮询
@@ -216,74 +240,84 @@ export function mountHistoryApp() {
       return;
     }
 
-    items.forEach((item) => {
-      const isOpen = openSet.has(item.id);
-      const card = document.createElement("div");
-      card.className = "history-card" + (isOpen ? " open-note" : "");
-      const title = (item.title || "").trim();
-      // 有标题：标题为主行、内容摘要为副行；无标题：直接以内容摘要为主行
-      const primary = title || item.snippet;
-      const secondary = title ? `<div class="card-snippet">${escapeHtml(item.snippet)}</div>` : "";
-      const statusTag = isOpen ? `<div class="card-status">打开中</div>` : "";
-      // 所有便签都显示删除按钮：后端 delete_note 会先向窗口发 note-deleted
-      // （前端停止保存并关闭窗口），再删文件，故即使便签还开着也能安全删除、不会复活。
-      const delBtnHtml = `<button class="card-delete" title="删除">\u2715</button>`;
-      // 置顶优先级按钮（标准图钉图标，SVG 可被 CSS 着色）：全局唯一，快捷键优先操作
-      const pinBtnHtml = `<button class="card-pin${item.top_priority ? " active" : ""}" title="${
-        item.top_priority ? "已置顶（快捷键优先操作此便签）" : "设为置顶（快捷键优先操作此便签）"
-      }"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg></button>`;
-      card.innerHTML = `
-        <div class="card-info">
-          <div class="card-title">${escapeHtml(primary)}</div>
-          ${secondary}
-          <div class="card-time">${escapeHtml(item.updatedStr)}</div>
-          ${statusTag}
-        </div>
-        <div class="card-actions">
-          ${pinBtnHtml}
-          ${delBtnHtml}
-        </div>
-      `;
-
-          card.addEventListener("click", () => {
-        openNoteWindow(item.id).catch((e) => console.error("打开便签失败:", e));
+    try {
+      items.forEach((item) => {
+        const isOpen = openSet.has(item.id);
+        const card = document.createElement("div");
+        card.className = "history-card" + (isOpen ? " open-note" : "");
+        // data-id：事件委托用（重建后仍能精确定位目标便签）
+        card.dataset.id = item.id;
+        const title = (item.title || "").trim();
+        // 有标题：标题为主行、内容摘要为副行；无标题：直接以内容摘要为主行
+        const primary = title || item.snippet;
+        const secondary = title ? `<div class="card-snippet">${escapeHtml(item.snippet)}</div>` : "";
+        const statusTag = isOpen ? `<div class="card-status">打开中</div>` : "";
+        // 所有便签都显示删除按钮：后端 delete_note 会先向窗口发 note-deleted
+        // （前端停止保存并关闭窗口），再删文件，故即使便签还开着也能安全删除、不会复活。
+        const delBtnHtml = `<button class="card-delete" title="删除">\u2715</button>`;
+        // 置顶优先级按钮（标准图钉图标，SVG 可被 CSS 着色）：全局唯一，快捷键优先操作
+        const pinBtnHtml = `<button class="card-pin${item.top_priority ? " active" : ""}" title="${
+          item.top_priority ? "已置顶（快捷键优先操作此便签）" : "设为置顶（快捷键优先操作此便签）"
+        }"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg></button>`;
+        card.innerHTML = `
+          <div class="card-info">
+            <div class="card-title">${escapeHtml(primary)}</div>
+            ${secondary}
+            <div class="card-time">${escapeHtml(item.updatedStr)}</div>
+            ${statusTag}
+          </div>
+          <div class="card-actions">
+            ${pinBtnHtml}
+            ${delBtnHtml}
+          </div>
+        `;
+        listEl.appendChild(card);
       });
-
-      // 置顶按钮：设置该便签为唯一置顶（互斥，后端统一处理）
-      const pinBtn = card.querySelector(".card-pin") as HTMLButtonElement;
-      pinBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        setNotePriority(item.id).catch((err) => console.error("设置置顶失败:", err));
-      });
-
-      const delBtn = card.querySelector(".card-delete")! as HTMLButtonElement;
-
-      // 两次点击确认删除（替代不可用的 confirm 弹窗）
-      delBtn.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        if (delBtn.classList.contains("confirming")) {
-          try {
-            await deleteNote(item.id);
-            render();
-          } catch (err) {
-            console.error("删除失败:", err);
-            delBtn.classList.remove("confirming");
-            delBtn.textContent = "\u2715";
+      // 【修复】事件委托：容器上注册一次监听，卡片无论重建多少次、何时重建，
+      // 点击永远命中容器 → 不再因重建丢掉点击（“点击没反应/面板卡死”的根因之一）。
+      if (!listEl.dataset.delegated) {
+        listEl.dataset.delegated = "1";
+        listEl.addEventListener("click", (e) => {
+          const target = e.target as HTMLElement;
+          const card = target.closest(".history-card") as HTMLElement | null;
+          if (!card || !card.dataset.id) return;
+          const id = card.dataset.id;
+          // 置顶按钮：设置该便签为唯一置顶（互斥，后端统一处理）
+          if (target.closest(".card-pin")) {
+            setNotePriority(id).catch((err) => console.error("设置置顶失败:", err));
+            return;
           }
-        } else {
-          delBtn.classList.add("confirming");
-          delBtn.textContent = "确认?";
-          setTimeout(() => {
-            if (delBtn.isConnected) {
-              delBtn.classList.remove("confirming");
-              delBtn.textContent = "\u2715";
+          // 删除按钮：两次点击确认（替代不可用的 confirm 弹窗；确认态存按钮自身）
+          const delBtn = target.closest(".card-delete") as HTMLElement | null;
+          if (delBtn) {
+            if (delBtn.classList.contains("confirming")) {
+              deleteNote(id)
+                .then(() => requestRender())
+                .catch((err) => {
+                  console.error("删除失败:", err);
+                  delBtn.classList.remove("confirming");
+                  delBtn.textContent = "\u2715";
+                });
+            } else {
+              delBtn.classList.add("confirming");
+              delBtn.textContent = "确认?";
+              window.setTimeout(() => {
+                if (delBtn.isConnected) {
+                  delBtn.classList.remove("confirming");
+                  delBtn.textContent = "\u2715";
+                }
+              }, 3000);
             }
-          }, 3000);
-        }
-      });
-
-      listEl.appendChild(card);
-    });
+            return;
+          }
+          // 卡片主体 → 打开便签：无论显示状态如何，后端都会 show+聚焦+补发 summoned，
+          // 保证重复点击同一条也能正确重新渲染并展示内容（见 sticky.rs open_note_window）。
+          openNoteWindow(id).catch((err) => console.error("打开便签失败:", err));
+        });
+      }
+    } catch (err) {
+      console.error("渲染历史列表失败:", err);
+    }
   }
 
   render();
