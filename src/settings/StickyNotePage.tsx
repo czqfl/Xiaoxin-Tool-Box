@@ -225,35 +225,46 @@ export function StickyNotePage() {
       {/* ===== 背景与毛玻璃 ===== */}
       <SettingGroup>
         <SettingRow title="背景图片" desc="便签全局默认背景；透明主题下不生效">
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={() => fileRef.current?.click()}
-            >
-              选择图片
-            </button>
-            {settings.bg_image && (
-              <button className="btn btn-sm" onClick={() => patch({ bg_image: "" })}>
-                清除
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "stretch",
+              gap: 8,
+              width: 360,
+              maxWidth: "100%",
+            }}
+          >
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => fileRef.current?.click()}
+              >
+                选择图片
               </button>
-            )}
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              style={{ display: "none" }}
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void uploadBg(f);
-                e.target.value = "";
-              }}
-            />
-          </div>
-          {settings.bg_image && (
-            <div className="sticky-bg-preview">
-              {bgPreview ? <img src={bgPreview} alt="便签背景预览" /> : <span>预览加载中…</span>}
+              {settings.bg_image && (
+                <button className="btn btn-sm" onClick={() => patch({ bg_image: "" })}>
+                  清除
+                </button>
+              )}
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void uploadBg(f);
+                  e.target.value = "";
+                }}
+              />
             </div>
-          )}
+            {settings.bg_image && (
+              <div className="sticky-bg-preview">
+                {bgPreview ? <img src={bgPreview} alt="便签背景预览" /> : <span>预览加载中…</span>}
+              </div>
+            )}
+          </div>
         </SettingRow>
         <SettingRow title="背景沉浸" desc="标题栏、工具栏也透出背景（非沉浸仅输入区）">
           <Switch checked={settings.bg_immersive} onChange={(v) => patch({ bg_immersive: v })} />
