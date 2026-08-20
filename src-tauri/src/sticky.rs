@@ -915,11 +915,16 @@ pub fn ensure_note_window(app: &AppHandle, id: &str) {
             }
             None => builder.center(),
         };
-        if let Ok(win) = builder.build() {
-            let _ = win.show();
-            let _ = win.set_focus();
-            crate::storage::diag_write(&format!("[sticky] ensure_note_window: {label} built+shown"));
-            // 窗口此刻才真正可见，补发显隐事件让工具栏高亮“便签”图标
+        if builder.build().is_ok() {
+            // 新建窗口不在此处 show：前端 init 把主题/背景/毛玻璃全部就绪后再自行显示，
+            // 否则 WebView 尚未加载完就被 show，窗口会先闪一帧「空白/默认外观」，随后才被
+            // 替换成磨砂背景（呼出"闪一下"的根因之一）。
+            // 可见性由前端保证：各呼出路径都已先行 mark_note_open_inner，前端 init 里
+            // getOpenNotes 命中即 show；"已存在"分支（上方）仍即时 show，因为视觉效果早已应用。
+            crate::storage::diag_write(&format!(
+                "[sticky] ensure_note_window: {label} built (frontend shows after visuals ready)"
+            ));
+            // 提前广播可见：工具栏高亮"便签"图标（窗口即将由前端显示，高亮方向正确）
             crate::panel::broadcast_panel_visibility(&app2, &window_label(&id2), true);
             // 登记到运行时可见集合（与"已存在"分支一致，保证收起 toggle 一次即生效）
             VISIBLE_NOTES.lock().unwrap().insert(window_label(&id2));

@@ -402,17 +402,6 @@ export function mountNoteApp(noteId: string, preset = "") {
       console.error("加载便签失败:", err);
       updatePin(true, false);
     }
-    // 便签窗口按“打开中”集合显隐；main 主窗由后端启动流程（show_all_open）统一决定，
-    // 不在前端自行 show——否则启动时会与默认便签同时出现两个窗口。
-    if (noteId !== "main") {
-      try {
-        const open = await getOpenNotes();
-        if (open.includes(noteId)) await getCurrentWindow().show();
-        else await getCurrentWindow().hide();
-      } catch (e) {
-        console.error("读取打开状态失败:", e);
-      }
-    }
     applyMdMode();
     await applyTheme();
     await applyMdTheme();
@@ -421,6 +410,23 @@ export function mountNoteApp(noteId: string, preset = "") {
     applySavedSize();
     await applyBackground();
     await applyGlassEnabled();
+    // 视觉效果（主题/背景/毛玻璃/尺寸）全部就绪后再显示窗口：
+    // 之前是先 show 再应用背景，呼出瞬间会先闪一帧「默认外观」，随后才被磨砂背景替换；
+    // 上一版把模糊改成呼出即生效后，这段残留的“先画后换”闪帧就暴露出来了。
+    // main 主窗仍由后端启动流程（show_all_open）统一决定，不在前端自行 show。
+    if (noteId !== "main") {
+      try {
+        const open = await getOpenNotes();
+        if (open.includes(noteId)) {
+          await getCurrentWindow().show();
+          await getCurrentWindow().setFocus();
+        } else {
+          await getCurrentWindow().hide();
+        }
+      } catch (e) {
+        console.error("读取打开状态失败:", e);
+      }
+    }
     await refreshEdgeSnapSetting();
     probeEdge();
     setInterval(probeEdge, 400);
