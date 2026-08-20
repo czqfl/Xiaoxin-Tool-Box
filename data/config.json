@@ -55,8 +55,7 @@
       "credentials",
       "translation",
       "port",
-      "settings",
-      "sticky"
+      "settings"
     ],
     "orientation": "vertical",
     "auto_hide": true

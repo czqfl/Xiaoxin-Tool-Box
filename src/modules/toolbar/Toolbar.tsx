@@ -415,14 +415,17 @@ export function Toolbar() {
 
   // 按配置的工具数量与排列方向调整窗口尺寸（按钮 28 + 间距 2 + 两端 4px padding）
   const tools = config?.toolbar?.tools ?? [];
+  /** 仅保留 TOOLS 中真实存在的工具键：历史配置若残留已移除的功能
+   *  （如便签），既不渲染也不撑出多余窗口宽度，避免工具栏末尾出现空位。 */
+  const validTools = tools.filter((k) => TOOLS[k]);
   useEffect(() => {
-    if (!tools.length) return;
-    const main = tools.length * (BTN + GAP) + PAD * 2;
+    if (!validTools.length) return;
+    const main = validTools.length * (BTN + GAP) + PAD * 2;
     const cross = BTN + PAD * 2;
     getCurrentWindow()
       .setSize(new LogicalSize(isVertical ? cross : main, isVertical ? main : cross))
       .catch(() => undefined);
-  }, [tools.length, isVertical]);
+  }, [validTools.length, isVertical]);
 
   // 启动兜底：若工具栏因历史 off-screen 残留等完全落在显示器外，夹回屏内，
   // 避免「开启收起后 / 重启后完全找不到」。收起态由 collapsedRef 内存控制，重启本应
@@ -523,7 +526,7 @@ export function Toolbar() {
   }, []);
 
   if (!config?.toolbar?.enabled) return null;
-  if (!tools.length) return null;
+  if (!validTools.length) return null;
 
   return (
     <div
