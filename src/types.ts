@@ -106,8 +106,7 @@ export type ToolKey =
   | "credentials"
   | "translation"
   | "port"
-  | "settings"
-  | "sticky";
+  | "settings";
 
 /** 悬浮工具栏配置：常驻小工具条，快速呼出各面板 */
 export interface ToolbarConfig {

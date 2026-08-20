@@ -21,7 +21,6 @@ import {
   IconKey,
   IconPort,
   IconSettings,
-  IconSticky,
   IconTranslate,
 } from "../../components/icons";
 import "./toolbar.css";
@@ -71,11 +70,6 @@ export const TOOLS: Record<ToolKey, { label: string; color: string; icon: React.
     color: "var(--tool-settings)",
     icon: <IconSettings size={14} />,
   },
-  sticky: {
-    label: "便签",
-    color: "var(--tool-sticky)",
-    icon: <IconSticky size={14} />,
-  },
 };
 
 /** 可用工具列表（设置页勾选用） */
@@ -89,14 +83,13 @@ const PANEL_LABEL_TO_KEY: Record<string, ToolKey> = {
   "port-panel": "port",
   settings: "settings",
   "translate-popup": "translation",
-  "sticky-history": "sticky",
 };
 
 /** 拖动判定阈值（px）：超过视为拖动窗口，否则视为点击。
  *  阈值适当放宽，避免点击时轻微手抖被误判成拖动（"点了没反应"）。 */
 const DRAG_THRESHOLD = 10;
 
-/** 贴边自动收起参数（参考便签 XiaoxinStickyNote 的靠边收起语义：
+/** 贴边自动收起参数（参考桌面悬浮工具条靠边收起语义：
  *  事件驱动——鼠标离开窗口收起、悬停收起条弹出、弹出后鼠标不在窗口内自动再收起） */
 const SLIVER = 12; // 收起后露出的窗口真实边缘宽度（12px：够宽够显眼，配品牌色亮轨）
 const EDGE_MARGIN = 12; // 距屏幕边缘多少像素内算"贴边"
@@ -167,7 +160,7 @@ export function Toolbar() {
     }
   }
 
-  // ---- 靠边收起/弹出（XiaoxinStickyNote 同款）----
+  // ---- 靠边收起/弹出（悬浮工具条贴边吸附）----
   // 缓动：弹出用轻微回弹（easeOutBack），收起用缓入（被"吸入"边缘）
   const easeOutBackSoft = (t: number): number => {
     const c1 = 0.9;
@@ -287,10 +280,7 @@ export function Toolbar() {
     const labels = await panelActive();
     const keys = new Set<ToolKey>();
     for (const label of labels) {
-      // 便签窗口 label 是 note_<id>（id 不定），前缀匹配归入"便签"
-      const k =
-        PANEL_LABEL_TO_KEY[label] ??
-        (label.startsWith("note_") ? ("sticky" satisfies ToolKey) : undefined);
+      const k = PANEL_LABEL_TO_KEY[label];
       if (k) keys.add(k);
     }
     setActiveKeys(keys);

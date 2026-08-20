@@ -51,7 +51,6 @@
   --tool-translation: #a855f7;
   --tool-port: #f97316;
   --tool-settings: #6366f1;
-  --tool-sticky: #8b5cf6;
   /* 品牌色 RGB（供轻渐变/半透明叠加使用） */
   --accent-rgb: 47, 128, 237;
 
@@ -173,7 +172,6 @@
   --tool-translation: #cd96ff;
   --tool-port: #ffab5e;
   --tool-settings: #97a1fb;
-  --tool-sticky: #a78bfa;
   --accent-rgb: 76, 158, 255;
 
   /* 背景：纯中性石墨黑（R=G=B，无蓝偏——与 WorkBuddy 深色一致）。
@@ -219,10 +217,9 @@
 
 /* 深色主题：顶部微光由「品牌蓝」改为「极淡中性白」，去掉整体蓝调。
    【关键】只作用于无 data-window 的普通内容窗口（设置页等）：panel 窗口
-   （html[data-window="panel"]）与便签窗口（data-window="sticky"，
-   含粒子层/图片查看器）的 body 必须保持透明——分别透出窗口亚克力模糊
-   （panel.css）与便签自己的背景图/毛玻璃（styles.css），若此处把 body 盖成
-   不透明底色，悬浮栏/面板的「不透明+模糊」玻璃质感与便签背景会消失。 */
+   （html[data-window="panel"]）的 body 必须保持透明——透出窗口亚克力模糊
+   （panel.css）；若此处把 body 盖成不透明底色，悬浮栏/面板的「不透明+模糊」
+   玻璃质感会消失。 */
 :root[data-theme="dark"]:not([data-window]) body {
   background:
     radial-gradient(1100px 560px at 50% -8%, rgba(255, 255, 255, 0.022), transparent 62%),
@@ -268,7 +265,6 @@
   --tool-translation: #7c3aed;
   --tool-port: #ea580c;
   --tool-settings: #4f46e5;
-  --tool-sticky: #7c3aed;
   --accent-rgb: 15, 159, 140;
 
   /* 背景：淡青灰（app 底与面板拉开明度差） */
@@ -351,7 +347,6 @@
   --tool-translation: #7c3aed;
   --tool-port: #ea580c;
   --tool-settings: #4f46e5;
-  --tool-sticky: #7c3aed;
   --accent-rgb: 22, 119, 255;
 
   /* 背景：明显淡蓝（与浅色的中性灰一眼区分） */
@@ -434,7 +429,6 @@
   --tool-translation: #b8426f;
   --tool-port: #e0623c;
   --tool-settings: #c2407a;
-  --tool-sticky: #b8426f;
   --accent-rgb: 207, 58, 67;
 
   /* 背景：极淡暖白玫瑰灰（红韵但不抢内容，与浅青/浅蓝同构） */
@@ -517,7 +511,6 @@
     --tool-translation: #cd96ff;
     --tool-port: #ffab5e;
     --tool-settings: #97a1fb;
-    --tool-sticky: #a78bfa;
     --accent-rgb: 76, 158, 255;
 
     /* 背景：纯中性石墨黑（与 data-theme="dark" 一致——R=G=B 无蓝偏，
@@ -562,7 +555,7 @@
 
   /* 系统深色下的 body 顶部微光：与 data-theme="dark" 一致——
      由 base.css 的「品牌色微光」改为「极淡中性白」，去掉整体蓝调。
-     同样只作用于无 data-window 的普通窗口（panel/便签窗口 body 保持透明） */
+     同样只作用于无 data-window 的普通窗口（panel 窗口 body 保持透明） */
   :root:not([data-theme="light"]):not([data-theme="dark"]):not([data-theme="mint"]):not([data-theme="skyblue"]):not([data-theme="red"]):not([data-window]) body {
     background:
       radial-gradient(1100px 560px at 50% -8%, rgba(255, 255, 255, 0.022), transparent 62%),

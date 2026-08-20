@@ -117,19 +117,13 @@ pub fn panel_active(app: tauri::AppHandle) -> Vec<String> {
             labels.push((*label).to_string());
         }
     }
-    for label in ["settings", crate::translate::TRANSLATE_PANEL, crate::sticky::HISTORY_WINDOW] {
+    for label in ["settings", crate::translate::TRANSLATE_PANEL] {
         if app
             .get_webview_window(label)
             .and_then(|w| w.is_visible().ok())
             .unwrap_or(false)
         {
             labels.push(label.to_string());
-        }
-    }
-    // 便签窗口（note_*）可见时也算“面板打开”，工具栏据此点亮“便签”图标
-    for (label, w) in app.webview_windows() {
-        if label.starts_with(crate::sticky::NOTE_PREFIX) && w.is_visible().unwrap_or(false) {
-            labels.push(label);
         }
     }
     labels
@@ -176,30 +170,6 @@ pub fn panel_toggle(app: tauri::AppHandle, label: String) -> Result<(), String> 
         }
         crate::translate::trigger_selection_translate(&app);
         broadcast_panel_visibility(&app, crate::translate::TRANSLATE_PANEL, true);
-        return Ok(());
-    }
-    // 便签：工具栏入口 toggle 历史窗口（可见 → 收起；不可见/无 → 打开）。
-    // 历史窗口关闭 = 隐藏常驻（close_window 语义），再次点击秒开，不重建。
-    // 便签窗口各自独立显隐，不受此开关影响。
-    if label == "sticky" {
-        let hist = app.get_webview_window(crate::sticky::HISTORY_WINDOW);
-        let visible = hist
-            .as_ref()
-            .map(|w| w.is_visible().unwrap_or(false))
-            .unwrap_or(false);
-        if visible {
-            crate::storage::diag_write("[panel_toggle] sticky -> hide history");
-            if let Some(w) = hist {
-                let _ = w.hide();
-            }
-            broadcast_panel_visibility(&app, crate::sticky::HISTORY_WINDOW, false);
-        } else {
-            crate::storage::diag_write("[panel_toggle] sticky -> open history");
-            let _ = crate::sticky::open_history_window(app.clone());
-            // 呼出时强制刷新历史列表（兜底：任何便签开/关状态漂移都被覆盖）
-            let _ = app.emit(crate::sticky::EVT_NOTE_STATE_CHANGED, ());
-            broadcast_panel_visibility(&app, crate::sticky::HISTORY_WINDOW, true);
-        }
         return Ok(());
     }
     let full = match label.as_str() {
@@ -386,7 +356,7 @@ pub fn hide_focused_panel<R: Runtime>(app: &AppHandle<R>) {
 /// URL 跟随运行模式：dev 用 devUrl（vite dev server），生产用打包资源。
 /// 重建后重新应用亚克力效果，避免"面板窗口消失后所有入口静默失效"。
 /// 【重建走事件循环空闲时创建】同步命令运行在主线程 WebView2 IPC 回调里，
-/// 直接 build 会重入挂死（同便签窗口卡死问题）；经 defer_to_main_loop 投递，
+/// 直接 build 会重入挂死（同 WebView2 窗口创建卡死问题）；经 defer_to_main_loop 投递，
 /// 主循环空闲时创建。本次调用返回 None，下一次 toggle 时窗口已就绪。
 fn ensure_panel_window<R: Runtime>(
     app: &AppHandle<R>,
@@ -402,7 +372,7 @@ fn ensure_panel_window<R: Runtime>(
     };
     let app2 = app.clone();
     let label2 = label.to_string();
-    crate::sticky::defer_to_main_loop(app2.clone(), move || {
+    crate::defer_to_main_loop(app2.clone(), move || {
         let _ = WebviewWindowBuilder::new(&app2, label2.as_str(), url)
             .title(label2.clone())
             .inner_size(640.0, 480.0)

@@ -11,7 +11,6 @@ import { GeneralPage } from "./GeneralPage";
 import { AboutPage } from "./AboutPage";
 import { TranslationPage } from "./TranslationPage";
 import { ToolbarPage } from "./ToolbarPage";
-import { StickyNotePage } from "./StickyNotePage";
 import { SettingsErrorBoundary } from "./ErrorBoundary";
 import {
   IconClipboard,
@@ -20,7 +19,6 @@ import {
   IconInfo,
   IconKeyboard,
   IconSettings,
-  IconSticky,
   IconTranslate,
 } from "../components/icons";
 import "../styles/settings.css";
@@ -32,13 +30,11 @@ type Page =
   | "general"
   | "translation"
   | "toolbar"
-  | "sticky"
   | "about";
 
 const NAV_ITEMS: Array<{ key: Page; label: string; icon: React.ReactNode }> = [
   { key: "clipboard", label: "剪贴板设置", icon: <IconClipboard size={15} /> },
   { key: "folder", label: "文件夹设置", icon: <IconFolder size={15} /> },
-  { key: "sticky", label: "便签设置", icon: <IconSticky size={15} /> },
   { key: "translation", label: "翻译设置", icon: <IconTranslate size={15} /> },
   { key: "shortcut", label: "快捷键设置", icon: <IconKeyboard size={15} /> },
   { key: "toolbar", label: "悬浮工具栏", icon: <IconGrid size={15} /> },
@@ -89,10 +85,6 @@ export function SettingsApp() {
     onEvent<string>(EVT_SHORTCUT_FAILED, (target) => {
       setShortcutFailed(target === "clipboard" ? "呼出剪贴板" : "呼出文件夹");
       setPage("shortcut");
-    }).then((un) => (disposed ? un() : cleanup.push(un)));
-    // 便签窗口"设置"入口：跳到便签设置页
-    onEvent<void>("sticky://goto-settings", () => {
-      setPage("sticky");
     }).then((un) => (disposed ? un() : cleanup.push(un)));
     return () => {
       disposed = true;
@@ -171,7 +163,6 @@ export function SettingsApp() {
         {page === "general" && <GeneralPage />}
         {page === "translation" && <TranslationPage />}
         {page === "toolbar" && <ToolbarPage />}
-        {page === "sticky" && <StickyNotePage />}
         {page === "about" && <AboutPage />}
       </main>
       </div>

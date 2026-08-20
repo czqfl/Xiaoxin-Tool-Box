@@ -287,15 +287,6 @@ export const IconCheck = (p: IconProps) => (
   </svg>
 );
 
-/** 便签（记事本/贴纸）：工具栏"便签"入口用 */
-export const IconSticky = (p: IconProps) => (
-  <svg {...base(p)}>
-    <path d="M4 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12l-6 6H6a2 2 0 0 1-2-2V4Z" />
-    <path d="M14 14v6l6-6" />
-    <path d="M8 8h8M8 12h5" />
-  </svg>
-);
-
 /** 翻译：左侧「文」字 + 右侧「A」（多语言互译，最经典的翻译图标） */
 export const IconTranslate = (p: IconProps) => (
   <svg {...base(p)}>

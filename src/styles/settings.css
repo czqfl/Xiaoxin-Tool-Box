@@ -471,24 +471,7 @@
   color: var(--accent);
 }
 
-/* 便签设置面板（iframe 嵌入原版面板） */
-.sticky-settings-frame-wrap {
-  margin-top: 4px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  height: calc(100vh - 240px);
-  min-height: 460px;
-  background: var(--bg-panel);
-}
-.sticky-settings-frame-wrap iframe {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border: none;
-}
-
-/* ---- 便签设置页（完整功能版）：输入/下拉/快捷键录制（工具箱风格） ---- */
+/* 设置页通用输入/下拉/快捷键录制控件 */
 .settings-input,
 .settings-select {
   box-sizing: border-box;
@@ -539,35 +522,7 @@
   0%, 100% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.25); }
   50% { box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.08); }
 }
-/* 便签背景图预览（完整功能版） */
-.sticky-bg-preview {
-  margin-top: 10px;
-  max-width: 360px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-subtle);
-  overflow: hidden;
-  background: var(--bg-panel);
-  position: relative;
-}
-/* 整行独占预览：脱离控件列，占满分组宽度（图片单独一行，文字另占一行） */
-.sticky-bg-preview--full {
-  max-width: none;
-  margin: 0 16px 16px;
-}
-.sticky-bg-preview img {
-  display: block;
-  width: 100%;
-  max-height: 160px;
-  object-fit: cover;
-}
-.sticky-bg-preview span {
-  display: block;
-  padding: 14px;
-  font-size: 12px;
-  color: var(--text-tertiary);
-}
-
-/* 快捷键页：便签分组标题 */
+/* 快捷键页：分组标题 */
 .setting-group-title {
   margin: 20px 0 8px;
   font-size: 13px;
