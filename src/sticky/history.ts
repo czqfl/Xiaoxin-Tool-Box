@@ -45,6 +45,8 @@ export function mountHistoryApp() {
     try {
       const id = await newNoteId();
       await createNoteWindow(id);
+      // 同源修复：新建便签后收起历史面板，避免新便签被面板遮挡（见卡片点击处说明）
+      await closeWindow().catch(() => {});
     } catch (err) {
       console.error("新建便签失败:", err);
     }
@@ -231,8 +233,13 @@ export function mountHistoryApp() {
         </div>
       `;
 
-      card.addEventListener("click", () => {
-        openNoteWindow(item.id).catch((e) => console.error("打开便签失败:", e));
+          card.addEventListener("click", () => {
+        // 历史面板本身也是 always-on-top 且持有焦点：直接 show 便签时，便签常被
+        // 历史面板遮挡（Windows 前台锁令 set_focus 偶发不生效），表现为"点了打不开"。
+        // 打开便签后收起历史面板，保证便签一定可见（历史上"从面板打不开"的根因）。
+        openNoteWindow(item.id)
+          .then(() => closeWindow().catch(() => {}))
+          .catch((e) => console.error("打开便签失败:", e));
       });
 
       // 置顶按钮：设置该便签为唯一置顶（互斥，后端统一处理）
