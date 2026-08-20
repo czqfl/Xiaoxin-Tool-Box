@@ -1,6 +1,6 @@
 [package]
 name = "xiaoxin-toolbox"
-version = "1.0.0"
+version = "1.0.1"
 description = "小心工具箱 - Windows 桌面快捷工具集"
 authors = ["xiaoxin"]
 edition = "2021"
