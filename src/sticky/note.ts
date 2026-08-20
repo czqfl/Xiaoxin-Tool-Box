@@ -1816,7 +1816,7 @@ export function mountNoteApp(noteId: string, preset = "") {
     }, 50);
   };
 
-  function requestAnimatedClose() {
+  async function requestAnimatedClose() {
     if (closing) return;
     closing = true;
     finished = false;
@@ -1843,14 +1843,26 @@ export function mountNoteApp(noteId: string, preset = "") {
     anim.flame?.cancelFlame();
     anim.glass?.cancelGlassShards();
     summonSeq++; // 作废进行中的呼出（其 getSettings().then 会检查 seq 后跳过）
-    // 透明主题：无粒子特效，直接隐藏（亚克力常驻整窗，无需动画遮罩）
-    if (noteWindow.classList.contains("bg-transparent")) {
+    // 主题判定以【设置】为权威来源，而非依赖 bg-transparent CSS 类：
+    // applyBackground 若在初始化时抛错未加上该类，透明主题会误走「动画分支」白等约 1s，
+    // 表现为「快捷键关闭有延迟、且看不到动画」。改读设置后，透明主题必定即时关闭、无动画。
+    let settings: Awaited<ReturnType<typeof getSettings>> | null = null;
+    try {
+      settings = await getSettings();
+    } catch {
+      /* 读取失败则回退 CSS 类判断 */
+    }
+    const transparent =
+      settings !== null
+        ? settings.theme === "transparent"
+        : noteWindow.classList.contains("bg-transparent");
+    if (transparent) {
       finishClose();
       return;
     }
     // 非透明主题：按粒子数量/风格设置启动关闭动画（数量从设置读取，失败回退默认 50）
     // 【懒加载】动画模块与 getSettings 并行加载：首次关闭才动态 import（vite 分包）
-    void Promise.all([getSettings(), anim.load()])
+    void Promise.all([settings !== null ? Promise.resolve(settings) : getSettings(), anim.load()])
       .then(([s]) => {
         // getSettings 是异步的：等待期间若用户又呼出了（closing 已被复位/取消），
         // 作废本次关闭，避免关闭动画与呼出动画同时改 clip-path 打架导致“卡住”。

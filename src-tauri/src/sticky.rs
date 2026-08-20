@@ -853,6 +853,10 @@ pub fn ensure_note_window(app: &AppHandle, id: &str) {
         let _ = win.show();
         let _ = win.unminimize();
         let _ = win.set_focus();
+        // 重新置顶：从「历史便签面板」点击打开时，历史面板也是 always_on_top 且持有
+        // 焦点，便签虽被 show 仍可能停在面板后面（Windows 前台锁令 set_focus 偶发不生效）。
+        // 再次置顶把便签插到置顶层最上方，确保它压在面板之上、必定可见（面板保持常开）。
+        let _ = win.set_always_on_top(true);
         // 登记到运行时可见集合：无论经由历史面板点击、工具栏入口还是快捷键打开，
         // toggle/快捷键「收起」都能在第一次按下即识别到"有可见便签"（此前仅快捷键
         // 路径登记，导致历史面板打开的便签要按两次才关得掉）。
