@@ -934,8 +934,9 @@ pub fn ensure_note_window(app: &AppHandle, id: &str) {
             let label3 = window_label(&id2);
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_millis(500));
+                let app_inner = app3.clone(); // 闭包内再克隆：避免 move 闭包与调用方借用冲突（E0505）
                 let _ = app3.run_on_main_thread(move || {
-                    if let Some(win) = app3.get_webview_window(&label3) {
+                    if let Some(win) = app_inner.get_webview_window(&label3) {
                         let _ = win.show();
                         let _ = win.set_focus();
                     }
