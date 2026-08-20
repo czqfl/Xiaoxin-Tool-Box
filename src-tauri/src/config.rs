@@ -204,6 +204,10 @@ pub enum ThemeMode {
     Dark,
     /// 浅青色主题（淡青背景 + 青绿品牌色，浅色系）
     Mint,
+    /// 浅蓝色主题（淡蓝背景 + 天蓝品牌色，浅色系）
+    Skyblue,
+    /// 红色主题（浅红背景 + 红品牌色，浅色系）
+    Red,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -928,6 +928,19 @@ pub fn ensure_note_window(app: &AppHandle, id: &str) {
             crate::panel::broadcast_panel_visibility(&app2, &window_label(&id2), true);
             // 登记到运行时可见集合（与"已存在"分支一致，保证收起 toggle 一次即生效）
             VISIBLE_NOTES.lock().unwrap().insert(window_label(&id2));
+            // 兜底：前端若因故未显示（init 异常 / 设置加载卡住），500ms 后强制显示，
+            // 保证"一次呼出必现"；正常路径前端在 ~300ms 已自行显示，此兜底为 no-op。
+            let app3 = app2.clone();
+            let label3 = window_label(&id2);
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                let _ = app3.run_on_main_thread(move || {
+                    if let Some(win) = app3.get_webview_window(&label3) {
+                        let _ = win.show();
+                        let _ = win.set_focus();
+                    }
+                });
+            });
         } else {
             crate::storage::diag_write(&format!("[sticky] ensure_note_window: {label} BUILD FAILED"));
         }

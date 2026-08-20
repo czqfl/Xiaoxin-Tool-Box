@@ -402,21 +402,29 @@ export function mountNoteApp(noteId: string, preset = "") {
       console.error("加载便签失败:", err);
       updatePin(true, false);
     }
-    applyMdMode();
-    await applyTheme();
-    await applyMdTheme();
-    updateMaxIcon();
-    await refreshSettingsUI();
-    applySavedSize();
-    await applyBackground();
-    await applyGlassEnabled();
-    // 视觉效果（主题/背景/毛玻璃/尺寸）全部就绪后再显示窗口：
-    // 之前是先 show 再应用背景，呼出瞬间会先闪一帧「默认外观」，随后才被磨砂背景替换；
-    // 上一版把模糊改成呼出即生效后，这段残留的“先画后换”闪帧就暴露出来了。
+    // 外观（主题/背景/毛玻璃/尺寸）应用失败绝不影响显示：先尽力"上妆"，失败也继续显示。
+    // 否则 init 在显示之前中断 → 新建便签第一次呼出永远不出现，必须再按一次快捷键由后端
+    // "已存在"分支兜底 show —— 即用户反馈的「连续两次快捷键才能呼出」。
+    try {
+      applyMdMode();
+      await applyTheme();
+      await applyMdTheme();
+      updateMaxIcon();
+      await refreshSettingsUI();
+      applySavedSize();
+      await applyBackground();
+      await applyGlassEnabled();
+    } catch (err) {
+      console.error("便签外观应用失败（已忽略，继续显示）:", err);
+    }
+    // 视觉效果就绪后再显示窗口：避免呼出瞬间先闪一帧「默认外观」再被磨砂背景替换。
     // main 主窗仍由后端启动流程（show_all_open）统一决定，不在前端自行 show。
     if (noteId !== "main") {
       try {
         const open = await getOpenNotes();
+        void invoke("diag_log", {
+          msg: `[note] init show: noteId=${noteId} open=${JSON.stringify(open)}`,
+        }).catch(() => {});
         if (open.includes(noteId)) {
           await getCurrentWindow().show();
           await getCurrentWindow().setFocus();

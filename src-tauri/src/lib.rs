@@ -58,7 +58,7 @@ pub(crate) fn window_theme_is_light<R: tauri::Runtime>(window: &tauri::WebviewWi
     use crate::config::{ConfigState, ThemeMode};
     if let Some(cfg) = window.app_handle().try_state::<ConfigState>() {
         match cfg.0.lock().unwrap().general.theme {
-            ThemeMode::Light | ThemeMode::Mint => return true,
+            ThemeMode::Light | ThemeMode::Mint | ThemeMode::Skyblue | ThemeMode::Red => return true,
             ThemeMode::Dark => return false,
             ThemeMode::System => {}
         }
