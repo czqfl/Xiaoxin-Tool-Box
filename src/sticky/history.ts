@@ -1,7 +1,7 @@
 import { listNotes, deleteNote, openNoteWindow, closeWindow, startDragging, getOpenNotes, setAcrylic, newNoteId, createNoteWindow, setNotePriority } from "./api";
-import { getSettings } from "./settings";
+import { getSettings, normalizeOpacity } from "./settings";
 import { applyPanelBackground } from "./panel-bg";
-import { applyGlassBlur } from "./glass";
+import { applyGlassBlur, parseColorToRgbInt } from "./glass";
 import type { NoteMeta, Settings } from "./types";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -115,20 +115,34 @@ export function mountHistoryApp() {
     if (!root) return;
     const transparent = s.theme === "transparent";
     if (transparent) {
-      // 集成版差异：历史窗口为非透明窗口（规避透明 WebView2 挂起），
-      // transparent 主题降级为实色 var(--bg)，不再切 bg-transparent 也不上亚克力
-      root.classList.remove("has-bg", "on-dark-bg", "glass", "bg-transparent");
+      // 与便签窗口完全一致：透明主题走 DWM 原生亚克力（实时模糊背后桌面），
+      // 不再退化成「静态壁纸图」——此前历史窗口为非透明窗体，只能塞一张压糊的
+      // 壁纸图冒充模糊，正是用户反馈“背景是张图片而不是实时模糊”的根因。
+      // 历史窗口现已 transparent(true)，WebView 默认透明，亚克力可直接透出。
+      root.classList.remove("has-bg", "on-dark-bg", "glass", "transparent-clear");
+      root.classList.add("bg-transparent");
       root.style.removeProperty("--note-bg-img");
       root.style.removeProperty("--note-bg-opacity");
       root.style.removeProperty("--glass-blur");
       document.documentElement.style.removeProperty("--trans-opacity");
       root.style.removeProperty("--trans-opacity");
-      setAcrylic(false, 0, 0).catch(() => {});
-      await applyPanelBackground(root, s);
-      const hasBg = root.classList.contains("has-bg");
-      const pct = s.glass_blur ?? 55;
-      const enabled = s.glass_enabled !== false;
-      applyGlassBlur({ target: root, strength: hasBg ? pct : 0, enabled: hasBg && enabled });
+      // 背景不透明度：<2% 完全透明（无模糊无面板）；≥2% 原生亚克力实时模糊 +
+      // 主题色半透明面板（0.6 × 滑块值，上限 60%，始终透出磨砂感，不变成实心白板）。
+      const o = normalizeOpacity(s.transparent_opacity);
+      if (o < 2) {
+        root.classList.add("transparent-clear");
+        root.style.setProperty("--trans-opacity", "0");
+        document.documentElement.style.setProperty("--trans-opacity", "0");
+        setAcrylic(false, 0, 0).catch(() => {});
+      } else {
+        root.classList.remove("transparent-clear");
+        const capped = Math.round(o * 0.6);
+        root.style.setProperty("--trans-opacity", String(capped));
+        document.documentElement.style.setProperty("--trans-opacity", String(capped));
+        const tint = parseColorToRgbInt(getComputedStyle(root).getPropertyValue("--bg")) ?? 0;
+        setAcrylic(true, 1, tint).catch((e) => console.error("应用实时模糊失败:", e));
+      }
+      applyGlassBlur({ target: root, strength: 0, enabled: false });
     } else {
       root.classList.remove("bg-transparent");
       document.documentElement.style.removeProperty("--trans-opacity");

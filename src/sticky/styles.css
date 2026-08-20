@@ -1496,8 +1496,17 @@ body,
   will-change: filter;
 }
 .history-window.has-bg > * { position: relative; z-index: 1; }
-/* 透明主题：窗口本体透明，让 DWM 原生亚克力磨砂桌面透出来（与便签一致） */
-.history-window.bg-transparent { background: transparent; }
+/* 透明主题：窗口本体透出 DWM 原生亚克力（实时模糊背后桌面），并叠一层主题色
+   半透明面板（深浅由 --trans-opacity 控制，公式与便签 .note-window.bg-transparent
+   完全一致：0.6 × “背景不透明度”滑块，上限 60%），保证始终透出磨砂感、不变成实心白板。 */
+.history-window.bg-transparent {
+  background: color-mix(in srgb, var(--bg) calc(var(--trans-opacity, 65) * 1%), transparent);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.14),
+    inset 0 -14px 28px rgba(0, 0, 0, 0.08);
+}
+/* 背景不透明度 0%：完全透明（无模糊无面板），去掉面板边缘框线 */
+.history-window.bg-transparent.transparent-clear { box-shadow: none; }
 /* 玻璃卡片：列表与卡片半透，透出背后的背景图/模糊 */
 .history-window.has-bg .history-list,
 .history-window.bg-transparent .history-list { background: transparent; }

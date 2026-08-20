@@ -1140,7 +1140,12 @@ pub fn open_history_window(app: AppHandle) -> Result<(), String> {
         let win = WebviewWindowBuilder::new(&app2, LABEL, WebviewUrl::App("index.html".into()))
             .title("历史便签")
             .decorations(false)
-            .transparent(false)
+            // 透明窗体：与便签窗口一致，使 WebView 默认背景透明，DWM 原生亚克力
+            // （实时模糊背后桌面）才能透过 CSS 透明区域显示出来。此前为 transparent(false)，
+            // WebView 默认不透明，透明主题只能退化为「静态壁纸图」——这正是用户反馈
+            // “历史面板背景是张图片而不是实时模糊”的根因。设置窗口(sticky-settings)
+            // 同样 transparent(true) 且实时亚克力工作正常，故此处放开安全。
+            .transparent(true)
             // 系统缩放边框：无边框 + resizable 时 Windows 提供隐形四边/四角
             // 拖拽热区——上下左右都能自由调大小（用户反馈自定义手柄失效 + 要全方向）
             .resizable(true)
