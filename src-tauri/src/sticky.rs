@@ -955,45 +955,19 @@ pub fn ensure_note_window(app: &AppHandle, id: &str) {
 #[tauri::command]
 pub fn open_note_window(app: AppHandle, paths: State<'_, AppPaths>, id: String) -> Result<(), String> {
     crate::storage::diag_write(&format!("[sticky] open_note_window called: id={id}"));
+    // 单一事实来源：先把 id 写入"打开中"集合（新建窗口的前端 init 据此自行显示）
     mark_note_open_inner(&paths, &id);
-    // 立即广播"打开中"：历史列表实时更新该便签状态（此前 open_note_window
-    // 只调无广播的 inner，若窗口需新建（ensure 创建分支）则历史收不到事件）
+    // 立即广播：历史列表实时更新该便签状态
     let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
     ensure_note_window(&app, &id);
-    let label = window_label(&id);
-    if let Some(win) = app.get_webview_window(&label) {
-        // 再兜底一次：确保窗口可见、未最小化、压在其他置顶窗（历史面板）之上
+    // 已存在窗口：show + 聚焦 + 置顶（压过历史面板等置顶窗），并通知前端复原/重绘。
+    // 已存在窗口的 JS 必然已就绪，一次 summoned 必达（前端无条件清理样式 + 强制重绘）；
+    // 新建窗口由前端 init 依"打开集合"自行显示，无需 summoned。
+    if let Some(win) = app.get_webview_window(&window_label(&id)) {
         let _ = win.show();
         let _ = win.unminimize();
         let _ = win.set_always_on_top(true);
-        // 【修复·打开状态异常】summoned 必须确保送达：新建窗口经 defer_to_main_loop
-        // 延迟构建，此刻 get_webview_window 可能还是 None → 首帧 summoned 丢失，
-        // 便签被 show 出来却是空白/不复原（用户反馈"显示打开中但内容没渲染"）。
-        // 分时多次补发（立即 + 120ms + 600ms），无论 JS 何时就绪都能收到并复原内容。
         let _ = win.emit("summoned", ());
-        let app2 = app.clone();
-        let app3 = app2.clone();
-        let label3 = label.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(120));
-            let _ = app2.run_on_main_thread(move || {
-                if let Some(w) = app3.get_webview_window(&label3) {
-                    let _ = w.emit("summoned", ());
-                }
-            });
-        });
-        let app4 = app.clone();
-        let app5 = app4.clone();
-        let label5 = label.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(600));
-            let _ = app4.run_on_main_thread(move || {
-                if let Some(w) = app5.get_webview_window(&label5) {
-                    let _ = w.emit("summoned", ());
-                }
-            });
-        });
-        crate::storage::diag_write(&format!("[sticky] open_note_window: emitted summoned to {id}"));
     }
     Ok(())
 }

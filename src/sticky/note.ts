@@ -836,22 +836,7 @@ export function mountNoteApp(noteId: string, preset = "") {
     // 呼出：恢复保存状态提示的显示（关闭动画期间的抑制结束）
     suppressSaveStatus = false;
     if (collapsed) expandFromEdge(false);
-    // 防御：若便签仍残留“隐藏时空画面”样式（clip/mask 未清，可能上次呼出的异步复原未生效），
-    // 立即复原显示——避免呼出后窗口空白、或需多次按键才显示。幂等，已正常显示时无害。
-    // 关键：有残留空白样式 = 必然是从“隐藏态”呼出（无论隐藏方式是托盘/工具栏/关闭动画）。
-    // 此时无论 wasHidden 是否已在隐藏时置位，都必须把它视为隐藏→呼出转移并走恢复/成形路径，
-    // 否则“工具栏隐藏 → 再次点开”时 wasHidden 未置位，恢复被吞掉，窗口空白打不开（用户反馈的根因）。
-    const blanked =
-      !!noteWindow.style.clipPath ||
-      !!noteWindow.style.webkitMaskImage ||
-      !!noteWindow.style.maskImage ||
-      noteWindow.style.opacity === "0";
-    if (blanked) {
-      wasHidden = true;
-      // 粒子模式先清空 mask/clip，保证即便成形动画不启动，内容也立即可见
-      restoreGlowSummoned();
-    }
-    // 呼出打断进行中的关闭动画：先取消关闭（取消会复原页面、且不会触发 finish/隐藏），
+    // 呼出打断进行中的关闭动画：先取消（取消会复原页面、且不会触发 finish/隐藏），
     // 再按普通呼出流程处理，避免“关闭动画没播完就呼出”导致窗口又被隐藏/动画卡住。
     if (closing) {
       closing = false;
@@ -860,52 +845,65 @@ export function mountNoteApp(noteId: string, preset = "") {
       anim.flame?.cancelFlame();
       anim.glow?.cancelGlowParticles();
       anim.glass?.cancelGlassShards();
-      // 关闭动画已被打断：把窗口视为"从空画面呼出"，补播呼出成形动画——
+      anim.inhale?.cancelInhaleParticles();
+      // 关闭动画已被打断：把窗口视为"从隐藏态呼出"，补播呼出成形动画——
       // 否则 wasHidden 仍为 false（finish 未执行），呼出动画被吞掉、窗口空着。
       wasHidden = true;
     }
+    // 【新逻辑·无条件复原】不再做 blanked 检测，也不区分隐藏方式：
+    // 呼出时一律清空残留的裁剪/透明/阴影样式并强制重绘，内容必定完整显示。
+    // 便签本体在关闭动画结束（finishClose）时即清理样式，不存在"空画面"残留；
+    // 这里无条件清理是双保险，且幂等无害。
+    noteWindow.style.clipPath = "";
+    noteWindow.style.setProperty("-webkit-mask-image", "");
+    noteWindow.style.setProperty("mask-image", "");
+    noteWindow.style.opacity = "";
+    noteWindow.style.boxShadow = "";
+    // 呼出时确保主题/背景为最新：便签隐藏期间若设置被修改，隐藏窗口的 IPC 事件
+    // 可能被 WebView2 延迟处理，这里显式重应用一次（幂等，失败忽略）。
+    void applyTheme().catch(() => {});
+    void applyBackground().catch(() => {});
+    void applyGlassEnabled().catch(() => {});
     // 呼出动画：仅从“隐藏态”呼出时播放（隐藏时窗口保持空画面），
     // 已可见的便签不重复动画；关闭动画播放中也不插入
     if (wasHidden && !closing) {
       wasHidden = false;
       if (noteWindow.classList.contains("bg-transparent")) {
-        // 透明主题：无粒子特效，直接复原便签显示（窗口已由后端显示）
-        noteWindow.style.clipPath = "";
-        noteWindow.style.boxShadow = "";
-        noteWindow.style.opacity = "";
+        // 透明主题：无粒子特效，直接复原显示（窗口已由后端显示）
         // 关闭后 50ms 内立刻呼出时亚克力还没恢复：立即补上，
         // 避免等定时器在可见窗口上触发 SWCA 造成卡顿 + 模糊晚到
         if (acrylicOffPending) {
           acrylicOffPending = false;
           applyAcrylic().catch(() => {});
         }
-        return;
+      } else {
+        // 非透明主题：按粒子数量/风格设置启动呼出动画（火焰模式（设置值 "erode"，历史命名）用火焰成形；
+        // 粒子吸入用吸入动画；默认「粒子光效」无呼出动画——直接复原便签显示）。
+        // 【懒加载】动画模块与 getSettings 并行加载：首次播放才动态 import（vite 分包）
+        const seq = summonSeq; // 快照：等待期间若被隐藏/关闭作废则跳过
+        void Promise.all([getSettings(), anim.load()])
+          .then(([s]) => {
+            if (seq !== summonSeq || closing || deleted) return;
+            const intensity = s.particle_count ?? 50;
+            const speed = s.animation_speed ?? 100;
+            if (s.particle_mode === "erode") anim.flame!.playFlameMaterialize(noteWindow, intensity, speed);
+            else if (s.particle_mode === "inhale") anim.inhale!.playInhaleMaterialize(noteWindow, intensity, speed);
+            else if (s.particle_mode === "glass") anim.glass?.restoreGlassSummoned(); // 玻璃碎裂无成形动画：直接复原
+            else restoreGlowSummoned();
+          })
+          .catch(() => {
+            if (seq !== summonSeq || closing || deleted) return;
+            // 读取失败回退到默认「粒子光效」：直接复原便签显示
+            restoreGlowSummoned();
+          });
       }
-      // 非透明主题：按粒子数量/风格设置启动呼出动画（火焰模式（设置值 "erode"，历史命名）用火焰消散；
-      // 粒子吸入用吸入动画；默认「粒子光效」无呼出动画——直接复原便签显示）。
-      // 【懒加载】动画模块与 getSettings 并行加载：首次播放才动态 import（vite 分包）
-      const seq = summonSeq; // 快照：等待期间若被隐藏/关闭作废则跳过
-      void Promise.all([getSettings(), anim.load()])
-        .then(([s]) => {
-          if (seq !== summonSeq || closing || deleted) return;
-          const intensity = s.particle_count ?? 50;
-          const speed = s.animation_speed ?? 100;
-          if (s.particle_mode === "erode") anim.flame!.playFlameMaterialize(noteWindow, intensity, speed);
-          else if (s.particle_mode === "inhale") anim.inhale!.playInhaleMaterialize(noteWindow, intensity, speed);
-          else if (s.particle_mode === "glass") anim.glass?.restoreGlassSummoned(); // 玻璃碎裂无成形动画：直接复原
-          else restoreGlowSummoned();
-        })
-        .catch(() => {
-          if (seq !== summonSeq || closing || deleted) return;
-          // 读取失败回退到默认「粒子光效」：直接复原便签显示
-          restoreGlowSummoned();
-        });
     }
     // 确保窗口真正激活/置顶：Windows 前台锁会令全局快捷键触发的 show 偶尔不激活窗口
     // （窗口可见却躲在别的窗口后面 → 看似“没呼出”，需多次按键）。从窗口自身上下文再 focus 一次。
     appWindow.setFocus().catch(() => {});
-    // 强制重绘：WebView2 透明窗口 hidden→shown 后偶发内容不复绘（窗口可见却空白），
-    // 轻微改动几何强制重排版/重绘，彻底根治「重新点开便签是空白」。
+    // 【修复】强制重绘必须无条件执行（透明主题也执行）：WebView2 透明窗口
+    // hidden→shown 后偶发内容不复绘（窗口可见却空白）——此前透明分支提前 return
+    // 跳过了这段，正是"显示打开中但内容没渲染"的直接原因之一。
     requestAnimationFrame(() => {
       const n = noteWindow;
       n.style.transform = "scale(0.9999)";
@@ -1753,7 +1751,6 @@ export function mountNoteApp(noteId: string, preset = "") {
   // 每便签背景图改在设置弹窗中配置（见 settings.ts），便签页面不再提供入口
 
   btnTray.addEventListener("click", () => {
-    // 隐藏前先进入"空画面"状态：下次呼出时粒子成形动画从空开始，不闪出旧内容。
     // 作废尚未开始的呼出（getSettings 等待中），取消进行中的呼出/关闭动画——
     // **无条件取消两个动画**（不能只在 closing 时取消：火焰呼出动画播放中隐藏时
     // 若不清 materializing，下次呼出会被 playFlameMaterialize 拒绝，窗口显示空画面卡死）。
@@ -1766,7 +1763,9 @@ export function mountNoteApp(noteId: string, preset = "") {
     anim.flame?.cancelFlame();
     anim.glow?.cancelGlowParticles();
     anim.glass?.cancelGlassShards();
-    noteWindow.style.clipPath = "inset(0 0 100% 0)";    noteWindow.style.boxShadow = "none";
+    anim.inhale?.cancelInhaleParticles();
+    // 【新逻辑】不再设置"空画面"裁切态：呼出时（summoned）无条件复原样式 + 强重绘，
+    // 托盘隐藏即干净隐藏，不留 clipPath/boxShadow 残留。
     wasHidden = true;
     minimizeToTray().catch((e) => console.error("最小化到托盘失败:", e));
   });
@@ -1801,12 +1800,17 @@ export function mountNoteApp(noteId: string, preset = "") {
     // 保证下次呼出瞬间模糊已就绪，不会在可见窗口上触发 SWCA 造成卡顿。
     setAcrylic(false, 0, 0).catch(() => {});
     acrylicOffPending = true;
-    // 记录"已隐藏"：下次呼出时播放粒子成形动画（隐藏后窗口保持空画面）
+    // 记录"已隐藏"：下次呼出时播放粒子成形动画
     wasHidden = true;
-    // 先真正关闭/隐藏窗口（关键路径，绝不被标记逻辑阻断）。
-    // 注意：不再在此调 markNoteClosed——关闭状态已在 requestAnimatedClose
-    // 开始时立即标记（点 × 即更新历史列表），此处重复标记无意义且晚。
+    // 【新逻辑·先隐藏后清理】关闭动画结束时便签本体可能残留 clip/mask 裁切态。
+    // 先隐藏窗口（closeWindow → Rust hide），再清空本体样式——隐藏后清理无感知，
+    // 且保证下次呼出时本体样式干净、内容完整显示（不再保留"空画面"态）。
     closeWindow().catch((e) => console.error("关闭失败:", e));
+    noteWindow.style.clipPath = "";
+    noteWindow.style.setProperty("-webkit-mask-image", "");
+    noteWindow.style.setProperty("mask-image", "");
+    noteWindow.style.opacity = "";
+    noteWindow.style.boxShadow = "";
     window.setTimeout(() => {
       applyAcrylic()
         .catch(() => {})

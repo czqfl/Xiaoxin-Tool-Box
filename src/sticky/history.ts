@@ -1,5 +1,5 @@
 import { listNotes, deleteNote, openNoteWindow, closeWindow, startDragging, getOpenNotes, setAcrylic, newNoteId, createNoteWindow, setNotePriority } from "./api";
-import { getSettings, normalizeOpacity } from "./settings";
+import { getSettings, normalizeOpacity, onSettingsChanged } from "./settings";
 import { applyPanelBackground } from "./panel-bg";
 import { applyGlassBlur, parseColorToRgbInt } from "./glass";
 import type { NoteMeta, Settings } from "./types";
@@ -69,31 +69,26 @@ export function mountHistoryApp() {
     });
 
   // 设置变更时实时同步背景（与便签窗口一致）。
-  // 【修复】此前监听 "xiaoxin-sticky-note-settings-changed"（原版便签“设置”窗口
-  // 在自身窗口内派发的 CustomEvent，非 Tauri 跨窗口事件）——工具箱集成版保存
-  // 设置走后端 save_settings 广播的是 "settings-changed"，事件名不匹配导致
-  // 历史窗口背景/主题永远不实时刷新（用户反馈“历史便签弹窗里背景不生效”）。
-  listen("settings-changed", () => {
+  // 【新逻辑】必须走 onSettingsChanged（而非裸 listen + getSettings）：
+  // onSettingsChanged 内部会先从磁盘重载设置缓存、再回调，getSettings() 才能拿到新值；
+  // 裸监听直接 getSettings() 只会返回本窗口首次加载后从未刷新的旧缓存——
+  // 这正是"在设置里改主题，历史面板不实时更新"的根因。
+  onSettingsChanged(() => {
     getSettings().then((s) => void applyHistoryBg(s)).catch(() => {});
-  }).catch((e) => console.error("监听设置变更失败:", e));
+  });
 
-  // ---- 状态刷新（三重保障，绝不展示过期信息）----
-  // 1) 事件：后端统一广播 sticky://state-changed（打开/关闭/新建/保存/删除）
-  // 2) 聚焦：窗口每次获得焦点主动刷新
-  // 3) 轮询：窗口可见期间每 500ms 兜底刷新（事件偶发丢失也被覆盖，基本无感）
-  // 【修复】三路来源统一收口到 requestRender：并发去重 + 交互中延后重建，
-  // 彻底消除「轮询/事件同时触发 → 整表重建竞态 → 点击被吞 → 面板像卡死」的根因。
+  // ---- 状态刷新：事件驱动 + 聚焦兜底（不再轮询）----
+  // 单一事实来源：后端每次状态变更（打开/关闭/新建/保存/删除/置顶）统一广播
+  // sticky://state-changed；"每次操作必广播"由后端保证，事件无丢失，故无需轮询。
   let renderPending = false;
   let pointerActive = false;
   const requestRender = (): void => {
     if (renderPending) return;
     renderPending = true;
-    // 用 setTimeout 而非 requestAnimationFrame：窗口隐藏时 rAF 不触发，
-    // 会让 renderPending 卡死、重开后不再刷新。
+    // 用 setTimeout 而非 requestAnimationFrame：窗口隐藏时 rAF 不触发，会让标志卡死。
     window.setTimeout(() => {
       renderPending = false;
       // 指针按下未松开时延后重建：防止重建把正在点的卡片换掉（点击丢失/误触）。
-      // pointerup/pointercancel 会再触发一次 requestRender，此处只是兜底。
       if (pointerActive) {
         window.setTimeout(requestRender, 60);
         return;
@@ -101,42 +96,28 @@ export function mountHistoryApp() {
       void render();
     }, 0);
   };
-  let pollTimer: number | undefined;
-  const stopPoll = () => {
-    if (pollTimer) {
-      window.clearInterval(pollTimer);
-      pollTimer = undefined;
-    }
-  };
-  const startPoll = () => {
-    stopPoll();
-    pollTimer = window.setInterval(requestRender, 500);
-  };
   // 指针交互保护：按下期间禁止重建（捕获阶段，按钮点击同样生效）
   listEl.addEventListener("pointerdown", () => { pointerActive = true; }, true);
   window.addEventListener("pointerup", () => { pointerActive = false; requestRender(); }, true);
   window.addEventListener("pointercancel", () => { pointerActive = false; requestRender(); }, true);
-  listen("sticky://state-changed", () => {
-    // 诊断：确认历史窗口收到状态广播（若此日志缺失 → 事件未到达，需查后端 emit）
-    import("@tauri-apps/api/core")
-      .then(({ invoke }) => invoke("diag_log", { msg: "[history] state-changed received" }))
-      .catch(() => {});
-    requestRender();
-  }).catch((e) => console.error("监听便签状态失败:", e));
-  // 【修复】轮询不再随失焦停止——用户从历史打开便签后历史窗口失焦但仍可见，
-  // 此前 stopPoll 导致事件偶发丢失时状态要等重新聚焦才刷新（“状态更新慢”根因）。
-  // 轮询持续跑，render 内部有列表签名去重，开销极小。
+  listen("sticky://state-changed", requestRender).catch((e) => console.error("监听便签状态失败:", e));
+  // 聚焦兜底：事件偶发丢失时，重新聚焦也能刷新
   getCurrentWindow()
     .onFocusChanged(({ payload: focused }) => {
       if (focused) requestRender();
     })
     .catch((e) => console.error("监听窗口焦点失败:", e));
-  startPoll(); // 窗口已可见：立即启动轮询
+  requestRender(); // 立即渲染首屏
 
   // 套用与便签一致的背景效果（背景图+毛玻璃 或 透明主题原生亚克力）
   async function applyHistoryBg(s: Settings): Promise<void> {
     const root = document.querySelector(".history-window") as HTMLElement | null;
     if (!root) return;
+    // 同步全局主题类（浅色不下类；深色/透明共用深色变量）——改主题时配色实时切换
+    document.documentElement.classList.remove("theme-dark");
+    if (s.theme === "dark" || s.theme === "transparent") {
+      document.documentElement.classList.add("theme-dark");
+    }
     const transparent = s.theme === "transparent";
     if (transparent) {
       // 与便签窗口完全一致：透明主题走 DWM 原生亚克力（实时模糊背后桌面），
