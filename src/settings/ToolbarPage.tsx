@@ -172,6 +172,7 @@ export function ToolbarPage() {
         <SettingRow
           title="工具栏上显示的工具"
           desc="勾选需要在工具栏展示的功能；留空时工具栏自动隐藏"
+          layout="block"
         >
           <div className="toolbar-tools">
             {TOOL_KEYS.map((key) => {
