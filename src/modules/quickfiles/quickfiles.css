@@ -8,13 +8,10 @@
   padding: 12px 14px;
   border-bottom: 1px solid var(--border-subtle);
 }
-/* 拖拽区内的交互元素必须排除：否则 WebView2 拖拽会把 mousedown/click 吞掉，
-   导致关闭/置顶/新建按钮不响应（关闭按钮不生效的根因） */
-.qf-header button,
-.qf-header input {
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
-}
+/* 拖拽区：data-tauri-drag-region 已放在 .qf-header 上（与剪贴板/文件夹/账号密码
+   面板一致）。无需在按钮上加 -webkit-app-region: no-drag——WebView2 对
+   Tauri 拖拽区内的子元素 button/input 默认就不会吞 click 事件，
+   反而加 no-drag 会与 Tauri 的原生 drag 拦截产生冲突，导致关闭按钮失效。 */
 .qf-title {
   display: flex;
   align-items: center;
@@ -149,16 +146,29 @@
   text-overflow: ellipsis;
 }
 
-/* 分段选择：标签（灰字）与按钮组（带底容器）一眼可分 */
+/* 分段选择：标签（小写大写胶囊）与按钮组（带底容器）一眼可分 */
 .qf-seg {
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
+/* 组与组之间加细分隔线，让"分组/排序/布局"三组一眼能数清 */
+.qf-seg + .qf-seg {
+  padding-left: 12px;
+  margin-left: 2px;
+  border-left: 1px solid var(--border-subtle);
+}
 .qf-seg-label {
-  font-size: 12px;
+  font-size: 10px;
+  font-weight: 600;
   color: var(--text-tertiary);
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: var(--bg-badge);
   user-select: none;
+  line-height: 1;
 }
 .qf-seg-group {
   display: inline-flex;
@@ -176,8 +186,9 @@
   background: transparent;
   color: var(--text-secondary);
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.12s;
+  transition: background 0.12s, color 0.12s, box-shadow 0.12s;
 }
 .qf-seg-btn:hover {
   color: var(--text);
@@ -186,7 +197,7 @@
 .qf-seg-btn.active {
   background: var(--accent);
   color: #fff;
-  font-weight: 500;
+  font-weight: 600;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
 }
 

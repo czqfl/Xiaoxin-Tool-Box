@@ -5,7 +5,6 @@
  *  文件按类型以强调色区分（左侧色条 + 扩展名徽标），醒目好分辨。
  *  分组：无 / 按类型 / 按创建日期；排序：创建时间 / 名称；分组模式下组内同样按排序。 */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import type {
   FileTypeDef,
   FilesGroupMode,
@@ -136,16 +135,6 @@ export function QuickFilesPanel() {
   const [error, setError] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<QuickFile | null>(null);
   const newInputRef = useRef<HTMLInputElement>(null);
-  // 头部按钮防抖：onMouseDown 与 onClick 双路都可能触发，300ms 内只执行一次
-  const hideGuardRef = useRef(0);
-
-  /** 关闭面板（防抖：双事件绑定下只执行一次） */
-  const requestHide = () => {
-    const now = Date.now();
-    if (now - hideGuardRef.current < 300) return;
-    hideGuardRef.current = now;
-    hideCurrentWindow();
-  };
 
   const fileTypes = config.files.file_types;
   const alwaysOnTop = config.files.always_on_top;
@@ -311,50 +300,23 @@ export function QuickFilesPanel() {
     setTimeout(() => newInputRef.current?.focus(), 50);
   };
 
-  // 头部按钮双路绑定（onMouseDown + onClick）：拖拽区可能吞掉其中一路，
-  // 双保险保证动作必达；同一动作 300ms 内只执行一次，避免双事件重复触发
-  const pressRef = useRef(0);
-  const pressOnce = (fn: () => void) => () => {
-    const now = Date.now();
-    if (now - pressRef.current < 300) return;
-    pressRef.current = now;
-    fn();
-  };
-  // 头部按钮统一事件处理：阻止冒泡进拖拽守卫，双路触发防抖动作
-  const headPress = (fn: () => void) => ({
-    onMouseDown: (e: React.MouseEvent) => {
-      e.stopPropagation();
-      e.preventDefault();
-      pressOnce(fn)();
-    },
-    onClick: (e: React.MouseEvent) => {
-      e.stopPropagation();
-      pressOnce(fn)();
-    },
-  });
-
   return (
     <div className="panel">
-      <div
-        className="panel-shell"
-        data-tauri-drag-region
-        onMouseDown={(e) => {
-          const t = e.target as HTMLElement;
-          if (t.closest("button, input, select, textarea, .qf-item, .qf-modal, .qf-new-pop")) return;
-          getCurrentWindow().startDragging().catch(() => undefined);
-        }}
-      >
-        {/* 头部 */}
-        <div className="panel-header qf-header">
-          <span className="qf-title">
+      <div className="panel-shell">
+        {/* 头部：data-tauri-drag-region 只放在 .qf-header 上（与剪贴板/文件夹/账号密码
+            面板一致）。这样只有标题栏区域参与原生拖拽，按钮区不被吞 mousedown/click，
+            关闭按钮能稳定响应。原实现把 drag-region 放在整 shell 上，需要 JS startDragging
+            + onMouseDown+onClick 双路绑定，反而把关闭路径搞坏——这是 bug 根因。 */}
+        <div className="panel-header qf-header" data-tauri-drag-region>
+          <span className="qf-title" data-tauri-drag-region>
             <IconFiles size={16} />
             快速文件
           </span>
 
-          <div className="qf-new-wrap">
+          <div className="qf-new-wrap" data-tauri-drag-region>
             <button
               className="btn btn-primary btn-sm"
-              {...headPress(() => setNewOpen((v) => !v))}
+              onClick={() => setNewOpen((v) => !v)}
               title="新建文件"
             >
               <IconPlus size={13} /> 新建
@@ -386,14 +348,14 @@ export function QuickFilesPanel() {
           <button
             className={`icon-btn${alwaysOnTop ? " active" : ""}`}
             title={alwaysOnTop ? "取消置顶（失焦自动隐藏）" : "置顶显示（常驻）"}
-            {...headPress(toggleAlwaysOnTop)}
+            onClick={toggleAlwaysOnTop}
           >
             <IconPin size={15} filled={alwaysOnTop} />
           </button>
           <button
             className="icon-btn"
             title="关闭（Esc）"
-            {...headPress(requestHide)}
+            onClick={() => hideCurrentWindow()}
           >
             <IconClose size={14} />
           </button>
@@ -468,11 +430,7 @@ export function QuickFilesPanel() {
               <span>该位置暂无已配置文件类型的文件，点「新建」创建一个吧</span>
               <button
                 className="btn btn-primary btn-sm qf-empty-btn"
-                onMouseDown={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  setNewOpen(true);
-                }}
+                onClick={() => setNewOpen(true)}
               >
                 <IconPlus size={13} /> 新建文件
               </button>
