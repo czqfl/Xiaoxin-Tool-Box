@@ -345,11 +345,32 @@ export const IconSortTime = (p: IconProps) => (
   </svg>
 );
 
-/** 排序：按名称（字母 A + 向下箭头 = 按字母序） */
+/** 排序：按名称（大 A 小 a 字样 = 字母序），比箭头更直观 */
 export const IconSortName = (p: IconProps) => (
   <svg {...base(p)}>
-    <path d="M7.5 4.5 11 12M7.5 4.5 4 12" />
-    <path d="M5.2 9.9h4.6" />
-    <path d="M17 9v10M14 13l3 3 3-3" />
+    <text
+      x="10.5"
+      y="12.5"
+      fontSize="15"
+      fontWeight="700"
+      textAnchor="middle"
+      dominantBaseline="central"
+      fill="currentColor"
+      stroke="none"
+    >
+      A
+    </text>
+    <text
+      x="18"
+      y="20.5"
+      fontSize="9"
+      fontWeight="600"
+      textAnchor="middle"
+      dominantBaseline="central"
+      fill="currentColor"
+      stroke="none"
+    >
+      a
+    </text>
   </svg>
 );
