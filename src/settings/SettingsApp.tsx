@@ -87,7 +87,15 @@ export function SettingsApp() {
       .then((un) => (disposed ? un() : cleanup.push(un)));
     // 启动时热键注册失败：跳转快捷键页并提示
     onEvent<string>(EVT_SHORTCUT_FAILED, (target) => {
-      setShortcutFailed(target === "clipboard" ? "呼出剪贴板" : "呼出文件夹");
+      const names: Record<string, string> = {
+        clipboard: "呼出剪贴板",
+        folder: "呼出文件夹",
+        credentials: "呼出账号密码",
+        translation: "划词翻译",
+        port: "呼出端口工具",
+        files: "呼出快速文件",
+      };
+      setShortcutFailed(names[target] ?? target);
       setPage("shortcut");
     }).then((un) => (disposed ? un() : cleanup.push(un)));
     return () => {

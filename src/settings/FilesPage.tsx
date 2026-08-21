@@ -1,12 +1,20 @@
 /** 快速文件设置页：保存位置、默认分组/排序、文件类型管理
  *  （每种类型单独配置扩展名 / 显示名 / 强调色 / 默认打开程序）。 */
+import { useEffect, useState } from "react";
 import { useConfigStore } from "../stores/configStore";
 import {
+  listInstalledApps,
   pickFolder,
   pickOpenerExecutable,
   quickfilesReveal,
 } from "../core/tauri";
-import type { FileTypeDef, FilesConfig, FilesGroupMode, FilesSortMode } from "../types";
+import type {
+  FileTypeDef,
+  FilesConfig,
+  FilesGroupMode,
+  FilesSortMode,
+  InstalledApp,
+} from "../types";
 import { Segmented, SettingGroup, SettingRow } from "./components";
 import { IconFiles, IconPlus, IconTrash } from "../components/icons";
 
@@ -16,6 +24,22 @@ export function FilesPage() {
 
   if (!config.files) return null;
   const files = config.files;
+
+  // 本机已安装应用（开始菜单 + App Paths），供「默认打开方式」下拉选择
+  const [apps, setApps] = useState<InstalledApp[]>([]);
+  const [appsLoading, setAppsLoading] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    listInstalledApps().then((list) => {
+      if (alive) {
+        setApps(list);
+        setAppsLoading(false);
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const patch = (p: Partial<FilesConfig>) =>
     void update({ ...config, files: { ...files, ...p } });
@@ -51,9 +75,23 @@ export function FilesPage() {
     };
     patch({ file_types: [...files.file_types, t] });
   };
-  const chooseOpener = async (i: number) => {
-    const exe = await pickOpenerExecutable();
-    if (exe) updateType(i, { opener: exe });
+
+  /** 下拉框当前值：opener 在应用列表中 → 原值；否则（自定义/系统默认）特殊值 */
+  const openerSelectValue = (opener: string | null | undefined): string => {
+    if (!opener) return "";
+    const hit = apps.some((a) => a.exe.toLowerCase() === opener.toLowerCase());
+    return hit ? opener : "__custom__";
+  };
+  /** 下拉变更：系统默认 / 应用 / 浏览其他程序… */
+  const handleOpenerChange = async (i: number, v: string) => {
+    if (v === "") {
+      updateType(i, { opener: null });
+    } else if (v === "__browse__") {
+      const exe = await pickOpenerExecutable();
+      if (exe) updateType(i, { opener: exe });
+    } else {
+      updateType(i, { opener: v });
+    }
   };
 
   return (
@@ -151,25 +189,39 @@ export function FilesPage() {
                   />
                 </div>
                 <div className="files-opener">
-                  {t.opener ? (
-                    <>
-                      <code className="files-opener-path" title={t.opener}>
-                        {t.opener.split(/[\\/]/).pop()}
-                      </code>
-                      <button
-                        className="btn btn-xs"
-                        title="清除默认打开方式（改用系统默认程序）"
-                        onClick={() => updateType(i, { opener: null })}
-                      >
-                        清除
-                      </button>
-                    </>
-                  ) : (
-                    <span className="files-opener-default">系统默认</span>
+                  <select
+                    className="files-opener-select"
+                    title="默认打开方式（留空使用系统默认程序）"
+                    value={openerSelectValue(t.opener)}
+                    onChange={(e) => void handleOpenerChange(i, e.target.value)}
+                  >
+                    <option value="">系统默认</option>
+                    {appsLoading && (
+                      <option value="" disabled>
+                        正在扫描本机应用…
+                      </option>
+                    )}
+                    {apps.map((a) => (
+                      <option key={a.exe} value={a.exe}>
+                        {a.name}
+                      </option>
+                    ))}
+                    {t.opener && openerSelectValue(t.opener) === "__custom__" && (
+                      <option value="__custom__" disabled>
+                        自定义：{t.opener.split(/[\\/]/).pop()}
+                      </option>
+                    )}
+                    <option value="__browse__">浏览其他程序…</option>
+                  </select>
+                  {t.opener && (
+                    <button
+                      className="btn btn-xs"
+                      title="清除默认打开方式（改用系统默认程序）"
+                      onClick={() => updateType(i, { opener: null })}
+                    >
+                      清除
+                    </button>
                   )}
-                  <button className="btn btn-xs" onClick={() => void chooseOpener(i)}>
-                    选择程序
-                  </button>
                 </div>
                 <button
                   className="files-del"

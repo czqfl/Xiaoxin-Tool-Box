@@ -280,6 +280,7 @@ pub fn run() {
             quickfiles::quickfiles_open,
             quickfiles::quickfiles_reveal,
             quickfiles::quickfiles_delete,
+            quickfiles::list_installed_apps,
         ])
         .run(tauri::generate_context!())
         .expect("应用启动失败");

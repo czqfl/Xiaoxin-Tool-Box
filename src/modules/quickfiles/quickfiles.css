@@ -1,39 +1,53 @@
 /* 快速文件面板（较大面板，样式与其他面板一致：套 .panel 外壳 + 亚克力毛玻璃） */
 
+/* 头部 */
 .qf-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-subtle);
 }
-
 .qf-title {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   font-size: 14px;
   font-weight: 600;
   color: var(--text-strong);
   margin-right: auto;
 }
-
-.qf-new-wrap {
-  position: relative;
+.qf-title svg {
+  color: var(--tool-files, var(--accent));
 }
 
 /* 新建类型下拉 */
+.qf-new-wrap {
+  position: relative;
+}
 .qf-new-pop {
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% + 8px);
   right: 0;
   z-index: 20;
-  width: 240px;
+  width: 248px;
   padding: 10px;
   border-radius: 12px;
   background: var(--bg-pop);
   border: 1px solid var(--border);
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35);
   backdrop-filter: blur(8px);
+  animation: qf-pop-in 0.14s var(--ease-out);
+}
+@keyframes qf-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 .qf-new-pop-title {
   font-size: 12px;
@@ -77,33 +91,39 @@
   color: var(--text-muted);
 }
 
-/* 控制条 */
+/* 控制条：保存位置 + 分组 + 排序 */
 .qf-controls {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  padding: 8px 12px;
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: rgba(var(--accent-rgb), 0.03);
 }
 .qf-loc {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: 280px;
-  padding: 5px 9px;
+  max-width: 300px;
+  padding: 5px 10px;
   border-radius: 8px;
   border: 1px solid var(--border);
-  background: var(--bg-elev);
+  background: var(--bg-input-glass);
   color: var(--text-muted);
   font-size: 12px;
   cursor: pointer;
   overflow: hidden;
+  transition: color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
 }
 .qf-loc:hover {
   color: var(--text);
-  border-color: var(--accent);
+  border-color: rgba(var(--accent-rgb), 0.5);
+}
+.qf-loc svg {
+  flex: none;
+  color: var(--accent);
 }
 .qf-loc-text {
   white-space: nowrap;
@@ -124,8 +144,8 @@
 .qf-seg-btn {
   padding: 4px 10px;
   border-radius: 7px;
-  border: 1px solid var(--border);
-  background: var(--bg-elev);
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--text-muted);
   font-size: 12px;
   cursor: pointer;
@@ -133,6 +153,7 @@
 }
 .qf-seg-btn:hover {
   color: var(--text);
+  background: var(--bg-elev);
 }
 .qf-seg-btn.active {
   background: var(--accent);
@@ -142,54 +163,68 @@
 
 /* 列表主体 */
 .qf-body {
-  padding: 10px 12px;
+  padding: 10px 14px;
 }
 .qf-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 40px 12px;
+  gap: 10px;
+  padding: 48px 16px;
   color: var(--text-muted);
   font-size: 13px;
   text-align: center;
+}
+.qf-empty .empty-icon {
+  font-size: 30px;
+  opacity: 0.55;
+}
+.qf-empty-btn {
+  margin-top: 4px;
 }
 .qf-empty-sm {
   font-size: 12px;
   color: var(--text-muted);
   padding: 6px 2px;
 }
-.qf-feedback {
-  margin-bottom: 8px;
-  padding: 7px 10px;
-  border-radius: 8px;
-  background: color-mix(in srgb, #36b37e 18%, transparent);
-  color: var(--text-strong);
+.qf-feedback,
+.qf-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 2px;
+  padding: 8px 12px;
+  border-radius: 9px;
   font-size: 12px;
+  animation: qf-pop-in 0.14s var(--ease-out);
+}
+.qf-feedback {
+  background: var(--success-soft);
+  color: var(--success);
 }
 .qf-error {
-  margin-bottom: 8px;
-  padding: 7px 10px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  background: var(--danger-soft);
   color: var(--danger);
-  font-size: 12px;
 }
 
 /* 分组 */
 .qf-group {
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 .qf-group-head {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  color: var(--text-strong);
-  margin: 4px 2px 8px;
-  padding-bottom: 4px;
-  border-bottom: 1px dashed var(--border);
+  letter-spacing: 0.4px;
+  color: var(--text-tertiary);
+  margin: 12px 4px 8px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.qf-group-head:first-child {
+  margin-top: 2px;
 }
 .qf-group-dot {
   width: 9px;
@@ -207,24 +242,25 @@
 .qf-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 9px 10px 9px 12px;
-  margin-bottom: 7px;
+  gap: 12px;
+  padding: 9px 12px 9px 14px;
+  margin-bottom: 6px;
   border-radius: 10px;
-  border: 1px solid var(--border);
-  border-left: 4px solid var(--text-muted);
-  background: var(--bg-elev);
-  transition: background 0.12s, transform 0.08s;
+  border: 1px solid transparent;
+  border-left: 3px solid var(--text-muted);
+  background: transparent;
+  transition: background 0.12s, border-color 0.12s;
 }
 .qf-item:hover {
-  background: var(--bg-elev-2);
+  background: var(--bg-elev);
+  border-color: var(--border);
 }
 .qf-ext-badge {
   flex: none;
   min-width: 42px;
   height: 42px;
   padding: 0 8px;
-  border-radius: 8px;
+  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -232,6 +268,7 @@
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.3px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
 }
 .qf-item-main {
   flex: 1;
@@ -259,6 +296,11 @@
   align-items: center;
   gap: 6px;
   flex: none;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.qf-item:hover .qf-item-actions {
+  opacity: 1;
 }
 .qf-act {
   padding: 4px 9px;
@@ -271,14 +313,17 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
 }
 .qf-act:hover {
   border-color: var(--accent);
   color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.08);
 }
 .qf-act.danger:hover {
   border-color: var(--danger);
   color: var(--danger);
+  background: rgba(229, 72, 77, 0.08);
 }
 
 /* 弹窗（新建 / 删除确认） */
@@ -291,6 +336,15 @@
   justify-content: center;
   background: rgba(0, 0, 0, 0.35);
   border-radius: var(--radius, 14px);
+  animation: qf-fade-in 0.14s var(--ease-out);
+}
+@keyframes qf-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 .qf-modal {
   width: 360px;
@@ -301,6 +355,7 @@
   border: 1px solid var(--border);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(10px);
+  animation: qf-pop-in 0.16s var(--ease-out);
 }
 .qf-modal-title {
   display: flex;
@@ -329,9 +384,12 @@
   color: var(--text);
   font-size: 13px;
   outline: none;
+  transition: border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
 }
 .qf-modal-input:focus {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .qf-modal-hint {
   margin-top: 7px;

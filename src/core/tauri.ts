@@ -8,6 +8,7 @@ import type {
   EditorInfo,
   FolderEntry,
   GitRunResult,
+  InstalledApp,
   PortProcess,
   QuickFileList,
   TranslateResult,
@@ -261,11 +262,21 @@ export const pickOpenerExecutable = async (): Promise<string | null> => {
   return typeof selected === "string" ? selected : null;
 };
 
+/** 枚举本机已安装应用（开始菜单 + App Paths），供「默认打开方式」下拉选择 */
+export const listInstalledApps = () =>
+  safe(invoke<InstalledApp[]>("list_installed_apps"), []);
+
 // ---- 快捷键 ----
 export const testShortcut = (shortcut: string) =>
   invoke<void>("shortcut_test", { shortcut });
 export const applyShortcut = (
-  target: "clipboard" | "folder" | "credentials" | "translation" | "port",
+  target:
+    | "clipboard"
+    | "folder"
+    | "credentials"
+    | "translation"
+    | "port"
+    | "files",
   shortcut: string
 ) => invoke<void>("shortcut_apply", { target, shortcut });
 /** 录入捕获：钩子接管 Win 组合，避免系统功能抢先（与 capture_end 成对使用） */

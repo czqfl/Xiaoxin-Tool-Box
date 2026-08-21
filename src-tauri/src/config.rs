@@ -117,6 +117,8 @@ pub struct ShortcutsConfig {
     pub translation: String,
     /// 呼出端口工具面板
     pub port: String,
+    /// 呼出快速文件面板
+    pub files: String,
 }
 
 impl Default for ShortcutsConfig {
@@ -130,6 +132,8 @@ impl Default for ShortcutsConfig {
             translation: "Alt+S".into(),
             // 端口工具：Alt+P（Port）
             port: "Alt+P".into(),
+            // 快速文件：Alt+Q（Quick Files）
+            files: "Alt+Q".into(),
         }
     }
 }

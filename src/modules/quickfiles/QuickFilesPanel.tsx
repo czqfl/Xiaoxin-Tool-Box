@@ -120,6 +120,16 @@ export function QuickFilesPanel() {
     return () => window.removeEventListener("keydown", onKey);
   }, [creatingType, deleteTarget]);
 
+  // 新建类型下拉：点击弹窗以外的区域自动关闭（含再次点击新建按钮）
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && !t.closest?.(".qf-new-wrap")) setNewOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, []);
+
   // 按扩展名查类型定义（取强调色/默认打开方式）
   const typeOf = (ext: string): FileTypeDef | undefined =>
     fileTypes.find((t) => t.ext.toLowerCase() === ext.toLowerCase());
@@ -249,7 +259,12 @@ export function QuickFilesPanel() {
           <div className="qf-new-wrap">
             <button
               className="btn btn-primary btn-sm"
-              onClick={() => setNewOpen((v) => !v)}
+              onMouseDown={(e) => {
+                // 按下即切换：拖拽区可能吞掉 click，用 mousedown 保证响应
+                e.stopPropagation();
+                e.preventDefault();
+                setNewOpen((v) => !v);
+              }}
               title="新建文件"
             >
               <IconPlus size={13} /> 新建
@@ -281,11 +296,23 @@ export function QuickFilesPanel() {
           <button
             className={`icon-btn${alwaysOnTop ? " active" : ""}`}
             title={alwaysOnTop ? "取消置顶（失焦自动隐藏）" : "置顶显示（常驻）"}
-            onClick={toggleAlwaysOnTop}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              toggleAlwaysOnTop();
+            }}
           >
             <IconPin size={15} filled={alwaysOnTop} />
           </button>
-          <button className="icon-btn" title="关闭（Esc）" onClick={() => hideCurrentWindow()}>
+          <button
+            className="icon-btn"
+            title="关闭（Esc）"
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              hideCurrentWindow();
+            }}
+          >
             <IconClose size={14} />
           </button>
         </div>
@@ -335,6 +362,16 @@ export function QuickFilesPanel() {
             <div className="qf-empty">
               <span className="empty-icon">📄</span>
               <span>该位置暂无已配置文件类型的文件，点「新建」创建一个吧</span>
+              <button
+                className="btn btn-primary btn-sm qf-empty-btn"
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  setNewOpen(true);
+                }}
+              >
+                <IconPlus size={13} /> 新建文件
+              </button>
             </div>
           )}
           {!loading &&

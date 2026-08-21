@@ -91,6 +91,8 @@ export interface ShortcutsConfig {
   translation: string;
   /** 呼出端口工具面板的快捷键 */
   port: string;
+  /** 呼出快速文件面板的快捷键 */
+  files: string;
 }
 
 /** 端口工具面板配置 */
@@ -150,6 +152,14 @@ export interface QuickFileList {
   location: string;
   /** 文件条目列表 */
   files: QuickFile[];
+}
+
+/** 本机已安装应用（供设置页「默认打开方式」下拉选择） */
+export interface InstalledApp {
+  /** 应用显示名 */
+  name: string;
+  /** 可执行文件完整路径 */
+  exe: string;
 }
 
 /** 悬浮工具栏可展示的工具 */

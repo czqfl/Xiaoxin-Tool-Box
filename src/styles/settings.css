@@ -663,17 +663,22 @@
   flex: 1;
   min-width: 0;
 }
-.files-opener-path {
-  font-size: 11px;
-  color: var(--text-secondary);
-  max-width: 150px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.files-opener-select {
+  flex: 1;
+  min-width: 0;
+  max-width: 260px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
 }
-.files-opener-default {
-  font-size: 11px;
-  color: var(--text-muted);
+.files-opener-select:focus {
+  border-color: var(--accent);
 }
 .files-del {
   flex: none;

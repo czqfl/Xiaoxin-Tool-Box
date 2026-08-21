@@ -34,6 +34,7 @@ const defaultConfig: AppConfig = {
     credentials: "Alt+A",
     translation: "Alt+S",
     port: "Alt+P",
+    files: "Alt+Q",
   },
   general: {
     theme: "system",

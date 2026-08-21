@@ -10,7 +10,13 @@ import {
 import { EVT_SHORTCUT_WIN_CAPTURED, onEvent } from "../core/events";
 import { SettingGroup, SettingRow } from "./components";
 
-type Target = "clipboard" | "folder" | "credentials" | "translation" | "port";
+type Target =
+  | "clipboard"
+  | "folder"
+  | "credentials"
+  | "translation"
+  | "port"
+  | "files";
 
 /** 将键盘事件转换为 global-shortcut 可解析的组合键字符串，如 "Ctrl+Alt+C" */
 function comboFromEvent(e: KeyboardEvent): string | null {
@@ -139,6 +145,7 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
     credentials: idleRow,
     translation: idleRow,
     port: idleRow,
+    files: idleRow,
   });
   const [saving, setSaving] = useState<Target | null>(null);
 
@@ -151,7 +158,14 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
   const saveOne = async (target: Target) => {
     const combo = draft[target];
     const others: Target[] = (
-      ["clipboard", "folder", "credentials", "translation", "port"] as Target[]
+      [
+        "clipboard",
+        "folder",
+        "credentials",
+        "translation",
+        "port",
+        "files",
+      ] as Target[]
     ).filter((t) => t !== target);
     if (others.some((t) => combo === draft[t])) {
       setRows((r) => ({
@@ -247,6 +261,11 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
           "port",
           "呼出端口工具面板",
           "点击快捷键后按下新组合，例如 Alt+P（查询端口占用 / 一键杀进程）"
+        )}
+        {renderRow(
+          "files",
+          "呼出快速文件面板",
+          "点击快捷键后按下新组合，例如 Alt+Q（快速新建 / 管理各类文件）"
         )}
       </SettingGroup>
 
