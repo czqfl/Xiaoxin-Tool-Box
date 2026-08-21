@@ -212,9 +212,17 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
           </div>
         </SettingRow>
         {state.error && (
-          <div className="shortcut-hint error">✕ {state.error}</div>
+          <div className="shortcut-hint error">
+            <span className="hint-icon">✕</span>
+            {state.error}
+          </div>
         )}
-        {state.ok && <div className="shortcut-hint ok">✓ 已生效</div>}
+        {state.ok && (
+          <div className="shortcut-hint ok">
+            <span className="hint-icon">✓</span>
+            已保存并生效
+          </div>
+        )}
       </>
     );
   };

@@ -122,8 +122,18 @@ export function TranslationPage() {
             </button>
           </div>
         </SettingRow>
-        {testOut && <div className="shortcut-hint ok">✓ {testOut}</div>}
-        {testErr && <div className="shortcut-hint error">✕ {testErr}</div>}
+        {testOut && (
+          <div className="shortcut-hint ok">
+            <span className="hint-icon">✓</span>
+            {testOut}
+          </div>
+        )}
+        {testErr && (
+          <div className="shortcut-hint error">
+            <span className="hint-icon">✕</span>
+            {testErr}
+          </div>
+        )}
       </SettingGroup>
     </div>
   );

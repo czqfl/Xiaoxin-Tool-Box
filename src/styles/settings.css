@@ -223,15 +223,63 @@
   border-style: solid;
   color: var(--danger);
 }
+/* 行内状态提示：默认=淡灰说明文字；ok/err=彩色胶囊 + 圆形图标徽标 + 淡入动画 */
 .shortcut-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
-  margin-top: 6px;
+  margin-top: 8px;
+  line-height: 1.4;
 }
-.shortcut-hint.error {
-  color: var(--danger);
+.shortcut-hint .hint-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1;
 }
 .shortcut-hint.ok {
   color: var(--success);
+  font-weight: 600;
+  background: var(--success-soft);
+  padding: 4px 12px 4px 8px;
+  border-radius: 999px;
+  width: fit-content;
+  animation: hint-pop-in var(--dur-fast) var(--ease-out);
+}
+.shortcut-hint.ok .hint-icon {
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--success-soft);
+}
+.shortcut-hint.error {
+  color: var(--danger);
+  font-weight: 600;
+  background: var(--danger-soft);
+  padding: 4px 12px 4px 8px;
+  border-radius: 999px;
+  width: fit-content;
+  animation: hint-pop-in var(--dur-fast) var(--ease-out);
+}
+.shortcut-hint.error .hint-icon {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-soft);
+}
+@keyframes hint-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 /* 固定文件夹管理列表 */
