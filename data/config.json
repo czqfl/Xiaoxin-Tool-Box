@@ -55,6 +55,7 @@
       "credentials",
       "translation",
       "port",
+      "snippets",
       "settings"
     ],
     "orientation": "vertical",

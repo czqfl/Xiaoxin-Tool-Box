@@ -12,6 +12,7 @@ mod panel;
 mod port;
 mod quickfiles;
 mod shortcut;
+mod snippets;
 mod storage;
 mod translate;
 mod tray;
@@ -110,6 +111,7 @@ fn apply_panel_acrylic<R: tauri::Runtime>(app: &tauri::AppHandle<R>, acrylic: bo
         panel::CREDENTIAL_PANEL,
         panel::PORT_PANEL,
         panel::FILES_PANEL,
+        panel::SNIPPETS_PANEL,
         panel::TOOLBAR_WINDOW,
         translate::TRANSLATE_PANEL,
     ] {
@@ -294,6 +296,11 @@ pub fn run() {
             quickfiles::quickfiles_reveal,
             quickfiles::quickfiles_delete,
             quickfiles::list_installed_apps,
+            snippets::snippets_list,
+            snippets::snippets_create,
+            snippets::snippets_update,
+            snippets::snippets_delete,
+            snippets::snippets_paste,
         ])
         .run(tauri::generate_context!())
         .expect("应用启动失败");

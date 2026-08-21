@@ -52,6 +52,7 @@
   --tool-port: #f97316;
   --tool-settings: #6366f1;
   --tool-files: #0ea5e9;
+  --tool-snippets: #ec4899;
   /* 品牌色 RGB（供轻渐变/半透明叠加使用） */
   --accent-rgb: 47, 128, 237;
 
@@ -174,6 +175,7 @@
   --tool-port: #ffab5e;
   --tool-settings: #97a1fb;
   --tool-files: #14b8a6;
+  --tool-snippets: #f472b6;
   --accent-rgb: 76, 158, 255;
 
   /* 背景：纯中性石墨黑（R=G=B，无蓝偏——与 WorkBuddy 深色一致）。
@@ -268,6 +270,7 @@
   --tool-port: #ea580c;
   --tool-settings: #4f46e5;
   --tool-files: #0284c7;
+  --tool-snippets: #be185d;
   --accent-rgb: 15, 159, 140;
 
   /* 背景：淡青灰（app 底与面板拉开明度差） */
@@ -351,6 +354,7 @@
   --tool-port: #ea580c;
   --tool-settings: #4f46e5;
   --tool-files: #38bdf8;
+  --tool-snippets: #ec4899;
   --accent-rgb: 22, 119, 255;
 
   /* 背景：明显淡蓝（与浅色的中性灰一眼区分） */
@@ -434,6 +438,7 @@
   --tool-port: #e0623c;
   --tool-settings: #c2407a;
   --tool-files: #e0598b;
+  --tool-snippets: #d6537f;
   --accent-rgb: 207, 58, 67;
 
   /* 背景：极淡暖白玫瑰灰（红韵但不抢内容，与浅青/浅蓝同构） */
@@ -517,6 +522,7 @@
     --tool-port: #ffab5e;
     --tool-settings: #97a1fb;
     --tool-files: #14b8a6;
+    --tool-snippets: #f472b6;
     --accent-rgb: 76, 158, 255;
 
     /* 背景：纯中性石墨黑（与 data-theme="dark" 一致——R=G=B 无蓝偏，

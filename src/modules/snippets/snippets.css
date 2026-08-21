@@ -1,0 +1,211 @@
+/* 常用语速贴面板专属样式（外壳/头部/滚动区复用 panel.css，这里只管内容） */
+
+/* 分组筛选 chips：横向滚动、胶囊按钮，激活态用品牌色 */
+.snip-chips {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.snip-chips::-webkit-scrollbar {
+  display: none;
+}
+.snip-chip {
+  flex-shrink: 0;
+  padding: 4px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-out);
+}
+.snip-chip:hover {
+  background: var(--bg-item-hover);
+  color: var(--text-primary);
+}
+.snip-chip.active {
+  background: rgba(var(--accent-rgb), 0.14);
+  border-color: rgba(var(--accent-rgb), 0.35);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* 列表卡片：点击整体 = 粘贴。hover 抬升 + 边框高亮，操作钮渐显 */
+.snip-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: 2px 0;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+.snip-item:hover {
+  background: var(--bg-item-hover);
+  border-color: var(--border-subtle);
+  box-shadow: var(--shadow-item);
+}
+.snip-item:active {
+  background: var(--bg-item-active);
+}
+
+.snip-main {
+  flex: 1;
+  min-width: 0;
+}
+.snip-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-base);
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.snip-tag {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg-badge);
+}
+.snip-preview {
+  margin-top: 2px;
+  font-size: var(--font-xs);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 操作钮（编辑/删除）：默认透明隐藏，hover 卡片时渐显 */
+.snip-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.snip-item:hover .snip-actions {
+  opacity: 1;
+}
+.snip-confirm-del {
+  background: rgba(var(--danger-rgb, 220, 60, 60), 0.15) !important;
+  border-color: rgba(var(--danger-rgb, 220, 60, 60), 0.5) !important;
+  color: var(--text-danger, #dc3c3c) !important;
+}
+
+/* 空状态 / 错误提示 */
+.snip-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 48px 16px;
+  color: var(--text-tertiary);
+  font-size: var(--font-sm);
+  text-align: center;
+}
+.snip-empty-icon {
+  color: var(--text-tertiary);
+  opacity: 0.6;
+}
+.snip-error {
+  color: var(--text-danger, #dc3c3c);
+  font-size: var(--font-sm);
+}
+
+/* 新增/编辑模态：居中浮层，遮罩点击关闭 */
+.snip-modal-mask {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.32);
+  z-index: 50;
+  animation: snip-fade var(--dur-base) var(--ease-out);
+}
+@keyframes snip-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.snip-modal {
+  width: min(400px, calc(100vw - 48px));
+  padding: 18px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-menu);
+  animation: snip-pop var(--dur-base) var(--ease-out);
+}
+@keyframes snip-pop {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.snip-modal-title {
+  margin-bottom: 14px;
+  font-size: var(--font-base);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.snip-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.snip-field > span {
+  font-size: var(--font-xs);
+  color: var(--text-secondary);
+}
+.snip-field input,
+.snip-field textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-input-glass);
+  color: var(--text-primary);
+  font-size: var(--font-sm);
+  resize: vertical;
+  transition: border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+.snip-field input:focus,
+.snip-field textarea:focus {
+  outline: none;
+  border-color: rgba(var(--accent-rgb), 0.5);
+  box-shadow: var(--ring);
+}
+.snip-field textarea {
+  font-family: var(--font-mono, inherit);
+  line-height: 1.5;
+}
+.snip-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}

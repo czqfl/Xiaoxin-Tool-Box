@@ -84,6 +84,8 @@ pub const CREDENTIAL_PANEL: &str = "credential-panel";
 pub const FILES_PANEL: &str = "files-panel";
 /// 端口工具面板（查询端口占用 / 一键杀进程）
 pub const PORT_PANEL: &str = "port-panel";
+/// 常用语速贴面板（常用话术一键粘贴）
+pub const SNIPPETS_PANEL: &str = "snippets-panel";
 /// 悬浮工具栏窗口（常驻小工具条，不参与面板互斥，独立显隐）
 pub const TOOLBAR_WINDOW: &str = "toolbar";
 
@@ -138,6 +140,7 @@ pub const ALL_PANELS: &[&str] = &[
     CREDENTIAL_PANEL,
     PORT_PANEL,
     FILES_PANEL,
+    SNIPPETS_PANEL,
 ];
 
 /// 工具栏呼出面板：工具栏前端点击图标呼出对应面板。
@@ -181,6 +184,7 @@ pub fn panel_toggle(app: tauri::AppHandle, label: String) -> Result<(), String> 
         "credentials" => CREDENTIAL_PANEL,
         "port" => PORT_PANEL,
         "files" => FILES_PANEL,
+        "snippets" => SNIPPETS_PANEL,
         _ => return Err("未知面板".into()),
     };
     crate::panel::toggle_panel(&app, full);

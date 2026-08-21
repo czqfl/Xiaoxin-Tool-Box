@@ -73,7 +73,7 @@ const defaultConfig: AppConfig = {
   },
   toolbar: {
     enabled: true,
-    tools: ["clipboard", "folder", "credentials", "translation", "port", "files", "settings"],
+    tools: ["clipboard", "folder", "credentials", "translation", "port", "files", "snippets", "settings"],
     orientation: "horizontal",
     auto_hide: true,
   },

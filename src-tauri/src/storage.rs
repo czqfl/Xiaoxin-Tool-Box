@@ -16,6 +16,8 @@ pub struct AppPaths {
     pub folders_file: PathBuf,
     pub creds_file: PathBuf,
     pub images_dir: PathBuf,
+    /// 常用语速贴数据文件
+    pub snippets_file: PathBuf,
 }
 
 impl AppPaths {
@@ -47,6 +49,7 @@ impl AppPaths {
             clipboard_file: data_dir.join("clipboard_history.json"),
             folders_file: data_dir.join("folders.json"),
             creds_file: data_dir.join("credentials.json"),
+            snippets_file: data_dir.join("snippets.json"),
             images_dir,
             data_dir,
         }

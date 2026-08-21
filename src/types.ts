@@ -173,6 +173,21 @@ export interface InstalledApp {
   icon: string | null;
 }
 
+/** 常用语速贴条目（点击一键粘贴到当前输入框） */
+export interface Snippet {
+  id: string;
+  /** 显示名 */
+  title: string;
+  /** 内容（点击后粘贴的正文） */
+  content: string;
+  /** 分组名（空串 = 默认分组） */
+  group: string;
+  /** 创建时间（毫秒时间戳） */
+  created_at: number;
+  /** 最近修改时间（毫秒时间戳） */
+  updated_at: number;
+}
+
 /** 悬浮工具栏可展示的工具 */
 export type ToolKey =
   | "clipboard"
@@ -181,6 +196,7 @@ export type ToolKey =
   | "translation"
   | "port"
   | "files"
+  | "snippets"
   | "settings";
 
 /** 悬浮工具栏配置：常驻小工具条，快速呼出各面板 */

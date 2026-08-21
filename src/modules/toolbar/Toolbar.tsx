@@ -22,6 +22,7 @@ import {
   IconKey,
   IconPort,
   IconSettings,
+  IconSnippet,
   IconTranslate,
 } from "../../components/icons";
 import "./toolbar.css";
@@ -71,6 +72,11 @@ export const TOOLS: Record<ToolKey, { label: string; color: string; icon: React.
     color: "var(--tool-files)",
     icon: <IconFiles size={14} />,
   },
+  snippets: {
+    label: "常用语速贴",
+    color: "var(--tool-snippets)",
+    icon: <IconSnippet size={14} />,
+  },
   settings: {
     label: "打开设置",
     color: "var(--tool-settings)",
@@ -88,6 +94,7 @@ const PANEL_LABEL_TO_KEY: Record<string, ToolKey> = {
   "credential-panel": "credentials",
   "port-panel": "port",
   "files-panel": "files",
+  "snippets-panel": "snippets",
   settings: "settings",
   "translate-popup": "translation",
 };

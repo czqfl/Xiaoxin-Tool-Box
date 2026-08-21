@@ -100,6 +100,23 @@
         "visible": false
       },
       {
+        "label": "snippets-panel",
+        "title": "常用语速贴",
+        "width": 380,
+        "height": 560,
+        "minWidth": 320,
+        "minHeight": 360,
+        "resizable": true,
+        "fullscreen": false,
+        "maximized": false,
+        "decorations": false,
+        "transparent": false,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false
+      },
+      {
         "label": "toolbar",
         "title": "悬浮工具栏",
         "width": 188,

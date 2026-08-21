@@ -251,6 +251,13 @@ export const IconPort = (p: IconProps) => (
   </svg>
 );
 
+/** 常用语速贴：闪电（一键快速粘贴常用话术） */
+export const IconSnippet = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M13 2 4.8 13.2h5.7L9.2 22l8.2-11.2h-5.8L13 2Z" />
+  </svg>
+);
+
 export const IconEye = (p: IconProps & { filled?: boolean }) => {
   const { filled, ...rest } = p;
   return (

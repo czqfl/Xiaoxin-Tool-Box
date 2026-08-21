@@ -382,14 +382,18 @@ fn app_icon_data_url(exe: &str) -> Option<String> {
     unsafe {
         let _ = DrawIconEx(hdc, 0, 0, small, 32, 32, 0, None, DI_NORMAL);
     }
+    // 关键：必须在 DeleteObject(hbmp) 之前把 DIB 像素拷出来——bits 指向的内存
+    // 由该 DIB section 拥有，删掉位图后即被释放，之后再读就是 use-after-free
+    // （实测直接 STATUS_ACCESS_VIOLATION 崩溃整个进程）。
+    let mut bgra = vec![0u8; 32 * 32 * 4];
     unsafe {
+        std::ptr::copy_nonoverlapping(bits as *const u8, bgra.as_mut_ptr(), 32 * 32 * 4);
         let _ = SelectObject(hdc, old);
         let _ = DeleteObject(HGDIOBJ(hbmp.0));
         let _ = DeleteDC(hdc);
         let _ = DestroyIcon(small);
     }
     // 32bpp DIB 是 BGRA（DrawIconEx 预乘 alpha）→ 还原为非预乘 RGBA
-    let bgra = unsafe { std::slice::from_raw_parts(bits as *const u8, 32 * 32 * 4) };
     let mut rgba = Vec::with_capacity(32 * 32 * 4);
     for px in bgra.chunks_exact(4) {
         let (b, g, r, a) = (px[0] as u32, px[1] as u32, px[2] as u32, px[3] as u32);
