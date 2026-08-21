@@ -93,6 +93,8 @@ export interface ShortcutsConfig {
   port: string;
   /** 呼出快速文件面板的快捷键 */
   files: string;
+  /** 呼出语速贴面板的快捷键 */
+  snippets: string;
 }
 
 /** 端口工具面板配置 */

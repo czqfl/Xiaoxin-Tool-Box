@@ -16,7 +16,8 @@ type Target =
   | "credentials"
   | "translation"
   | "port"
-  | "files";
+  | "files"
+  | "snippets";
 
 /** 将键盘事件转换为 global-shortcut 可解析的组合键字符串，如 "Ctrl+Alt+C" */
 function comboFromEvent(e: KeyboardEvent): string | null {
@@ -146,6 +147,7 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
     translation: idleRow,
     port: idleRow,
     files: idleRow,
+    snippets: idleRow,
   });
   const [saving, setSaving] = useState<Target | null>(null);
 
@@ -165,6 +167,7 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
         "translation",
         "port",
         "files",
+        "snippets",
       ] as Target[]
     ).filter((t) => t !== target);
     if (others.some((t) => combo === draft[t])) {
@@ -266,6 +269,11 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
           "files",
           "呼出快速文件面板",
           "点击快捷键后按下新组合，例如 Alt+Q（快速新建 / 管理各类文件）"
+        )}
+        {renderRow(
+          "snippets",
+          "呼出语速贴面板",
+          "点击快捷键后按下新组合，例如 Alt+K（快捷短语，一键粘贴到任意应用）"
         )}
       </SettingGroup>
 

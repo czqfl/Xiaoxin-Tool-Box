@@ -35,6 +35,7 @@ const defaultConfig: AppConfig = {
     translation: "Alt+S",
     port: "Alt+P",
     files: "Alt+Q",
+    snippets: "Alt+K",
   },
   general: {
     theme: "system",

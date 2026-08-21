@@ -276,7 +276,8 @@ export const applyShortcut = (
     | "credentials"
     | "translation"
     | "port"
-    | "files",
+    | "files"
+    | "snippets",
   shortcut: string
 ) => invoke<void>("shortcut_apply", { target, shortcut });
 /** 录入捕获：钩子接管 Win 组合，避免系统功能抢先（与 capture_end 成对使用） */

@@ -50,6 +50,8 @@ enum Action {
     TogglePort,
     /// 呼出/隐藏快速文件面板
     ToggleFiles,
+    /// 呼出/隐藏语速贴面板
+    ToggleSnippets,
     /// 关闭翻译弹窗（系统级兜底：弹窗无焦点时 webview 收不到 Esc）
     CloseTranslate,
     /// 捕获模式：设置页录入 Win 组合键（payload 为虚拟键码）
@@ -82,6 +84,9 @@ static PORT_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
 /// 快速文件面板热键（Win/Alt 组合）
 static FILES_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
 static FILES_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
+/// 语速贴面板热键（Win/Alt 组合）
+static SNIPPETS_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
+static SNIPPETS_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
 /// 翻译弹窗是否打开：打开时按 Esc 系统级关闭（弹窗 webview 可能无焦点收不到键）
 static TRANSLATE_POPUP_OPEN: AtomicBool = AtomicBool::new(false);
 static SENDER: OnceLock<Sender<Action>> = OnceLock::new();
@@ -136,12 +141,14 @@ pub fn set_panel_hotkey(target: &str, is_alt: bool, vk: u16) {
         ("translation", false) => &TRANSLATE_HOTKEY_VK,
         ("port", false) => &PORT_HOTKEY_VK,
         ("files", false) => &FILES_HOTKEY_VK,
+        ("snippets", false) => &SNIPPETS_HOTKEY_VK,
         ("clipboard", true) => &CLIPBOARD_HOTKEY_ALT_VK,
         ("folder", true) => &FOLDER_HOTKEY_ALT_VK,
         ("credentials", true) => &CREDENTIAL_HOTKEY_ALT_VK,
         ("translation", true) => &TRANSLATE_HOTKEY_ALT_VK,
         ("port", true) => &PORT_HOTKEY_ALT_VK,
         ("files", true) => &FILES_HOTKEY_ALT_VK,
+        ("snippets", true) => &SNIPPETS_HOTKEY_ALT_VK,
         _ => return,
     };
     slot.store(vk, Ordering::SeqCst);
@@ -266,6 +273,10 @@ fn run_action<R: Runtime>(app: &AppHandle<R>, action: Action) {
             crate::storage::diag_write("[keyhook] files hotkey pressed");
             crate::panel::toggle_panel(app, crate::panel::FILES_PANEL)
         }
+        Action::ToggleSnippets => {
+            crate::storage::diag_write("[keyhook] snippets hotkey pressed");
+            crate::panel::toggle_panel(app, crate::panel::SNIPPETS_PANEL)
+        }
         Action::CloseTranslate => {
             // 系统级关闭翻译弹窗（webview 无焦点时前端收不到 Esc 的兜底）
             set_translate_popup_open(false);
@@ -375,6 +386,8 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                 Some(Action::TogglePort)
             } else if vk == FILES_HOTKEY_VK.load(Ordering::SeqCst) as u32 {
                 Some(Action::ToggleFiles)
+            } else if vk == SNIPPETS_HOTKEY_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::ToggleSnippets)
             } else {
                 None
             };
@@ -397,13 +410,14 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
             // 诊断：Alt 按住时每次按键都记录状态（低频），用于定位
             // "Alt 组合不触发"——能区分 alt_held 未置位 / 槽位未注册 / 匹配失败
             crate::storage::diag_write(&format!(
-                "[keyhook] alt+key vk=0x{vk:X} slots=cb:0x{:X}/fd:0x{:X}/cr:0x{:X}/tr:0x{:X}/pt:0x{:X}/fl:0x{:X}",
+                "[keyhook] alt+key vk=0x{vk:X} slots=cb:0x{:X}/fd:0x{:X}/cr:0x{:X}/tr:0x{:X}/pt:0x{:X}/fl:0x{:X}/sn:0x{:X}",
                 CLIPBOARD_HOTKEY_ALT_VK.load(Ordering::SeqCst),
                 FOLDER_HOTKEY_ALT_VK.load(Ordering::SeqCst),
                 CREDENTIAL_HOTKEY_ALT_VK.load(Ordering::SeqCst),
                 TRANSLATE_HOTKEY_ALT_VK.load(Ordering::SeqCst),
                 PORT_HOTKEY_ALT_VK.load(Ordering::SeqCst),
                 FILES_HOTKEY_ALT_VK.load(Ordering::SeqCst),
+                SNIPPETS_HOTKEY_ALT_VK.load(Ordering::SeqCst),
             ));
             let action = if vk == CLIPBOARD_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
                 Some(Action::ToggleClipboard)
@@ -417,6 +431,8 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                 Some(Action::TogglePort)
             } else if vk == FILES_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
                 Some(Action::ToggleFiles)
+            } else if vk == SNIPPETS_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::ToggleSnippets)
             } else {
                 None
             };

@@ -2,6 +2,7 @@
 use crate::config::{AppConfig, ConfigState, PasteMode};
 use crate::panel::{
     self, CLIPBOARD_PANEL, CREDENTIAL_PANEL, FILES_PANEL, FOLDER_PANEL, PORT_PANEL,
+    SNIPPETS_PANEL,
 };
 use crate::storage::{save_json, AppPaths};
 use std::sync::Mutex;
@@ -28,6 +29,8 @@ pub struct ShortcutBindingsInner {
     pub port: Option<Shortcut>,
     /// 呼出快速文件面板
     pub files: Option<Shortcut>,
+    /// 呼出语速贴面板
+    pub snippets: Option<Shortcut>,
 }
 
 pub fn parse(shortcut: &str) -> Result<Shortcut, String> {
@@ -119,6 +122,7 @@ pub fn shortcut_test(
             || inner.translation == Some(parsed)
             || inner.port == Some(parsed)
             || inner.files == Some(parsed)
+            || inner.snippets == Some(parsed)
         {
             return Ok(());
         }
@@ -175,6 +179,7 @@ pub fn shortcut_apply(
         && target != "translation"
         && target != "port"
         && target != "files"
+        && target != "snippets"
     {
         return Err("未知的快捷键目标".into());
     }
@@ -190,8 +195,10 @@ pub fn shortcut_apply(
         inner.translation
     } else if target == "port" {
         inner.port
-    } else {
+    } else if target == "files" {
         inner.files
+    } else {
+        inner.snippets
     };
     if current == Some(parsed) {
         return Ok(());
@@ -211,8 +218,10 @@ pub fn shortcut_apply(
         inner.translation = Some(parsed);
     } else if target == "port" {
         inner.port = Some(parsed);
-    } else {
+    } else if target == "files" {
         inner.files = Some(parsed);
+    } else {
+        inner.snippets = Some(parsed);
     }
     drop(inner);
 
@@ -228,8 +237,10 @@ pub fn shortcut_apply(
         config.shortcuts.translation = shortcut;
     } else if target == "port" {
         config.shortcuts.port = shortcut;
-    } else {
+    } else if target == "files" {
         config.shortcuts.files = shortcut;
+    } else {
+        config.shortcuts.snippets = shortcut;
     }
     let _ = save_json(&paths.config_file, &config);
     *config_state.0.lock().unwrap() = config;
@@ -244,6 +255,7 @@ pub fn register_initial<R: Runtime>(app: &AppHandle<R>, config: &AppConfig) {
     register_one(app, "translation", &config.shortcuts.translation);
     register_one(app, "port", &config.shortcuts.port);
     register_one(app, "files", &config.shortcuts.files);
+    register_one(app, "snippets", &config.shortcuts.snippets);
     sync_seq_shortcut(app, config.clipboard.paste_mode);
 }
 
@@ -276,8 +288,10 @@ fn register_one<R: Runtime>(app: &AppHandle<R>, target: &str, shortcut_str: &str
                     inner.translation = Some(parsed);
                 } else if target == "port" {
                     inner.port = Some(parsed);
-                } else {
+                } else if target == "files" {
                     inner.files = Some(parsed);
+                } else {
+                    inner.snippets = Some(parsed);
                 }
             }
         }
@@ -305,6 +319,8 @@ pub fn panel_label_for(
         Some(PORT_PANEL)
     } else if bindings.files == Some(*shortcut) {
         Some(FILES_PANEL)
+    } else if bindings.snippets == Some(*shortcut) {
+        Some(SNIPPETS_PANEL)
     } else {
         None
     }
