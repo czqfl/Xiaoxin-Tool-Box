@@ -8,6 +8,7 @@ import { ClipboardPanel } from "./modules/clipboard/ClipboardPanel";
 import { FolderPanel } from "./modules/folder/FolderPanel";
 import { CredentialPanel } from "./modules/credential/CredentialPanel";
 import { PortPanel } from "./modules/port/PortPanel";
+import { QuickFilesPanel } from "./modules/quickfiles/QuickFilesPanel";
 import { TranslatePopup } from "./modules/translate/TranslatePopup";
 import { Toolbar } from "./modules/toolbar/Toolbar";
 import { SettingsApp } from "./settings/SettingsApp";
@@ -50,6 +51,9 @@ export default function App() {
   }
   if (label === "port-panel") {
     return <PortPanel />;
+  }
+  if (label === "files-panel") {
+    return <QuickFilesPanel />;
   }
   if (label === "translate-popup") {
     return <TranslatePopup />;

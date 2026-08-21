@@ -17,6 +17,7 @@ import { diagLog } from "../../core/tauri";
 import { useConfigStore } from "../../stores/configStore";
 import {
   IconClipboard,
+  IconFiles,
   IconFolder,
   IconKey,
   IconPort,
@@ -65,6 +66,11 @@ export const TOOLS: Record<ToolKey, { label: string; color: string; icon: React.
     color: "var(--tool-port)",
     icon: <IconPort size={14} />,
   },
+  files: {
+    label: "快速文件",
+    color: "var(--tool-files)",
+    icon: <IconFiles size={14} />,
+  },
   settings: {
     label: "打开设置",
     color: "var(--tool-settings)",
@@ -81,6 +87,7 @@ const PANEL_LABEL_TO_KEY: Record<string, ToolKey> = {
   "folder-panel": "folder",
   "credential-panel": "credentials",
   "port-panel": "port",
+  "files-panel": "files",
   settings: "settings",
   "translate-popup": "translation",
 };

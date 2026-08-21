@@ -55,9 +55,23 @@ const defaultConfig: AppConfig = {
   port: {
     always_on_top: true,
   },
+  files: {
+    location: null,
+    file_types: [
+      { ext: "txt", label: "文本", color: "#8a94a6", opener: null },
+      { ext: "md", label: "Markdown", color: "#4c8dff", opener: null },
+      { ext: "json", label: "JSON", color: "#e0a23a", opener: null },
+      { ext: "csv", label: "CSV", color: "#36b37e", opener: null },
+      { ext: "log", label: "日志", color: "#b06fd6", opener: null },
+      { ext: "yaml", label: "YAML", color: "#d96aa0", opener: null },
+    ],
+    always_on_top: true,
+    default_group: "type",
+    default_sort: "created",
+  },
   toolbar: {
     enabled: true,
-    tools: ["clipboard", "folder", "credentials", "translation", "port", "settings"],
+    tools: ["clipboard", "folder", "credentials", "translation", "port", "files", "settings"],
     orientation: "horizontal",
     auto_hide: true,
   },

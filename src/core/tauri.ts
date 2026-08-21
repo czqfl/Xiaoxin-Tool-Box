@@ -9,6 +9,7 @@ import type {
   FolderEntry,
   GitRunResult,
   PortProcess,
+  QuickFileList,
   TranslateResult,
 } from "../types";
 
@@ -228,6 +229,37 @@ export const portSearch = (keyword: string) =>
 /** 结束指定 PID 的进程 */
 export const killPort = (pid: number) =>
   safe(invoke("port_kill", { pid }), undefined);
+
+// ---- 快速文件 ----
+/** 列出保存位置下、属于已配置文件类型的所有文件（附带实际保存位置） */
+export const quickfilesList = (location: string, extensions: string[]) =>
+  safe(
+    invoke<QuickFileList>("quickfiles_list", { location, extensions }),
+    { location: "", files: [] } as QuickFileList
+  );
+/** 在保存位置新建空文件，返回完整路径 */
+export const quickfilesCreate = (location: string, filename: string) =>
+  invoke<string>("quickfiles_create", { location, filename });
+/** 打开文件：opener 为空则用系统默认程序 */
+export const quickfilesOpen = (path: string, opener?: string | null) =>
+  invoke<void>("quickfiles_open", { path, opener: opener ?? null });
+/** 在资源管理器中定位文件 */
+export const quickfilesReveal = (path: string) =>
+  invoke<void>("quickfiles_reveal", { path });
+/** 删除文件 */
+export const quickfilesDelete = (path: string) =>
+  safe(invoke("quickfiles_delete", { path }), undefined);
+
+/** 调起系统文件选择器定位"默认打开程序"可执行文件，取消时返回 null */
+export const pickOpenerExecutable = async (): Promise<string | null> => {
+  const selected = await open({
+    directory: false,
+    multiple: false,
+    title: "选择默认打开此类型文件的应用程序",
+    filters: [{ name: "可执行文件", extensions: ["exe"] }],
+  });
+  return typeof selected === "string" ? selected : null;
+};
 
 // ---- 快捷键 ----
 export const testShortcut = (shortcut: string) =>

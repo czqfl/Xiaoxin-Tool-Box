@@ -10,6 +10,7 @@ async function bootstrap() {
     "folder-panel",
     "credential-panel",
     "port-panel",
+    "files-panel",
     "translate-popup",
     "toolbar",
   ];

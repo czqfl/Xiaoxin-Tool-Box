@@ -150,6 +150,68 @@ impl Default for PortConfig {
     }
 }
 
+/// 单一文件类型定义（快速文件面板用）。
+/// 每种类型可单独配置：扩展名、显示名、强调色、默认打开方式。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct FileTypeDef {
+    /// 扩展名（不含点，小写），如 "md"
+    pub ext: String,
+    /// 显示名，如 "Markdown"
+    pub label: String,
+    /// 强调色（十六进制，如 #4c8dff），用于面板内该类型卡片的醒目区分
+    pub color: String,
+    /// 默认打开方式：应用 exe 完整路径或命令（如 VS Code 路径）。
+    /// 为空表示使用系统默认程序打开。
+    pub opener: Option<String>,
+}
+
+impl Default for FileTypeDef {
+    fn default() -> Self {
+        Self {
+            ext: "txt".into(),
+            label: "文本".into(),
+            color: "#8a94a6".into(),
+            opener: None,
+        }
+    }
+}
+
+/// 快速文件面板配置：在统一位置快速新建/打开/管理多种类型文件。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FilesConfig {
+    /// 文件统一保存位置（绝对路径）。为空时回退到 data 目录下的 quickfiles 子目录。
+    pub location: Option<String>,
+    /// 可新建的文件类型列表（每种类型单独配置扩展名/强调色/默认打开方式）
+    pub file_types: Vec<FileTypeDef>,
+    /// 面板是否置顶显示
+    pub always_on_top: bool,
+    /// 默认分组方式："none" 不分组 / "type" 按文件类型 / "date" 按创建日期
+    pub default_group: String,
+    /// 默认排序方式："created" 按创建时间 / "name" 按名称
+    pub default_sort: String,
+}
+
+impl Default for FilesConfig {
+    fn default() -> Self {
+        Self {
+            location: None,
+            file_types: vec![
+                FileTypeDef { ext: "txt".into(), label: "文本".into(), color: "#8a94a6".into(), opener: None },
+                FileTypeDef { ext: "md".into(), label: "Markdown".into(), color: "#4c8dff".into(), opener: None },
+                FileTypeDef { ext: "json".into(), label: "JSON".into(), color: "#e0a23a".into(), opener: None },
+                FileTypeDef { ext: "csv".into(), label: "CSV".into(), color: "#36b37e".into(), opener: None },
+                FileTypeDef { ext: "log".into(), label: "日志".into(), color: "#b06fd6".into(), opener: None },
+                FileTypeDef { ext: "yaml".into(), label: "YAML".into(), color: "#d96aa0".into(), opener: None },
+            ],
+            always_on_top: true,
+            default_group: "type".into(),
+            default_sort: "created".into(),
+        }
+    }
+}
+
 /// 悬浮工具栏配置：常驻小工具条，快速呼出各面板
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -303,6 +365,10 @@ pub struct AppConfig {
     pub translator: TranslatorConfig,
     /// 端口工具面板配置
     pub port: PortConfig,
+    /// 快速文件面板配置（统一位置新建/打开/管理多种类型文件）
+    /// serde(default)：旧配置缺失该字段时仅用默认填充，不破坏整份配置
+    #[serde(default)]
+    pub files: FilesConfig,
     /// 悬浮工具栏配置
     pub toolbar: ToolbarConfig,
     /// 各面板上次关闭时的窗口位置（标签 -> 屏幕坐标），下次呼出恢复（记忆位置）
@@ -335,6 +401,7 @@ pub fn config_save(
         crate::panel::FOLDER_PANEL,
         crate::panel::CREDENTIAL_PANEL,
         crate::panel::PORT_PANEL,
+        crate::panel::FILES_PANEL,
         crate::panel::TOOLBAR_WINDOW,
     ] {
         if let Some(w) = app.get_webview_window(label) {

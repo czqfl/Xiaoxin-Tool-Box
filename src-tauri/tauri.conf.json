@@ -84,6 +84,23 @@
         "visible": false
       },
       {
+        "label": "files-panel",
+        "title": "快速文件",
+        "width": 760,
+        "height": 560,
+        "minWidth": 520,
+        "minHeight": 380,
+        "resizable": true,
+        "fullscreen": false,
+        "maximized": false,
+        "decorations": false,
+        "transparent": false,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false
+      },
+      {
         "label": "toolbar",
         "title": "悬浮工具栏",
         "width": 188,

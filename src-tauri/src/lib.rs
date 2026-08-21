@@ -10,6 +10,7 @@ mod credentials;
 mod keyhook;
 mod panel;
 mod port;
+mod quickfiles;
 mod shortcut;
 mod storage;
 mod translate;
@@ -274,6 +275,11 @@ pub fn run() {
             port::port_query,
             port::port_kill,
             port::port_search,
+            quickfiles::quickfiles_list,
+            quickfiles::quickfiles_create,
+            quickfiles::quickfiles_open,
+            quickfiles::quickfiles_reveal,
+            quickfiles::quickfiles_delete,
         ])
         .run(tauri::generate_context!())
         .expect("应用启动失败");

@@ -178,6 +178,12 @@ button {
   padding: 0 10px;
   font-size: 12px;
 }
+.btn-xs {
+  height: 22px;
+  padding: 0 8px;
+  font-size: 11px;
+  border-radius: var(--radius-sm);
+}
 
 /* 图标按钮 */
 .icon-btn {

@@ -99,6 +99,59 @@ export interface PortConfig {
   always_on_top: boolean;
 }
 
+/** 单一文件类型定义（快速文件面板用） */
+export interface FileTypeDef {
+  /** 扩展名（不含点，小写），如 "md" */
+  ext: string;
+  /** 显示名，如 "Markdown" */
+  label: string;
+  /** 强调色（十六进制，如 #4c8dff），面板内该类型卡片醒目区分 */
+  color: string;
+  /** 默认打开方式：应用 exe 完整路径或命令；为空表示系统默认程序 */
+  opener?: string | null;
+}
+
+/** 快速文件面板配置：统一位置新建/打开/管理多种类型文件 */
+export interface FilesConfig {
+  /** 文件统一保存位置（绝对路径）；为空回退到 data/quickfiles */
+  location?: string | null;
+  /** 可新建的文件类型列表（每种类型单独配置扩展名/强调色/默认打开方式） */
+  file_types: FileTypeDef[];
+  /** 面板是否置顶显示 */
+  always_on_top: boolean;
+  /** 默认分组方式："none" 不分组 / "type" 按文件类型 / "date" 按创建日期 */
+  default_group: FilesGroupMode;
+  /** 默认排序方式："created" 按创建时间 / "name" 按名称 */
+  default_sort: FilesSortMode;
+}
+
+/** 快速文件分组方式 */
+export type FilesGroupMode = "none" | "type" | "date";
+/** 快速文件排序方式 */
+export type FilesSortMode = "created" | "name";
+
+/** 快速文件面板：保存位置下的单个文件条目 */
+export interface QuickFile {
+  /** 文件名（含扩展名） */
+  name: string;
+  /** 扩展名（小写，不含点） */
+  ext: string;
+  /** 完整路径 */
+  path: string;
+  /** 创建时间（毫秒时间戳，0 表示未知） */
+  created_at: number;
+  /** 文件大小（字节） */
+  size: number;
+}
+
+/** 快速文件列表结果（附带实际使用的保存位置） */
+export interface QuickFileList {
+  /** 实际使用的保存位置（绝对路径） */
+  location: string;
+  /** 文件条目列表 */
+  files: QuickFile[];
+}
+
 /** 悬浮工具栏可展示的工具 */
 export type ToolKey =
   | "clipboard"
@@ -106,6 +159,7 @@ export type ToolKey =
   | "credentials"
   | "translation"
   | "port"
+  | "files"
   | "settings";
 
 /** 悬浮工具栏配置：常驻小工具条，快速呼出各面板 */
@@ -172,6 +226,8 @@ export interface AppConfig {
   translator: TranslatorConfig;
   /** 端口工具面板配置 */
   port: PortConfig;
+  /** 快速文件面板配置 */
+  files: FilesConfig;
   /** 悬浮工具栏配置 */
   toolbar: ToolbarConfig;
   /** 各面板上次关闭位置（窗口标签 -> 屏幕坐标），持久化，呼出时恢复 */
