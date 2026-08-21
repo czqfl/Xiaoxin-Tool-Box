@@ -560,6 +560,66 @@ fn restore_position<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>, l
         .is_ok()
 }
 
+/// 应用退出前：把所有面板（位置+尺寸）与悬浮工具栏（位置）的**最后状态**
+/// 写入配置，下次启动自动恢复。面板可能处于隐藏态，但窗口对象仍在，
+/// outer_position/outer_size 依然可靠——这样"拖好位置/大小后直接退出应用"
+/// 也不会丢。
+/// 工具栏收起态会滑出屏幕，保存前校验窗口中心仍在某显示器内，屏外则跳过
+/// （避免用收起坐标覆盖用户拖好的停靠位，下次启动回退右下角）。
+pub fn save_all_window_states<R: Runtime>(app: &AppHandle<R>) {
+    let (Some(cfg), Some(paths)) = (
+        app.try_state::<ConfigState>(),
+        app.try_state::<AppPaths>(),
+    ) else {
+        return;
+    };
+    let mut guard = cfg.0.lock().unwrap();
+    let mut changed = false;
+
+    // 工具栏：位置（校验中心仍在屏内才保存）
+    if let Some(w) = app.get_webview_window(TOOLBAR_WINDOW) {
+        if let (Ok(pos), Ok(size)) = (w.outer_position(), w.outer_size()) {
+            let cx = pos.x + size.width as i32 / 2;
+            let cy = pos.y + size.height as i32 / 2;
+            let scale = app
+                .primary_monitor()
+                .ok()
+                .flatten()
+                .map(|m| m.scale_factor())
+                .unwrap_or(1.0);
+            let (lx, ly) = (cx as f64 / scale, cy as f64 / scale);
+            if app.monitor_from_point(lx, ly).ok().flatten().is_some() {
+                guard.toolbar.position = Some((pos.x, pos.y));
+                changed = true;
+            }
+        }
+    }
+
+    // 各面板：位置 + 尺寸
+    for label in ALL_PANELS {
+        let Some(w) = app.get_webview_window(label) else {
+            continue;
+        };
+        if let Ok(pos) = w.outer_position() {
+            guard
+                .panel_positions
+                .insert(label.to_string(), (pos.x, pos.y));
+        }
+        if let Ok(size) = w.outer_size() {
+            guard
+                .panel_sizes
+                .insert(label.to_string(), (size.width, size.height));
+        }
+        changed = true;
+    }
+
+    if changed {
+        let snapshot = guard.clone();
+        drop(guard);
+        let _ = save_json(&paths.config_file, &snapshot);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // 工具栏点击穿透：常驻工具条不遮挡屏幕点击
 // ---------------------------------------------------------------------------

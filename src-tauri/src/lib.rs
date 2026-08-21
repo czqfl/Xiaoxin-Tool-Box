@@ -302,6 +302,13 @@ pub fn run() {
             snippets::snippets_delete,
             snippets::snippets_paste,
         ])
-        .run(tauri::generate_context!())
-        .expect("应用启动失败");
+        .build(tauri::generate_context!())
+        .expect("应用构建失败")
+        .run(|app_handle, event| {
+            // 应用退出前：把所有面板/工具栏的最后位置与尺寸写入配置，
+            // 下次启动自动恢复（面板可能处于隐藏态，但窗口对象仍在）
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                panel::save_all_window_states(app_handle);
+            }
+        });
 }
