@@ -31,6 +31,7 @@ import {
   IconGroupNone,
   IconGroupType,
   IconList,
+  IconListColumns,
   IconLocate,
   IconPin,
   IconPlus,
@@ -505,10 +506,7 @@ export function QuickFilesPanel() {
                   title="水平多列并排"
                   onClick={() => changeLayout("horizontal")}
                 >
-                  <IconList
-                    size={16}
-                    style={{ transform: "rotate(90deg)", transformOrigin: "center" }}
-                  />
+                  <IconListColumns size={16} />
                 </button>
               </div>
             </div>

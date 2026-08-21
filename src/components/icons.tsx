@@ -97,9 +97,23 @@ export const IconGrid = (p: IconProps) => (
   </svg>
 );
 
+/** 布局：垂直列表（三行「圆点 + 横线」，清晰表达列表语义） */
 export const IconList = (p: IconProps) => (
   <svg {...base(p)}>
-    <path d="M8 6h13M8 12h13M8 18h13M3 6h0M3 12h0M3 18h0" />
+    <circle cx="4.5" cy="6.5" r="1.2" />
+    <path d="M8 6.5h12" />
+    <circle cx="4.5" cy="12" r="1.2" />
+    <path d="M8 12h12" />
+    <circle cx="4.5" cy="17.5" r="1.2" />
+    <path d="M8 17.5h12" />
+  </svg>
+);
+
+/** 布局：水平多列并排（圆角外框 + 中间竖线分栏） */
+export const IconListColumns = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="3.5" y="4" width="17" height="16" rx="2.5" />
+    <path d="M12 4v16" />
   </svg>
 );
 
@@ -345,13 +359,13 @@ export const IconSortTime = (p: IconProps) => (
   </svg>
 );
 
-/** 排序：按名称（大 A 小 a 字样 = 字母序），比箭头更直观 */
+/** 排序：按名称（大 A 小 a 字样 = 字母序），大小对比明显但不糊 */
 export const IconSortName = (p: IconProps) => (
   <svg {...base(p)}>
     <text
-      x="10.5"
-      y="12.5"
-      fontSize="15"
+      x="10"
+      y="12"
+      fontSize="16"
       fontWeight="700"
       textAnchor="middle"
       dominantBaseline="central"
@@ -361,9 +375,9 @@ export const IconSortName = (p: IconProps) => (
       A
     </text>
     <text
-      x="18"
+      x="17.5"
       y="20.5"
-      fontSize="9"
+      fontSize="11.5"
       fontWeight="600"
       textAnchor="middle"
       dominantBaseline="central"
