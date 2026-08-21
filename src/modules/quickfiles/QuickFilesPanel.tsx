@@ -22,7 +22,21 @@ import {
   quickfilesReveal,
   setPanelAlwaysOnTop,
 } from "../../core/tauri";
-import { IconClose, IconFiles, IconLocate, IconPin, IconPlus, IconTrash } from "../../components/icons";
+import {
+  IconClose,
+  IconFiles,
+  IconGroupDate,
+  IconGroupNone,
+  IconGroupType,
+  IconGrid,
+  IconList,
+  IconLocate,
+  IconPin,
+  IconPlus,
+  IconSortName,
+  IconSortTime,
+  IconTrash,
+} from "../../components/icons";
 import "../../styles/panel.css";
 import "./quickfiles.css";
 
@@ -361,7 +375,9 @@ export function QuickFilesPanel() {
           </button>
         </div>
 
-        {/* 控制条：保存位置靠左，分组/排序/布局靠右 */}
+        {/* 控制条：保存位置靠左；分组/排序/布局改为纯图标按钮组（参考文件夹面板
+            的布局切换按钮组）——不再写"分组/排序/布局"文字标签与选项汉字名，
+            每个控件是一个独立的图标按钮胶囊，靠 icon + tooltip + active 高亮表达。 */}
         <div className="qf-controls">
           <button
             className="qf-loc"
@@ -373,48 +389,62 @@ export function QuickFilesPanel() {
           </button>
 
           <div className="qf-controls-right">
-            <div className="qf-seg">
-              <span className="qf-seg-label">分组</span>
-              <div className="qf-seg-group">
-                {(["none", "type", "date"] as FilesGroupMode[]).map((m) => (
-                  <button
-                    key={m}
-                    className={`qf-seg-btn${group === m ? " active" : ""}`}
-                    onClick={() => setGroup(m)}
-                  >
-                    {m === "none" ? "无" : m === "type" ? "按类型" : "按日期"}
-                  </button>
-                ))}
-              </div>
+            <div className="qf-icon-switcher">
+              <button
+                className={`icon-btn${group === "none" ? " active" : ""}`}
+                title="不分组（平铺列表）"
+                onClick={() => setGroup("none")}
+              >
+                <IconGroupNone size={15} />
+              </button>
+              <button
+                className={`icon-btn${group === "type" ? " active" : ""}`}
+                title="按类型分组"
+                onClick={() => setGroup("type")}
+              >
+                <IconGroupType size={15} />
+              </button>
+              <button
+                className={`icon-btn${group === "date" ? " active" : ""}`}
+                title="按日期分组"
+                onClick={() => setGroup("date")}
+              >
+                <IconGroupDate size={15} />
+              </button>
             </div>
-            <div className="qf-seg">
-              <span className="qf-seg-label">排序</span>
-              <div className="qf-seg-group">
-                {(["created", "name"] as FilesSortMode[]).map((m) => (
-                  <button
-                    key={m}
-                    className={`qf-seg-btn${sort === m ? " active" : ""}`}
-                    onClick={() => setSort(m)}
-                  >
-                    {m === "created" ? "创建时间" : "名称"}
-                  </button>
-                ))}
-              </div>
+
+            <div className="qf-icon-switcher">
+              <button
+                className={`icon-btn${sort === "created" ? " active" : ""}`}
+                title="按创建时间排序"
+                onClick={() => setSort("created")}
+              >
+                <IconSortTime size={15} />
+              </button>
+              <button
+                className={`icon-btn${sort === "name" ? " active" : ""}`}
+                title="按名称排序"
+                onClick={() => setSort("name")}
+              >
+                <IconSortName size={15} />
+              </button>
             </div>
-            <div className="qf-seg">
-              <span className="qf-seg-label">布局</span>
-              <div className="qf-seg-group">
-                {(["vertical", "horizontal"] as FilesLayoutMode[]).map((m) => (
-                  <button
-                    key={m}
-                    className={`qf-seg-btn${layout === m ? " active" : ""}`}
-                    title={m === "vertical" ? "垂直列表" : "水平多列并排"}
-                    onClick={() => setLayout(m)}
-                  >
-                    {m === "vertical" ? "竖排" : "横排"}
-                  </button>
-                ))}
-              </div>
+
+            <div className="qf-icon-switcher">
+              <button
+                className={`icon-btn${layout === "vertical" ? " active" : ""}`}
+                title="垂直列表"
+                onClick={() => setLayout("vertical")}
+              >
+                <IconList size={15} />
+              </button>
+              <button
+                className={`icon-btn${layout === "horizontal" ? " active" : ""}`}
+                title="水平多列并排"
+                onClick={() => setLayout("horizontal")}
+              >
+                <IconGrid size={15} />
+              </button>
             </div>
           </div>
         </div>

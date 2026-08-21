@@ -146,59 +146,25 @@
   text-overflow: ellipsis;
 }
 
-/* 分段选择：标签（小写大写胶囊）与按钮组（带底容器）一眼可分 */
-.qf-seg {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-/* 组与组之间加细分隔线，让"分组/排序/布局"三组一眼能数清 */
-.qf-seg + .qf-seg {
-  padding-left: 12px;
-  margin-left: 2px;
-  border-left: 1px solid var(--border-subtle);
-}
-.qf-seg-label {
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--text-tertiary);
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
-  padding: 3px 7px;
-  border-radius: 5px;
-  background: var(--bg-badge);
-  user-select: none;
-  line-height: 1;
-}
-.qf-seg-group {
+/* 图标切换组：自包含胶囊，每个控件一组按钮（参考文件夹面板 .layout-switcher）。
+   无文字标签——靠 icon + tooltip + active 高亮表达，彻底消除"看不清哪个是按钮"。 */
+.qf-icon-switcher {
   display: inline-flex;
   align-items: center;
   gap: 2px;
   padding: 2px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--bg-input-glass);
+  border-radius: var(--radius-md);
+  background: var(--bg-item-active);
 }
-.qf-seg-btn {
-  padding: 4px 10px;
-  border-radius: 6px;
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s, box-shadow 0.12s;
+.qf-icon-switcher .icon-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: calc(var(--radius-md) - 2px);
 }
-.qf-seg-btn:hover {
-  color: var(--text);
-  background: var(--bg-elev);
-}
-.qf-seg-btn.active {
-  background: var(--accent);
-  color: #fff;
-  font-weight: 600;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+/* active 用品牌色实底（与 .icon-btn.active 一致），不依赖文字即可一眼看出当前选中 */
+.qf-icon-switcher .icon-btn.active {
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 /* 列表主体 */

@@ -304,3 +304,44 @@ export const IconTranslate = (p: IconProps) => (
     <path d="M14 18h6" />
   </svg>
 );
+
+/** 分组：不分组（单块 = 未分段） */
+export const IconGroupNone = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="4" y="5" width="16" height="14" rx="2" />
+  </svg>
+);
+
+/** 分组：按类型（标签 / 类别） */
+export const IconGroupType = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M3 11.5V4a1 1 0 0 1 1-1h7.5L21 12.5a2 2 0 0 1 0 2.8l-4.7 4.7a2 2 0 0 1-2.8 0L3 11.5Z" />
+    <circle cx="7.6" cy="7.6" r="1.4" />
+  </svg>
+);
+
+/** 分组：按日期（日历） */
+export const IconGroupDate = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="3" y="4.5" width="18" height="16.5" rx="2" />
+    <path d="M3 9h18M8 2.5v4M16 2.5v4" />
+  </svg>
+);
+
+/** 排序：按创建时间（时钟） */
+export const IconSortTime = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M12 7.5V12l3 2" />
+  </svg>
+);
+
+/** 排序：按名称（A→Z 字母序） */
+export const IconSortName = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M6 17 9 6l3 11" />
+    <path d="M7 13h4" />
+    <path d="M14 17V6.5l3 2.2" />
+    <path d="M14 17h3" />
+  </svg>
+);
