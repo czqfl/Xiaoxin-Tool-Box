@@ -17,6 +17,7 @@ import type {
   InstalledApp,
 } from "../types";
 import { Segmented, SettingGroup, SettingRow } from "./components";
+import { GlassSelect, type GlassOption } from "../components/GlassSelect";
 import { IconFiles, IconPlus, IconTrash } from "../components/icons";
 
 export function FilesPage() {
@@ -95,6 +96,44 @@ export function FilesPage() {
     }
   };
 
+  /** 打开方式下拉选项：系统默认 → 常用编辑器（置顶）→ 浏览器 → 其他应用 → 更多。
+   *  过滤由后端完成（安装器/更新器/系统组件等已被剔除），图标为 exe 提取的
+   *  32×32 PNG data URL。 */
+  const openerOptions = (opener: string | null | undefined): GlassOption[] => {
+    const opts: GlassOption[] = [{ value: "", label: "系统默认" }];
+    if (appsLoading) {
+      opts.push({ value: "__loading__", label: "正在扫描本机应用…", disabled: true });
+    }
+    const groups: Record<string, string> = {
+      editor: "常用编辑器",
+      browser: "浏览器",
+      other: "其他应用",
+    };
+    for (const k of ["editor", "browser", "other"] as const) {
+      const list = apps.filter((a) => a.kind === k);
+      if (list.length === 0) continue;
+      for (const a of list) {
+        opts.push({
+          value: a.exe,
+          label: a.name,
+          icon: a.icon ?? undefined,
+          group: groups[k],
+        });
+      }
+    }
+    // 当前 opener 不在扫描列表（用户通过「浏览其他程序…」选择的）→ 显示为禁用占位
+    if (opener && !apps.some((a) => a.exe.toLowerCase() === opener.toLowerCase())) {
+      opts.push({
+        value: "__custom__",
+        label: `自定义：${opener.split(/[\\/]/).pop()}`,
+        disabled: true,
+        group: "更多",
+      });
+    }
+    opts.push({ value: "__browse__", label: "浏览其他程序…", group: "更多" });
+    return opts;
+  };
+
   return (
     <div className="settings-page">
       <h2>快速文件</h2>
@@ -105,7 +144,7 @@ export function FilesPage() {
       <SettingGroup>
         <SettingRow
           title="文件保存位置"
-          desc="所有新建文件统一保存到此处；留空则使用程序数据目录下的 quickfiles 文件夹"
+          desc="所有新建文件统一保存到此处，并按文件类型分子文件夹存放（每种类型一个文件夹）；留空则使用程序数据目录下的 quickfiles 文件夹"
         >
           <div className="files-loc-box">
             <code className="files-loc-path">{files.location || "（默认：数据目录 / quickfiles）"}</code>
@@ -202,30 +241,12 @@ export function FilesPage() {
                   />
                 </div>
                 <div className="files-opener">
-                  <select
-                    className="files-opener-select"
+                  <GlassSelect
                     title="默认打开方式（留空使用系统默认程序）"
                     value={openerSelectValue(t.opener)}
-                    onChange={(e) => void handleOpenerChange(i, e.target.value)}
-                  >
-                    <option value="">系统默认</option>
-                    {appsLoading && (
-                      <option value="" disabled>
-                        正在扫描本机应用…
-                      </option>
-                    )}
-                    {apps.map((a) => (
-                      <option key={a.exe} value={a.exe}>
-                        {a.name}
-                      </option>
-                    ))}
-                    {t.opener && openerSelectValue(t.opener) === "__custom__" && (
-                      <option value="__custom__" disabled>
-                        自定义：{t.opener.split(/[\\/]/).pop()}
-                      </option>
-                    )}
-                    <option value="__browse__">浏览其他程序…</option>
-                  </select>
+                    options={openerOptions(t.opener)}
+                    onChange={(v) => void handleOpenerChange(i, v)}
+                  />
                   {t.opener && (
                     <button
                       className="btn btn-xs"

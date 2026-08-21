@@ -41,7 +41,6 @@ fn ensure_settings_window<R: Runtime>(app: &AppHandle<R>) -> Option<tauri::Webvi
         .min_inner_size(760.0, 520.0)
         .center()
         .resizable(true)
-        .always_on_top(true)
         .visible(false)
         .build();
     // 重建的窗口同样要挂上"关闭=隐藏"拦截，防止再次被销毁
@@ -67,8 +66,7 @@ pub fn show_settings_window<R: Runtime>(app: &AppHandle<R>) {
     ));
     // 标题栏跟随应用主题（浅色=浅色标题栏，而非 Windows 系统深色）
     crate::apply_titlebar_theme(&w);
-    // 确保置顶样式在位（同步生效），再显示
-    let _ = w.set_always_on_top(true);
+    // 设置窗口不置顶：显示后点击其他应用即让位（不再是永久置顶窗口）
     let _ = w.unminimize();
     let _ = w.show();
     // 兜底：极端状态（最小化+隐藏）下 unminimize/show 可能仍未真正显示，
@@ -108,14 +106,15 @@ pub fn show_settings_window<R: Runtime>(app: &AppHandle<R>) {
             None
         };
         if let Some(hwnd) = hwnd_of(&w2) {
-            crate::acrylic::force_topmost_foreground(hwnd);
+            // 置前但不置顶：设置窗口不再保持 TOPMOST，点击其他应用即让位
+            crate::acrylic::force_foreground_robust(hwnd);
         }
         let _ = w2.set_focus();
         // 兜底：若仍未获得焦点（前台锁再次拒绝），稍后再补一次置前
         std::thread::sleep(std::time::Duration::from_millis(150));
         if !w2.is_focused().unwrap_or(false) {
             if let Some(hwnd) = hwnd_of(&w2) {
-                crate::acrylic::force_topmost_foreground(hwnd);
+                crate::acrylic::force_foreground_robust(hwnd);
             }
             let _ = w2.set_focus();
         }
@@ -189,7 +188,8 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
             // 悬浮工具栏：切换显隐（位置自动记忆）
             "toggle_toolbar" => crate::panel::toggle_toolbar(app),
             "open_settings" => show_settings_window(app),
-            "quit" => app.exit(0),
+            // 硬退出：跳过第三方注入 DLL 的卸载回调（微信输入法 CrashRpt 竞态崩溃）
+            "quit" => hard_exit(),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
@@ -204,6 +204,24 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         })
         .build(app)?;
     Ok(())
+}
+
+/// 应用退出：直接终止进程（TerminateProcess），跳过 DLL 卸载回调。
+///
+/// 常规退出（app.exit → ExitProcess）会给仍加载的 DLL 发 DLL_PROCESS_DETACH；
+/// 微信输入法（WeType）注入的 CrashRpt1500.dll 在卸载阶段存在竞态——其内部
+/// 线程调用已卸载代码，直接访问越界（事件日志多次记录：0xc0000005、
+/// 模块 CrashRpt1500.dll_unloaded，弹窗"Error launching CrashSender.exe"）。
+/// TerminateProcess 不通知任何 DLL，从根上绕开该第三方卸载竞态；进程终止后
+/// 所有句柄/内存由 OS 统一回收，本应用自身无退出清理需求（配置均为改动即保存）。
+#[cfg(windows)]
+pub fn hard_exit() -> ! {
+    unsafe {
+        use windows::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
+        let _ = TerminateProcess(GetCurrentProcess(), 0);
+    }
+    // TerminateProcess 对自身进程理论上必成功；兜底用快死路径，绝不走常规退出
+    std::process::abort();
 }
 
 /// 设置窗口标题栏精确配色（DWMWA_CAPTION_COLOR，Windows 11 22000+，属性值 35）：

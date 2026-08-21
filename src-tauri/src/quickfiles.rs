@@ -1,5 +1,7 @@
 //! 快速文件面板：在统一位置快速新建 / 打开 / 管理多种类型文件。
 //! 位置可在设置中配置；为空时回退到 data 目录下的 quickfiles 子目录（自动创建）。
+//! 存储按文件类型分子目录管理：新文件落在「位置/<扩展名>/」下（如 .../txt/note.txt），
+//! 一种类型一个文件夹，互不混放；列表同时扫描根目录，兼容旧版平铺存放的遗留文件。
 use crate::storage::AppPaths;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -60,6 +62,8 @@ fn created_ms(path: &Path) -> i64 {
 
 /// 列出保存位置下、且属于已配置文件类型的所有文件。
 /// extensions 为允许显示的扩展名集合（小写、不含点）；为空表示不过滤。
+/// 存储按类型分子目录：新文件落在「位置/<扩展名>/」下（见 quickfiles_create），
+/// 此处同时扫描【根目录】（旧版平铺存放的遗留文件）与【各类型子目录】。
 #[tauri::command]
 pub fn quickfiles_list(
     location: String,
@@ -73,31 +77,43 @@ pub fn quickfiles_list(
         .map(|e| e.trim_start_matches('.').to_lowercase())
         .collect();
     let mut files = Vec::new();
-    let entries = std::fs::read_dir(&dir).map_err(|e| format!("读取目录失败：{e}"))?;
-    for ent in entries.flatten() {
-        let p = ent.path();
-        if !p.is_file() {
-            continue;
+    // 扫描单个目录下、扩展名命中的文件
+    let mut collect = |d: &Path| {
+        let Ok(entries) = std::fs::read_dir(d) else { return };
+        for ent in entries.flatten() {
+            let p = ent.path();
+            if !p.is_file() {
+                continue;
+            }
+            let name = match p.file_name().and_then(|s| s.to_str()) {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+            let ext = ext_of(&name);
+            if !allowed.is_empty() && !allowed.contains(&ext) {
+                continue;
+            }
+            let meta = match std::fs::metadata(&p) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            files.push(QuickFile {
+                name,
+                ext,
+                path: p.to_string_lossy().to_string(),
+                created_at: created_ms(&p),
+                size: meta.len(),
+            });
         }
-        let name = match p.file_name().and_then(|s| s.to_str()) {
-            Some(n) => n.to_string(),
-            None => continue,
-        };
-        let ext = ext_of(&name);
-        if !allowed.is_empty() && !allowed.contains(&ext) {
-            continue;
+    };
+    // 根目录：兼容旧版平铺存放的文件（不会重复——子目录内文件名含子目录前缀）
+    collect(&dir);
+    // 各类型子目录：每种扩展名一个文件夹
+    for ext in &allowed {
+        let sub = dir.join(ext);
+        if sub.is_dir() {
+            collect(&sub);
         }
-        let meta = match std::fs::metadata(&p) {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
-        files.push(QuickFile {
-            name,
-            ext,
-            path: p.to_string_lossy().to_string(),
-            created_at: created_ms(&p),
-            size: meta.len(),
-        });
     }
     // 默认按创建时间倒序（最新在前）；前端再按分组/排序重排
     files.sort_by(|a, b| b.created_at.cmp(&a.created_at));
@@ -108,6 +124,7 @@ pub fn quickfiles_list(
 }
 
 /// 在保存位置新建一个空文件。filename 仅取纯文件名（防目录穿越）。
+/// 存储按类型分文件夹：文件落入「位置/<扩展名>/」子目录（无扩展名时仍在根目录）。
 /// 重名时返回错误，不覆盖。成功返回完整路径。
 #[tauri::command]
 pub fn quickfiles_create(
@@ -124,7 +141,14 @@ pub fn quickfiles_create(
     if base.trim().is_empty() {
         return Err("文件名不能为空".into());
     }
-    let full = dir.join(&base);
+    let ext = ext_of(&base);
+    let target = if ext.is_empty() {
+        dir.clone()
+    } else {
+        dir.join(&ext)
+    };
+    std::fs::create_dir_all(&target).map_err(|e| format!("创建类型目录失败：{e}"))?;
+    let full = target.join(&base);
     if full.exists() {
         return Err(format!("文件已存在：{base}"));
     }
@@ -166,6 +190,15 @@ pub fn quickfiles_delete(path: String) -> Result<(), String> {
     std::fs::remove_file(&path).map_err(|e| format!("删除失败：{e}"))
 }
 
+/// 应用类别：编辑器（能打开文本类文件的最常用工具，置顶）/ 浏览器 / 其他
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AppKind {
+    Editor,
+    Browser,
+    Other,
+}
+
 /// 已安装应用（供设置页「默认打开方式」下拉选择）
 #[derive(Debug, Clone, Serialize)]
 pub struct InstalledApp {
@@ -173,14 +206,60 @@ pub struct InstalledApp {
     pub name: String,
     /// 可执行文件完整路径
     pub exe: String,
+    /// 应用类别（前端据此分组：常用编辑器置顶）
+    pub kind: AppKind,
+    /// 应用图标（32×32 PNG data URL），提取失败为 None
+    pub icon: Option<String>,
 }
 
-/// 枚举本机已安装应用，供设置页选择默认打开程序（免去手工从文件夹翻 exe）。
-/// 来源：开始菜单快捷方式（.lnk 解析目标，覆盖用户可见的已安装应用）+ App Paths
-/// 注册表（HKLM+HKCU，覆盖 code.exe 等命令型应用）。同一 exe 只保留一次，
-/// 结果按名称排序，最多返回 300 条。
-#[tauri::command]
-pub fn list_installed_apps() -> Result<Vec<InstalledApp>, String> {
+/// 常见文本/代码编辑器关键字（应用名或 exe 名，小写子串匹配）
+const EDITOR_KEYS: &[&str] = &[
+    "notepad", "记事本", "editor", "编辑器", "code", "vscode", "visual studio",
+    "sublime", "typora", "obsidian", "wordpad", "写字板", "word", "wps",
+    "office", "jetbrains", "idea", "pycharm", "webstorm", "goland", "datagrip",
+    "emeditor", "ultraedit", "vim", "neovim", "gvim", "geany", "kate",
+    "leafpad", "zed", "marktext", "logseq", "joplin", "dbeaver", "hbuilder",
+    "eclipse", "markdown", "sql", "text", "文本", "写字",
+];
+
+/// 常见浏览器关键字
+const BROWSER_KEYS: &[&str] = &[
+    "chrome", "chromium", "edge", "firefox", "opera", "brave", "vivaldi",
+    "arc", "浏览器", "internet explorer", "maxthon", "centbrowser", "safari",
+    "360浏览器", "猎豹", "uc浏览器",
+];
+
+/// 明显不能用来打开文件的项（安装器 / 更新器 / 系统组件 / 商店等），过滤掉
+const JUNK_KEYS: &[&str] = &[
+    "unins", "uninstall", "卸载", "setup", "installer", "update", "updater",
+    "store", "settings", "设置", "control panel", "repair", "diagnos",
+    "feedback", "webview", "runtime", "redist", "cmd", "powershell", "pwsh",
+    "explorer", "regedit", "taskmgr", "msconfig", "winver", "control",
+    "mstsc", "calc", "计算器", "calculator", "nvidia", "amd", "intel",
+    "realtek", "driver", "驱动",
+];
+
+/// 判断是否为垃圾项（安装器/更新器/系统组件/驱动等）
+fn is_junk(name: &str, exe: &str) -> bool {
+    let hay = format!("{} {}", name.to_lowercase(), exe.to_lowercase());
+    JUNK_KEYS.iter().any(|k| hay.contains(k))
+}
+
+/// 分类：编辑器 / 浏览器 / 其他
+fn classify_app(name: &str, exe: &str) -> AppKind {
+    let hay = format!("{} {}", name.to_lowercase(), exe.to_lowercase());
+    if EDITOR_KEYS.iter().any(|k| hay.contains(k)) {
+        AppKind::Editor
+    } else if BROWSER_KEYS.iter().any(|k| hay.contains(k)) {
+        AppKind::Browser
+    } else {
+        AppKind::Other
+    }
+}
+
+/// 扫描本机应用（开始菜单 + App Paths），过滤垃圾项、分类并排序（编辑器置顶）、
+/// 提取图标。在后台线程执行（spawn_blocking），避免阻塞 UI。
+fn collect_installed_apps() -> Vec<InstalledApp> {
     let mut apps: Vec<InstalledApp> = Vec::new();
     #[cfg(windows)]
     {
@@ -191,22 +270,145 @@ pub fn list_installed_apps() -> Result<Vec<InstalledApp>, String> {
     let mut out: Vec<InstalledApp> = Vec::new();
     for app in apps {
         let exe = app.exe.trim();
+        let name = app.name.trim();
         if exe.is_empty() || !exe.to_lowercase().ends_with(".exe") {
             continue;
         }
+        if is_junk(name, exe) {
+            continue;
+        }
         if seen.insert(exe.to_lowercase()) {
-            out.push(app);
+            out.push(InstalledApp {
+                kind: classify_app(name, exe),
+                icon: None,
+                ..app
+            });
         }
     }
+    // 常用编辑器 > 浏览器 > 其他，组内按名称排序
+    let rank = |k: AppKind| match k {
+        AppKind::Editor => 0,
+        AppKind::Browser => 1,
+        AppKind::Other => 2,
+    };
     out.sort_by(|a, b| {
-        a.name
-            .to_lowercase()
-            .cmp(&b.name.to_lowercase())
+        rank(a.kind)
+            .cmp(&rank(b.kind))
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
     if out.len() > 300 {
         out.truncate(300);
     }
-    Ok(out)
+    #[cfg(windows)]
+    for app in &mut out {
+        app.icon = app_icon_data_url(&app.exe);
+    }
+    out
+}
+
+/// 枚举本机已安装应用，供设置页选择默认打开程序（免去手工从文件夹翻 exe）。
+/// 来源：开始菜单快捷方式（.lnk 解析目标）+ App Paths 注册表（HKLM+HKCU）。
+/// 过滤掉安装器/更新器/系统组件等明显不能打开文件的项；常用编辑器排在
+/// 最前；每个应用附带 32×32 图标（data URL），供下拉列表展示。
+#[tauri::command]
+pub async fn list_installed_apps() -> Result<Vec<InstalledApp>, String> {
+    tauri::async_runtime::spawn_blocking(collect_installed_apps)
+        .await
+        .map_err(|e| format!("扫描本机应用失败：{e}"))
+}
+
+/// 提取 exe 图标为 32×32 PNG data URL：
+/// ExtractIconExW 取小图标 → DrawIconEx 画到 32bpp DIB → 预乘 alpha 还原 →
+/// image crate 编码 PNG → base64。
+#[cfg(windows)]
+fn app_icon_data_url(exe: &str) -> Option<String> {
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
+    use windows::core::PCWSTR;
+    use windows::Win32::Graphics::Gdi::{
+        CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, SelectObject, BITMAPINFO,
+        BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HGDIOBJ, RGBQUAD,
+    };
+    use windows::Win32::UI::Shell::ExtractIconExW;
+    use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, DrawIconEx, DI_NORMAL, HICON};
+
+    let wide: Vec<u16> = exe.encode_utf16().chain(Some(0)).collect();
+    let mut small = HICON::default();
+    let n = unsafe {
+        ExtractIconExW(
+            PCWSTR(wide.as_ptr()),
+            0,
+            None,
+            Some(&mut small as *mut HICON),
+            1,
+        )
+    };
+    if n == 0 || small.is_invalid() {
+        return None;
+    }
+    let hdc = unsafe { CreateCompatibleDC(None) };
+    let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
+    let mut bmi = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: 32,
+            biHeight: -32, // top-down，bit 直接顺序
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        },
+        bmiColors: [RGBQUAD::default(); 1],
+    };
+    let hbmp = unsafe {
+        CreateDIBSection(
+            Some(hdc),
+            &mut bmi,
+            DIB_RGB_COLORS,
+            &mut bits,
+            None,
+            0,
+        )
+    }
+    .ok()?;
+    if hbmp.is_invalid() || bits.is_null() {
+        unsafe {
+            let _ = DestroyIcon(small);
+            let _ = DeleteDC(hdc);
+        }
+        return None;
+    }
+    let old = unsafe { SelectObject(hdc, HGDIOBJ(hbmp.0)) };
+    unsafe {
+        let _ = DrawIconEx(hdc, 0, 0, small, 32, 32, 0, None, DI_NORMAL);
+    }
+    unsafe {
+        let _ = SelectObject(hdc, old);
+        let _ = DeleteObject(HGDIOBJ(hbmp.0));
+        let _ = DeleteDC(hdc);
+        let _ = DestroyIcon(small);
+    }
+    // 32bpp DIB 是 BGRA（DrawIconEx 预乘 alpha）→ 还原为非预乘 RGBA
+    let bgra = unsafe { std::slice::from_raw_parts(bits as *const u8, 32 * 32 * 4) };
+    let mut rgba = Vec::with_capacity(32 * 32 * 4);
+    for px in bgra.chunks_exact(4) {
+        let (b, g, r, a) = (px[0] as u32, px[1] as u32, px[2] as u32, px[3] as u32);
+        if a == 0 {
+            rgba.extend_from_slice(&[0, 0, 0, 0]);
+        } else {
+            rgba.extend_from_slice(&[
+                ((r * 255) / a).min(255) as u8,
+                ((g * 255) / a).min(255) as u8,
+                ((b * 255) / a).min(255) as u8,
+                a as u8,
+            ]);
+        }
+    }
+    let img = image::RgbaImage::from_raw(32, 32, rgba)?;
+    let mut out = Vec::new();
+    img.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+        .ok()?;
+    Some(format!("data:image/png;base64,{}", B64.encode(&out)))
 }
 
 /// 扫描开始菜单 Programs（系统级 + 用户级）下的 .lnk，解析目标 exe。
@@ -242,7 +444,12 @@ fn apps_from_start_menu() -> Vec<InstalledApp> {
                                 .with_extension("")
                                 .to_string_lossy()
                                 .replace('\\', "/");
-                            apps.push(InstalledApp { name, exe });
+                            apps.push(InstalledApp {
+                                name,
+                                exe,
+                                kind: AppKind::Other,
+                                icon: None,
+                            });
                         }
                     }
                 }
@@ -379,7 +586,12 @@ fn apps_from_registry() -> Vec<InstalledApp> {
                         .and_then(|x| x.to_str())
                         .map(|x| x.to_string())
                         .unwrap_or_else(|| sub_name.clone());
-                    apps.push(InstalledApp { name: display, exe: s });
+                    apps.push(InstalledApp {
+                        name: display,
+                        exe: s,
+                        kind: AppKind::Other,
+                        icon: None,
+                    });
                 }
             }
             unsafe {

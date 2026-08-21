@@ -27,6 +27,13 @@
     box-shadow var(--dur-fast) var(--ease-out),
     background var(--dur-fast) var(--ease-out);
 }
+.glass-select-btn-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
 .glass-select-btn:hover {
   border-color: var(--border-strong);
 }
@@ -86,13 +93,44 @@
   transition: background var(--dur-fast) var(--ease-out),
     color var(--dur-fast) var(--ease-out);
 }
-.glass-select-opt:hover {
+.glass-select-opt:hover:not(.disabled) {
   background: var(--accent-soft);
   color: var(--accent);
 }
 .glass-select-opt.selected {
   color: var(--accent);
   font-weight: 600;
+}
+.glass-select-opt.disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+/* 选项图标 */
+.glass-select-opt-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+.glass-select-opt-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+.glass-select-opt-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 分组标题（如「常用编辑器」「浏览器」） */
+.glass-select-group {
+  padding: 7px 10px 3px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  color: var(--text-tertiary);
 }
 .glass-select-opt-check {
   flex-shrink: 0;

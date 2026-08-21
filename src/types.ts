@@ -158,12 +158,19 @@ export interface QuickFileList {
   files: QuickFile[];
 }
 
+/** 应用类别：编辑器（置顶）/ 浏览器 / 其他 */
+export type AppKind = "editor" | "browser" | "other";
+
 /** 本机已安装应用（供设置页「默认打开方式」下拉选择） */
 export interface InstalledApp {
   /** 应用显示名 */
   name: string;
   /** 可执行文件完整路径 */
   exe: string;
+  /** 应用类别（前端分组：常用编辑器置顶） */
+  kind: AppKind;
+  /** 应用图标（32×32 PNG data URL），取不到为 null */
+  icon: string | null;
 }
 
 /** 悬浮工具栏可展示的工具 */

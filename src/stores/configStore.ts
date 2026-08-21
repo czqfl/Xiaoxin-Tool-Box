@@ -11,7 +11,7 @@ const defaultConfig: AppConfig = {
     watch_images: true,
     watch_files: true,
     close_after_paste: true,
-    always_on_top: true,
+    always_on_top: false,
     paste_mode: "normal",
   },
   folder: {
@@ -19,13 +19,13 @@ const defaultConfig: AppConfig = {
     layout: "grid",
     split: "columns",
     page_size: 12,
-    always_on_top: true,
+    always_on_top: false,
     track_explorer: true,
     terminal_shell: "powershell",
     vscode_path: null,
   },
   credentials: {
-    always_on_top: true,
+    always_on_top: false,
     show_passwords: false,
   },
   shortcuts: {
@@ -50,11 +50,11 @@ const defaultConfig: AppConfig = {
     baidu_appid: "",
     baidu_secret: "",
     target_lang: "zh",
-    /* 默认置顶常驻：划词翻译后不因失焦自动关闭（与其他面板一致） */
-    always_on_top: true,
+    /* 默认不置顶常驻：划词翻译后失焦自动隐藏（与其他面板一致） */
+    always_on_top: false,
   },
   port: {
-    always_on_top: true,
+    always_on_top: false,
   },
   files: {
     location: null,
@@ -66,7 +66,7 @@ const defaultConfig: AppConfig = {
       { ext: "log", label: "日志", color: "#b06fd6", opener: null },
       { ext: "yaml", label: "YAML", color: "#d96aa0", opener: null },
     ],
-    always_on_top: true,
+    always_on_top: false,
     default_group: "type",
     default_sort: "created",
     default_layout: "vertical",

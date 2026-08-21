@@ -20,7 +20,6 @@
         "minHeight": 520,
         "center": true,
         "resizable": true,
-        "alwaysOnTop": true,
         "visible": false
       },
       {

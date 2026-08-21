@@ -4,7 +4,7 @@
     "watch_images": true,
     "watch_files": true,
     "close_after_paste": true,
-    "always_on_top": true,
+    "always_on_top": false,
     "paste_mode": "normal"
   },
   "folder": {
@@ -12,13 +12,13 @@
     "layout": "grid",
     "split": "columns",
     "page_size": 12,
-    "always_on_top": true,
+    "always_on_top": false,
     "track_explorer": true,
     "terminal_shell": "powershell",
     "vscode_path": null
   },
   "credentials": {
-    "always_on_top": true,
+    "always_on_top": false,
     "show_passwords": false
   },
   "shortcuts": {
@@ -42,10 +42,10 @@
     "baidu_appid": "",
     "baidu_secret": "",
     "target_lang": "zh",
-    "always_on_top": true
+    "always_on_top": false
   },
   "port": {
-    "always_on_top": true
+    "always_on_top": false
   },
   "toolbar": {
     "enabled": true,

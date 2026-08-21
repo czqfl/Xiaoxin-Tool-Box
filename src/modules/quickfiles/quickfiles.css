@@ -8,17 +8,17 @@
   padding: 12px 14px;
   border-bottom: 1px solid var(--border-subtle);
 }
-/* 拖拽区：data-tauri-drag-region 已放在 .qf-header 上（与剪贴板/文件夹/账号密码
-   面板一致）。无需在按钮上加 -webkit-app-region: no-drag——WebView2 对
-   Tauri 拖拽区内的子元素 button/input 默认就不会吞 click 事件，
-   反而加 no-drag 会与 Tauri 的原生 drag 拦截产生冲突，导致关闭按钮失效。 */
+/* 拖拽区：data-tauri-drag-region 只放在 .qf-header 上（与剪贴板/文件夹/账号密码
+   面板一致），子元素不再重复标记。无需在按钮上加 -webkit-app-region: no-drag——
+   Tauri 的拖拽脚本对 button/input 等可点击元素默认不接管，不会吞 click。
+   关闭按钮与其它面板一致：普通 onClick。 */
 .qf-title {
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 14px;
   font-weight: 600;
-  color: var(--text-strong);
+  color: var(--text-primary);
   margin-right: auto;
 }
 .qf-title svg {
@@ -29,6 +29,66 @@
 .qf-new-wrap {
   position: relative;
 }
+/* 全窗透明捕获层：下拉打开时铺满整个面板，点击任意处关闭下拉。
+   位于弹层（z-20）之下、其余内容之上——弹层不受影响，弹层以外的
+   点击必然落在捕获层上（不依赖事件冒泡，杜绝"点别处关不掉"）。 */
+.qf-new-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+}
+/* 新建按钮：玻璃胶囊 + 品牌色圆片加号，与面板毛玻璃风格一致 */
+.qf-new-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 12px 0 5px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--accent-rgb), 0.32);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--accent-rgb), 0.16),
+    rgba(var(--accent-rgb), 0.06)
+  );
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+.qf-new-plus {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-text);
+  box-shadow: 0 1px 4px rgba(var(--accent-rgb), 0.38);
+  transition: background var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+.qf-new-btn:hover,
+.qf-new-btn.open {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: transparent;
+  box-shadow: 0 4px 14px rgba(var(--accent-rgb), 0.35);
+  transform: translateY(-1px);
+}
+.qf-new-btn:hover .qf-new-plus,
+.qf-new-btn.open .qf-new-plus {
+  background: rgba(255, 255, 255, 0.24);
+  transform: rotate(90deg);
+}
+.qf-new-btn:active {
+  transform: translateY(0) scale(0.95);
+}
 .qf-new-pop {
   position: absolute;
   top: calc(100% + 8px);
@@ -37,10 +97,15 @@
   width: 248px;
   padding: 10px;
   border-radius: 12px;
-  background: var(--bg-pop);
-  border: 1px solid var(--border);
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(8px);
+  /* 半透明面板色底 + 实时模糊：毛玻璃弹出层，与面板外壳同一套视觉语言
+     （原 --bg-pop 变量从未定义 → 背景透明，模糊后直接露出面板内容）
+     底色比面板外壳更实、边框更亮、投影更深——弹层边界一眼可辨，
+     不再"看着像面板、点上去被弹层吞掉" */
+  background: rgba(var(--bg-panel-rgb), 0.92);
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
   animation: qf-pop-in 0.14s var(--ease-out);
 }
 @keyframes qf-pop-in {
@@ -55,7 +120,7 @@
 }
 .qf-new-pop-title {
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--text-tertiary);
   margin-bottom: 8px;
 }
 .qf-new-types {
@@ -66,21 +131,50 @@
   overflow: auto;
 }
 .qf-type-chip {
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 7px 10px;
   border-radius: 9px;
-  border: 1px solid var(--border);
-  background: var(--bg-elev);
-  color: var(--text);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
   font-size: 13px;
   cursor: pointer;
-  transition: background 0.12s, border-color 0.12s;
+  transition: border-color 0.15s var(--ease-out),
+    box-shadow 0.15s var(--ease-out),
+    background 0.15s var(--ease-out),
+    transform 0.15s var(--ease-out);
+}
+/* 类型色高亮层：用绝对定位伪元素叠类型色，悬浮时淡入——
+   不依赖 color-mix，任何 WebView2 版本都能出效果 */
+.qf-type-chip::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--c);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s var(--ease-out);
+}
+.qf-type-chip > * {
+  position: relative;
+  z-index: 1;
 }
 .qf-type-chip:hover {
   border-color: var(--c);
-  background: color-mix(in srgb, var(--c) 14%, var(--bg-elev));
+  background: var(--bg-elevated);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.18);
+  transform: translateX(3px);
+}
+.qf-type-chip:hover::before {
+  opacity: 0.12;
+}
+.qf-type-chip:active {
+  transform: translateX(3px) scale(0.97);
 }
 .qf-type-dot {
   width: 10px;
@@ -92,7 +186,7 @@
 .qf-type-ext {
   margin-left: auto;
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--text-tertiary);
 }
 
 /* 控制条：保存位置（左）+ 分组/排序/布局（右） */
@@ -123,7 +217,7 @@
   border-radius: 8px;
   border: 1px solid var(--border-strong);
   background: var(--bg-input-glass);
-  color: var(--text-muted);
+  color: var(--text-tertiary);
   font-size: 12px;
   cursor: pointer;
   overflow: hidden;
@@ -132,7 +226,7 @@
     box-shadow var(--dur-fast) var(--ease-out);
 }
 .qf-loc:hover {
-  color: var(--text);
+  color: var(--text-primary);
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
@@ -152,14 +246,24 @@
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  padding: 2px;
+  padding: 3px;
   border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
   background: var(--bg-item-active);
 }
 .qf-icon-switcher .icon-btn {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border-radius: calc(var(--radius-md) - 2px);
+  transition: background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+.qf-icon-switcher .icon-btn:hover:not(.active) {
+  background: var(--bg-item-hover);
+}
+.qf-icon-switcher .icon-btn:active {
+  transform: scale(0.9);
 }
 /* active 用品牌色实底（与 .icon-btn.active 一致），不依赖文字即可一眼看出当前选中 */
 .qf-icon-switcher .icon-btn.active {
@@ -177,7 +281,7 @@
   align-items: center;
   gap: 10px;
   padding: 48px 16px;
-  color: var(--text-muted);
+  color: var(--text-tertiary);
   font-size: 13px;
   text-align: center;
 }
@@ -190,7 +294,7 @@
 }
 .qf-empty-sm {
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--text-tertiary);
   padding: 6px 2px;
 }
 .qf-feedback,
@@ -218,15 +322,26 @@
   display: flex;
   flex-direction: column;
 }
-/* 水平布局：分组多列并排（组头在上、组内条目竖排） */
+/* 水平布局：每个分组占一列并排（组头在上、组内条目竖排）。
+   列内容过长时【该列独立纵向滚动】，互不影响；列数超出宽度时整体横向滚动。
+   条目卡片样式与垂直布局共用（见下方 .qf-item*），此处只控制列宽与滚动。 */
 .qf-groups-h {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 0 16px;
-  align-items: start;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 16px;
+  height: 100%;
+  min-height: 0;
+  overflow-x: auto;
 }
 .qf-groups-h .qf-group {
-  min-width: 0;
+  flex: 1 1 200px;
+  min-width: 200px;
+  max-width: 240px;
+  min-height: 0;
+  margin-bottom: 0;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 .qf-group {
   margin-bottom: 8px;
@@ -253,60 +368,88 @@
 }
 .qf-group-count {
   margin-left: auto;
-  font-size: 11px;
-  font-weight: 400;
-  color: var(--text-muted);
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
-/* 文件条目（左侧强调色条区分类型） */
+/* 文件卡片（垂直列表 / 水平多列并排共用同一套样式）：
+   类型色淡底卡片 + 右上角扩展名角标 + 名称胶囊 + 底部时间/大小与操作按钮 */
 .qf-item {
+  position: relative;
   display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 9px 12px 9px 14px;
-  margin-bottom: 6px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  margin-bottom: 8px;
   border-radius: 10px;
-  border: 1px solid transparent;
-  border-left: 3px solid var(--text-muted);
-  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--c) 16%, transparent);
+  background: color-mix(in srgb, var(--c) 4%, transparent);
   transition: background 0.12s, border-color 0.12s;
 }
 .qf-item:hover {
-  background: var(--bg-elev);
-  border-color: var(--border);
+  /* 悬浮直接加重类型色（不再叠中性底色——那会冲淡颜色，看着像"取消颜色"） */
+  background: color-mix(in srgb, var(--c) 14%, transparent);
+  border-color: color-mix(in srgb, var(--c) 50%, transparent);
 }
 .qf-ext-badge {
-  flex: none;
-  min-width: 42px;
-  height: 42px;
-  padding: 0 8px;
-  border-radius: 9px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.3px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  min-width: 0;
+  width: auto;
+  height: auto;
+  padding: 2px 6px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.22);
 }
 .qf-item-main {
-  flex: 1;
-  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  /* 右上角角标悬浮在名称行之上：长名省略前先让出角标区域 */
+  padding-right: 42px;
 }
 .qf-item-name {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 9px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);
+  background: color-mix(in srgb, var(--c) 10%, transparent);
   font-size: 13px;
-  color: var(--text-strong);
+  font-weight: 600;
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .qf-item-meta {
+  position: absolute;
+  bottom: 15px;
+  left: 12px;
   display: flex;
   gap: 10px;
-  margin-top: 3px;
+  white-space: nowrap;
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--text-tertiary);
 }
 .qf-item-app {
   color: var(--accent);
@@ -314,20 +457,30 @@
 .qf-item-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  align-self: flex-end;
+  gap: 4px;
   flex: none;
+  /* 操作按钮默认隐藏，卡片悬浮时才显示（水平多列并排时按钮常显太挤）。
+     visibility + opacity 组合：隐藏时不可点、不占 Tab 焦点，显示时无布局跳动 */
+  visibility: hidden;
   opacity: 0;
-  transition: opacity 0.12s;
+  transform: translateY(2px);
+  transition: opacity 0.12s var(--ease-out),
+    transform 0.12s var(--ease-out),
+    visibility 0.12s;
 }
-.qf-item:hover .qf-item-actions {
+.qf-item:hover .qf-item-actions,
+.qf-item:focus-within .qf-item-actions {
+  visibility: visible;
   opacity: 1;
+  transform: translateY(0);
 }
 .qf-act {
-  padding: 4px 9px;
+  padding: 3px 8px;
   border-radius: 7px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   background: transparent;
-  color: var(--text);
+  color: var(--text-primary);
   font-size: 12px;
   cursor: pointer;
   display: inline-flex;
@@ -371,10 +524,12 @@
   max-width: calc(100% - 32px);
   padding: 18px;
   border-radius: 14px;
-  background: var(--bg-pop);
-  border: 1px solid var(--border);
+  /* 半透明面板色底 + 实时模糊（同 .qf-new-pop，毛玻璃弹层） */
+  background: rgba(var(--bg-panel-rgb), 0.88);
+  border: 1px solid var(--border-strong);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
   animation: qf-pop-in 0.16s var(--ease-out);
 }
 .qf-modal-title {
@@ -383,25 +538,25 @@
   gap: 8px;
   font-size: 15px;
   font-weight: 600;
-  color: var(--text-strong);
+  color: var(--text-primary);
   margin-bottom: 6px;
 }
 .qf-modal-sub {
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--text-tertiary);
   margin-bottom: 12px;
   word-break: break-all;
 }
 .qf-modal-loc {
-  color: var(--text);
+  color: var(--text-primary);
 }
 .qf-modal-input {
   width: 100%;
   padding: 9px 11px;
   border-radius: 9px;
-  border: 1px solid var(--border);
-  background: var(--bg-elev);
-  color: var(--text);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
   font-size: 13px;
   outline: none;
   transition: border-color var(--dur-fast) var(--ease-out),
@@ -414,7 +569,7 @@
 .qf-modal-hint {
   margin-top: 7px;
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--text-tertiary);
 }
 .qf-modal-warn {
   font-size: 12px;

@@ -35,9 +35,10 @@ use tauri_plugin_global_shortcut::ShortcutState;
 
 /// 面板窗口效果：不透明窗口 + DWM 系统原生圆角 +（可选）背景模糊。
 /// 圆角由 DWM 直接裁剪窗口物理边角，从根上消除"圆角面板后露出矩形背景"；
-/// 模糊走 SetWindowCompositionAttribute + ACCENT_ENABLE_ACRYLICBLURBEHIND
-/// （与窗口是否激活无关，窗口可见即出模糊，无需点击、失焦也保持）。
-/// 亚克力色调跟随当前有效主题（浅色白调/深色黑调），避免不透明度调低时
+/// 模糊走 SetWindowCompositionAttribute + ACCENT_ENABLE_BLURBEHIND
+/// （实时模糊：背后内容变化即时刷新，且与窗口是否激活无关，窗口可见即出模糊，
+/// 无需点击、失焦也保持）。
+/// 色调跟随当前有效主题（浅色白调/深色黑调），避免不透明度调低时
 /// 内容叠在错误的深浅底上看不清。
 #[cfg(windows)]
 pub(crate) fn apply_panel_effects_for<R: tauri::Runtime>(
@@ -50,12 +51,15 @@ pub(crate) fn apply_panel_effects_for<R: tauri::Runtime>(
             let hwnd = windows::Win32::Foundation::HWND(h.hwnd.get() as _);
             let _ = acrylic::apply_rounded_corners(hwnd);
             if acrylic {
-                let _ = acrylic::apply_acrylic(hwnd, window_theme_is_light(window));
+                let _ = acrylic::apply_blur(hwnd, window_theme_is_light(window));
             } else {
-                let _ = acrylic::clear_acrylic(hwnd);
+                let _ = acrylic::clear_blur(hwnd);
             }
         }
     }
+    // 每次显示都重刷 webview 透明背景：窗口被销毁重建（ensure_panel_window）后
+    // 会新建 webview，不重刷则不透明底色盖住模糊，面板变实心
+    make_webview_transparent(window);
 }
 
 /// 当前有效主题是否为浅色：配置手动主题优先；system 模式用窗口主题
@@ -87,7 +91,7 @@ pub(crate) fn apply_titlebar_theme<R: tauri::Runtime>(window: &tauri::WebviewWin
     }
 }
 
-/// 启动时给两个悬浮面板窗口应用效果，并把 webview 默认背景设为全透明。
+/// 启动时给所有悬浮面板窗口应用效果，并把 webview 默认背景设为全透明。
 /// 前提：窗口 transparent: false；webview 背景全透明后，DWM 亚克力层才能
 /// 透过 CSS 透明区域显示出来（CSS 透明只能透出 webview 自身的默认底色）。
 ///
@@ -95,6 +99,9 @@ pub(crate) fn apply_titlebar_theme<R: tauri::Runtime>(window: &tauri::WebviewWin
 /// WebviewWindow::set_background_color：后者会同时把 tao 窗口背景色设成
 /// 实心色，tao 在 WM_ERASEBKGND 里忽略 alpha 把整个客户区填成不透明色，
 /// 把亚克力层全部盖死——正是"panel 外边框一圈黑色"的来源。
+///
+/// 透明背景的设置在 make_webview_transparent 里，且每次显示面板时
+/// （refresh_panel_acrylic → apply_panel_effects_for）都会重刷，窗口重建后也不会丢失。
 #[cfg(windows)]
 fn apply_panel_acrylic<R: tauri::Runtime>(app: &tauri::AppHandle<R>, acrylic: bool) {
     for label in [
@@ -102,29 +109,35 @@ fn apply_panel_acrylic<R: tauri::Runtime>(app: &tauri::AppHandle<R>, acrylic: bo
         panel::FOLDER_PANEL,
         panel::CREDENTIAL_PANEL,
         panel::PORT_PANEL,
+        panel::FILES_PANEL,
         panel::TOOLBAR_WINDOW,
         translate::TRANSLATE_PANEL,
     ] {
         if let Some(w) = app.get_webview_window(label) {
             apply_panel_effects_for(&w, acrylic);
-            let _ = w.with_webview(|wv| {
-                use webview2_com::Microsoft::Web::WebView2::Win32::{
-                    COREWEBVIEW2_COLOR, ICoreWebView2Controller2,
-                };
-                use windows::core::Interface;
-                if let Ok(controller2) = wv.controller().cast::<ICoreWebView2Controller2>() {
-                    unsafe {
-                        let _ = controller2.SetDefaultBackgroundColor(COREWEBVIEW2_COLOR {
-                            A: 0,
-                            R: 0,
-                            G: 0,
-                            B: 0,
-                        });
-                    }
-                }
-            });
         }
     }
+}
+
+/// 把 webview 默认背景设为全透明（亚克力层透出的前提；见 apply_panel_acrylic 注释）。
+#[cfg(windows)]
+fn make_webview_transparent<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+    let _ = window.with_webview(|wv| {
+        use webview2_com::Microsoft::Web::WebView2::Win32::{
+            COREWEBVIEW2_COLOR, ICoreWebView2Controller2,
+        };
+        use windows::core::Interface;
+        if let Ok(controller2) = wv.controller().cast::<ICoreWebView2Controller2>() {
+            unsafe {
+                let _ = controller2.SetDefaultBackgroundColor(COREWEBVIEW2_COLOR {
+                    A: 0,
+                    R: 0,
+                    G: 0,
+                    B: 0,
+                });
+            }
+        }
+    });
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

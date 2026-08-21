@@ -305,18 +305,20 @@ export const IconTranslate = (p: IconProps) => (
   </svg>
 );
 
-/** 分组：不分组（单块 = 未分段） */
+/** 分组：不分组（单个文件平铺 = 未归类、无分组） */
 export const IconGroupNone = (p: IconProps) => (
   <svg {...base(p)}>
-    <rect x="4" y="5" width="16" height="14" rx="2" />
+    <path d="M6 3.5h8.5L18.5 7.5V19a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 19V5A1.5 1.5 0 0 1 6 3.5Z" />
+    <path d="M14 3.5v4h4.5" />
+    <path d="M8.5 13h7M8.5 16.5h5" />
   </svg>
 );
 
-/** 分组：按类型（标签 / 类别） */
+/** 分组：按类型（标签 = 类别） */
 export const IconGroupType = (p: IconProps) => (
   <svg {...base(p)}>
-    <path d="M3 11.5V4a1 1 0 0 1 1-1h7.5L21 12.5a2 2 0 0 1 0 2.8l-4.7 4.7a2 2 0 0 1-2.8 0L3 11.5Z" />
-    <circle cx="7.6" cy="7.6" r="1.4" />
+    <path d="M3 12V5a2 2 0 0 1 2-2h7a2 2 0 0 1 1.4.6l7.1 7.1a2 2 0 0 1 0 2.8l-6.2 6.2a2 2 0 0 1-2.8 0L3.6 13.4A2 2 0 0 1 3 12Z" />
+    <path d="M8 8h0" />
   </svg>
 );
 
@@ -336,12 +338,11 @@ export const IconSortTime = (p: IconProps) => (
   </svg>
 );
 
-/** 排序：按名称（A→Z 字母序） */
+/** 排序：按名称（字母 A + 向下箭头 = 按字母序） */
 export const IconSortName = (p: IconProps) => (
   <svg {...base(p)}>
-    <path d="M6 17 9 6l3 11" />
-    <path d="M7 13h4" />
-    <path d="M14 17V6.5l3 2.2" />
-    <path d="M14 17h3" />
+    <path d="M7.5 4.5 11 12M7.5 4.5 4 12" />
+    <path d="M5.2 9.9h4.6" />
+    <path d="M17 9v10M14 13l3 3 3-3" />
   </svg>
 );

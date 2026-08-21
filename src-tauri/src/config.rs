@@ -37,7 +37,7 @@ impl Default for ClipboardConfig {
             watch_images: true,
             watch_files: true,
             close_after_paste: true,
-            always_on_top: true,
+            always_on_top: false,
             paste_mode: PasteMode::Normal,
         }
     }
@@ -96,7 +96,7 @@ impl Default for FolderConfig {
             layout: FolderLayout::Grid,
             split: FolderSplit::Columns,
             page_size: 12,
-            always_on_top: true,
+            always_on_top: false,
             track_explorer: true,
             terminal_shell: TerminalShell::Powershell,
             vscode_path: None,
@@ -149,7 +149,7 @@ pub struct PortConfig {
 impl Default for PortConfig {
     fn default() -> Self {
         Self {
-            always_on_top: true,
+            always_on_top: false,
         }
     }
 }
@@ -211,7 +211,7 @@ impl Default for FilesConfig {
                 FileTypeDef { ext: "log".into(), label: "日志".into(), color: "#b06fd6".into(), opener: None },
                 FileTypeDef { ext: "yaml".into(), label: "YAML".into(), color: "#d96aa0".into(), opener: None },
             ],
-            always_on_top: true,
+            always_on_top: false,
             default_group: "type".into(),
             default_sort: "created".into(),
             default_layout: "vertical".into(),
@@ -291,7 +291,7 @@ pub struct CredentialConfig {
 impl Default for CredentialConfig {
     fn default() -> Self {
         Self {
-            always_on_top: true,
+            always_on_top: false,
             show_passwords: false,
         }
     }
@@ -354,8 +354,8 @@ impl Default for TranslatorConfig {
             baidu_appid: String::new(),
             baidu_secret: String::new(),
             target_lang: "zh".into(),
-            // 默认置顶常驻：与其他面板一致，划词翻译后不因失焦自动关闭
-            always_on_top: true,
+            // 默认不置顶常驻：划词翻译后失焦自动隐藏（与其他面板一致）
+            always_on_top: false,
         }
     }
 }

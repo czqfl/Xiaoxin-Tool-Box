@@ -682,22 +682,19 @@
   flex: 1;
   min-width: 0;
 }
-.files-opener-select {
+/* 打开方式下拉（GlassSelect）：在类型行内撑满剩余宽度 */
+.files-opener .glass-select {
   flex: 1;
   min-width: 0;
-  max-width: 260px;
-  height: 30px;
-  padding: 0 8px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--bg-input);
-  color: var(--text-primary);
-  font-size: 12px;
-  outline: none;
-  cursor: pointer;
 }
-.files-opener-select:focus {
-  border-color: var(--accent);
+.files-opener .glass-select-btn {
+  max-width: none;
+  width: 100%;
+}
+.files-opener .glass-select-pop {
+  width: max-content;
+  min-width: 100%;
+  max-width: 300px;
 }
 .files-del {
   flex: none;

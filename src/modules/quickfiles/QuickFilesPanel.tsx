@@ -13,6 +13,8 @@ import type {
   QuickFile,
 } from "../../types";
 import { hideCurrentWindow, usePanelCommon } from "../../core/usePanel";
+import { EVT_PANEL_VISIBILITY, onEvent } from "../../core/events";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useConfigStore } from "../../stores/configStore";
 import {
   quickfilesCreate,
@@ -28,7 +30,6 @@ import {
   IconGroupDate,
   IconGroupNone,
   IconGroupType,
-  IconGrid,
   IconList,
   IconLocate,
   IconPin,
@@ -98,7 +99,7 @@ function FileItem({
   return (
     <div
       className="qf-item"
-      style={{ borderLeftColor: color } as React.CSSProperties}
+      style={{ "--c": color } as React.CSSProperties}
       onDoubleClick={onOpen}
     >
       <span className="qf-ext-badge" style={{ background: color }}>
@@ -153,6 +154,21 @@ export function QuickFilesPanel() {
   const fileTypes = config.files.file_types;
   const alwaysOnTop = config.files.always_on_top;
 
+  // 分组/排序/布局变更即持久化（写入 config.files 的 default_* 字段）：
+  // 否则选择只存在组件内存里，面板重开就回到初始化状态（用户反馈）
+  const changeGroup = (g: FilesGroupMode) => {
+    setGroup(g);
+    void updateConfig({ ...config, files: { ...config.files, default_group: g } });
+  };
+  const changeSort = (s: FilesSortMode) => {
+    setSort(s);
+    void updateConfig({ ...config, files: { ...config.files, default_sort: s } });
+  };
+  const changeLayout = (l: FilesLayoutMode) => {
+    setLayout(l);
+    void updateConfig({ ...config, files: { ...config.files, default_layout: l } });
+  };
+
   const load = async () => {
     setLoading(true);
     setError("");
@@ -178,33 +194,52 @@ export function QuickFilesPanel() {
     setPanelAlwaysOnTop(alwaysOnTop).catch(console.error);
   }, [alwaysOnTop]);
 
-  // Esc 关闭
+  // Esc 隐藏（与其它面板完全一致：不做任何弹窗拦截，Esc 必达 hideCurrentWindow）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (creatingType) {
-          setCreatingType(null);
-          setNewName("");
-        } else if (deleteTarget) {
-          setDeleteTarget(null);
-        } else {
-          hideCurrentWindow();
-        }
-      }
+      if (e.key === "Escape") hideCurrentWindow();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [creatingType, deleteTarget]);
+  }, []);
 
-  // 新建类型下拉：点击弹窗以外的区域自动关闭（含再次点击新建按钮）
+  // 面板再次显示时重置弹窗状态：若上次关闭时新建/删除弹窗仍开着，状态会残留，
+  // 再次打开时弹窗遮罩（inset:0, z-index 50）会挡住头部按钮并吞掉 Esc——
+  // 表现为"关闭按钮不生效"。显示时统一清空，保证头部始终可交互。
   useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    let disposed = false;
+    onEvent<{ label: string; visible: boolean }>(EVT_PANEL_VISIBILITY, (ev) => {
+      if (ev.visible && ev.label === getCurrentWindow().label) {
+        setCreatingType(null);
+        setNewName("");
+        setDeleteTarget(null);
+        setNewOpen(false);
+      }
+    }).then((un) => {
+      if (disposed) un();
+      else cleanup = un;
+    });
+    return () => {
+      disposed = true;
+      cleanup?.();
+    };
+  }, []);
+
+  // 新建类型下拉：点击弹窗以外的区域自动关闭（含再次点击新建按钮）。
+  // 用 ref 判包含关系（不依赖类名/DOM 结构），且仅在打开期间注册监听。
+  const newWrapRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!newOpen) return;
     const onDown = (e: MouseEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (t && !t.closest?.(".qf-new-wrap")) setNewOpen(false);
+      const t = e.target as Node | null;
+      if (t && newWrapRef.current && !newWrapRef.current.contains(t)) {
+        setNewOpen(false);
+      }
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, []);
+  }, [newOpen]);
 
   // 按扩展名查类型定义（取强调色/默认打开方式）
   const typeOf = (ext: string): FileTypeDef | undefined =>
@@ -318,44 +353,60 @@ export function QuickFilesPanel() {
     <div className="panel">
       <div className="panel-shell">
         {/* 头部：data-tauri-drag-region 只放在 .qf-header 上（与剪贴板/文件夹/账号密码
-            面板一致）。这样只有标题栏区域参与原生拖拽，按钮区不被吞 mousedown/click，
-            关闭按钮能稳定响应。原实现把 drag-region 放在整 shell 上，需要 JS startDragging
-            + onMouseDown+onClick 双路绑定，反而把关闭路径搞坏——这是 bug 根因。 */}
+            面板一致）。关闭/置顶按钮与其它面板完全相同——普通 onClick。
+            Esc 亦与其它面板一致：一律隐藏面板（见上方 Esc effect）。 */}
         <div className="panel-header qf-header" data-tauri-drag-region>
           <span className="qf-title" data-tauri-drag-region>
             <IconFiles size={16} />
             快速文件
           </span>
 
-          <div className="qf-new-wrap" data-tauri-drag-region>
+          <div className="qf-new-wrap" ref={newWrapRef}>
             <button
-              className="btn btn-primary btn-sm"
+              className={`qf-new-btn${newOpen ? " open" : ""}`}
               onClick={() => setNewOpen((v) => !v)}
               title="新建文件"
             >
-              <IconPlus size={13} /> 新建
+              <span className="qf-new-plus">
+                <IconPlus size={12} />
+              </span>
+              新建
             </button>
             {newOpen && (
-              <div className="qf-new-pop" onMouseDown={(e) => e.stopPropagation()}>
-                <div className="qf-new-pop-title">选择文件类型</div>
-                <div className="qf-new-types">
-                  {fileTypes.length === 0 && (
-                    <div className="qf-empty-sm">尚未配置文件类型，请到设置中添加</div>
-                  )}
-                  {fileTypes.map((t) => (
-                    <button
-                      key={t.ext}
-                      className="qf-type-chip"
-                      style={{ "--c": t.color } as React.CSSProperties}
-                      onClick={() => startCreate(t)}
-                    >
-                      <span className="qf-type-dot" />
-                      {t.label}
-                      <span className="qf-type-ext">.{t.ext}</span>
-                    </button>
-                  ))}
+              <>
+                {/* 全窗透明捕获层：点击弹层以外的任意处即关闭下拉。
+                    不依赖事件冒泡/类名匹配——弹层在 z-20 位于其上，
+                    其余所有内容（头部/控制条/列表）都在其下，点击必中。
+                    点中捕获层后弹层卸载，click 派发到两者共同祖先，
+                    不会触发按钮的 onClick 造成重新打开。 */}
+                <div
+                  className="qf-new-mask"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    setNewOpen(false);
+                  }}
+                />
+                <div className="qf-new-pop" onMouseDown={(e) => e.stopPropagation()}>
+                  <div className="qf-new-pop-title">选择文件类型</div>
+                  <div className="qf-new-types">
+                    {fileTypes.length === 0 && (
+                      <div className="qf-empty-sm">尚未配置文件类型，请到设置中添加</div>
+                    )}
+                    {fileTypes.map((t) => (
+                      <button
+                        key={t.ext}
+                        className="qf-type-chip"
+                        style={{ "--c": t.color } as React.CSSProperties}
+                        onClick={() => startCreate(t)}
+                      >
+                        <span className="qf-type-dot" />
+                        {t.label}
+                        <span className="qf-type-ext">.{t.ext}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              </>
             )}
           </div>
 
@@ -364,14 +415,14 @@ export function QuickFilesPanel() {
             title={alwaysOnTop ? "取消置顶（失焦自动隐藏）" : "置顶显示（常驻）"}
             onClick={toggleAlwaysOnTop}
           >
-            <IconPin size={15} filled={alwaysOnTop} />
+            <IconPin size={16} filled={alwaysOnTop} />
           </button>
           <button
             className="icon-btn"
             title="关闭（Esc）"
             onClick={() => hideCurrentWindow()}
           >
-            <IconClose size={14} />
+            <IconClose size={16} />
           </button>
         </div>
 
@@ -393,23 +444,23 @@ export function QuickFilesPanel() {
               <button
                 className={`icon-btn${group === "none" ? " active" : ""}`}
                 title="不分组（平铺列表）"
-                onClick={() => setGroup("none")}
+                onClick={() => changeGroup("none")}
               >
-                <IconGroupNone size={15} />
+                <IconGroupNone size={16} />
               </button>
               <button
                 className={`icon-btn${group === "type" ? " active" : ""}`}
                 title="按类型分组"
-                onClick={() => setGroup("type")}
+                onClick={() => changeGroup("type")}
               >
-                <IconGroupType size={15} />
+                <IconGroupType size={16} />
               </button>
               <button
                 className={`icon-btn${group === "date" ? " active" : ""}`}
                 title="按日期分组"
-                onClick={() => setGroup("date")}
+                onClick={() => changeGroup("date")}
               >
-                <IconGroupDate size={15} />
+                <IconGroupDate size={16} />
               </button>
             </div>
 
@@ -417,16 +468,16 @@ export function QuickFilesPanel() {
               <button
                 className={`icon-btn${sort === "created" ? " active" : ""}`}
                 title="按创建时间排序"
-                onClick={() => setSort("created")}
+                onClick={() => changeSort("created")}
               >
-                <IconSortTime size={15} />
+                <IconSortTime size={16} />
               </button>
               <button
                 className={`icon-btn${sort === "name" ? " active" : ""}`}
                 title="按名称排序"
-                onClick={() => setSort("name")}
+                onClick={() => changeSort("name")}
               >
-                <IconSortName size={15} />
+                <IconSortName size={16} />
               </button>
             </div>
 
@@ -434,16 +485,19 @@ export function QuickFilesPanel() {
               <button
                 className={`icon-btn${layout === "vertical" ? " active" : ""}`}
                 title="垂直列表"
-                onClick={() => setLayout("vertical")}
+                onClick={() => changeLayout("vertical")}
               >
-                <IconList size={15} />
+                <IconList size={16} />
               </button>
               <button
                 className={`icon-btn${layout === "horizontal" ? " active" : ""}`}
                 title="水平多列并排"
-                onClick={() => setLayout("horizontal")}
+                onClick={() => changeLayout("horizontal")}
               >
-                <IconGrid size={15} />
+                <IconList
+                  size={16}
+                  style={{ transform: "rotate(90deg)", transformOrigin: "center" }}
+                />
               </button>
             </div>
           </div>
@@ -460,7 +514,7 @@ export function QuickFilesPanel() {
               <span>该位置暂无已配置文件类型的文件，点「新建」创建一个吧</span>
               <button
                 className="btn btn-primary btn-sm qf-empty-btn"
-                onClick={() => setNewOpen(true)}
+                onClick={() => setNewOpen((v) => !v)}
               >
                 <IconPlus size={13} /> 新建文件
               </button>
@@ -550,7 +604,10 @@ export function QuickFilesPanel() {
               新建{creatingType.label}文件
             </div>
             <div className="qf-modal-sub">
-              将保存到：<span className="qf-modal-loc">{location || "默认位置"}</span>
+              将保存到：<span className="qf-modal-loc">
+                {location || "默认位置"}
+                {creatingType ? `\\${creatingType.ext}` : ""}
+              </span>
             </div>
             <input
               ref={newInputRef}

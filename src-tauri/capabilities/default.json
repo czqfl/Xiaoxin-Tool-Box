@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "所有窗口共享的基础权限",
-  "windows": ["settings", "clipboard-panel", "folder-panel", "credential-panel", "port-panel", "translate-popup", "toolbar"],
+  "windows": ["settings", "clipboard-panel", "folder-panel", "credential-panel", "port-panel", "files-panel", "translate-popup", "toolbar"],
   "permissions": [
     "core:default",
     "core:window:allow-show",

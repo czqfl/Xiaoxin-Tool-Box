@@ -1,4 +1,12 @@
-//! 面板模糊效果：SetWindowCompositionAttribute + ACCENT_ENABLE_ACRYLICBLURBEHIND。
+//! 面板模糊效果：SetWindowCompositionAttribute + ACCENT_ENABLE_BLURBEHIND。
+//!
+//! 为什么用 BLURBEHIND（state=3）而不用 ACRYLIC（state=4）：
+//! - ACRYLIC 是「静态快照」模糊——窗口显示时对背后截一次图并固定住，背后内容
+//!   变化（滚动/切换窗口、动壁纸）不会跟着刷新，观感正是"只有透明、没有实时
+//!   模糊"；BLURBEHIND 由合成器逐帧实时计算，背后内容变化即时更新。
+//! - ACRYLIC 依赖 GPU 合成通道，在 RDP / 虚拟机 / 部分显卡上整窗不渲染
+//!   （只剩透明底）；BLURBEHIND 兼容性更广，老环境也能稳定出模糊。
+//! 二者同走 SWCA，激活无关性一致（窗口可见即出、失焦也保持）。
 //!
 //! 为什么不用 DWM 系统背景（DWMSBT_*）：
 //! - DWMSBT_TRANSIENTWINDOW（mica）仅在「活动窗口」上绘制，程序化呼出的面板
@@ -7,16 +15,11 @@
 //!   不绘制（实测"模糊消失"）。
 //! 二者都绕不开"依赖窗口是否激活"，无法满足"呼出即模糊、无需点击"。
 //!
-//! 本路径（SWCA + ACRYLICBLURBEHIND）的模糊只认"窗口可见"，与是否激活/聚焦完全无关，
+//! 本路径（SWCA + BLURBEHIND）的模糊只认"窗口可见"，与是否激活/聚焦完全无关，
 //! 窗口一显示即出模糊、失焦也保持。前提窗口为不透明（transparent: false）：
 //! 此前踩过的黑色矩形是 transparent:true（WS_EX_LAYERED 分层窗口）上 DWM
 //! 系统背景的坑，与本路径无关，故保持不透明窗口即可安全使用。
-//!
-//! 为什么用 ACRYLIC（state=4）而不用经典 BLURBEHIND（state=3）：
-//! BLURBEHIND 是 Win7 时代对背景快照的固定大半径粗糙模糊，高对比文字会被糊成
-//! 一团团明暗色块（实测观感"一坨一坨"）；ACRYLIC 模糊半径更小且带噪点颗粒，
-//! 观感接近 Win10/11 原生亚克力。二者同走 SWCA，激活无关性一致。
-//! 注意：ACRYLIC 的 gradient_color alpha 不能为 0（否则整窗渲染异常），
+//! 注意：BLURBEHIND 的 gradient_color alpha 不能为 0（否则整窗渲染异常），
 //! 这里用 alpha=1 的透明底色，色调完全交给前端半透明外壳（主题自适应）。
 //!
 //! 注意：SetWindowCompositionAttribute 是未公开 API——既不在 windows crate 元数据里
@@ -34,7 +37,7 @@ use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 const WCA_ACCENT_POLICY: u32 = 19;
 // ACCENT_STATE
 const ACCENT_DISABLED: u32 = 0;
-const ACCENT_ENABLE_ACRYLICBLURBEHIND: u32 = 4;
+const ACCENT_ENABLE_BLURBEHIND: u32 = 3;
 
 #[repr(C)]
 struct AccentPolicy {
@@ -74,17 +77,17 @@ unsafe fn set_window_composition_attribute(
     func(hwnd, data) != 0
 }
 
-/// 给窗口应用背景模糊（ACRYLICBLURBEHIND，与激活无关，窗口可见即出）。
+/// 给窗口应用背景模糊（BLURBEHIND：实时模糊，与激活无关，窗口可见即出）。
 /// 失败（如系统不支持）返回 false，调用方保持普通窗口，不黑。
-/// light：亚克力色调跟随主题——浅色=白色调（面板不透明度调低时透出白调模糊，
+/// light：模糊色调跟随主题——浅色=白色调（面板不透明度调低时透出白调模糊，
 /// 深色文字仍清晰可读），深色=黑色调（白字可读）。
-pub fn apply_acrylic(hwnd: HWND, light: bool) -> bool {
-    apply_acrylic_impl(hwnd, if light { 0x01FF_FFFF } else { 0x0100_0000 })
+pub fn apply_blur(hwnd: HWND, light: bool) -> bool {
+    apply_blur_impl(hwnd, if light { 0x01FF_FFFF } else { 0x0100_0000 })
 }
 
-fn apply_acrylic_impl(hwnd: HWND, gradient_color: u32) -> bool {
+fn apply_blur_impl(hwnd: HWND, gradient_color: u32) -> bool {
     let mut policy = AccentPolicy {
-        accent_state: ACCENT_ENABLE_ACRYLICBLURBEHIND,
+        accent_state: ACCENT_ENABLE_BLURBEHIND,
         accent_flags: 0,
         gradient_color,
         animation_id: 0,
@@ -99,7 +102,7 @@ fn apply_acrylic_impl(hwnd: HWND, gradient_color: u32) -> bool {
 
 /// 清除背景模糊。
 #[allow(dead_code)]
-pub fn clear_acrylic(hwnd: HWND) -> bool {
+pub fn clear_blur(hwnd: HWND) -> bool {
     let mut policy = AccentPolicy {
         accent_state: ACCENT_DISABLED,
         accent_flags: 0,
