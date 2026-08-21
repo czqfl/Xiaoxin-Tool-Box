@@ -125,12 +125,16 @@ export interface FilesConfig {
   default_group: FilesGroupMode;
   /** 默认排序方式："created" 按创建时间 / "name" 按名称 */
   default_sort: FilesSortMode;
+  /** 分组展示布局："vertical" 垂直列表 / "horizontal" 水平多列并排 */
+  default_layout: FilesLayoutMode;
 }
 
 /** 快速文件分组方式 */
 export type FilesGroupMode = "none" | "type" | "date";
 /** 快速文件排序方式 */
 export type FilesSortMode = "created" | "name";
+/** 快速文件分组展示布局：垂直列表 / 水平多列并排 */
+export type FilesLayoutMode = "vertical" | "horizontal";
 
 /** 快速文件面板：保存位置下的单个文件条目 */
 export interface QuickFile {

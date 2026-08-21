@@ -195,6 +195,8 @@ pub struct FilesConfig {
     pub default_group: String,
     /// 默认排序方式："created" 按创建时间 / "name" 按名称
     pub default_sort: String,
+    /// 分组展示布局："vertical" 垂直列表 / "horizontal" 水平多列并排
+    pub default_layout: String,
 }
 
 impl Default for FilesConfig {
@@ -212,6 +214,7 @@ impl Default for FilesConfig {
             always_on_top: true,
             default_group: "type".into(),
             default_sort: "created".into(),
+            default_layout: "vertical".into(),
         }
     }
 }

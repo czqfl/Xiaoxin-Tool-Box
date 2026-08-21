@@ -8,6 +8,13 @@
   padding: 12px 14px;
   border-bottom: 1px solid var(--border-subtle);
 }
+/* 拖拽区内的交互元素必须排除：否则 WebView2 拖拽会把 mousedown/click 吞掉，
+   导致关闭/置顶/新建按钮不响应（关闭按钮不生效的根因） */
+.qf-header button,
+.qf-header input {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
 .qf-title {
   display: flex;
   align-items: center;
@@ -91,7 +98,7 @@
   color: var(--text-muted);
 }
 
-/* 控制条：保存位置 + 分组 + 排序 */
+/* 控制条：保存位置（左）+ 分组/排序/布局（右） */
 .qf-controls {
   display: flex;
   align-items: center;
@@ -101,25 +108,36 @@
   border-bottom: 1px solid var(--border-subtle);
   background: rgba(var(--accent-rgb), 0.03);
 }
+.qf-controls-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
 .qf-loc {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: 300px;
-  padding: 5px 10px;
+  max-width: 320px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 10px;
   border-radius: 8px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   background: var(--bg-input-glass);
   color: var(--text-muted);
   font-size: 12px;
   cursor: pointer;
   overflow: hidden;
   transition: color var(--dur-fast) var(--ease-out),
-    border-color var(--dur-fast) var(--ease-out);
+    border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
 }
 .qf-loc:hover {
   color: var(--text);
-  border-color: rgba(var(--accent-rgb), 0.5);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .qf-loc svg {
   flex: none;
@@ -131,22 +149,32 @@
   text-overflow: ellipsis;
 }
 
+/* 分段选择：标签（灰字）与按钮组（带底容器）一眼可分 */
 .qf-seg {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 .qf-seg-label {
   font-size: 12px;
-  color: var(--text-muted);
-  margin-right: 2px;
+  color: var(--text-tertiary);
+  user-select: none;
+}
+.qf-seg-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-input-glass);
 }
 .qf-seg-btn {
   padding: 4px 10px;
-  border-radius: 7px;
-  border: 1px solid transparent;
+  border-radius: 6px;
+  border: none;
   background: transparent;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   font-size: 12px;
   cursor: pointer;
   transition: all 0.12s;
@@ -157,8 +185,9 @@
 }
 .qf-seg-btn.active {
   background: var(--accent);
-  border-color: var(--accent);
   color: #fff;
+  font-weight: 500;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
 }
 
 /* 列表主体 */
@@ -208,6 +237,20 @@
 }
 
 /* 分组 */
+.qf-groups {
+  display: flex;
+  flex-direction: column;
+}
+/* 水平布局：分组多列并排（组头在上、组内条目竖排） */
+.qf-groups-h {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 0 16px;
+  align-items: start;
+}
+.qf-groups-h .qf-group {
+  min-width: 0;
+}
 .qf-group {
   margin-bottom: 8px;
 }

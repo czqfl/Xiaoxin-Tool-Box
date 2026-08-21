@@ -69,6 +69,7 @@ const defaultConfig: AppConfig = {
     always_on_top: true,
     default_group: "type",
     default_sort: "created",
+    default_layout: "vertical",
   },
   toolbar: {
     enabled: true,

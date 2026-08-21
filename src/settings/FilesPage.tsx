@@ -12,6 +12,7 @@ import type {
   FileTypeDef,
   FilesConfig,
   FilesGroupMode,
+  FilesLayoutMode,
   FilesSortMode,
   InstalledApp,
 } from "../types";
@@ -141,6 +142,17 @@ export function FilesPage() {
               { value: "name", label: "名称" },
             ]}
             onChange={(v) => patch({ default_sort: v as FilesSortMode })}
+          />
+        </SettingRow>
+
+        <SettingRow title="分组布局" desc="分组展示方式：垂直列表或水平多列并排（面板控制条也可切换）">
+          <Segmented
+            value={files.default_layout}
+            options={[
+              { value: "vertical", label: "垂直列表" },
+              { value: "horizontal", label: "水平多列" },
+            ]}
+            onChange={(v) => patch({ default_layout: v as FilesLayoutMode })}
           />
         </SettingRow>
 

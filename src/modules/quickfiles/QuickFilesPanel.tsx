@@ -6,7 +6,13 @@
  *  分组：无 / 按类型 / 按创建日期；排序：创建时间 / 名称；分组模式下组内同样按排序。 */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { FileTypeDef, FilesGroupMode, FilesSortMode, QuickFile } from "../../types";
+import type {
+  FileTypeDef,
+  FilesGroupMode,
+  FilesLayoutMode,
+  FilesSortMode,
+  QuickFile,
+} from "../../types";
 import { hideCurrentWindow, usePanelCommon } from "../../core/usePanel";
 import { useConfigStore } from "../../stores/configStore";
 import {
@@ -56,6 +62,60 @@ interface Group {
   items: QuickFile[];
 }
 
+/** 单个文件条目：左侧类型色条 + 扩展名徽标 + 名称/meta + 悬停操作 */
+function FileItem({
+  f,
+  color,
+  dateLabel,
+  fmtSize,
+  customOpener,
+  onOpen,
+  onReveal,
+  onDelete,
+}: {
+  f: QuickFile;
+  color: string;
+  dateLabel: (ts: number) => string;
+  fmtSize: (b: number) => string;
+  customOpener: boolean;
+  onOpen: () => void;
+  onReveal: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div
+      className="qf-item"
+      style={{ borderLeftColor: color } as React.CSSProperties}
+      onDoubleClick={onOpen}
+    >
+      <span className="qf-ext-badge" style={{ background: color }}>
+        {f.ext.toUpperCase() || "?"}
+      </span>
+      <div className="qf-item-main">
+        <div className="qf-item-name" title={f.name}>
+          {f.name}
+        </div>
+        <div className="qf-item-meta">
+          <span>{dateLabel(f.created_at)}</span>
+          <span>{fmtSize(f.size)}</span>
+          {customOpener && <span className="qf-item-app">自定义打开</span>}
+        </div>
+      </div>
+      <div className="qf-item-actions">
+        <button className="qf-act" title="打开" onClick={onOpen}>
+          打开
+        </button>
+        <button className="qf-act" title="在文件夹中定位" onClick={onReveal}>
+          定位
+        </button>
+        <button className="qf-act danger" title="删除" onClick={onDelete}>
+          <IconTrash size={13} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function QuickFilesPanel() {
   const config = useConfigStore((s) => s.config);
   const updateConfig = useConfigStore((s) => s.update);
@@ -66,6 +126,9 @@ export function QuickFilesPanel() {
   const [loading, setLoading] = useState(true);
   const [group, setGroup] = useState<FilesGroupMode>(config.files.default_group);
   const [sort, setSort] = useState<FilesSortMode>(config.files.default_sort);
+  const [layout, setLayout] = useState<FilesLayoutMode>(
+    config.files.default_layout || "vertical"
+  );
   const [newOpen, setNewOpen] = useState(false);
   const [creatingType, setCreatingType] = useState<FileTypeDef | null>(null);
   const [newName, setNewName] = useState("");
@@ -73,6 +136,16 @@ export function QuickFilesPanel() {
   const [error, setError] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<QuickFile | null>(null);
   const newInputRef = useRef<HTMLInputElement>(null);
+  // 头部按钮防抖：onMouseDown 与 onClick 双路都可能触发，300ms 内只执行一次
+  const hideGuardRef = useRef(0);
+
+  /** 关闭面板（防抖：双事件绑定下只执行一次） */
+  const requestHide = () => {
+    const now = Date.now();
+    if (now - hideGuardRef.current < 300) return;
+    hideGuardRef.current = now;
+    hideCurrentWindow();
+  };
 
   const fileTypes = config.files.file_types;
   const alwaysOnTop = config.files.always_on_top;
@@ -238,6 +311,28 @@ export function QuickFilesPanel() {
     setTimeout(() => newInputRef.current?.focus(), 50);
   };
 
+  // 头部按钮双路绑定（onMouseDown + onClick）：拖拽区可能吞掉其中一路，
+  // 双保险保证动作必达；同一动作 300ms 内只执行一次，避免双事件重复触发
+  const pressRef = useRef(0);
+  const pressOnce = (fn: () => void) => () => {
+    const now = Date.now();
+    if (now - pressRef.current < 300) return;
+    pressRef.current = now;
+    fn();
+  };
+  // 头部按钮统一事件处理：阻止冒泡进拖拽守卫，双路触发防抖动作
+  const headPress = (fn: () => void) => ({
+    onMouseDown: (e: React.MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      pressOnce(fn)();
+    },
+    onClick: (e: React.MouseEvent) => {
+      e.stopPropagation();
+      pressOnce(fn)();
+    },
+  });
+
   return (
     <div className="panel">
       <div
@@ -259,12 +354,7 @@ export function QuickFilesPanel() {
           <div className="qf-new-wrap">
             <button
               className="btn btn-primary btn-sm"
-              onMouseDown={(e) => {
-                // 按下即切换：拖拽区可能吞掉 click，用 mousedown 保证响应
-                e.stopPropagation();
-                e.preventDefault();
-                setNewOpen((v) => !v);
-              }}
+              {...headPress(() => setNewOpen((v) => !v))}
               title="新建文件"
             >
               <IconPlus size={13} /> 新建
@@ -296,28 +386,20 @@ export function QuickFilesPanel() {
           <button
             className={`icon-btn${alwaysOnTop ? " active" : ""}`}
             title={alwaysOnTop ? "取消置顶（失焦自动隐藏）" : "置顶显示（常驻）"}
-            onMouseDown={(e) => {
-              e.stopPropagation();
-              e.preventDefault();
-              toggleAlwaysOnTop();
-            }}
+            {...headPress(toggleAlwaysOnTop)}
           >
             <IconPin size={15} filled={alwaysOnTop} />
           </button>
           <button
             className="icon-btn"
             title="关闭（Esc）"
-            onMouseDown={(e) => {
-              e.stopPropagation();
-              e.preventDefault();
-              hideCurrentWindow();
-            }}
+            {...headPress(requestHide)}
           >
             <IconClose size={14} />
           </button>
         </div>
 
-        {/* 控制条：保存位置 + 分组 + 排序 */}
+        {/* 控制条：保存位置靠左，分组/排序/布局靠右 */}
         <div className="qf-controls">
           <button
             className="qf-loc"
@@ -327,29 +409,51 @@ export function QuickFilesPanel() {
             <IconLocate size={13} />
             <span className="qf-loc-text">{location || "（未配置，使用默认位置）"}</span>
           </button>
-          <div className="qf-seg">
-            <span className="qf-seg-label">分组</span>
-            {(["none", "type", "date"] as FilesGroupMode[]).map((m) => (
-              <button
-                key={m}
-                className={`qf-seg-btn${group === m ? " active" : ""}`}
-                onClick={() => setGroup(m)}
-              >
-                {m === "none" ? "无" : m === "type" ? "按类型" : "按日期"}
-              </button>
-            ))}
-          </div>
-          <div className="qf-seg">
-            <span className="qf-seg-label">排序</span>
-            {(["created", "name"] as FilesSortMode[]).map((m) => (
-              <button
-                key={m}
-                className={`qf-seg-btn${sort === m ? " active" : ""}`}
-                onClick={() => setSort(m)}
-              >
-                {m === "created" ? "创建时间" : "名称"}
-              </button>
-            ))}
+
+          <div className="qf-controls-right">
+            <div className="qf-seg">
+              <span className="qf-seg-label">分组</span>
+              <div className="qf-seg-group">
+                {(["none", "type", "date"] as FilesGroupMode[]).map((m) => (
+                  <button
+                    key={m}
+                    className={`qf-seg-btn${group === m ? " active" : ""}`}
+                    onClick={() => setGroup(m)}
+                  >
+                    {m === "none" ? "无" : m === "type" ? "按类型" : "按日期"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="qf-seg">
+              <span className="qf-seg-label">排序</span>
+              <div className="qf-seg-group">
+                {(["created", "name"] as FilesSortMode[]).map((m) => (
+                  <button
+                    key={m}
+                    className={`qf-seg-btn${sort === m ? " active" : ""}`}
+                    onClick={() => setSort(m)}
+                  >
+                    {m === "created" ? "创建时间" : "名称"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="qf-seg">
+              <span className="qf-seg-label">布局</span>
+              <div className="qf-seg-group">
+                {(["vertical", "horizontal"] as FilesLayoutMode[]).map((m) => (
+                  <button
+                    key={m}
+                    className={`qf-seg-btn${layout === m ? " active" : ""}`}
+                    title={m === "vertical" ? "垂直列表" : "水平多列并排"}
+                    onClick={() => setLayout(m)}
+                  >
+                    {m === "vertical" ? "竖排" : "横排"}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -375,60 +479,63 @@ export function QuickFilesPanel() {
             </div>
           )}
           {!loading &&
-            groups.map((g) => (
-              <div className="qf-group" key={g.key || "__all__"}>
-                {g.label && (
-                  <div className="qf-group-head">
-                    {g.color && <span className="qf-group-dot" style={{ background: g.color }} />}
-                    {g.label}
-                    <span className="qf-group-count">{g.items.length}</span>
+            (layout === "horizontal" && group !== "none" ? (
+              <div className="qf-groups qf-groups-h">
+                {groups.map((g) => (
+                  <div className="qf-group" key={g.key || "__all__"}>
+                    {g.label && (
+                      <div className="qf-group-head">
+                        {g.color && (
+                          <span className="qf-group-dot" style={{ background: g.color }} />
+                        )}
+                        {g.label}
+                        <span className="qf-group-count">{g.items.length}</span>
+                      </div>
+                    )}
+                    {g.items.map((f) => (
+                      <FileItem
+                        key={f.path}
+                        f={f}
+                        color={typeOf(f.ext)?.color ?? "#8a94a6"}
+                        dateLabel={dateLabel}
+                        fmtSize={fmtSize}
+                        customOpener={!!typeOf(f.ext)?.opener}
+                        onOpen={() => void doOpen(f)}
+                        onReveal={() => quickfilesReveal(f.path).catch(() => undefined)}
+                        onDelete={() => setDeleteTarget(f)}
+                      />
+                    ))}
                   </div>
-                )}
-                {g.items.map((f) => {
-                  const t = typeOf(f.ext);
-                  const color = t?.color ?? "#8a94a6";
-                  return (
-                    <div
-                      className="qf-item"
-                      key={f.path}
-                      style={{ borderLeftColor: color } as React.CSSProperties}
-                      onDoubleClick={() => void doOpen(f)}
-                    >
-                      <span className="qf-ext-badge" style={{ background: color }}>
-                        {f.ext.toUpperCase() || "?"}
-                      </span>
-                      <div className="qf-item-main">
-                        <div className="qf-item-name" title={f.name}>
-                          {f.name}
-                        </div>
-                        <div className="qf-item-meta">
-                          <span>{dateLabel(f.created_at)}</span>
-                          <span>{fmtSize(f.size)}</span>
-                          {t?.opener && <span className="qf-item-app">自定义打开</span>}
-                        </div>
+                ))}
+              </div>
+            ) : (
+              <div className="qf-groups">
+                {groups.map((g) => (
+                  <div className="qf-group" key={g.key || "__all__"}>
+                    {g.label && (
+                      <div className="qf-group-head">
+                        {g.color && (
+                          <span className="qf-group-dot" style={{ background: g.color }} />
+                        )}
+                        {g.label}
+                        <span className="qf-group-count">{g.items.length}</span>
                       </div>
-                      <div className="qf-item-actions">
-                        <button className="qf-act" title="打开" onClick={() => void doOpen(f)}>
-                          打开
-                        </button>
-                        <button
-                          className="qf-act"
-                          title="在文件夹中定位"
-                          onClick={() => quickfilesReveal(f.path).catch(() => undefined)}
-                        >
-                          定位
-                        </button>
-                        <button
-                          className="qf-act danger"
-                          title="删除"
-                          onClick={() => setDeleteTarget(f)}
-                        >
-                          <IconTrash size={13} />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
+                    )}
+                    {g.items.map((f) => (
+                      <FileItem
+                        key={f.path}
+                        f={f}
+                        color={typeOf(f.ext)?.color ?? "#8a94a6"}
+                        dateLabel={dateLabel}
+                        fmtSize={fmtSize}
+                        customOpener={!!typeOf(f.ext)?.opener}
+                        onOpen={() => void doOpen(f)}
+                        onReveal={() => quickfilesReveal(f.path).catch(() => undefined)}
+                        onDelete={() => setDeleteTarget(f)}
+                      />
+                    ))}
+                  </div>
+                ))}
               </div>
             ))}
         </div>
