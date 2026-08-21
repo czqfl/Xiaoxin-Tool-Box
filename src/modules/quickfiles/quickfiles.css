@@ -37,9 +37,8 @@
   inset: 0;
   z-index: 10;
 }
-/* 新建按钮：玻璃胶囊 + 玻璃加号圆片——半透明底 + 实时模糊。
-   注意：元素自身/祖先的 transform 会让 Chromium 跳过 backdrop-filter，
-   因此这里不做位移/缩放动画，只保留颜色过渡，确保毛玻璃稳定生效 */
+/* 新建按钮：图标与文字为品牌色（蓝），按钮主体透明无蓝色；
+   仅 hover/打开时淡入玻璃底作交互反馈 */
 .qf-new-btn {
   display: inline-flex;
   align-items: center;
@@ -47,14 +46,8 @@
   height: 30px;
   padding: 0 12px 0 5px;
   border-radius: 999px;
-  border: 1px solid rgba(var(--accent-rgb), 0.35);
-  background: linear-gradient(
-    135deg,
-    rgba(var(--accent-rgb), 0.2),
-    rgba(var(--accent-rgb), 0.08)
-  );
-  backdrop-filter: blur(14px) saturate(1.35);
-  -webkit-backdrop-filter: blur(14px) saturate(1.35);
+  border: 1px solid rgba(var(--accent-rgb), 0.45);
+  background: transparent;
   color: var(--accent);
   font-size: 12px;
   font-weight: 600;
@@ -79,13 +72,13 @@
   transition: background var(--dur-fast) var(--ease-out),
     transform var(--dur-fast) var(--ease-out);
 }
-/* hover/open：加深玻璃（半透明，非实色），毛玻璃质感全程保持 */
+/* hover/open：淡玻璃底 + 加号圆片加深，反馈清晰但保持半透明 */
 .qf-new-btn:hover,
 .qf-new-btn.open {
-  background: color-mix(in srgb, var(--accent) 34%, transparent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 60%, transparent);
-  box-shadow: 0 4px 14px rgba(var(--accent-rgb), 0.3);
+  box-shadow: 0 4px 14px rgba(var(--accent-rgb), 0.28);
 }
 .qf-new-btn:hover .qf-new-plus,
 .qf-new-btn.open .qf-new-plus {
@@ -225,7 +218,7 @@
   font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.5px;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   user-select: none;
 }
 .qf-loc {
@@ -239,7 +232,7 @@
   border-radius: 8px;
   border: 1px solid var(--border-strong);
   background: var(--bg-input-glass);
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-size: 12px;
   cursor: pointer;
   overflow: hidden;
@@ -401,7 +394,7 @@
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.4px;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   margin: 12px 4px 8px;
   padding-bottom: 5px;
   border-bottom: 1px solid var(--border-subtle);
