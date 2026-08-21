@@ -292,9 +292,11 @@ fn position_toolbar_default<R: Runtime>(app: &AppHandle<R>, window: &WebviewWind
     let _ = window.set_position(LogicalPosition::new(x, y));
 }
 
-/// 工具栏启动位置：主显示器右下角（距边 16px）。
+/// 工具栏启动位置：主显示器工作区（排除任务栏）右下角（距边 16px）。
 /// 保证每次启动都在一个确定、可见的位置——既不依赖光标位置，也不恢复可能
 /// 落到屏外/边缘的「记忆位置」（那正是「启动后工具栏找不到」的根因之一）。
+/// 用 work_area 而非 monitor 全区域：任务栏在底部时工具栏贴在工作区下缘，
+/// 即任务栏上方，不会被系统任务栏遮挡。
 fn position_toolbar_bottom_right<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) {
     let Ok(monitor) = app.primary_monitor() else {
         return;
@@ -306,13 +308,21 @@ fn position_toolbar_bottom_right<R: Runtime>(app: &AppHandle<R>, window: &Webvie
     let Ok(wsize) = window.outer_size() else {
         return;
     };
+    // 工作区 = 排除系统任务栏后的可用区域（Tauri 直接返回引用，恒可用）
+    let wa = monitor.work_area();
+    let (wa_x, wa_y, wa_w, wa_h) = (
+        wa.position.x as f64,
+        wa.position.y as f64,
+        wa.size.width as f64,
+        wa.size.height as f64,
+    );
     if scale <= 0.0 {
         return;
     }
-    let mw = monitor.size().width as f64 / scale;
-    let mh = monitor.size().height as f64 / scale;
-    let mx = monitor.position().x as f64 / scale;
-    let my = monitor.position().y as f64 / scale;
+    let mx = wa_x / scale;
+    let my = wa_y / scale;
+    let mw = wa_w / scale;
+    let mh = wa_h / scale;
     let ww = wsize.width as f64 / scale;
     let wh = wsize.height as f64 / scale;
     let margin = 16.0;

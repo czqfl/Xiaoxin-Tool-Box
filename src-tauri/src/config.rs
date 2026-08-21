@@ -235,15 +235,14 @@ pub struct ToolbarConfig {
     pub tools: Vec<String>,
     /// 排列方向："horizontal" 水平横条 / "vertical" 竖直竖条
     #[serde(default = "default_toolbar_orientation")]
-    pub orientation: String,
-    /// 贴边自动收起：贴到屏幕边缘后鼠标离开自动滑出、靠近边缘自动弹出
+    pub orientation: String,    /// 贴边自动收起：贴到屏幕边缘后鼠标离开自动滑出、靠近边缘自动弹出
     #[serde(default = "default_true")]
     pub auto_hide: bool,
 }
 
-/// 工具栏排列方向默认值：水平
+/// 工具栏排列方向默认值：竖直（竖条，右下角贴边常驻更省横向空间）
 pub fn default_toolbar_orientation() -> String {
-    "horizontal".into()
+    "vertical".into()
 }
 
 /// 布尔默认值 true（serde 字段级 default 用）
