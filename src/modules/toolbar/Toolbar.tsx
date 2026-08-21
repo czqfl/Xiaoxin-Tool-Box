@@ -350,6 +350,39 @@ export function Toolbar() {
     }
   };
 
+  /** 拖动落定后持久化工具栏位置（物理像素）。原生拖动无结束回调，
+   *  轮询 outerPosition 连续两次相同视为拖动结束，保存一次即停。 */
+  const persistDragEndPosition = () => {
+    let last: { x: number; y: number } | null = null;
+    let stable = 0;
+    const timer = window.setInterval(() => {
+      void getCurrentWindow()
+        .outerPosition()
+        .then((p) => {
+          const cur = { x: p.x, y: p.y };
+          if (last && last.x === cur.x && last.y === cur.y) {
+            if (++stable >= 2) {
+              window.clearInterval(timer);
+              // 收起/滑入滑出动画中的位置变化不保存，仅拖动落定的停靠位
+              if (!collapsedRef.current && !snappingRef.current) {
+                const st = useConfigStore.getState();
+                void st.update({
+                  ...st.config,
+                  toolbar: { ...st.config.toolbar, position: [cur.x, cur.y] },
+                });
+              }
+            }
+          } else {
+            stable = 0;
+            last = cur;
+          }
+        })
+        .catch(() => {});
+    }, 300);
+    // 60s 兜底：确保轮询必定结束（防泄漏）
+    window.setTimeout(() => window.clearInterval(timer), 60000);
+  };
+
   /** 鼠标移动：记录位置并安排下一帧更新（拖动判定同步进行） */
   const handleMove = (e: React.MouseEvent) => {
     const rect = barRef.current?.getBoundingClientRect();
@@ -366,6 +399,7 @@ export function Toolbar() {
     if (Math.abs(e.clientX - p.x) + Math.abs(e.clientY - p.y) > DRAG_THRESHOLD) {
       if (pressRef.current) pressRef.current.dragged = true;
       getCurrentWindow().startDragging().catch(() => undefined);
+      persistDragEndPosition();
     }
   };
 

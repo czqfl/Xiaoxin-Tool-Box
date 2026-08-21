@@ -331,13 +331,43 @@ fn position_toolbar_bottom_right<R: Runtime>(app: &AppHandle<R>, window: &Webvie
     let _ = window.set_position(LogicalPosition::new(x, y));
 }
 
-/// 启动显示工具栏：强制放在主显示器右下角（确定、可见）再 show。
-/// 调用方：lib.rs 启动流程（`config.toolbar.enabled` 时）。
-pub fn show_toolbar_at_bottom_right<R: Runtime>(app: &AppHandle<R>) {
+/// 恢复工具栏记忆位置（物理像素）。位置记录缺失，或该点已不在任何显示器内
+/// （换屏/分辨率变化/拔屏）时返回 false，由调用方回退到右下角默认位。
+fn restore_toolbar_position<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) -> bool {
+    let Some(cfg) = app.try_state::<ConfigState>() else {
+        return false;
+    };
+    let Some((x, y)) = cfg.0.lock().unwrap().toolbar.position else {
+        return false;
+    };
+    let scale = app
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .map(|m| m.scale_factor())
+        .unwrap_or(1.0);
+    if scale <= 0.0 {
+        return false;
+    }
+    let (lx, ly) = (x as f64 / scale, y as f64 / scale);
+    if app.monitor_from_point(lx, ly).ok().flatten().is_none() {
+        return false;
+    }
+    window
+        .set_position(tauri::PhysicalPosition::new(x, y))
+        .is_ok()
+}
+
+/// 启动显示工具栏：有记忆位置（用户上次拖动落定）且仍屏内 → 恢复该位置；
+/// 否则强制主显示器工作区（排除任务栏）右下角——保证每次启动都在一个确定、
+/// 可见的位置，不会出现"启动后工具栏找不到"。
+pub fn show_toolbar_initial<R: Runtime>(app: &AppHandle<R>) {
     let Some(window) = app.get_webview_window(TOOLBAR_WINDOW) else {
         return;
     };
-    position_toolbar_bottom_right(app, &window);
+    if !restore_toolbar_position(app, &window) {
+        position_toolbar_bottom_right(app, &window);
+    }
     let _ = window.show();
 }
 
@@ -416,12 +446,14 @@ pub fn toggle_panel<R: Runtime>(app: &AppHandle<R>, label: &str) {
     let visible = window.is_visible().unwrap_or(false);
     crate::storage::diag_write(&format!("[toggle_panel] {label} visible={visible}"));
     if visible {
-        // 关闭前记住窗口位置（持久化到配置），下次呼出恢复上次位置
+        // 关闭前记住窗口位置与尺寸（持久化到配置），下次呼出恢复
         remember_position(app, &window, label);
         let _ = window.hide();
         broadcast_panel_visibility(app, label, false);
     } else {
-        // 优先恢复上次关闭位置；记录缺失或位置失效（换屏/分辨率变化）时回退居中
+        // 先恢复上次尺寸，再恢复上次位置；位置记录缺失或失效（换屏/分辨率
+        // 变化）时回退居中
+        restore_size(app, &window, label);
         if !restore_position(app, &window, label) {
             position_near_cursor(app, &window);
         }
@@ -460,10 +492,11 @@ fn position_near_cursor<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R
     let _ = window.set_position(LogicalPosition::new(x, y));
 }
 
-/// 记住面板关闭时的窗口位置（物理坐标），持久化到 config.json 的 panel_positions。
-/// 这样重装应用、重启进程后再次呼出仍回到上次位置。
+/// 记住面板关闭时的窗口位置与尺寸（物理坐标/物理像素），持久化到
+/// config.json 的 panel_positions / panel_sizes。这样重启进程后再次呼出
+/// 仍回到上次位置、保持上次调好的窗口大小。
 fn remember_position<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>, label: &str) {
-    let Ok(pos) = window.outer_position() else {
+    let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size()) else {
         return;
     };
     let (Some(cfg), Some(paths)) = (
@@ -476,9 +509,27 @@ fn remember_position<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>, 
     guard
         .panel_positions
         .insert(label.to_string(), (pos.x, pos.y));
+    guard
+        .panel_sizes
+        .insert(label.to_string(), (size.width, size.height));
     let snapshot = guard.clone();
     drop(guard);
     let _ = save_json(&paths.config_file, &snapshot);
+}
+
+/// 恢复面板上次关闭时的窗口尺寸（物理像素）。记录缺失或宽度/高度
+/// 异常（≤0）时跳过，窗口保持 tauri.conf.json 的默认尺寸。
+fn restore_size<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>, label: &str) {
+    let Some(cfg) = app.try_state::<ConfigState>() else {
+        return;
+    };
+    let Some(&(w, h)) = cfg.0.lock().unwrap().panel_sizes.get(label) else {
+        return;
+    };
+    if w == 0 || h == 0 {
+        return;
+    }
+    let _ = window.set_size(tauri::PhysicalSize::new(w, h));
 }
 
 /// 恢复面板上次关闭位置。位置记录缺失，或该点已不在任何显示器内

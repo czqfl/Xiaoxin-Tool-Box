@@ -211,6 +211,14 @@ export interface ToolbarConfig {
   orientation: "horizontal" | "vertical";
   /** 贴边自动收起：工具栏贴到屏幕边缘后，鼠标离开自动滑出（靠近边缘自动弹出） */
   auto_hide: boolean;
+  /** 工具栏停靠位置（物理像素）；null = 未记忆，启动用右下角默认位 */
+  position?: [number, number] | null;
+}
+
+/** 语速贴面板配置 */
+export interface SnippetsConfig {
+  /** 语速贴面板是否置顶显示（置顶时常驻，失焦不自动隐藏） */
+  always_on_top: boolean;
 }
 
 export interface GeneralConfig {
@@ -269,8 +277,12 @@ export interface AppConfig {
   files: FilesConfig;
   /** 悬浮工具栏配置 */
   toolbar: ToolbarConfig;
+  /** 语速贴面板配置 */
+  snippets: SnippetsConfig;
   /** 各面板上次关闭位置（窗口标签 -> 屏幕坐标），持久化，呼出时恢复 */
   panel_positions: Record<string, [number, number]>;
+  /** 各面板上次关闭尺寸（窗口标签 -> 物理像素宽高），持久化，呼出时恢复 */
+  panel_sizes?: Record<string, [number, number]>;
 }
 
 /** 粘贴模式：普通 / 先进先出 / 后进先出 */

@@ -77,8 +77,13 @@ const defaultConfig: AppConfig = {
     tools: ["clipboard", "folder", "credentials", "translation", "port", "files", "snippets", "settings"],
     orientation: "vertical",
     auto_hide: true,
+    position: null,
+  },
+  snippets: {
+    always_on_top: false,
   },
   panel_positions: {},
+  panel_sizes: {},
 };
 
 interface ConfigStore {

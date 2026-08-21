@@ -5,6 +5,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { hideCurrentWindow, usePanelCommon } from "../../core/usePanel";
+import { useConfigStore } from "../../stores/configStore";
+import { setPanelAlwaysOnTop } from "../../core/tauri";
 import type { Snippet } from "../../types";
 import {
   clipboardCopyText,
@@ -19,6 +21,7 @@ import {
   IconClose,
   IconCopy,
   IconEdit,
+  IconPin,
   IconPlus,
   IconSearch,
   IconSnippet,
@@ -40,7 +43,10 @@ interface EditState {
 }
 
 export function SnippetPanel() {
-  usePanelCommon(false);
+  const config = useConfigStore((s) => s.config);
+  const updateConfig = useConfigStore((s) => s.update);
+  // 置顶开启时面板常驻：失焦不再自动隐藏
+  usePanelCommon(config.snippets.always_on_top);
 
   const [items, setItems] = useState<Snippet[]>([]);
   const [keyword, setKeyword] = useState("");
@@ -55,6 +61,20 @@ export function SnippetPanel() {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const titleRef = useRef<HTMLInputElement>(null);
+
+  // 面板置顶状态跟随配置生效（经后端命令切换，避免透明窗口黑屏）
+  const alwaysOnTop = config.snippets.always_on_top;
+  useEffect(() => {
+    setPanelAlwaysOnTop(alwaysOnTop).catch(console.error);
+  }, [alwaysOnTop]);
+
+  /** 切换面板置顶（持久化到配置，重启后保持） */
+  const toggleAlwaysOnTop = () => {
+    void updateConfig({
+      ...config,
+      snippets: { ...config.snippets, always_on_top: !alwaysOnTop },
+    });
+  };
 
   const refresh = async () => {
     try {
@@ -229,6 +249,13 @@ export function SnippetPanel() {
           </div>
           <button className="icon-btn" title="新增语速贴（Enter 保存）" onClick={() => openEdit()}>
             <IconPlus size={15} />
+          </button>
+          <button
+            className={`icon-btn ${alwaysOnTop ? "active" : ""}`}
+            title={alwaysOnTop ? "取消面板置顶" : "面板置顶显示"}
+            onClick={toggleAlwaysOnTop}
+          >
+            <IconPin size={15} filled={alwaysOnTop} />
           </button>
           <button className="icon-btn" title="关闭（Esc）" onClick={() => hideCurrentWindow()}>
             <IconClose size={14} />

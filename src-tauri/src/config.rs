@@ -235,9 +235,14 @@ pub struct ToolbarConfig {
     pub tools: Vec<String>,
     /// 排列方向："horizontal" 水平横条 / "vertical" 竖直竖条
     #[serde(default = "default_toolbar_orientation")]
-    pub orientation: String,    /// 贴边自动收起：贴到屏幕边缘后鼠标离开自动滑出、靠近边缘自动弹出
+    pub orientation: String,
+    /// 贴边自动收起：贴到屏幕边缘后鼠标离开自动滑出、靠近边缘自动弹出
     #[serde(default = "default_true")]
     pub auto_hide: bool,
+    /// 工具栏停靠位置（物理像素）；None = 尚未记忆，启动用右下角默认位。
+    /// 用户拖动工具栏后落定即保存，重启恢复到上次位置。
+    #[serde(default)]
+    pub position: Option<(i32, i32)>,
 }
 
 /// 工具栏排列方向默认值：竖直（竖条，右下角贴边常驻更省横向空间）
@@ -264,6 +269,23 @@ impl Default for ToolbarConfig {
             ],
             orientation: default_toolbar_orientation(),
             auto_hide: default_true(),
+            position: None,
+        }
+    }
+}
+
+/// 语速贴面板配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SnippetsConfig {
+    /// 语速贴面板是否置顶显示（置顶时常驻，失焦不自动隐藏）
+    pub always_on_top: bool,
+}
+
+impl Default for SnippetsConfig {
+    fn default() -> Self {
+        Self {
+            always_on_top: false,
         }
     }
 }
@@ -381,8 +403,13 @@ pub struct AppConfig {
     pub files: FilesConfig,
     /// 悬浮工具栏配置
     pub toolbar: ToolbarConfig,
+    /// 语速贴面板配置
+    pub snippets: SnippetsConfig,
     /// 各面板上次关闭时的窗口位置（标签 -> 屏幕坐标），下次呼出恢复（记忆位置）
     pub panel_positions: std::collections::HashMap<String, (i32, i32)>,
+    /// 各面板上次关闭时的窗口尺寸（标签 -> 物理像素宽高），下次呼出恢复（记忆大小）
+    #[serde(default)]
+    pub panel_sizes: std::collections::HashMap<String, (u32, u32)>,
 }
 
 /// 运行时共享的配置状态，供剪贴板监听线程等读取。
