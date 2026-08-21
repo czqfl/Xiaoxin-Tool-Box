@@ -102,7 +102,10 @@ function FileItem({
       style={{ "--c": color } as React.CSSProperties}
       onDoubleClick={onOpen}
     >
-      <span className="qf-ext-badge" style={{ background: color }}>
+      <span
+        className="qf-ext-badge"
+        style={{ "--c": color } as React.CSSProperties}
+      >
         {f.ext.toUpperCase() || "?"}
       </span>
       <div className="qf-item-main">
