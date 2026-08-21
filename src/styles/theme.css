@@ -78,8 +78,8 @@
 
   /* 文本：中性墨灰 */
   --text-primary: #171a21;
-  --text-secondary: #545b68;
-  --text-tertiary: #97a0ad;
+  --text-secondary: #444a55;
+  --text-tertiary: #5d636b;
   --text-inverse: #ffffff;
 
   /* 边框与分割（中性，无蓝） */
@@ -289,8 +289,8 @@
 
   /* 文本：青墨 */
   --text-primary: #142b26;
-  --text-secondary: #4c6a63;
-  --text-tertiary: #8aa39c;
+  --text-secondary: #3e5651;
+  --text-tertiary: #556560;
   --text-inverse: #ffffff;
 
   --border-subtle: rgba(15, 60, 52, 0.08);
@@ -373,8 +373,8 @@
 
   /* 文本：蓝墨（比浅色深一档，更蓝） */
   --text-primary: #13203a;
-  --text-secondary: #43577a;
-  --text-tertiary: #7e93b5;
+  --text-secondary: #364764;
+  --text-tertiary: #4e5b70;
   --text-inverse: #ffffff;
 
   --border-subtle: rgba(25, 80, 160, 0.1);
@@ -457,8 +457,8 @@
 
   /* 文本：暖墨红棕（中性偏暖，不偏蓝保持稳定可读性） */
   --text-primary: #2a1417;
-  --text-secondary: #6b4a4e;
-  --text-tertiary: #a3858a;
+  --text-secondary: #573c3f;
+  --text-tertiary: #655255;
   --text-inverse: #ffffff;
 
   --border-subtle: rgba(150, 45, 50, 0.08);
