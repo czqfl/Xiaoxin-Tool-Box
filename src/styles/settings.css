@@ -394,17 +394,21 @@
   transform: scale(1.1);
 }
 
-/* 悬浮工具栏设置：工具勾选网格 */
+/* 悬浮工具栏设置：工具勾选网格。
+   grid 等宽列：每项宽度一致（取最宽项为基准），选中（✓出现）也不改变
+   按钮宽高——布局稳定，不会"点一下按钮跳一下"。 */
 .toolbar-tools {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
   gap: 8px;
-  max-width: 520px;
+  max-width: 560px;
 }
 .toolbar-tool {
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
+  min-width: 0;
   padding: 7px 12px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-subtle);
@@ -436,6 +440,13 @@
   text-align: center;
   color: var(--accent);
   font-weight: 700;
+}
+.toolbar-tool-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* 图标顺序拖拽排序列表 */

@@ -440,65 +440,74 @@ export function QuickFilesPanel() {
           </button>
 
           <div className="qf-controls-right">
-            <div className="qf-icon-switcher">
-              <button
-                className={`icon-btn${group === "none" ? " active" : ""}`}
-                title="不分组（平铺列表）"
-                onClick={() => changeGroup("none")}
-              >
-                <IconGroupNone size={16} />
-              </button>
-              <button
-                className={`icon-btn${group === "type" ? " active" : ""}`}
-                title="按类型分组"
-                onClick={() => changeGroup("type")}
-              >
-                <IconGroupType size={16} />
-              </button>
-              <button
-                className={`icon-btn${group === "date" ? " active" : ""}`}
-                title="按日期分组"
-                onClick={() => changeGroup("date")}
-              >
-                <IconGroupDate size={16} />
-              </button>
+            <div className="qf-switch-group">
+              <span className="qf-switch-label">分组</span>
+              <div className="qf-icon-switcher">
+                <button
+                  className={`icon-btn${group === "none" ? " active" : ""}`}
+                  title="不分组（平铺列表）"
+                  onClick={() => changeGroup("none")}
+                >
+                  <IconGroupNone size={16} />
+                </button>
+                <button
+                  className={`icon-btn${group === "type" ? " active" : ""}`}
+                  title="按类型分组"
+                  onClick={() => changeGroup("type")}
+                >
+                  <IconGroupType size={16} />
+                </button>
+                <button
+                  className={`icon-btn${group === "date" ? " active" : ""}`}
+                  title="按日期分组"
+                  onClick={() => changeGroup("date")}
+                >
+                  <IconGroupDate size={16} />
+                </button>
+              </div>
             </div>
 
-            <div className="qf-icon-switcher">
-              <button
-                className={`icon-btn${sort === "created" ? " active" : ""}`}
-                title="按创建时间排序"
-                onClick={() => changeSort("created")}
-              >
-                <IconSortTime size={16} />
-              </button>
-              <button
-                className={`icon-btn${sort === "name" ? " active" : ""}`}
-                title="按名称排序"
-                onClick={() => changeSort("name")}
-              >
-                <IconSortName size={16} />
-              </button>
+            <div className="qf-switch-group">
+              <span className="qf-switch-label">排序</span>
+              <div className="qf-icon-switcher">
+                <button
+                  className={`icon-btn${sort === "created" ? " active" : ""}`}
+                  title="按创建时间排序"
+                  onClick={() => changeSort("created")}
+                >
+                  <IconSortTime size={16} />
+                </button>
+                <button
+                  className={`icon-btn${sort === "name" ? " active" : ""}`}
+                  title="按名称排序"
+                  onClick={() => changeSort("name")}
+                >
+                  <IconSortName size={16} />
+                </button>
+              </div>
             </div>
 
-            <div className="qf-icon-switcher">
-              <button
-                className={`icon-btn${layout === "vertical" ? " active" : ""}`}
-                title="垂直列表"
-                onClick={() => changeLayout("vertical")}
-              >
-                <IconList size={16} />
-              </button>
-              <button
-                className={`icon-btn${layout === "horizontal" ? " active" : ""}`}
-                title="水平多列并排"
-                onClick={() => changeLayout("horizontal")}
-              >
-                <IconList
-                  size={16}
-                  style={{ transform: "rotate(90deg)", transformOrigin: "center" }}
-                />
-              </button>
+            <div className="qf-switch-group">
+              <span className="qf-switch-label">排列</span>
+              <div className="qf-icon-switcher">
+                <button
+                  className={`icon-btn${layout === "vertical" ? " active" : ""}`}
+                  title="垂直列表"
+                  onClick={() => changeLayout("vertical")}
+                >
+                  <IconList size={16} />
+                </button>
+                <button
+                  className={`icon-btn${layout === "horizontal" ? " active" : ""}`}
+                  title="水平多列并排"
+                  onClick={() => changeLayout("horizontal")}
+                >
+                  <IconList
+                    size={16}
+                    style={{ transform: "rotate(90deg)", transformOrigin: "center" }}
+                  />
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -524,7 +533,11 @@ export function QuickFilesPanel() {
             (layout === "horizontal" && group !== "none" ? (
               <div className="qf-groups qf-groups-h">
                 {groups.map((g) => (
-                  <div className="qf-group" key={g.key || "__all__"}>
+                  <div
+                    className="qf-group"
+                    key={g.key || "__all__"}
+                    style={{ "--c": g.color ?? "var(--accent)" } as React.CSSProperties}
+                  >
                     {g.label && (
                       <div className="qf-group-head">
                         {g.color && (
@@ -534,19 +547,21 @@ export function QuickFilesPanel() {
                         <span className="qf-group-count">{g.items.length}</span>
                       </div>
                     )}
-                    {g.items.map((f) => (
-                      <FileItem
-                        key={f.path}
-                        f={f}
-                        color={typeOf(f.ext)?.color ?? "#8a94a6"}
-                        dateLabel={dateLabel}
-                        fmtSize={fmtSize}
-                        customOpener={!!typeOf(f.ext)?.opener}
-                        onOpen={() => void doOpen(f)}
-                        onReveal={() => quickfilesReveal(f.path).catch(() => undefined)}
-                        onDelete={() => setDeleteTarget(f)}
-                      />
-                    ))}
+                    <div className="qf-group-body">
+                      {g.items.map((f) => (
+                        <FileItem
+                          key={f.path}
+                          f={f}
+                          color={typeOf(f.ext)?.color ?? "#8a94a6"}
+                          dateLabel={dateLabel}
+                          fmtSize={fmtSize}
+                          customOpener={!!typeOf(f.ext)?.opener}
+                          onOpen={() => void doOpen(f)}
+                          onReveal={() => quickfilesReveal(f.path).catch(() => undefined)}
+                          onDelete={() => setDeleteTarget(f)}
+                        />
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -563,19 +578,21 @@ export function QuickFilesPanel() {
                         <span className="qf-group-count">{g.items.length}</span>
                       </div>
                     )}
-                    {g.items.map((f) => (
-                      <FileItem
-                        key={f.path}
-                        f={f}
-                        color={typeOf(f.ext)?.color ?? "#8a94a6"}
-                        dateLabel={dateLabel}
-                        fmtSize={fmtSize}
-                        customOpener={!!typeOf(f.ext)?.opener}
-                        onOpen={() => void doOpen(f)}
-                        onReveal={() => quickfilesReveal(f.path).catch(() => undefined)}
-                        onDelete={() => setDeleteTarget(f)}
-                      />
-                    ))}
+                    <div className="qf-group-body">
+                      {g.items.map((f) => (
+                        <FileItem
+                          key={f.path}
+                          f={f}
+                          color={typeOf(f.ext)?.color ?? "#8a94a6"}
+                          dateLabel={dateLabel}
+                          fmtSize={fmtSize}
+                          customOpener={!!typeOf(f.ext)?.opener}
+                          onOpen={() => void doOpen(f)}
+                          onReveal={() => quickfilesReveal(f.path).catch(() => undefined)}
+                          onDelete={() => setDeleteTarget(f)}
+                        />
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>

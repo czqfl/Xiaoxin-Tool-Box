@@ -195,16 +195,35 @@
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  padding: 9px 14px;
+  padding: 8px 14px;
   border-bottom: 1px solid var(--border-subtle);
   background: rgba(var(--accent-rgb), 0.03);
 }
 .qf-controls-right {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 4px;
   flex-wrap: wrap;
   margin-left: auto;
+}
+/* 带小标题的分组：每组"标签 + 图标胶囊"，组间以细分隔线断开，层次更清晰 */
+.qf-switch-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 0;
+}
+.qf-switch-group + .qf-switch-group {
+  margin-left: 4px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border-subtle);
+}
+.qf-switch-label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  color: var(--text-tertiary);
+  user-select: none;
 }
 .qf-loc {
   display: inline-flex;
@@ -241,7 +260,7 @@
 }
 
 /* 图标切换组：自包含胶囊，每个控件一组按钮（参考文件夹面板 .layout-switcher）。
-   无文字标签——靠 icon + tooltip + active 高亮表达，彻底消除"看不清哪个是按钮"。 */
+   带小标题（.qf-switch-group）明确每组含义；active 实底品牌色高亮醒目。 */
 .qf-icon-switcher {
   display: inline-flex;
   align-items: center;
@@ -265,10 +284,10 @@
 .qf-icon-switcher .icon-btn:active {
   transform: scale(0.9);
 }
-/* active 用品牌色实底（与 .icon-btn.active 一致），不依赖文字即可一眼看出当前选中 */
+/* active 用品牌色实底白字图标（比浅色底更醒目），选中项一眼可辨 */
 .qf-icon-switcher .icon-btn.active {
-  color: var(--accent);
-  background: var(--accent-soft);
+  color: var(--accent-text);
+  background: var(--accent);
 }
 
 /* 列表主体 */
@@ -322,9 +341,9 @@
   display: flex;
   flex-direction: column;
 }
-/* 水平布局：每个分组占一列并排（组头在上、组内条目竖排）。
-   列内容过长时【该列独立纵向滚动】，互不影响；列数超出宽度时整体横向滚动。
-   条目卡片样式与垂直布局共用（见下方 .qf-item*），此处只控制列宽与滚动。 */
+/* 水平布局：每个分组占一列并排。列头（类型标识）作为【固定表头】钉在列顶，
+   内容区 .qf-group-body 独立纵向滚动——表头不随内容滚走，始终可见；
+   列数超出宽度时整体横向滚动。 */
 .qf-groups-h {
   display: flex;
   flex-direction: row;
@@ -335,11 +354,27 @@
   overflow-x: auto;
 }
 .qf-groups-h .qf-group {
+  display: flex;
+  flex-direction: column;
   flex: 1 1 200px;
   min-width: 200px;
   max-width: 240px;
   min-height: 0;
   margin-bottom: 0;
+  overflow: visible;
+}
+/* 固定表头：不参与滚动（flex:none），自身带底/边/投影与内容区隔离 */
+.qf-groups-h .qf-group-head {
+  flex: none;
+  margin: 0 0 8px;
+  padding: 7px 6px;
+  border: 1px solid color-mix(in srgb, var(--c, var(--accent)) 22%, transparent);
+  background: color-mix(in srgb, var(--c, var(--accent)) 6%, transparent);
+  border-radius: 8px;
+}
+.qf-groups-h .qf-group-body {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding-right: 4px;
 }
