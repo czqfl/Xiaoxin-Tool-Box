@@ -223,6 +223,22 @@ export function PortPanel() {
                       </span>
                     )}
                   </div>
+                  {/* 进程路径 / 命令行：用于反查“启动项目”。
+                      node 等开发进程的命令行含项目路径，一眼看出端口由哪个项目占用。 */}
+                  <div className="port-detail">
+                    {proc.path && !proc.path.startsWith("PID ") && (
+                      <div className="port-detail-row">
+                        <span className="port-detail-key">路径</span>
+                        <span className="port-detail-val" title={proc.path}>{proc.path}</span>
+                      </div>
+                    )}
+                    {proc.cmdline && (
+                      <div className="port-detail-row">
+                        <span className="port-detail-key">命令行</span>
+                        <span className="port-detail-val cmdline" title={proc.cmdline}>{proc.cmdline}</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 {proc.protected ? (
                   <span className="port-kill-lock" title="系统关键进程，已保护不可终止">

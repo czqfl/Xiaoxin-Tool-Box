@@ -215,4 +215,8 @@ export interface PortProcess {
   protected: boolean;
   /** 该进程占用的端口（按名称搜索时多个端口逐行返回；按端口查询时为查询端口） */
   port?: number;
+  /** 进程完整映像路径（可执行文件全路径），如 C:\Program Files\nodejs\node.exe */
+  path: string;
+  /** 进程命令行（best-effort）：含启动参数与项目路径，用于反查“启动项目” */
+  cmdline: string;
 }

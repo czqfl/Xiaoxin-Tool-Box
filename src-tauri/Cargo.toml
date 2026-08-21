@@ -54,6 +54,7 @@ features = [
     "Win32_System_Memory",
     "Win32_System_LibraryLoader",
     "Win32_NetworkManagement_IpHelper",
+    "Wdk_System_Threading",
 ]
 
 [target.'cfg(windows)'.dependencies.webview2-com]

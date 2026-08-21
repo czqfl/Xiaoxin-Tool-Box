@@ -18,6 +18,12 @@ pub struct PortProcess {
     /// 该进程占用的端口（按端口查询时为查询端口；按名称搜索时为该行实际端口）。
     /// 同一进程可能占用多个端口，按名称搜索时逐行返回。
     pub port: Option<u16>,
+    /// 进程完整映像路径（可执行文件全路径），如 C:\Program Files\nodejs\node.exe
+    pub path: String,
+    /// 进程命令行（best-effort）：含启动参数与项目路径，用于反查“启动项目”。
+    /// 例如 node 进程命令行含 `C:\proj\hussar-front\node_modules\vite\bin\vite.js`，
+    /// 据此即可看出该端口由哪个前端项目占用。
+    pub cmdline: String,
 }
 
 /// 原始连接行（解析自 IP Helper 表）
@@ -200,6 +206,8 @@ pub fn port_query(port: u16) -> Result<Vec<PortProcess>, String> {
                 continue;
             }
             let name = process_name(c.pid);
+            let path = process_image_path(c.pid);
+            let cmdline = process_command_line(c.pid);
             result.push(PortProcess {
                 pid: c.pid,
                 protected: SYSTEM_PROTECTED.contains(&name.to_lowercase().as_str()),
@@ -207,6 +215,8 @@ pub fn port_query(port: u16) -> Result<Vec<PortProcess>, String> {
                 state: c.state,
                 proto: c.proto.to_string(),
                 port: Some(port),
+                path,
+                cmdline,
             });
         }
         Ok(result)
@@ -251,6 +261,8 @@ pub fn port_search(keyword: String) -> Result<Vec<PortProcess>, String> {
             if !seen.insert((c.pid, c.port, c.proto.to_string(), c.state.clone())) {
                 continue;
             }
+            let path = process_image_path(c.pid);
+            let cmdline = process_command_line(c.pid);
             result.push(PortProcess {
                 pid: c.pid,
                 protected: SYSTEM_PROTECTED.contains(&name.to_lowercase().as_str()),
@@ -258,6 +270,8 @@ pub fn port_search(keyword: String) -> Result<Vec<PortProcess>, String> {
                 state: c.state,
                 proto: c.proto.to_string(),
                 port: Some(c.port),
+                path,
+                cmdline,
             });
         }
         Ok(result)
@@ -318,9 +332,9 @@ const SYSTEM_PROTECTED: &[&str] = &[
     "conhost.exe",
 ];
 
-/// 根据 PID 取进程名（进程映像文件名）；失败回退 "PID <pid>"
+/// 根据 PID 取进程完整映像路径（可执行文件全路径）；失败回退 "PID <pid>"
 #[cfg(windows)]
-fn process_name(pid: u32) -> String {
+fn process_image_path(pid: u32) -> String {
     use windows::core::PWSTR;
     use windows::Win32::System::Threading::{
         OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
@@ -328,23 +342,98 @@ fn process_name(pid: u32) -> String {
     };
     unsafe {
         if let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
-            let mut buf = [0u16; 512];
+            let mut buf = [0u16; 1024];
             let mut size = buf.len() as u32;
             let name = PWSTR(buf.as_mut_ptr());
             if QueryFullProcessImageNameW(handle, PROCESS_NAME_FORMAT(0), name, &mut size).is_ok()
             {
                 let wide = String::from_utf16_lossy(&buf[..size as usize]);
-                return std::path::Path::new(&wide)
-                    .file_name()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or(wide);
+                if !wide.is_empty() {
+                    return wide;
+                }
             }
         }
     }
     format!("PID {pid}")
 }
 
+/// 进程名（映像文件名，如 node.exe）；取不到时回退 "PID <pid>"
+#[cfg(windows)]
+fn process_name(pid: u32) -> String {
+    let full = process_image_path(pid);
+    if full.starts_with("PID ") {
+        return full;
+    }
+    std::path::Path::new(&full)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or(full)
+}
+
+/// 根据 PID 取进程命令行（best-effort，取不到返回空串）。
+/// 用于端口工具反查“启动项目”：例如 node 进程命令行含
+/// `C:\proj\hussar-front\node_modules\vite\bin\vite.js`，可直接看出项目路径。
+#[cfg(windows)]
+fn process_command_line(pid: u32) -> String {
+    use windows::Win32::Foundation::NTSTATUS;
+    use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION};
+    use windows::Wdk::System::Threading::{NtQueryInformationProcess, PROCESSINFOCLASS};
+    // ProcessCommandLineInformation = 60
+    const CMD_LINE_CLASS: PROCESSINFOCLASS = PROCESSINFOCLASS(60i32);
+    unsafe {
+        let handle = match OpenProcess(PROCESS_QUERY_INFORMATION, false, pid) {
+            Ok(h) => h,
+            Err(_) => return String::new(),
+        };
+        // 第一次调用（长度为 0）拿所需缓冲区大小，写入 needed
+        let mut needed: u32 = 0;
+        let _ = NtQueryInformationProcess(
+            handle,
+            CMD_LINE_CLASS,
+            std::ptr::null_mut(),
+            0,
+            &mut needed,
+        );
+        if needed == 0 {
+            return String::new();
+        }
+        let mut buf: Vec<u8> = vec![0u8; needed as usize];
+        let status: NTSTATUS = NtQueryInformationProcess(
+            handle,
+            CMD_LINE_CLASS,
+            buf.as_mut_ptr() as *mut core::ffi::c_void,
+            needed,
+            std::ptr::null_mut(),
+        );
+        if status != NTSTATUS(0) {
+            return String::new();
+        }
+        // 返回结构是 UNICODE_STRING（x64 布局）：Length(u16)@0、MaximumLength(u16)@2、
+        // Buffer(*mut u16)@8（本工具为 64 位，内核按原生布局返回，不受目标进程位数影响）。
+        if buf.len() < 8 {
+            return String::new();
+        }
+        let length = u16::from_ne_bytes([buf[0], buf[1]]) as usize;
+        let buf_ptr = std::ptr::read_unaligned(buf.as_ptr().add(8) as *const *const u16);
+        if buf_ptr.is_null() || length == 0 {
+            return String::new();
+        }
+        let slice = std::slice::from_raw_parts(buf_ptr, length / 2);
+        String::from_utf16_lossy(slice)
+    }
+}
+
 #[cfg(not(windows))]
 fn process_name(pid: u32) -> String {
+    format!("PID {pid}")
+}
+
+#[cfg(not(windows))]
+fn process_command_line(_pid: u32) -> String {
+    String::new()
+}
+
+#[cfg(not(windows))]
+fn process_image_path(pid: u32) -> String {
     format!("PID {pid}")
 }

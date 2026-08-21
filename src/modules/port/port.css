@@ -274,3 +274,39 @@
 .port-state.LISTENING {
   color: var(--accent);
 }
+
+/* 进程路径 / 命令行详情：用于反查“启动项目” */
+.port-detail {
+  margin-top: 7px;
+  padding: 7px 9px;
+  border-radius: var(--radius-md);
+  background: var(--bg-badge);
+  border: 1px solid var(--border-subtle);
+}
+.port-detail-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.port-detail-row + .port-detail-row {
+  margin-top: 5px;
+}
+.port-detail-key {
+  flex-shrink: 0;
+  width: 42px;
+  color: var(--text-tertiary);
+  font-weight: 600;
+}
+.port-detail-val {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+/* 命令行等宽显示，路径一目了然（如 node C:\proj\hussar-front\...） */
+.port-detail-val.cmdline {
+  font-family: var(--font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
+  color: var(--text-primary);
+}
