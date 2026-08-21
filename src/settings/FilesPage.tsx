@@ -172,6 +172,7 @@ export function FilesPage() {
         <SettingRow
           title="文件类型"
           desc="面板「新建」时列出的类型；可增删、改名、改扩展名与强调色，并为每种类型单独配置默认打开程序"
+          layout="block"
         >
           <div className="files-types">
             {files.file_types.map((t, i) => (

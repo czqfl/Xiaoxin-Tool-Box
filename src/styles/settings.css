@@ -141,6 +141,25 @@
   align-items: center;
   gap: 8px;
 }
+/* 块状布局：标题在上、控件在下。给"控件是列表/多行内容"的设置项用——
+   避免行内布局把左侧长描述挤成竖排一字一行。子元素要重置 row 模式的 flex：
+   .setting-info 的 flex:1 在 column 下会霸占整高、.setting-control 的 flex-shrink:0
+   会阻止其适配父宽，所以全部归零再让 align-self:stretch 撑满横向 */
+.setting-row.block {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  padding-top: 16px;
+  padding-bottom: 16px;
+}
+.setting-row.block .setting-info {
+  flex: 0 0 auto;
+}
+.setting-row.block .setting-control {
+  flex: 0 0 auto;
+  flex-shrink: 0;
+  align-self: stretch;
+}
 
 /* 滑块（面板不透明度等） */
 .slider-wrap {

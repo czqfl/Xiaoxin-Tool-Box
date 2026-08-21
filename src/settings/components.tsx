@@ -9,11 +9,16 @@ interface RowProps {
   title: string;
   desc?: string;
   children?: ReactNode;
+  /** 布局方式：
+   *  - "row"   默认：左标题 + 右控件（行内水平，适合开关/分段/输入框等窄控件）
+   *  - "block" 块状：标题在上、控件在下（垂直堆叠，适合多行列表/文本区域等会换行的内容，
+   *                避免控件把左侧标题+长描述挤成竖排一字一行） */
+  layout?: "row" | "block";
 }
 
-export function SettingRow({ title, desc, children }: RowProps) {
+export function SettingRow({ title, desc, children, layout = "row" }: RowProps) {
   return (
-    <div className="setting-row">
+    <div className={`setting-row${layout === "block" ? " block" : ""}`}>
       <div className="setting-info">
         <div className="setting-title">{title}</div>
         {desc && <div className="setting-desc">{desc}</div>}
