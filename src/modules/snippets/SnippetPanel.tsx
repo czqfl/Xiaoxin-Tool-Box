@@ -7,6 +7,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { hideCurrentWindow, usePanelCommon } from "../../core/usePanel";
 import type { Snippet } from "../../types";
 import {
+  clipboardCopyText,
   snippetsCreate,
   snippetsDelete,
   snippetsList,
@@ -14,11 +15,14 @@ import {
   snippetsUpdate,
 } from "./api";
 import {
+  IconCheck,
   IconClose,
+  IconCopy,
   IconEdit,
   IconPlus,
   IconSearch,
   IconSnippet,
+  IconText,
   IconTrash,
 } from "../../components/icons";
 import "../../styles/panel.css";
@@ -47,6 +51,8 @@ export function SnippetPanel() {
   const [saving, setSaving] = useState(false);
   /** 待删除确认的条目 id（点击删除后二次确认，防误删） */
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  /** 刚复制成功的字段键（"id:title" / "id:content"），用于按钮上显示✓反馈 */
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const titleRef = useRef<HTMLInputElement>(null);
 
@@ -95,6 +101,23 @@ export function SnippetPanel() {
       return;
     }
     hideCurrentWindow();
+  };
+
+  /** 复制标题或内容到剪贴板（不粘贴、不关闭面板；按钮 hover 渐显）。
+   *  成功后该按钮短暂显示✓，1.2s 后复原。 */
+  const copyField = async (sn: Snippet, kind: "title" | "content") => {
+    const text = kind === "title" ? sn.title : sn.content;
+    if (!text) return;
+    const key = `${sn.id}:${kind}`;
+    try {
+      await clipboardCopyText(text);
+      setCopiedKey(key);
+      window.setTimeout(() => {
+        setCopiedKey((cur) => (cur === key ? null : cur));
+      }, 1200);
+    } catch (err) {
+      setError(String(err));
+    }
   };
 
   /** 打开新增/编辑模态 */
@@ -269,6 +292,21 @@ export function SnippetPanel() {
                 <div className="snip-preview">{sn.content || "（空内容）"}</div>
               </div>
               <div className="snip-actions" onClick={(e) => e.stopPropagation()}>
+                <button
+                  className={`icon-btn${copiedKey === `${sn.id}:title` ? " copied" : ""}`}
+                  title="复制标题"
+                  onClick={() => void copyField(sn, "title")}
+                >
+                  {copiedKey === `${sn.id}:title` ? <IconCheck size={13} /> : <IconText size={13} />}
+                </button>
+                <button
+                  className={`icon-btn${copiedKey === `${sn.id}:content` ? " copied" : ""}`}
+                  title="复制内容"
+                  onClick={() => void copyField(sn, "content")}
+                >
+                  {copiedKey === `${sn.id}:content` ? <IconCheck size={13} /> : <IconCopy size={13} />}
+                </button>
+                <span className="snip-actions-sep" />
                 <button
                   className="icon-btn"
                   title="编辑"

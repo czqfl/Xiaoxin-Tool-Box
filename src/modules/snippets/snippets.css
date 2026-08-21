@@ -89,16 +89,33 @@
   text-overflow: ellipsis;
 }
 
-/* 操作钮（编辑/删除）：默认透明隐藏，hover 卡片时渐显 */
+/* 操作钮（复制标题/内容 · 编辑/删除）：默认透明隐藏，hover 卡片时渐显。
+   flex-shrink:0 防止长标题把操作区挤变形，保证布局稳定（hover 显隐无重排）。
+   hover 才显示，满足"鼠标悬浮时才显示"；复制钮与编辑/删除间以 1px 分隔线区隔，
+   视觉上区分"取用"与"管理"两组操作，更整洁合理。 */
 .snip-actions {
   display: flex;
   align-items: center;
   gap: 2px;
+  flex-shrink: 0;
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease-out);
 }
 .snip-item:hover .snip-actions {
   opacity: 1;
+}
+/* 复制组 / 管理组之间的细分隔线 */
+.snip-actions-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 3px;
+  background: var(--border-subtle);
+  flex-shrink: 0;
+}
+/* 复制成功反馈：按钮短暂高亮为品牌色 + ✓ */
+.snip-actions .icon-btn.copied {
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 .snip-confirm-del {
   background: rgba(var(--danger-rgb, 220, 60, 60), 0.15) !important;
