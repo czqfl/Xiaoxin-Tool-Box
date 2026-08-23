@@ -336,6 +336,9 @@ export function ScreenshotOverlay() {
       // 字母键用 e.code 判定：中文输入法激活时 e.key 可能是 "Process"，e.code 始终是物理键
       else if (e.code === "KeyC" && e.ctrlKey && phase === "selected") { e.preventDefault(); if (!e.repeat) void doOutput("copy"); }
       else if (e.code === "KeyT" && (e.ctrlKey || (!e.ctrlKey && !e.altKey && !e.shiftKey)) && phase === "selected") { e.preventDefault(); if (!e.repeat) void doOutput("pin"); }
+      // F8 贴图：与全局热键（贴图显示/隐藏）语义区分——截图模式中 Rust 侧会忽略
+      // 全局 F8（见 shortcut.rs pins 分支的 shooting 判断），此处 F8 = 把选区贴到桌面
+      else if (e.code === "F8" && phase === "selected") { e.preventDefault(); if (!e.repeat) void doOutput("pin"); }
       else if (e.key.startsWith("Arrow")) {
         e.preventDefault(); const d = e.shiftKey ? 10 : 1;
         const r = {...regRef.current};

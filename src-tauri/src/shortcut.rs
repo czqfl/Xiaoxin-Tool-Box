@@ -446,6 +446,11 @@ pub fn handle_shortcut_pressed<R: Runtime>(app: &AppHandle<R>, shortcut: &Shortc
         inner.pins == Some(*shortcut)
     };
     if is_pins {
+        // 截图会话进行中：全局 F8 忽略——此时 F8 语义是「把选区贴到桌面」，
+        // 由遮罩前端键盘监听处理（避免全局 toggle 把刚贴的图又隐藏/干扰遮罩）
+        if crate::screenshot::shooting() {
+            return;
+        }
         // toggle: 有可见贴图 → 全隐藏；否则全显示。
         // 整个动作移出主线程（见 pin::toggle_all 注释）——热键回调里直接做
         // 窗口操作一旦卡住会冻结全部窗口

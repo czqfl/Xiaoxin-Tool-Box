@@ -12,6 +12,13 @@ use tauri::{
 
 pub const OVERLAY_PREFIX: &str = "shot-overlay";
 static SHOOTING: AtomicBool = AtomicBool::new(false);
+
+/// 截图会话是否进行中（遮罩已打开/正在准备）。
+/// 全局快捷键 handler 据此判断：截图模式中 F8 语义是「贴图」而非「显示/隐藏贴图」，
+/// 避免与遮罩前端 F8 贴图冲突（RegisterHotKey 全局触发与遮罩 WebView 焦点并存）。
+pub fn shooting() -> bool {
+    SHOOTING.load(Ordering::SeqCst)
+}
 static LAST_REGION: Mutex<Option<[i32; 4]>> = Mutex::new(None);
 /// 本次截图光标所在显示器索引（shot_ready 时只给这台遮罩焦点）
 static CURSOR_MON: AtomicUsize = AtomicUsize::new(0);
