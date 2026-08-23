@@ -78,10 +78,11 @@ html[data-window="shot"] body { background: transparent; }
 .shot-toolbtn-main { /* 继承 .shot-toolbar button 的基样式 */ }
 .shot-toolbtn-main.active { background: rgba(var(--accent-rgb), 0.28); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.55); }
 /* 子图形枚举：点一级图标后直接平铺在正下方（非下拉框）。
-   单行结构：子工具图标 + 颜色/粗细面板【同一行】排列 */
+   严格单行：子工具图标 + 小竖线 + 颜色/粗细面板，禁止任何折行 */
 .shot-toolbtn-submenu {
   position: absolute; top: calc(100% + 4px); left: 0; z-index: 220;
-  display: flex; flex-direction: row; gap: 7px; padding: 5px 8px;
+  display: flex; flex-direction: row; flex-wrap: nowrap; white-space: nowrap;
+  gap: 5px; padding: 5px 8px;
   align-items: center; justify-content: flex-start;
   background: rgba(var(--bg-panel-rgb), var(--panel-opacity));
   backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
@@ -90,14 +91,16 @@ html[data-window="shot"] body { background: transparent; }
   animation: shot-submenu-in 100ms var(--ease-out) both;
 }
 .shot-toolbtn-submenu.above { top: auto; bottom: calc(100% + 4px); }
-.shot-toolbtn-submenu button { min-width: 27px; min-height: 27px; }
+.shot-toolbtn-submenu button { min-width: 27px; min-height: 27px; flex: none; }
 .shot-toolbtn-submenu button.active { background: rgba(var(--accent-rgb), 0.28); color: var(--accent-text); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.55); }
+/* 图形与颜色之间的小竖线分隔 */
+.shot-submenu-divider { width: 1px; height: 18px; flex: none; margin: 0 3px; background: rgba(255,255,255,0.22); }
 /* 枚举内嵌的颜色/粗细面板：复用主面板内容，去掉自己的底（枚举已有玻璃底），
-   与子图形同行，左侧竖线分隔 */
+   与子图形严格同行、不换行 */
 .shot-toolbtn-submenu .shot-toolbar-panel {
   background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none;
-  padding: 0; align-self: center; border-top: none;
-  border-left: 1px solid rgba(255,255,255,0.12); padding-left: 8px;
+  padding: 0; align-self: center; border-top: none; border-left: none;
+  flex-wrap: nowrap; white-space: nowrap; flex: none;
 }
 @keyframes shot-submenu-in { from { opacity: 0; } to { opacity: 1; } }
 /* 悬停提示：条下方浮出「名称 (快捷键)」小标签 */

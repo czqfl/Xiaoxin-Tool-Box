@@ -1434,6 +1434,9 @@ pub fn shot_drag_begin(
     {
         let idx = overlay_index(window.label()).ok_or("not overlay")?;
         let a = [accent.first().copied().unwrap_or(76), accent.get(1).copied().unwrap_or(141), accent.get(2).copied().unwrap_or(255)];
+        diag_write(&format!(
+            "[drag] begin mon={idx} mode={mode} anchor=({ax},{ay}) hx={hx} hy={hy} start=({sx},{sy},{sw},{sh}) scale={scale}"
+        ));
         *DRAG_PARAMS.lock().unwrap() = Some(DragParams {
             mon: idx, mode, ax, ay, hx, hy, sx, sy, sw, sh,
             accent: a, scale,
