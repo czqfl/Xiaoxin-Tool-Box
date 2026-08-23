@@ -617,8 +617,12 @@ fn paint_drag_frame(idx: usize, r: [i32; 4], p: &DragParams, pristine: &[u8]) {
     let target = {
         let _bits = FREEZE_BITS_LOCK.lock().unwrap();
         let map = FREEZES.lock().unwrap();
-        let Some(l) = map.get(&idx) else { return };
-        if l.bits.is_null() || !l.ready || l.w <= 0 || l.h <= 0 { return; }
+        let Some(l) = map.get(&idx) else {
+            diag_write(&format!("[drag] paint skip: no freeze layer mon={idx}")); return;
+        };
+        if l.bits.is_null() || !l.ready || l.w <= 0 || l.h <= 0 {
+            diag_write("[drag] paint skip: layer not ready"); return;
+        }
         unsafe { composite_drag(l.bits, l.w, l.h, pristine, &dim, r, p); }
         l.child
     };

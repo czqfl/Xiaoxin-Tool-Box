@@ -1441,20 +1441,18 @@ export function ScreenshotOverlay() {
                       <span style={{ color: active ? "#fff" : c, display: "inline-flex" }}><MainIcon /></span>
                     </button>
                     {/* 子图形枚举：点一级图标后直接平铺在其正下方（无下拉框）；
-                        第一行选图形，第二行直接带出颜色/粗细——一次点开全部选完。
-                        点选图形切换 tool 并关闭；选颜色/粗细不关闭。贴底翻上方 */}
+                        子图形 + 颜色/粗细【同一行】展示，一次点开全部选完。
+                        选图形后面板保持展开可继续调色；收起靠再点一级图标或点外部。
+                        贴底翻上方 */}
                     {isGroup && submenuOpen === i && (
                       <div className={`shot-toolbtn-submenu${panelAbove ? " above" : ""}`} onClick={(ev) => ev.stopPropagation()}>
-                        <div className="shot-submenu-tools">
-                          {/* 选图形后面板保持展开：可继续调颜色/粗细；
-                              收起靠再点一级图标或点面板外部 */}
-                          {b.items.map(([t, Ic, name, cc]) => (
-                            <button key={t} className={tool === t ? "active" : ""} data-tip={name}
-                              onClick={() => setTool(t)}>
-                              <span style={{ color: tool === t ? "#fff" : cc, display: "inline-flex" }}><Ic /></span>
-                            </button>
-                          ))}
-                        </div>
+                        {/* 选图形后面板保持展开：可继续调颜色/粗细 */}
+                        {b.items.map(([t, Ic, name, cc]) => (
+                          <button key={t} className={tool === t ? "active" : ""} data-tip={name}
+                            onClick={() => setTool(t)}>
+                            <span style={{ color: tool === t ? "#fff" : cc, display: "inline-flex" }}><Ic /></span>
+                          </button>
+                        ))}
                         {renderConfigPanel}
                       </div>
                     )}
