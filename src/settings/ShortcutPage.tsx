@@ -21,7 +21,8 @@ type Target =
   | "files"
   | "snippets"
   | "screenshot"
-  | "pins";
+  | "pins"
+  | "picker";
 
 /** 将键盘事件转换为 global-shortcut 可解析的组合键字符串，如 "Ctrl+Alt+C"。
  *  F1~F12 不与文本输入冲突，允许不搭配修饰键单独使用（Snipaste 即默认 F1 截图） */
@@ -173,6 +174,7 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
     snippets: idleRow,
     screenshot: idleRow,
     pins: idleRow,
+    picker: idleRow,
   });
   const [saving, setSaving] = useState<Target | null>(null);
   const [resyncing, setResyncing] = useState(false);
@@ -212,6 +214,7 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
         "snippets",
         "screenshot",
         "pins",
+        "picker",
       ] as Target[]
     ).filter((t) => t !== target);
     if (others.some((t) => combo === draft[t])) {
@@ -335,6 +338,11 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
           "screenshot",
           "开始截图",
           "点击快捷键后按下新组合，例如 Ctrl+Alt+A（冻结屏幕 + 全屏遮罩选区）"
+        )}
+        {renderRow(
+          "picker",
+          "屏幕取色",
+          "点击快捷键后按下新组合，例如 Alt+D（十字线跟随鼠标显示坐标与颜色，C 复制颜色，Shift 切换 RGB/HEX）"
         )}
         {renderRow(
           "pins",

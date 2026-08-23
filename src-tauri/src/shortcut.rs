@@ -35,6 +35,8 @@ pub struct ShortcutBindingsInner {
     pub screenshot: Option<Shortcut>,
     /// 显示/隐藏全部贴图
     pub pins: Option<Shortcut>,
+    /// 屏幕取色（呼出十字取色模式，复用截图遮罩窗）
+    pub picker: Option<Shortcut>,
 }
 
 pub fn parse(shortcut: &str) -> Result<Shortcut, String> {
@@ -44,7 +46,7 @@ pub fn parse(shortcut: &str) -> Result<Shortcut, String> {
 }
 
 /// 全部快捷键目标（顺序 = 注册顺序 = 绑定表字段顺序）
-const TARGETS: [&str; 9] = [
+const TARGETS: [&str; 10] = [
     "clipboard",
     "folder",
     "credentials",
@@ -54,6 +56,7 @@ const TARGETS: [&str; 9] = [
     "snippets",
     "screenshot",
     "pins",
+    "picker",
 ];
 
 fn is_valid_target(t: &str) -> bool {
@@ -71,7 +74,8 @@ fn config_shortcut(config: &AppConfig, target: &str) -> String {
         "files" => config.shortcuts.files.clone(),
         "snippets" => config.shortcuts.snippets.clone(),
         "screenshot" => config.shortcuts.screenshot.clone(),
-        _ => config.shortcuts.pins.clone(),
+        "pins" => config.shortcuts.pins.clone(),
+        _ => config.shortcuts.picker.clone(),
     }
 }
 
@@ -86,7 +90,8 @@ fn set_config_shortcut(config: &mut AppConfig, target: &str, value: String) {
         "files" => config.shortcuts.files = value,
         "snippets" => config.shortcuts.snippets = value,
         "screenshot" => config.shortcuts.screenshot = value,
-        _ => config.shortcuts.pins = value,
+        "pins" => config.shortcuts.pins = value,
+        _ => config.shortcuts.picker = value,
     }
 }
 
@@ -101,7 +106,8 @@ fn set_binding(inner: &mut ShortcutBindingsInner, target: &str, v: Option<Shortc
         "files" => inner.files = v,
         "snippets" => inner.snippets = v,
         "screenshot" => inner.screenshot = v,
-        _ => inner.pins = v,
+        "pins" => inner.pins = v,
+        _ => inner.picker = v,
     }
 }
 
@@ -176,6 +182,7 @@ pub fn shortcut_test(
             || inner.snippets == Some(parsed)
             || inner.screenshot == Some(parsed)
             || inner.pins == Some(parsed)
+            || inner.picker == Some(parsed)
         {
             return Ok(());
         }
@@ -289,6 +296,7 @@ pub fn shortcut_runtime_bindings(bindings: State<'_, ShortcutBindings>) -> Vec<S
     push("snippets", &inner.snippets);
     push("screenshot", &inner.screenshot);
     push("pins", &inner.pins);
+    push("picker", &inner.picker);
     out
 }
 
@@ -303,8 +311,8 @@ pub fn register_initial<R: Runtime>(app: &AppHandle<R>, config: &AppConfig) {
     // 启动即记录配置声称的快捷键全貌：与 diag 里 registered/FAILED 行对照，
     // 任何"配置与运行时脱节"（改了不生效、旧的还在）都能一眼定位
     crate::storage::diag_write(&format!(
-        "[shortcut] initial from config: shot={} pins={} cb={} fd={} cr={} tr={} pt={} fl={} sn={}",
-        config.shortcuts.screenshot, config.shortcuts.pins,
+        "[shortcut] initial from config: shot={} pins={} picker={} cb={} fd={} cr={} tr={} pt={} fl={} sn={}",
+        config.shortcuts.screenshot, config.shortcuts.pins, config.shortcuts.picker,
         config.shortcuts.clipboard, config.shortcuts.folder,
         config.shortcuts.credentials, config.shortcuts.translation,
         config.shortcuts.port, config.shortcuts.files, config.shortcuts.snippets,
@@ -437,7 +445,17 @@ pub fn handle_shortcut_pressed<R: Runtime>(app: &AppHandle<R>, shortcut: &Shortc
     };
     if is_screenshot {
         crate::storage::diag_write("[shortcut] screenshot triggered");
-        let _ = crate::screenshot::begin_impl(app.clone());
+        let _ = crate::screenshot::begin_impl(app.clone(), false);
+        return;
+    }
+    // 屏幕取色：复用截图遮罩窗，但进入纯取色模式（无遮罩/选区/工具条）
+    let is_picker = {
+        let inner = bindings.0.lock().unwrap();
+        inner.picker == Some(*shortcut)
+    };
+    if is_picker {
+        crate::storage::diag_write("[shortcut] picker triggered");
+        let _ = crate::screenshot::begin_impl(app.clone(), true);
         return;
     }
     // 贴图显示/隐藏
@@ -446,9 +464,11 @@ pub fn handle_shortcut_pressed<R: Runtime>(app: &AppHandle<R>, shortcut: &Shortc
         inner.pins == Some(*shortcut)
     };
     if is_pins {
-        // 截图会话进行中：全局 F8 忽略——此时 F8 语义是「把选区贴到桌面」，
-        // 由遮罩前端键盘监听处理（避免全局 toggle 把刚贴的图又隐藏/干扰遮罩）
+        // 截图会话进行中：全局贴图热键语义变为「把当前选区贴到桌面」。
+        // 热键已被 RegisterHotKey 吞掉（遮罩 webview 收不到按键），必须以事件
+        // 转发给遮罩页执行；直接 return 会让用户配置的贴图键在截图里失灵
         if crate::screenshot::shooting() {
+            let _ = app.emit(crate::screenshot::EVT_PIN_HOTKEY, ());
             return;
         }
         // toggle: 有可见贴图 → 全隐藏；否则全显示。

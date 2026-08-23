@@ -63,7 +63,10 @@ export function ScreenshotPage() {
             <SettingRow title="智能识别窗口边缘" desc="鼠标悬停时自动识别窗口边界并吸附选框">
               <Switch checked={config.shot.smart_detect} onChange={(v) => updateShot({ smart_detect: v })} />
             </SettingRow>
-            <SettingRow title="放大镜" desc="选区时显示像素级放大镜">
+            <SettingRow title="元素级识别（界面组件）" desc="智能识别开启时进一步下钻到按钮组、输入框等界面组件（浏览器页面需开启其无障碍支持）">
+              <Switch checked={config.shot.smart_element !== false} onChange={(v) => updateShot({ smart_element: v })} />
+            </SettingRow>
+            <SettingRow title="放大镜" desc="选区时显示像素级放大镜与取色（C 复制颜色 / Shift 切 RGB/HEX）">
               <Switch checked={config.shot.magnifier} onChange={(v) => updateShot({ magnifier: v })} />
             </SettingRow>
             <SettingRow title="记住上次截取区域" desc="呼出截图时若光标下未识别到窗口，预填上一次的选区">

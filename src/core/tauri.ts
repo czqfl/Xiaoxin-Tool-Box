@@ -281,7 +281,8 @@ export const applyShortcut = (
     | "files"
     | "snippets"
     | "screenshot"
-    | "pins",
+    | "pins"
+    | "picker",
   shortcut: string
 ) => invoke<import("../types").AppConfig>("shortcut_apply", { target, shortcut });
 /** 运行时【真实生效】的绑定列表（["pins=Ctrl+N", ...]）——与配置声称值对照，
@@ -305,9 +306,13 @@ export interface ShotGeom {
   snap: { x: number; y: number; width: number; height: number } | null;
   /** 上次截取区域预填（本显示器局部坐标；仅当智能识别未命中时给出） */
   prefill: { x: number; y: number; width: number; height: number } | null;
+  /** 本次会话是否为屏幕取色模式（前端据此渲染取色面板而非截图选区 UI） */
+  picker: boolean;
 }
 /** 开始截图（冻结屏幕 + 创建遮罩窗口） */
 export const shotBegin = () => invoke<void>("shot_begin");
+/** 开始屏幕取色（复用遮罩窗，纯取色模式：十字线+颜色面板） */
+export const shotBeginPicker = () => invoke<void>("shot_begin_picker");
 /** 获取当前遮罩窗口所在显示器的几何信息（含智能高亮框/预填选区） */
 export const shotGeometry = () => invoke<ShotGeom>("shot_geometry");
 /** 获取当前显示器的截屏原始 RGBA 二进制（配合 shot_geometry 的宽高使用）。
@@ -325,6 +330,9 @@ export const shotCursorGlobal = () =>
 /** 智能窗口识别：返回全局物理坐标下鼠标处的窗口矩形 */
 export const shotWindowRectAt = (x: number, y: number) =>
   invoke<{ x: number; y: number; width: number; height: number } | null>("shot_window_rect_at", { x, y });
+/** 元素级智能识别（UIA）：返回鼠标处最合适界面组件（按钮/输入框等）的矩形 */
+export const shotUiRectAt = (x: number, y: number) =>
+  invoke<{ x: number; y: number; width: number; height: number } | null>("shot_ui_rect_at", { x, y });
 /** 获取上次记住的选区 */
 export const shotLastRegion = () =>
   invoke<number[] | null>("shot_last_region");

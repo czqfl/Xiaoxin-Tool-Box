@@ -38,6 +38,7 @@ const defaultConfig: AppConfig = {
     snippets: "Alt+K",
     screenshot: "Ctrl+Alt+A",
     pins: "Ctrl+Alt+P",
+    picker: "Alt+D",
   },
   general: {
     theme: "system",
@@ -89,6 +90,7 @@ const defaultConfig: AppConfig = {
     delay_ms: 0,
     capture_cursor: false,
     smart_detect: true,
+    smart_element: true,
     magnifier: true,
     remember_region: true,
     auto_copy: true,

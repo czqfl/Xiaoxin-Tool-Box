@@ -22,6 +22,11 @@ async function bootstrap() {
   if (label.startsWith("shot-overlay")) {
     document.documentElement.dataset.window = "shot";
   }
+  // 贴图窗：页面背景必须透明——show 后 WebView2 首帧 present 前的未绘制瞬间，
+  // 不透明主题底色会闪出一块实色矩形；透明则该瞬间不可见，绝无闪烁
+  if (label.startsWith("pin-")) {
+    document.documentElement.dataset.window = "pin";
+  }
 
   const [{ default: React }, { default: ReactDOM }, { default: App }] = await Promise.all([
     import("react"),

@@ -222,7 +222,14 @@ pub async fn pin_ready(app: AppHandle, window: WebviewWindow) -> Result<(), Stri
         if let Some(hwnd) = crate::screenshot::hwnd_of_webview(&w) {
             crate::acrylic::force_foreground_robust(hwnd);
         }
-        crate::screenshot::hide_all(&app);
+        // 收遮罩延后 ~80ms（约 5 帧）：就绪信号来自隐藏窗里的 rAF，证明不了
+        // 显示后首帧已 present。这期间即便贴图尚未合成完毕，底下仍是截图冻结
+        // 画面而非裸桌面；遮罩揭开时贴图必已画好——彻底消除"闪一下"
+        let app2 = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(80));
+            crate::screenshot::hide_all(&app2);
+        });
         // 本次 staging 已消耗：立刻补一个待命
         if label == STAGING_LABEL {
             ensure_staging(&app);

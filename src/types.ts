@@ -92,6 +92,8 @@ export interface ShortcutsConfig {
   snippets: string;
   screenshot: string;
   pins: string;
+  /** 屏幕取色（呼出十字取色模式） */
+  picker: string;
 }
 
 /** 端口工具面板配置 */
@@ -267,6 +269,7 @@ export interface ShotConfig {
   delay_ms: number;
   capture_cursor: boolean;
   smart_detect: boolean;
+  smart_element: boolean;
   magnifier: boolean;
   remember_region: boolean;
   auto_copy: boolean;

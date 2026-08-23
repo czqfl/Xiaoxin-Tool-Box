@@ -54,6 +54,8 @@ enum Action {
     ToggleSnippets,
     /// 触发截图
     ShotBegin,
+    /// 触发屏幕取色
+    PickerBegin,
     /// 显示/隐藏全部贴图
     TogglePins,
     /// 关闭翻译弹窗（系统级兜底：弹窗无焦点时 webview 收不到 Esc）
@@ -94,6 +96,9 @@ static SNIPPETS_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
 /// 截图热键（Win/Alt 组合）
 static SCREENSHOT_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
 static SCREENSHOT_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
+/// 屏幕取色热键（Win/Alt 组合）
+static PICKER_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
+static PICKER_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
 /// 贴图显示/隐藏热键（Win/Alt 组合）
 static PINS_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
 static PINS_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
@@ -154,6 +159,7 @@ pub fn set_panel_hotkey(target: &str, is_alt: bool, vk: u16) {
         ("snippets", false) => &SNIPPETS_HOTKEY_VK,
         ("screenshot", false) => &SCREENSHOT_HOTKEY_VK,
         ("pins", false) => &PINS_HOTKEY_VK,
+        ("picker", false) => &PICKER_HOTKEY_VK,
         ("clipboard", true) => &CLIPBOARD_HOTKEY_ALT_VK,
         ("folder", true) => &FOLDER_HOTKEY_ALT_VK,
         ("credentials", true) => &CREDENTIAL_HOTKEY_ALT_VK,
@@ -163,6 +169,7 @@ pub fn set_panel_hotkey(target: &str, is_alt: bool, vk: u16) {
         ("snippets", true) => &SNIPPETS_HOTKEY_ALT_VK,
         ("screenshot", true) => &SCREENSHOT_HOTKEY_ALT_VK,
         ("pins", true) => &PINS_HOTKEY_ALT_VK,
+        ("picker", true) => &PICKER_HOTKEY_ALT_VK,
         _ => return,
     };
     slot.store(vk, Ordering::SeqCst);
@@ -293,9 +300,19 @@ fn run_action<R: Runtime>(app: &AppHandle<R>, action: Action) {
         }
         Action::ShotBegin => {
             crate::storage::diag_write("[keyhook] screenshot hotkey pressed");
-            let _ = crate::screenshot::begin_impl(app.clone());
+            let _ = crate::screenshot::begin_impl(app.clone(), false);
+        }
+        Action::PickerBegin => {
+            crate::storage::diag_write("[keyhook] picker hotkey pressed");
+            let _ = crate::screenshot::begin_impl(app.clone(), true);
         }
         Action::TogglePins => {
+            // 截图会话进行中：贴图热键语义变为「把当前选区贴到桌面」，
+            // 按键已被钩子吞掉，转发事件给遮罩页执行（与 RegisterHotKey 路径一致）
+            if crate::screenshot::shooting() {
+                let _ = app.emit(crate::screenshot::EVT_PIN_HOTKEY, ());
+                return;
+            }
             crate::storage::diag_write("[keyhook] pins hotkey pressed");
             // toggle: 有可见贴图 → 全隐藏；否则全显示（统一走后台线程入口）
             crate::pin::toggle_all(app);
@@ -415,6 +432,8 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                 Some(Action::ShotBegin)
             } else if vk == PINS_HOTKEY_VK.load(Ordering::SeqCst) as u32 {
                 Some(Action::TogglePins)
+            } else if vk == PICKER_HOTKEY_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::PickerBegin)
             } else {
                 None
             };
@@ -464,6 +483,8 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                 Some(Action::ShotBegin)
             } else if vk == PINS_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
                 Some(Action::TogglePins)
+            } else if vk == PICKER_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::PickerBegin)
             } else {
                 None
             };

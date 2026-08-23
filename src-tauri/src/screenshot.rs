@@ -10,8 +10,16 @@ use tauri::{
     WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
 
+/// 截图会话进行中按下全局「显示/隐藏贴图」热键：
+/// RegisterHotKey/钩子会吞掉该按键（遮罩 webview 收不到 keydown），
+/// 此事件把「贴图」语义转发给遮罩页执行选区输出
+pub const EVT_PIN_HOTKEY: &str = "shot://pin-hotkey";
+
 pub const OVERLAY_PREFIX: &str = "shot-overlay";
 static SHOOTING: AtomicBool = AtomicBool::new(false);
+/// 本次会话是否为屏幕取色模式：复用遮罩窗与冻结帧，但前端只渲染
+/// 十字线+颜色面板（无压暗遮罩/选区/工具条），Esc/单击复制后收场
+static PICKER: AtomicBool = AtomicBool::new(false);
 
 /// 截图会话是否进行中（遮罩已打开/正在准备）。
 /// 全局快捷键 handler 据此判断：截图模式中 F8 语义是「贴图」而非「显示/隐藏贴图」，
@@ -50,13 +58,22 @@ pub struct ShotState {
     /// 呼出瞬间桌面顶层窗口 Z 序快照（从顶到底，全局物理坐标）。
     /// 悬停智能识别直接查这份表——活调 WindowFromPoint 只会命中盖在最上面的
     /// 遮罩自己，这是"智能框选时灵时不灵"的根因。
-    pub candidates: Mutex<Vec<ShotRect>>,
+    /// hwnd 供元素级识别（UIA）用：ElementFromHandle 直达目标窗口的元素树，
+    /// 绕开遮罩（ElementFromPoint 同样只会命中遮罩自己）
+    pub candidates: Mutex<Vec<SnapWin>>,
     /// 呼出瞬间光标下窗口矩形（全局物理坐标）。
     /// 在 Rust 端截图瞬间就做好智能识别，前端拿到 geometry 即可高亮，
     /// 无需等整屏 RGBA 传完——这是"立马智能识别"的关键。
     pub initial_snap: Mutex<Option<ShotRect>>,
     /// 记忆的上次选区（全局物理坐标；仅当智能识别未命中时作为预填）
     pub prefill: Mutex<Option<[i32; 4]>>,
+}
+
+/// Z 序快照条目：窗口视觉矩形 + 顶层 HWND（元素级识别用）
+#[derive(Debug, Clone)]
+pub struct SnapWin {
+    pub rect: ShotRect,
+    pub hwnd: isize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,6 +109,7 @@ pub fn is_overlay_label(label: &str) -> bool {
 /// pin.rs 的贴图就绪时序也依赖它（先显贴图再收遮罩），故 pub(crate)。
 pub(crate) fn hide_all<R: Runtime>(app: &AppHandle<R>) {
     SHOOTING.store(false, Ordering::SeqCst);
+    PICKER.store(false, Ordering::SeqCst);
     let labels: Vec<String> = app.webview_windows().keys()
         .filter(|k| k.starts_with(OVERLAY_PREFIX))
         .cloned().collect();
@@ -450,6 +468,17 @@ fn create_overlays<R: Runtime>(app: &AppHandle<R>, geoms: &[ShotMonitorGeom]) {
                 if let Some(parent) = hwnd_of_webview(&win) {
                     attach_freeze_layer(idx, parent, w as i32, h as i32);
                     disable_show_animation(parent);
+                    // 自愈兜底：若 begin_impl 的统一写帧闭包先于本建窗在主循环执行
+                    // （两批闭包乱序的极小概率），此处直接从会话状态补写本屏冻结帧，
+                    // 确保新建窗的冻结层必有帧可显，绝不带黑帧亮窗。
+                    // 预热路径（非会话）写入的是上一会话旧帧：窗口隐藏不可见，
+                    // 且下次 begin 会先 invalidate_freezes 再写新帧，无副作用
+                    if let Some(state) = app2.try_state::<ShotState>() {
+                        let shots = state.shots.lock().unwrap();
+                        if let Some(s) = shots.iter().find(|s| s.geom.index == idx) {
+                            update_freeze_frame(idx, w as i32, h as i32, &s.bgra);
+                        }
+                    }
                 }
                 // 兜底：仅当本会话前端从未就绪（页面加载失败等）时超时强制显示。
                 // 不能只看 is_visible——用户可能在 3 秒内已正常完成截图（窗口被隐藏），
@@ -526,16 +555,16 @@ pub fn prewarm_overlays<R: Runtime>(app: &AppHandle<R>) {
 // ---------- smart detection ----------
 
 /// 悬停/初始识别：在窗口 Z 序快照里找包含该全局坐标的最顶层窗口
-fn candidate_at(cands: &[ShotRect], gx: i32, gy: i32) -> Option<ShotRect> {
+fn candidate_at(cands: &[SnapWin], gx: i32, gy: i32) -> Option<ShotRect> {
     cands.iter()
-        .find(|r| gx >= r.x && gx < r.x + r.width as i32 && gy >= r.y && gy < r.y + r.height as i32)
-        .cloned()
+        .find(|w| gx >= w.rect.x && gx < w.rect.x + w.rect.width as i32 && gy >= w.rect.y && gy < w.rect.y + w.rect.height as i32)
+        .map(|w| w.rect.clone())
 }
 
 #[cfg(windows)]
 struct SnapCtx {
     own_roots: Vec<isize>,
-    out: Vec<ShotRect>,
+    out: Vec<SnapWin>,
 }
 
 #[cfg(windows)]
@@ -566,7 +595,7 @@ unsafe extern "system" fn snap_enum_proc(
     let w = rect.right - rect.left;
     let h = rect.bottom - rect.top;
     if w >= 16 && h >= 16 {
-        ctx.out.push(ShotRect { x: rect.left, y: rect.top, width: w as u32, height: h as u32 });
+        ctx.out.push(SnapWin { rect: ShotRect { x: rect.left, y: rect.top, width: w as u32, height: h as u32 }, hwnd: root.0 as isize });
     }
     BOOL(1)
 }
@@ -579,7 +608,7 @@ unsafe extern "system" fn snap_enum_proc(
 /// 表现即"时灵时不灵"。改为呼出瞬间枚举一次列表，悬停时纯查表：
 /// 稳定、确定、零系统调用开销。代价是会话期间新弹出的窗口不参与识别。
 #[cfg(windows)]
-fn snapshot_windows<R: Runtime>(app: &AppHandle<R>) -> Vec<ShotRect> {
+fn snapshot_windows<R: Runtime>(app: &AppHandle<R>) -> Vec<SnapWin> {
     use windows::Win32::Foundation::LPARAM;
     use windows::Win32::UI::WindowsAndMessaging::EnumWindows;
 
@@ -595,18 +624,27 @@ fn snapshot_windows<R: Runtime>(app: &AppHandle<R>) -> Vec<ShotRect> {
 }
 
 #[cfg(not(windows))]
-fn snapshot_windows<R: Runtime>(_: &AppHandle<R>) -> Vec<ShotRect> { Vec::new() }
+fn snapshot_windows<R: Runtime>(_: &AppHandle<R>) -> Vec<SnapWin> { Vec::new() }
 
 // ---------- internal ----------
 
-pub(crate) fn begin_impl<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+pub(crate) fn begin_impl<R: Runtime>(app: AppHandle<R>, picker: bool) -> Result<(), String> {
     if SHOOTING.swap(true, Ordering::SeqCst) { return Ok(()); }
+    PICKER.store(picker, Ordering::SeqCst);
     let cfg: ShotConfig = app.try_state::<ConfigState>()
         .map(|s| s.0.lock().unwrap().shot.clone())
         .unwrap_or_default();
-    if !cfg.enabled { SHOOTING.store(false, Ordering::SeqCst); return Err("disabled".into()); }
+    // 取色是独立工具（有自己的快捷键）：不受「启用截图功能」开关限制
+    if !cfg.enabled && !picker {
+        SHOOTING.store(false, Ordering::SeqCst);
+        PICKER.store(false, Ordering::SeqCst);
+        return Err("disabled".into());
+    }
     let delay = cfg.delay_ms;
     let capture_cursor = cfg.capture_cursor;
+    // 取色模式不做智能识别/区域记忆：无选区概念，省掉窗口快照开销
+    let smart_detect = cfg.smart_detect && !picker;
+    let remember_region = cfg.remember_region && !picker;
     std::thread::spawn(move || {
         if delay > 0 { std::thread::sleep(std::time::Duration::from_millis(delay as u64)); }
         match capture_all(&app, capture_cursor) {
@@ -623,13 +661,13 @@ pub(crate) fn begin_impl<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
                 CURSOR_MON.store(cursor_mon, Ordering::SeqCst);
                 // 窗口 Z 序快照：此刻本会话遮罩窗还不存在，列表天然干净。
                 // 初始高亮与后续悬停识别统一查这份表
-                let cands = snapshot_windows(&app);
+                let cands = if smart_detect { snapshot_windows(&app) } else { Vec::new() };
                 // 智能识别在截图瞬间完成：光标处命中的第一个（最顶层）窗口
-                let snap = if cfg.smart_detect {
+                let snap = if smart_detect {
                     candidate_at(&cands, cursor.x as i32, cursor.y as i32)
                 } else { None };
                 // 记忆区域回退：仅当智能识别未命中且开关开启
-                let prefill = if snap.is_none() && cfg.remember_region {
+                let prefill = if snap.is_none() && remember_region {
                     *LAST_REGION.lock().unwrap()
                 } else { None };
                 // store
@@ -642,8 +680,11 @@ pub(crate) fn begin_impl<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
                     *state.initial_snap.lock().unwrap() = snap;
                     *state.prefill.lock().unwrap() = prefill;
                 }
-                // 帧先送进原生冻结层（主线程执行），随后才通知前端——
-                // 保证前端就绪时冻结层必已可显示，亮窗即见完整冻结画面
+                // 先确保遮罩窗就位（复用或调度重建），随后才把帧写入冻结层——
+                // 顺序绝不能反：重建路径（显示器数量变化/预热未完成）下，若写帧
+                // 闭包先于新窗口创建执行，get_webview_window 落空 → 冻结层永远
+                // 无帧 → shot_ready 等 300ms 超时后照样亮窗 → 整屏漆黑一整场
+                ensure_overlays(&app, &shots);
                 {
                     let app3 = app.clone();
                     let shots2 = shots.clone();
@@ -657,7 +698,6 @@ pub(crate) fn begin_impl<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
                         }
                     });
                 }
-                ensure_overlays(&app, &shots);
                 diag_write(&format!("[shot] begin ok, {} monitors", shots.len()));
                 // 看门狗：只兜底「遮罩从未就绪」的异常会话。前端就绪（OVERLAY_READY）
                 // 说明遮罩正常显示、用户可交互——此后由用户 Esc/输出/取消操作收场，
@@ -691,7 +731,13 @@ pub(crate) fn begin_impl<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn shot_begin(app: AppHandle) -> Result<(), String> {
-    begin_impl(app)
+    begin_impl(app, false)
+}
+
+/// 屏幕取色：复用遮罩窗进入纯取色模式（十字线 + 颜色面板，无选区）
+#[tauri::command]
+pub fn shot_begin_picker(app: AppHandle) -> Result<(), String> {
+    begin_impl(app, true)
 }
 
 #[derive(Serialize)]
@@ -702,6 +748,8 @@ pub struct ShotGeomResp {
     pub snap: Option<ShotRect>,
     /// 上次截取区域预填（本显示器局部坐标；仅当无智能识别结果时给出）
     pub prefill: Option<ShotRect>,
+    /// 本次会话是否为屏幕取色模式（前端据此渲染取色面板而非截图选区 UI）
+    pub picker: bool,
 }
 
 /// 全局矩形 → 本显示器局部坐标，并裁剪到显示器范围内（不相交/过小则 None）
@@ -731,7 +779,7 @@ pub fn shot_geometry(window: WebviewWindow) -> Result<ShotGeomResp, String> {
             clip_to_monitor(&ShotRect { x: last[0], y: last[1], width: last[2] as u32, height: last[3] as u32 }, &g)
         })
     } else { None };
-    Ok(ShotGeomResp { geom: g, snap, prefill })
+    Ok(ShotGeomResp { geom: g, snap, prefill, picker: PICKER.load(Ordering::SeqCst) })
 }
 
 /// 当前显示器的截屏原始 BGRA（二进制 IPC；宽高从 shot_geometry 取）。
@@ -861,11 +909,13 @@ fn serve_pin_file<R: Runtime>(
 pub async fn shot_ready(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
     OVERLAY_READY.store(true, Ordering::SeqCst);
     let idx = overlay_index(window.label()).ok_or("not overlay")?;
-    // 冻结层更新闭包在主循环排队中，可能比事件晚到一拍：短暂等待就绪再亮窗
+    // 冻结层更新闭包在主循环排队中，可能比事件晚到一拍：短暂等待就绪再亮窗。
+    // 上限放宽到 500ms——高负载/多屏大 memcpy 下 300ms 可能不够，超时亮窗
+    // 撞上黑帧兜底就是一次整屏黑闪
     #[cfg(windows)]
     {
         let mut waited = 0u32;
-        while !freeze_ready(idx) && waited < 300 {
+        while !freeze_ready(idx) && waited < 500 {
             std::thread::sleep(std::time::Duration::from_millis(5));
             waited += 5;
         }
@@ -897,6 +947,92 @@ pub fn shot_window_rect_at(app: AppHandle, x: i32, y: i32) -> Option<ShotRect> {
     let state = app.try_state::<ShotState>()?;
     let cands = state.candidates.lock().unwrap();
     candidate_at(&cands, x, y)
+}
+
+/// 元素级智能识别（UIA）：返回全局物理坐标 (x,y) 处最合适 UI 元素的矩形。
+///
+/// 【为什么不能用 ElementFromPoint】遮罩窗是全屏置顶且接收鼠标输入的窗口，
+/// UIA 的 ElementFromPoint 与 WindowFromPoint 一样只会命中遮罩自己——
+/// 返回的"元素"是遮罩/其 WebView2 宿主，矩形≈全屏，被前端过滤后什么都选不中。
+///
+/// 正确路径：从呼出瞬间的 Z 序快照里查到光标下目标窗口的 HWND，
+/// 用 ElementFromHandle 直达【目标窗口】的 UIA 元素树，再反复下钻到
+/// 「包含该点且面积最小」的子元素——从而能框选浏览器页面里的按钮组/
+/// 输入框/标签页等细粒度组件。过小（<10px，噪点）与异常返回 None，
+/// 前端自动回退窗口级识别。
+#[cfg(windows)]
+pub fn ui_element_rect_at(app: &AppHandle, x: i32, y: i32) -> Option<ShotRect> {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
+    use windows::Win32::UI::Accessibility::{CUIAutomation, IUIAutomationElement, TreeScope_Children};
+
+    // 快照查表：光标下最顶层的目标窗口（含其 HWND）
+    let state = app.try_state::<ShotState>()?;
+    let cands = state.candidates.lock().unwrap();
+    let target = cands.iter().find(|w| {
+        x >= w.rect.x && x < w.rect.x + w.rect.width as i32
+            && y >= w.rect.y && y < w.rect.y + w.rect.height as i32
+    })?;
+    let hwnd = HWND(target.hwnd as *mut _);
+
+    // COM 线程初始化：命令跑在 tokio 线程池，各线程首次使用时初始化一次；
+    // 已初始化（含模式不符）的错误直接忽略，CoCreateInstance 仍可成功
+    unsafe { let _ = windows::Win32::System::Com::CoInitializeEx(
+        None, windows::Win32::System::Com::COINIT_MULTITHREADED); }
+    let auto: windows::Win32::UI::Accessibility::IUIAutomation =
+        unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()? };
+
+    let area = |r: &windows::Win32::Foundation::RECT| (r.right - r.left) * (r.bottom - r.top);
+    let contains = |r: &windows::Win32::Foundation::RECT| x >= r.left && x < r.right && y >= r.top && y < r.bottom;
+
+    // 直达目标窗口的 UIA 元素（Chromium 系浏览器会在收到 UIA 查询时
+    // 自动激活无障碍树，首次查询可能略慢，属预期行为）
+    let mut cur: IUIAutomationElement = unsafe { auto.ElementFromHandle(hwnd).ok()? };
+    let mut cur_rect = unsafe { cur.CurrentBoundingRectangle() }.ok()?;
+
+    // 下钻：在子元素里找包含该点且面积最小的矩形，最多 8 层；子树过大（>800，
+    // 病态树）放弃下钻保响应性。UIA 调用全部失败安全——出错即返回当前结果
+    if let Ok(cond) = unsafe { auto.CreateTrueCondition() } {
+        for _ in 0..8 {
+            let Ok(children) = (unsafe { cur.FindAll(TreeScope_Children, &cond) }) else { break };
+            let Ok(n) = (unsafe { children.Length() }) else { break };
+            if n == 0 || n > 800 { break; }
+            let mut best: Option<(IUIAutomationElement, windows::Win32::Foundation::RECT)> = None;
+            for i in 0..n {
+                let Ok(c) = (unsafe { children.GetElement(i) }) else { continue };
+                let Ok(r) = (unsafe { c.CurrentBoundingRectangle() }) else { continue };
+                if contains(&r) {
+                    match &best {
+                        Some((_, br)) if area(br) <= area(&r) => {}
+                        _ => best = Some((c, r)),
+                    }
+                }
+            }
+            match best {
+                Some((c, r)) if area(&r) < area(&cur_rect) => {
+                    cur = c; cur_rect = r;
+                }
+                _ => break,
+            }
+        }
+    }
+
+    let w = cur_rect.right - cur_rect.left;
+    let h = cur_rect.bottom - cur_rect.top;
+    // 过小视为命中噪点（1px 分隔线等）；与目标窗口几乎等大的结果（下钻失败，
+    // 仍停留在窗口根元素）也返回 None，避免与窗口级识别重复
+    if w < 10 || h < 10 { return None; }
+    if w >= target.rect.width as i32 && h >= target.rect.height as i32 { return None; }
+    Some(ShotRect { x: cur_rect.left, y: cur_rect.top, width: w.max(0) as u32, height: h.max(0) as u32 })
+}
+
+#[cfg(not(windows))]
+pub fn ui_element_rect_at(_: &AppHandle, _x: i32, _y: i32) -> Option<ShotRect> { None }
+
+/// 元素级识别命令：与 shot_window_rect_at 并行调用，前端择优（取更精细者）
+#[tauri::command]
+pub fn shot_ui_rect_at(app: AppHandle, x: i32, y: i32) -> Option<ShotRect> {
+    ui_element_rect_at(&app, x, y)
 }
 
 #[tauri::command]
@@ -980,6 +1116,7 @@ pub fn on_overlay_destroyed<R: Runtime>(app: &AppHandle<R>) {
         .count();
     if remaining == 0 {
         SHOOTING.store(false, Ordering::SeqCst);
+        PICKER.store(false, Ordering::SeqCst);
     }
 }
 

@@ -11,7 +11,19 @@ import {
 } from "../../core/tauri";
 import "./pin.css";
 
+/** 贴图边框随机定格色板（Snipaste 式：贴图瞬间彩闪几下，随后定格其中一色） */
+const PIN_ACCENTS = ["#0a84ff", "#ff453a", "#32d74b", "#bf5af2", "#ff9f0a", "#64d2ff"];
+
 export function PinWindow() {
+  // 边框主题色：每次贴图从调色板随机取一个——开场彩闪结束后定格于此
+  const [accent, setAccent] = useState(() =>
+    PIN_ACCENTS[Math.floor(Math.random() * PIN_ACCENTS.length)]);
+  const [introDone, setIntroDone] = useState(false);
+  // 每张贴图都重放开场彩闪并重摇主题色（staging 复用窗跨多张贴图存活）
+  const replayIntro = () => {
+    setAccent(PIN_ACCENTS[Math.floor(Math.random() * PIN_ACCENTS.length)]);
+    setIntroDone(false);
+  };
   const [src, setSrc] = useState<string>("");
   const [opacity, setOpacity] = useState(1);
   const [rotation, setRotation] = useState(0);
@@ -20,12 +32,19 @@ export function PinWindow() {
   const [shadow, setShadow] = useState(true);
   const [clickThrough, setClickThrough] = useState(false);
   const [dragging, setDragging] = useState(false);
+  // 缩放比例角标（左上角）：滚轮缩放时出现，停止 ~1s 后淡出
+  const [zoomLabel, setZoomLabel] = useState<string | null>(null);
+  const zoomHideTimer = useRef(0);
+  // 图片原始宽度（naturalWidth）：缩放比例 = 当前窗宽 / 原始宽
+  const baseWRef = useRef(0);
   const dragStart = useRef<{x:number;y:number;wx:number;wy:number}|null>(null);
 
   const winLabel = getCurrentWindow().label;
   const isStaging = winLabel === "pin-staging";
   // 贴图 id：常规窗取自 label；复用窗等 assign 事件分配
   const idRef = useRef<string>(isStaging ? "" : winLabel.replace(/^pin-/, ""));
+  // 图片加载失败自愈重试：只重试一次（协议偶发抖动），绝不反复刷
+  const retriedRef = useRef(false);
 
   // 常规窗：直接加载图片（自定义协议 GET /pin/{id} 文件字节直出，
   // WebView2 原生读盘+解码，取代旧 base64 data URL 的数秒等待）
@@ -41,6 +60,7 @@ export function PinWindow() {
     let un: (() => void) | undefined;
     void listen<{ id: string }>("pin://assign", (e) => {
       idRef.current = e.payload.id;
+      replayIntro();
       setSrc(pinImageUrl(e.payload.id));
     }).then((f) => { un = f; });
     return () => { un?.(); };
@@ -70,6 +90,13 @@ export function PinWindow() {
   // 左键按住状态：左键+滚轮 = 调透明度（Snipaste 同款交互）
   const btnHeld = useRef(false);
 
+  // 缩放角标：显示比例，停止滚动 ~1s 后自动隐藏
+  const showZoomBadge = (scale: number) => {
+    setZoomLabel(`${Math.round(scale * 100)}%`);
+    window.clearTimeout(zoomHideTimer.current);
+    zoomHideTimer.current = window.setTimeout(() => setZoomLabel(null), 1000);
+  };
+
   // mouse wheel: 普通滚动=缩放；左键按住滚动=透明度 ±5%（范围 5%~100%）
   useEffect(() => {
     const md = (e: MouseEvent) => { if (e.button === 0) btnHeld.current = true; };
@@ -77,7 +104,8 @@ export function PinWindow() {
     const h = (e: WheelEvent) => {
       e.preventDefault();
       const win = getCurrentWindow();
-      if (btnHeld.current && idRef.current) {
+      // Ctrl+滚轮 或 左键按住+滚轮：调透明度 ±5%（范围 5%~100%，Snipaste 同款）
+      if ((e.ctrlKey || btnHeld.current) && idRef.current) {
         setOpacity((o) => Math.min(1, Math.max(0.05, +(o - Math.sign(e.deltaY) * 0.05).toFixed(2))));
         debouncePersist();
         return;
@@ -87,6 +115,8 @@ export function PinWindow() {
         const nw = Math.max(40, Math.round(size.width * factor));
         const nh = Math.max(40, Math.round(size.height * factor));
         win.setSize(new PhysicalSize(nw, nh)).catch(() => {});
+        // 左上角实时缩放比例：当前窗宽 / 图片原始宽（未缩放即 100%）
+        if (baseWRef.current > 0) showZoomBadge(nw / baseWRef.current);
         debouncePersist();
       });
     };
@@ -199,18 +229,36 @@ export function PinWindow() {
       requestAnimationFrame(() => { void pinReady().catch(() => {}); }));
 
   return (
-    <div className={`pin-window${shadow ? " pin-shadow" : ""}`} style={{ opacity }}
+    <div className={`pin-window${shadow ? " pin-shadow" : ""}${dragging ? " pin-dragging" : ""}`}
+      style={{ opacity, "--pin-accent": accent } as React.CSSProperties}
       onMouseDown={onMouseDown} onContextMenu={onContext}
       onDoubleClick={() => { if (idRef.current) pinClose(idRef.current).catch(() => {}); }}>
       {src && (
         <img src={src} draggable={false}
-          onLoad={readyWhenPainted}
-          onError={readyWhenPainted}
+          onLoad={(e) => {
+            baseWRef.current = (e.target as HTMLImageElement).naturalWidth || 0;
+            readyWhenPainted();
+          }}
+          onError={() => {
+            // 加载失败绝不调用 pinReady——那会 show 出一块空白/底色矩形（必闪）。
+            // 换查询参数自愈重试一次；staging 仍失败则由 Rust 侧 1.5s 兜底重建
+            const id = idRef.current;
+            if (!id || retriedRef.current) return;
+            retriedRef.current = true;
+            const base = pinImageUrl(id);
+            setSrc(base + (base.includes("?") ? "&" : "?") + "r=" + Date.now());
+          }}
           style={{
             transform: `rotate(${rotation}deg) scaleX(${flipH?-1:1}) scaleY(${flipV?-1:1})`,
             width: "100%", height: "100%", objectFit: "contain",
           }} />
       )}
+      {/* Snipaste 式边框：贴图瞬间彩闪几下定格随机主题色；此后悬停/拖动时
+          显示主题色、闲置时白色，让贴图边界在任何桌面都清晰可辨 */}
+      <div
+        className={`pin-border${introDone ? "" : " pin-border-flash"}`}
+        onAnimationEnd={() => setIntroDone(true)} />
+      {zoomLabel && <div className="pin-zoom-badge">{zoomLabel}</div>}
     </div>
   );
 }

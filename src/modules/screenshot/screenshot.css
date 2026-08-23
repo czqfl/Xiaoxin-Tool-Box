@@ -56,9 +56,19 @@ html[data-window="shot"] body { background: transparent; }
 /* 整条（工具条+展开面板）统一投影，避免两段各自描边 */
 .shot-toolbar-float { position: fixed; display: flex; flex-direction: column; align-items: flex-start; gap: 0; z-index: 200; max-width: calc(100vw - 16px); box-shadow: 0 6px 20px rgba(0,0,0,0.45); }
 /* 主题玻璃条：背景跟随主题令牌，毛玻璃模糊采样背后冻结画面；直角、无边框 */
-.shot-toolbar { display: flex; align-items: center; gap: 1px; background: rgba(var(--bg-panel-rgb), var(--panel-opacity)); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-radius: 0; padding: 3px 4px; flex-wrap: nowrap; white-space: nowrap; }
+/* 毛玻璃 blur 移到 ::before：backdrop-filter 若直接放在条上会创建层叠上下文，
+   把按钮 tooltip(::after, z-index:320) 关死在条内——颜色面板（后置兄弟）反而
+   盖住 tooltip（"提示框被颜色面板挡住"根因）。伪元素做模糊效果相同，
+   且不产生条级层叠上下文，tooltip 可正常浮到面板之上 */
+.shot-toolbar { display: flex; align-items: center; gap: 1px; background: rgba(var(--bg-panel-rgb), var(--panel-opacity)); border-radius: 0; padding: 3px 4px; flex-wrap: nowrap; white-space: nowrap; position: relative; }
+.shot-toolbar::before { content: ""; position: absolute; inset: 0; z-index: -1; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
 .shot-toolbar-panel { display: flex; align-items: center; gap: 7px; background: rgba(var(--bg-panel-rgb), var(--panel-opacity)); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-radius: 0; padding: 8px 10px; white-space: nowrap; align-self: stretch; }
-.shot-toolbar button { background: transparent; border: none; color: var(--text-primary); padding: 5px; border-radius: 2px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; min-width: 27px; min-height: 27px; position: relative; }
+.shot-toolbar button { background: transparent; border: none; color: var(--text-primary); padding: 5px; border-radius: 2px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; min-width: 27px; min-height: 27px; position: relative; transition: background var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
+/* 图标：细线 + 在深色玻璃上以自身颜色发出柔和光晕（Snipaste 式高级感）。
+   几何已在组件内重校（统一边距/圆角），此处只负责发光与过渡。 */
+.shot-toolbar button svg { filter: drop-shadow(0 0 2.5px currentColor); transition: filter var(--dur-fast) var(--ease-out); }
+.shot-toolbar button:hover svg,
+.shot-toolbar button.active svg { filter: drop-shadow(0 0 4px currentColor); }
 .shot-toolbar button:hover:not(:disabled) { background: var(--bg-item-hover); color: var(--text-primary); }
 .shot-toolbar button.active { background: rgba(var(--accent-rgb), 0.32); color: var(--accent-text); }
 .shot-toolbar button:disabled { opacity: 0.3; cursor: default; }
@@ -82,9 +92,52 @@ html[data-window="shot"] body { background: transparent; }
 /* 色板小方块，选中白圈描边 */
 .shot-color-btn { width: 15px !important; height: 15px !important; min-width: 15px !important; min-height: 15px !important; border-radius: 2px !important; border: 1.5px solid rgba(255,255,255,0.25) !important; cursor: pointer; padding: 0 !important; transition: transform 80ms ease; }
 .shot-color-btn.active { border-color: #fff !important; transform: scale(1.18); }
+/* 自定义颜色按钮：彩虹环，唤起原生系统取色器（Snipaste 同款交互） */
+.shot-color-custom {
+  width: 16px !important; height: 16px !important; min-width: 16px !important; min-height: 16px !important;
+  border-radius: 50% !important; border: 1.5px solid rgba(255,255,255,0.38) !important; cursor: pointer; padding: 0 !important;
+  background: conic-gradient(#e5484d, #ffd60a, #36b37e, #4c8dff, #b06fd6, #e5484d);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25);
+  transition: transform 80ms ease, box-shadow var(--dur-fast) var(--ease-out);
+}
+.shot-color-custom:hover { transform: scale(1.14); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25), 0 0 8px rgba(var(--accent-rgb), 0.45); }
 .shot-sw-wheel { width: 30px !important; height: 30px !important; min-width: 30px !important; min-height: 30px !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; }
 .shot-sw-wheel span { display: block; border-radius: 50%; background: #bbb; pointer-events: none; }
 .shot-sw-wheel:hover span { background: #fff; }
+
+/* 浅色主题（light / mint / skyblue / red）：截图工具栏改为「深色玻璃 + 主题强调色微染」。
+   原因：浅色面板底色近白、毛玻璃仅 75% 不透明，叠在亮色截图上后工具栏发白发亮，
+   细线图标被「亮底 + 杂乱内容」吃掉、看不清。截图工具栏是浮在任意画面上的工具层，
+   可读性优先——用深色玻璃承载浅色图标，并以主题 accent 染色保持协调（非旧版纯黑条）。
+   深色主题保持原样（已是深色玻璃）。*/
+:root[data-theme="light"] .shot-toolbar,
+:root[data-theme="mint"] .shot-toolbar,
+:root[data-theme="skyblue"] .shot-toolbar,
+:root[data-theme="red"] .shot-toolbar,
+:root[data-theme="light"] .shot-toolbar-panel,
+:root[data-theme="mint"] .shot-toolbar-panel,
+:root[data-theme="skyblue"] .shot-toolbar-panel,
+:root[data-theme="red"] .shot-toolbar-panel {
+  background:
+    linear-gradient(rgba(var(--accent-rgb), 0.18), rgba(var(--accent-rgb), 0.18)),
+    rgba(24, 26, 30, 0.9);
+}
+:root[data-theme="light"] .shot-toolbar button,
+:root[data-theme="mint"] .shot-toolbar button,
+:root[data-theme="skyblue"] .shot-toolbar button,
+:root[data-theme="red"] .shot-toolbar button { color: #f2f4f7; }
+:root[data-theme="light"] .shot-toolbar button:hover:not(:disabled),
+:root[data-theme="mint"] .shot-toolbar button:hover:not(:disabled),
+:root[data-theme="skyblue"] .shot-toolbar button:hover:not(:disabled),
+:root[data-theme="red"] .shot-toolbar button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.14); color: #fff; }
+:root[data-theme="light"] .shot-toolbar button.active,
+:root[data-theme="mint"] .shot-toolbar button.active,
+:root[data-theme="skyblue"] .shot-toolbar button.active,
+:root[data-theme="red"] .shot-toolbar button.active { background: rgba(var(--accent-rgb), 0.92); color: #fff; }
+:root[data-theme="light"] .shot-toolbar-sep,
+:root[data-theme="mint"] .shot-toolbar-sep,
+:root[data-theme="skyblue"] .shot-toolbar-sep,
+:root[data-theme="red"] .shot-toolbar-sep { background: rgba(255, 255, 255, 0.2); }
 
 /* 文字标注编辑器 */
 .shot-text-editor { position: fixed; z-index: 300; display: inline-flex; align-items: center; background: transparent; border: 1.5px solid rgba(255,255,255,0.95); outline: 1px solid rgba(0,0,0,0.35); border-radius: 2px; padding: 3px 8px; }
