@@ -77,10 +77,12 @@ html[data-window="shot"] body { background: transparent; }
 .shot-toolbtn { position: relative; display: inline-flex; align-items: stretch; }
 .shot-toolbtn-main { /* 继承 .shot-toolbar button 的基样式 */ }
 .shot-toolbtn-main.active { background: rgba(var(--accent-rgb), 0.28); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.55); }
-/* 子图形枚举：点一级图标后直接平铺在正下方（非下拉框），列出一行子工具图标 */
+/* 子图形枚举：点一级图标后直接平铺在正下方（非下拉框）。
+   两行结构：第一行子工具图标（.shot-submenu-tools）+ 第二行颜色/粗细面板 */
 .shot-toolbtn-submenu {
   position: absolute; top: calc(100% + 4px); left: 0; z-index: 220;
-  display: inline-flex; gap: 1px; padding: 4px; align-items: center;
+  display: flex; flex-direction: column; gap: 5px; padding: 5px 6px;
+  align-items: stretch; justify-content: flex-start;
   background: rgba(var(--bg-panel-rgb), var(--panel-opacity));
   backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
   box-shadow: 0 4px 14px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.08);
@@ -88,8 +90,14 @@ html[data-window="shot"] body { background: transparent; }
   animation: shot-submenu-in 100ms var(--ease-out) both;
 }
 .shot-toolbtn-submenu.above { top: auto; bottom: calc(100% + 4px); }
+.shot-submenu-tools { display: flex; gap: 1px; align-items: center; }
 .shot-toolbtn-submenu button { min-width: 27px; min-height: 27px; }
 .shot-toolbtn-submenu button.active { background: rgba(var(--accent-rgb), 0.28); color: var(--accent-text); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.55); }
+/* 枚举内嵌的颜色/粗细面板：复用主面板内容，但去掉自己的底（枚举已有玻璃底） */
+.shot-toolbtn-submenu .shot-toolbar-panel {
+  background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none;
+  padding: 0; align-self: stretch; border-top: 1px solid rgba(255,255,255,0.12);
+}
 @keyframes shot-submenu-in { from { opacity: 0; } to { opacity: 1; } }
 /* 悬停提示：条下方浮出「名称 (快捷键)」小标签 */
 .shot-toolbar button[data-tip]:hover::after {

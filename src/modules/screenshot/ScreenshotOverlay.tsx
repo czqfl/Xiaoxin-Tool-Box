@@ -1376,11 +1376,49 @@ export function ScreenshotOverlay() {
         const outsideY = region.y + region.h + 8;
         const insideY = region.y + region.h - 40;
         const ty = outsideY + 32 <= vh - 6 ? outsideY : Math.max(insideY, 8);
-        const panelOpen = NEEDS_CONFIG.includes(tool);
+        // 枚举展开时主面板不重复显示（枚举面板里已带颜色/粗细）
+        const panelOpen = NEEDS_CONFIG.includes(tool) && submenuOpen === null;
         // 工具栏贴近屏幕底缘时：tooltip 翻到上方（已有 .tips-above CSS）；
         // 配置面板（色板/粗细）也必须翻到工具栏【上方】，否则会跑出屏幕
         const tipsAbove = ty >= vh - 80;
         const panelAbove = tipsAbove;
+        // 颜色/粗细面板：可复用片段——单工具激活时显示在主条下方；
+        // 形状/线枚举展开时拼在子图形行下方，一步选完图形+颜色
+        const renderConfigPanel = (
+          <div className="shot-toolbar-panel">
+            {(cfg.annotate?.colors||["#e5484d","#ff8d1a","#ffd60a","#36b37e","#4c8dff","#b06fd6","#ffffff","#000000"]).map((c) => (
+              <button key={c} className={`shot-color-btn${color===c?" active":""}`}
+                style={{background:c}} onClick={()=>setColor(c)} />
+            ))}
+            {/* 自定义颜色：彩虹按钮唤起原生取色器；选中的颜色即用即存——
+                追加进色板并持久化（下次截图仍在），Snipaste 同款交互 */}
+            <input ref={customColorRef} type="color" value={color} tabIndex={-1}
+              onChange={(ev) => {
+                const hex = ev.target.value;
+                setColor(hex);
+                const cur = cfg.annotate?.colors ?? ["#e5484d","#ff8d1a","#ffd60a","#36b37e","#4c8dff","#b06fd6","#ffffff","#000000"];
+                if (!cur.some((x) => x.toLowerCase() === hex)) {
+                  void updateCfg({ ...cfg, annotate: { ...cfg.annotate, colors: [...cur, hex] } });
+                }
+              }}
+              style={{ position: "absolute", width: 0, height: 0, opacity: 0, pointerEvents: "none", border: 0, padding: 0 }} />
+            <button className="shot-color-custom" title="自定义颜色" aria-label="自定义颜色"
+              onClick={() => customColorRef.current?.click()} />
+            {/* 单圆点=当前粗细的直观映射：鼠标悬停其上滚动滚轮即无级缩放
+                （1~24px 连续等级），圆点本身随数值放大缩小 */}
+            <button className="shot-sw-wheel" title="悬停滚动滚轮调节粗细（1~24px 无级）"
+              onWheel={(ev) => {
+                ev.stopPropagation();
+                const dir = ev.deltaY > 0 ? -1 : 1;
+                const nv = Math.min(24, Math.max(1, sw + dir));
+                setSw(nv); setSwBadge(nv);
+                window.clearTimeout(swBadgeTimer.current);
+                swBadgeTimer.current = window.setTimeout(() => setSwBadge(null), 800);
+              }}>
+              <span style={{ width: Math.min(4 + sw * 1.2, 26), height: Math.min(4 + sw * 1.2, 26) }} />
+            </button>
+          </div>
+        );
         return (
           <div className={`shot-toolbar-float${panelOpen ? " has-panel" : ""}${tipsAbove ? " tips-above" : ""}${panelAbove ? " panel-above" : ""}`} style={{ right: rightPx, top: ty }}>
             <div className="shot-toolbar">
@@ -1402,16 +1440,20 @@ export function ScreenshotOverlay() {
                       }}>
                       <span style={{ color: active ? "#fff" : c, display: "inline-flex" }}><MainIcon /></span>
                     </button>
-                    {/* 子图形枚举：点一级图标后直接平铺在其正下方（不浮出下拉框）；
-                        点选切换 tool 并关闭。贴近底缘时翻到上方 */}
+                    {/* 子图形枚举：点一级图标后直接平铺在其正下方（无下拉框）；
+                        第一行选图形，第二行直接带出颜色/粗细——一次点开全部选完。
+                        点选图形切换 tool 并关闭；选颜色/粗细不关闭。贴底翻上方 */}
                     {isGroup && submenuOpen === i && (
                       <div className={`shot-toolbtn-submenu${panelAbove ? " above" : ""}`} onClick={(ev) => ev.stopPropagation()}>
-                        {b.items.map(([t, Ic, name, cc]) => (
-                          <button key={t} className={tool === t ? "active" : ""} data-tip={name}
-                            onClick={() => { setTool(t); setSubmenuOpen(null); }}>
-                            <span style={{ color: tool === t ? "#fff" : cc, display: "inline-flex" }}><Ic /></span>
-                          </button>
-                        ))}
+                        <div className="shot-submenu-tools">
+                          {b.items.map(([t, Ic, name, cc]) => (
+                            <button key={t} className={tool === t ? "active" : ""} data-tip={name}
+                              onClick={() => { setTool(t); setSubmenuOpen(null); }}>
+                              <span style={{ color: tool === t ? "#fff" : cc, display: "inline-flex" }}><Ic /></span>
+                            </button>
+                          ))}
+                        </div>
+                        {renderConfigPanel}
                       </div>
                     )}
                   </div>
@@ -1434,41 +1476,7 @@ export function ScreenshotOverlay() {
                   <span style={{ color: "#32d74b", display: "inline-flex" }}><IcoPin/></span></button>
               </div>
             </div>
-            {panelOpen && (
-              <div className="shot-toolbar-panel">
-                {(cfg.annotate?.colors||["#e5484d","#ff8d1a","#ffd60a","#36b37e","#4c8dff","#b06fd6","#ffffff","#000000"]).map((c) => (
-                  <button key={c} className={`shot-color-btn${color===c?" active":""}`}
-                    style={{background:c}} onClick={()=>setColor(c)} />
-                ))}
-                {/* 自定义颜色：彩虹按钮唤起原生取色器；选中的颜色即用即存——
-                    追加进色板并持久化（下次截图仍在），Snipaste 同款交互 */}
-                <input ref={customColorRef} type="color" value={color} tabIndex={-1}
-                  onChange={(ev) => {
-                    const hex = ev.target.value;
-                    setColor(hex);
-                    const cur = cfg.annotate?.colors ?? ["#e5484d","#ff8d1a","#ffd60a","#36b37e","#4c8dff","#b06fd6","#ffffff","#000000"];
-                    if (!cur.some((x) => x.toLowerCase() === hex)) {
-                      void updateCfg({ ...cfg, annotate: { ...cfg.annotate, colors: [...cur, hex] } });
-                    }
-                  }}
-                  style={{ position: "absolute", width: 0, height: 0, opacity: 0, pointerEvents: "none", border: 0, padding: 0 }} />
-                <button className="shot-color-custom" title="自定义颜色" aria-label="自定义颜色"
-                  onClick={() => customColorRef.current?.click()} />
-                {/* 单圆点=当前粗细的直观映射：鼠标悬停其上滚动滚轮即无级缩放
-                    （1~24px 连续等级），圆点本身随数值放大缩小 */}
-                <button className="shot-sw-wheel" title="悬停滚动滚轮调节粗细（1~24px 无级）"
-                  onWheel={(ev) => {
-                    ev.stopPropagation();
-                    const dir = ev.deltaY > 0 ? -1 : 1;
-                    const nv = Math.min(24, Math.max(1, sw + dir));
-                    setSw(nv); setSwBadge(nv);
-                    window.clearTimeout(swBadgeTimer.current);
-                    swBadgeTimer.current = window.setTimeout(() => setSwBadge(null), 800);
-                  }}>
-                  <span style={{ width: Math.min(4 + sw * 1.2, 26), height: Math.min(4 + sw * 1.2, 26) }} />
-                </button>
-              </div>
-            )}
+            {panelOpen && renderConfigPanel}
           </div>
         );
       })()}
