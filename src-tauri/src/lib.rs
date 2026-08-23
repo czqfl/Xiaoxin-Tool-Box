@@ -1,5 +1,7 @@
 #[cfg(windows)]
 mod acrylic;
+mod screenshot;
+mod pin;
 mod clipboard;
 mod config;
 #[cfg(windows)]
@@ -192,9 +194,26 @@ pub fn run() {
         .manage(CredentialStore(Mutex::new(creds)))
         .manage(ShortcutBindings::default())
         .manage(TranslateStore(Mutex::new(None)))
+        .manage(screenshot::ShotState::default())
+        .manage(pin::PinStore(Mutex::new(vec![])))
+        .manage(pin::PinWinMap(Mutex::new(std::collections::HashMap::new())))
         .manage(paths)
+        // 截图帧自定义协议：前端经 http://screenshot.localhost/frame/{idx} 流式
+        // 加载 BMP 冻结帧，绕开 invoke IPC 的序列化瓶颈（大图走 postMessage 极慢）。
+        // 必须在窗口创建前注册（预热遮罩窗加载页面时就要能用）。
+        .register_uri_scheme_protocol("screenshot", |ctx, request| {
+            crate::screenshot::frame_protocol(ctx, request)
+                .unwrap_or_else(|_| tauri::http::Response::builder()
+                    .status(404).body(std::borrow::Cow::Borrowed(&b""[..])).unwrap())
+        })
         .setup(move |app| {
             let handle = app.handle().clone();
+            // 启动诊断：数据目录 + 配置声称的快捷键（配合 [shortcut] 行定位
+            // "改键不生效/旧键还在"——一眼看出跑的是哪个实例、读的哪份配置）
+            crate::storage::diag_write(&format!(
+                "[boot] data_dir={}",
+                handle.state::<storage::AppPaths>().data_dir.display()
+            ));
 
             // 设置窗口点击关闭（X）→ 隐藏而非销毁。
             // Tauri 默认关闭即销毁窗口；销毁后 get_webview_window("settings") 返回 None，
@@ -219,12 +238,26 @@ pub fn run() {
             if config.toolbar.enabled {
                 panel::show_toolbar_initial(&handle);
             }
+            // 恢复上次的贴图
+            crate::pin::restore_pins(&handle);
+            // 预建隐藏的复用贴图窗：贴图时直接装图秒显，免临时建 WebView2 窗口
+            crate::pin::ensure_staging(&handle);
             // 工具栏保持置顶（盖过任务栏等系统级置顶窗口，300ms 周期顶置）
             panel::start_keep_on_top(handle.clone());
 
             // 非静默启动时直接打开设置窗口
             if !config.general.silent_start {
                 tray::show_settings_window(&handle);
+            }
+
+            // 截图遮罩窗预热：启动稍作停顿后（避开启动高峰）提前建好隐藏遮罩页，
+            // 首次呼出即复用，省掉 WebView2 创建 + 前端应用加载数百毫秒
+            {
+                let h = handle.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(1500));
+                    crate::screenshot::prewarm_overlays(&h);
+                });
             }
             Ok(())
         })
@@ -281,8 +314,10 @@ pub fn run() {
             panel::toolbar_geometry,
             shortcut::shortcut_test,
             shortcut::shortcut_apply,
+            shortcut::shortcut_runtime_bindings,
             shortcut::shortcut_capture_begin,
             shortcut::shortcut_capture_end,
+            shortcut::shortcut_resync,
             panel::panel_set_always_on_top,
             panel::panel_toggle,
             panel::panel_active,
@@ -301,10 +336,54 @@ pub fn run() {
             snippets::snippets_update,
             snippets::snippets_delete,
             snippets::snippets_paste,
+            screenshot::shot_begin,
+            screenshot::shot_geometry,
+            screenshot::shot_image_raw,
+            screenshot::shot_ready,
+            screenshot::shot_cursor_global,
+            screenshot::shot_window_rect_at,
+            screenshot::shot_last_region,
+            // 截图输出（复制/另存为/贴图）：原生二进制 IPC 直传 PNG 字节
+            screenshot::shot_output,
+            screenshot::shot_cancel,
+            screenshot::shot_save_region,
+            pin::pin_create,
+            pin::pin_from_clipboard,
+            pin::pin_list,
+            pin::pin_update,
+            pin::pin_ready,
+            pin::pin_close,
+            pin::pin_hide_all,
+            pin::pin_show_all,
+            pin::pin_clear_all,
+            pin::pin_set_click_through,
+            pin::pin_file_path,
+            // 贴图图片展示走协议 GET /pin/{id} 直出文件字节，pin_image_data 已删
+            pin::pin_copy_image,
         ])
         .build(tauri::generate_context!())
         .expect("应用构建失败")
         .run(|app_handle, event| {
+            // 截图遮罩/贴图窗口被非命令途径关闭（Alt+F4、系统关机等）时的状态兜底：
+            // 不重置 SHOOTING 会让之后每次截图都静默失败；不清理 PinStore
+            // 会留下指向已关闭窗口的幽灵条目（重启还会恢复出不存在的贴图）。
+            if let tauri::RunEvent::WindowEvent {
+                ref label, event: tauri::WindowEvent::Destroyed, ..
+            } = event
+            {
+                if label.starts_with(screenshot::OVERLAY_PREFIX) {
+                    screenshot::on_overlay_destroyed(app_handle);
+                } else if label == pin::STAGING_LABEL {
+                    // 复用贴图窗被销毁（关闭其承载的贴图/Alt+F4 等）：
+                    // 清分配关系并补建新的待命窗，保证下次贴图仍走快路径
+                    if let Some(m) = app_handle.try_state::<pin::PinWinMap>() {
+                        m.0.lock().unwrap().remove(label.as_str());
+                    }
+                    pin::ensure_staging(app_handle);
+                } else if let Some(id) = label.strip_prefix("pin-") {
+                    pin::forget_pin(app_handle, id);
+                }
+            }
             // 应用退出前：把所有面板/工具栏的最后位置与尺寸写入配置，
             // 下次启动自动恢复（面板可能处于隐藏态，但窗口对象仍在）
             if let tauri::RunEvent::ExitRequested { .. } = event {

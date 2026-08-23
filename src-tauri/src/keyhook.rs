@@ -52,6 +52,10 @@ enum Action {
     ToggleFiles,
     /// 呼出/隐藏语速贴面板
     ToggleSnippets,
+    /// 触发截图
+    ShotBegin,
+    /// 显示/隐藏全部贴图
+    TogglePins,
     /// 关闭翻译弹窗（系统级兜底：弹窗无焦点时 webview 收不到 Esc）
     CloseTranslate,
     /// 捕获模式：设置页录入 Win 组合键（payload 为虚拟键码）
@@ -87,6 +91,12 @@ static FILES_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
 /// 语速贴面板热键（Win/Alt 组合）
 static SNIPPETS_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
 static SNIPPETS_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
+/// 截图热键（Win/Alt 组合）
+static SCREENSHOT_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
+static SCREENSHOT_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
+/// 贴图显示/隐藏热键（Win/Alt 组合）
+static PINS_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
+static PINS_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
 /// 翻译弹窗是否打开：打开时按 Esc 系统级关闭（弹窗 webview 可能无焦点收不到键）
 static TRANSLATE_POPUP_OPEN: AtomicBool = AtomicBool::new(false);
 static SENDER: OnceLock<Sender<Action>> = OnceLock::new();
@@ -142,6 +152,8 @@ pub fn set_panel_hotkey(target: &str, is_alt: bool, vk: u16) {
         ("port", false) => &PORT_HOTKEY_VK,
         ("files", false) => &FILES_HOTKEY_VK,
         ("snippets", false) => &SNIPPETS_HOTKEY_VK,
+        ("screenshot", false) => &SCREENSHOT_HOTKEY_VK,
+        ("pins", false) => &PINS_HOTKEY_VK,
         ("clipboard", true) => &CLIPBOARD_HOTKEY_ALT_VK,
         ("folder", true) => &FOLDER_HOTKEY_ALT_VK,
         ("credentials", true) => &CREDENTIAL_HOTKEY_ALT_VK,
@@ -149,6 +161,8 @@ pub fn set_panel_hotkey(target: &str, is_alt: bool, vk: u16) {
         ("port", true) => &PORT_HOTKEY_ALT_VK,
         ("files", true) => &FILES_HOTKEY_ALT_VK,
         ("snippets", true) => &SNIPPETS_HOTKEY_ALT_VK,
+        ("screenshot", true) => &SCREENSHOT_HOTKEY_ALT_VK,
+        ("pins", true) => &PINS_HOTKEY_ALT_VK,
         _ => return,
     };
     slot.store(vk, Ordering::SeqCst);
@@ -277,6 +291,15 @@ fn run_action<R: Runtime>(app: &AppHandle<R>, action: Action) {
             crate::storage::diag_write("[keyhook] snippets hotkey pressed");
             crate::panel::toggle_panel(app, crate::panel::SNIPPETS_PANEL)
         }
+        Action::ShotBegin => {
+            crate::storage::diag_write("[keyhook] screenshot hotkey pressed");
+            let _ = crate::screenshot::begin_impl(app.clone());
+        }
+        Action::TogglePins => {
+            crate::storage::diag_write("[keyhook] pins hotkey pressed");
+            // toggle: 有可见贴图 → 全隐藏；否则全显示（统一走后台线程入口）
+            crate::pin::toggle_all(app);
+        }
         Action::CloseTranslate => {
             // 系统级关闭翻译弹窗（webview 无焦点时前端收不到 Esc 的兜底）
             set_translate_popup_open(false);
@@ -388,6 +411,10 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                 Some(Action::ToggleFiles)
             } else if vk == SNIPPETS_HOTKEY_VK.load(Ordering::SeqCst) as u32 {
                 Some(Action::ToggleSnippets)
+            } else if vk == SCREENSHOT_HOTKEY_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::ShotBegin)
+            } else if vk == PINS_HOTKEY_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::TogglePins)
             } else {
                 None
             };
@@ -433,6 +460,10 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                 Some(Action::ToggleFiles)
             } else if vk == SNIPPETS_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
                 Some(Action::ToggleSnippets)
+            } else if vk == SCREENSHOT_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::ShotBegin)
+            } else if vk == PINS_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::TogglePins)
             } else {
                 None
             };

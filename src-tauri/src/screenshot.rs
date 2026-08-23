@@ -1,0 +1,969 @@
+﻿//! Screen capture (GDI BitBlt) + fullscreen overlay windows + smart window detection.
+
+use crate::config::{ConfigState, ShotConfig};
+use crate::storage::diag_write;
+use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Mutex;
+use tauri::{
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Runtime,
+    WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+};
+
+pub const OVERLAY_PREFIX: &str = "shot-overlay";
+static SHOOTING: AtomicBool = AtomicBool::new(false);
+static LAST_REGION: Mutex<Option<[i32; 4]>> = Mutex::new(None);
+/// 本次截图光标所在显示器索引（shot_ready 时只给这台遮罩焦点）
+static CURSOR_MON: AtomicUsize = AtomicUsize::new(0);
+/// 本次会话是否已有任一遮罩页就绪（区分"前端死了"和"用户已正常结束"）
+static OVERLAY_READY: AtomicBool = AtomicBool::new(false);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShotMonitorGeom {
+    pub index: usize,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Clone)]
+pub struct MonitorShot {
+    pub geom: ShotMonitorGeom,
+    /// 原始 BGRA 像素（GetDIBits 原样输出，不做通道交换）。
+    /// 经自定义协议按 BMP 提供给前端（WebView2 原生流式解码），
+    /// 绕开 IPC 的 base64/JSON 序列化瓶颈——33MB 一帧走 postMessage
+    /// 要数百毫秒，这是"呼出延迟"的最大头。
+    pub bgra: std::sync::Arc<Vec<u8>>,
+}
+
+#[derive(Default)]
+pub struct ShotState {
+    pub shots: Mutex<Vec<MonitorShot>>,
+    /// 呼出瞬间桌面顶层窗口 Z 序快照（从顶到底，全局物理坐标）。
+    /// 悬停智能识别直接查这份表——活调 WindowFromPoint 只会命中盖在最上面的
+    /// 遮罩自己，这是"智能框选时灵时不灵"的根因。
+    pub candidates: Mutex<Vec<ShotRect>>,
+    /// 呼出瞬间光标下窗口矩形（全局物理坐标）。
+    /// 在 Rust 端截图瞬间就做好智能识别，前端拿到 geometry 即可高亮，
+    /// 无需等整屏 RGBA 传完——这是"立马智能识别"的关键。
+    pub initial_snap: Mutex<Option<ShotRect>>,
+    /// 记忆的上次选区（全局物理坐标；仅当智能识别未命中时作为预填）
+    pub prefill: Mutex<Option<[i32; 4]>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShotRect {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+pub fn hwnd_of_webview<R: Runtime>(w: &WebviewWindow<R>) -> Option<windows::Win32::Foundation::HWND> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    if let Ok(h) = w.window_handle() {
+        if let RawWindowHandle::Win32(h) = h.as_raw() {
+            return Some(windows::Win32::Foundation::HWND(h.hwnd.get() as *mut _));
+        }
+    }
+    None
+}
+
+pub fn overlay_index(label: &str) -> Option<usize> {
+    label.strip_prefix(OVERLAY_PREFIX)?.strip_prefix('-')?.parse().ok()
+}
+
+#[allow(dead_code)]
+pub fn is_overlay_label(label: &str) -> bool {
+    label.starts_with(OVERLAY_PREFIX)
+}
+
+/// 结束本次截图：遮罩窗【隐藏】而非销毁——WebView2 页面保持加载状态，
+/// 下次呼出直接换图显示，省掉重建窗口 + 加载整个前端应用的开销
+/// （每次数百毫秒起步，是"截图慢"的最大头）。窗口销毁仅发生在显示器数量变化时。
+/// pin.rs 的贴图就绪时序也依赖它（先显贴图再收遮罩），故 pub(crate)。
+pub(crate) fn hide_all<R: Runtime>(app: &AppHandle<R>) {
+    SHOOTING.store(false, Ordering::SeqCst);
+    let labels: Vec<String> = app.webview_windows().keys()
+        .filter(|k| k.starts_with(OVERLAY_PREFIX))
+        .cloned().collect();
+    for l in labels {
+        if let Some(w) = app.get_webview_window(&l) { let _ = w.hide(); }
+    }
+}
+
+#[cfg(windows)]
+pub(crate) fn disable_show_animation(hwnd: windows::Win32::Foundation::HWND) {
+    use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_TRANSITIONS_FORCEDISABLED};
+    let on: i32 = 1;
+    unsafe {
+        // 禁掉 DWM 的窗口开合过渡动画：截图遮罩要"凭空出现"，任何淡入/滑入
+        // 都会让冻结画面与真实屏幕之间产生可感知的不连贯
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_TRANSITIONS_FORCEDISABLED,
+            &on as *const _ as *const std::ffi::c_void,
+            std::mem::size_of::<i32>() as u32,
+        );
+    }
+}
+
+// ---------- capture ----------
+
+fn capture_all<R: Runtime>(app: &AppHandle<R>, capture_cursor: bool) -> Result<Vec<MonitorShot>, String> {
+    use windows::Win32::Graphics::Gdi::{
+        BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject,
+        GetDC, GetDIBits, ReleaseDC, SelectObject,
+        BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, SRCCOPY,
+    };
+
+    let monitors = app.available_monitors().map_err(|e| e.to_string())?;
+    if monitors.is_empty() { return Err("no monitors".into()); }
+
+    let screen_dc = unsafe { GetDC(None) };
+    if screen_dc.0.is_null() { return Err("GetDC failed".into()); }
+
+    let mut results = Vec::with_capacity(monitors.len());
+
+    for (i, monitor) in monitors.iter().enumerate() {
+        let pos = monitor.position();
+        let sz = monitor.size();
+        let mw = sz.width as i32;
+        let mh = sz.height as i32;
+        if mw <= 0 || mh <= 0 { continue; }
+
+        let mem_dc = unsafe { CreateCompatibleDC(Some(screen_dc)) };
+        if mem_dc.0.is_null() {
+            unsafe { ReleaseDC(None, screen_dc); }
+            return Err(format!("CreateCompatibleDC failed monitor {i}"));
+        }
+        let hbmp = unsafe { CreateCompatibleBitmap(screen_dc, mw, mh) };
+        let old = unsafe { SelectObject(mem_dc, hbmp.into()) };
+
+        let rop = windows::Win32::Graphics::Gdi::ROP_CODE(SRCCOPY.0 | 0x4000_0000);
+        if unsafe { BitBlt(mem_dc, 0, 0, mw, mh, Some(screen_dc), pos.x, pos.y, rop) }.is_err() {
+            unsafe { SelectObject(mem_dc, old); let _ = DeleteObject(hbmp.into()); let _ = DeleteDC(mem_dc); let _ = ReleaseDC(None, screen_dc); }
+            return Err(format!("BitBlt failed monitor {i}"));
+        }
+
+        // optional cursor
+        if capture_cursor {
+            draw_cursor(mem_dc, *pos);
+        }
+
+        // read pixels
+        let mut bmi: BITMAPINFO = unsafe { std::mem::zeroed() };
+        bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+        bmi.bmiHeader.biWidth = mw;
+        bmi.bmiHeader.biHeight = -mh;
+        bmi.bmiHeader.biPlanes = 1;
+        bmi.bmiHeader.biBitCount = 32;
+        bmi.bmiHeader.biCompression = 0; // BI_RGB
+
+        let mut pixels = vec![0u8; (mw * mh * 4) as usize];
+        let ok = unsafe {
+            GetDIBits(mem_dc, hbmp, 0, mh as u32, Some(pixels.as_mut_ptr() as _), &mut bmi, DIB_RGB_COLORS)
+        };
+        unsafe { SelectObject(mem_dc, old); let _ = DeleteObject(hbmp.into()); let _ = DeleteDC(mem_dc); }
+        if ok == 0 { unsafe { ReleaseDC(None, screen_dc); } return Err(format!("GetDIBits failed monitor {i}")); }
+
+        // BGRA 原样保留：BMP 格式天然就是 BGRA，无需逐字节换通道
+
+        results.push(MonitorShot {
+            geom: ShotMonitorGeom { index: i, x: pos.x, y: pos.y, width: sz.width, height: sz.height },
+            bgra: std::sync::Arc::new(pixels),
+        });
+    }
+    unsafe { ReleaseDC(None, screen_dc); }
+    Ok(results)
+}
+
+#[cfg(windows)]
+fn draw_cursor(mem_dc: windows::Win32::Graphics::Gdi::HDC, mon_pos: tauri::PhysicalPosition<i32>) {
+    use windows::Win32::Graphics::Gdi::DeleteObject;
+    use windows::Win32::UI::WindowsAndMessaging::{DrawIconEx, GetCursorInfo, GetIconInfo, HICON, CURSORINFO, ICONINFO};
+
+    let mut ci: CURSORINFO = unsafe { std::mem::zeroed() };
+    ci.cbSize = std::mem::size_of::<CURSORINFO>() as u32;
+    if unsafe { GetCursorInfo(&mut ci) }.is_err() { return; }
+    if (ci.flags.0 & 0x1) == 0 { return; } // not showing
+
+    let mut ii: ICONINFO = unsafe { std::mem::zeroed() };
+    if unsafe { GetIconInfo(HICON(ci.hCursor.0), &mut ii) }.is_err() { return; }
+    if ii.fIcon.as_bool() {
+        unsafe { let _ = DeleteObject(ii.hbmMask.into()); let _ = DeleteObject(ii.hbmColor.into()); }
+        return;
+    }
+    let cx = ci.ptScreenPos.x - mon_pos.x - ii.xHotspot as i32;
+    let cy = ci.ptScreenPos.y - mon_pos.y - ii.yHotspot as i32;
+    let _ = unsafe {
+        DrawIconEx(mem_dc, cx, cy, HICON(ci.hCursor.0), 0, 0, 0, None,
+            windows::Win32::UI::WindowsAndMessaging::DI_NORMAL)
+    };
+    unsafe { let _ = DeleteObject(ii.hbmMask.into()); let _ = DeleteObject(ii.hbmColor.into()); }
+}
+
+// ---------- native freeze layer ----------
+// 原生冻结层：每个遮罩窗最底层的子 HWND，直接 BitBlt 冻结帧。
+// 显示路径完全绕开前端与 IPC——呼出延迟只剩「抓屏一次 memcpy + 一次 blit」，
+// 逼近 Snipaste（原生窗口直贴位图）的速度。WebView 以透明背景盖在其上，
+// 仅绘制压暗遮罩/选区/工具栏等 UI。
+
+#[cfg(windows)]
+struct FreezeLayer {
+    child: windows::Win32::Foundation::HWND,
+    memdc: windows::Win32::Graphics::Gdi::HDC,
+    hbmp: windows::Win32::Graphics::Gdi::HBITMAP,
+    /// DIB 内存指针（BGRA，top-down）
+    bits: *mut u8,
+    w: i32,
+    h: i32,
+    /// 已写入有效帧
+    ready: bool,
+}
+// GDI 对象仅主线程触达；ready 位由 shot_ready 的异步命令线程只读
+#[cfg(windows)]
+unsafe impl Send for FreezeLayer {}
+
+#[cfg(windows)]
+static FREEZES: std::sync::LazyLock<Mutex<std::collections::HashMap<usize, FreezeLayer>>> =
+    std::sync::LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+
+#[cfg(windows)]
+fn ensure_freeze_class() {
+    use windows::core::w;
+    use windows::Win32::Foundation::HINSTANCE;
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::UI::WindowsAndMessaging::{RegisterClassW, WNDCLASSW};
+    static DONE: AtomicBool = AtomicBool::new(false);
+    if DONE.swap(true, Ordering::SeqCst) { return; }
+    unsafe {
+        let hinstance = GetModuleHandleW(None)
+            .map(|m| HINSTANCE(m.0))
+            .unwrap_or_default();
+        let wc = WNDCLASSW {
+            lpfnWndProc: Some(freeze_wndproc),
+            hInstance: hinstance,
+            lpszClassName: w!("XiaoxinShotFreeze"),
+            ..Default::default()
+        };
+        RegisterClassW(&wc);
+    }
+}
+
+#[cfg(windows)]
+unsafe extern "system" fn freeze_wndproc(
+    hwnd: windows::Win32::Foundation::HWND,
+    msg: u32,
+    wp: windows::Win32::Foundation::WPARAM,
+    lp: windows::Win32::Foundation::LPARAM,
+) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::Foundation::LRESULT;
+    use windows::Win32::Graphics::Gdi::{BeginPaint, BitBlt, EndPaint, PAINTSTRUCT, BLACKNESS, SRCCOPY};
+    use windows::Win32::UI::WindowsAndMessaging::{DefWindowProcW, WM_ERASEBKGND, WM_PAINT};
+    if msg == WM_ERASEBKGND { return LRESULT(1); } // 全帧自绘，禁掉背景擦除防闪烁
+    if msg == WM_PAINT {
+        let mut ps = PAINTSTRUCT::default();
+        let hdc = BeginPaint(hwnd, &mut ps);
+        // 锁内只取值，BitBlt 放锁外避免与更新路径互卡（实际同为主线程，防御性）
+        let frame = FREEZES.lock().unwrap().values()
+            .find(|l| l.child == hwnd)
+            .map(|l| (l.memdc, l.w, l.h, l.ready));
+        match frame {
+            Some((memdc, w, h, true)) => {
+                let _ = BitBlt(hdc, 0, 0, w, h, Some(memdc), 0, 0, SRCCOPY);
+            }
+            other => {
+                // 尚无帧：填黑兜底（预热期间窗口不可见，不会真的显示出来）
+                let (w, h) = other.map(|(_, w, h, _)| (w.max(1), h.max(1))).unwrap_or((1, 1));
+                let _ = BitBlt(hdc, 0, 0, w, h, None, 0, 0, BLACKNESS);
+            }
+        }
+        let _ = EndPaint(hwnd, &ps);
+        return LRESULT(0);
+    }
+    DefWindowProcW(hwnd, msg, wp, lp)
+}
+
+/// 确保遮罩窗内有冻结层子 HWND（复用窗口时只校正尺寸并压回最底层）
+#[cfg(windows)]
+fn attach_freeze_layer(idx: usize, parent: windows::Win32::Foundation::HWND, w: i32, h: i32) {
+    use windows::core::w;
+    use windows::Win32::Foundation::HINSTANCE;
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, SetWindowPos, HWND_BOTTOM, SWP_NOACTIVATE, SWP_NOMOVE,
+        WINDOW_EX_STYLE, WS_CHILD, WS_VISIBLE,
+    };
+    ensure_freeze_class();
+    let mut map = FREEZES.lock().unwrap();
+    if let Some(l) = map.get_mut(&idx) {
+        unsafe {
+            // 分辨率可能变化；同时压回最底层，确保始终在 WebView 子窗之下
+            let _ = SetWindowPos(l.child, Some(HWND_BOTTOM), 0, 0, w, h, SWP_NOMOVE | SWP_NOACTIVATE);
+        }
+        return;
+    }
+    unsafe {
+        let hinstance = GetModuleHandleW(None)
+            .map(|m| HINSTANCE(m.0))
+            .unwrap_or_default();
+        let child = CreateWindowExW(
+            WINDOW_EX_STYLE(0),
+            w!("XiaoxinShotFreeze"),
+            w!(""),
+            WS_CHILD | WS_VISIBLE,
+            0, 0, w, h,
+            Some(parent),
+            None,
+            Some(hinstance),
+            None,
+        );
+        let Ok(child) = child else { return; };
+        let _ = SetWindowPos(child, Some(HWND_BOTTOM), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOACTIVATE);
+        map.insert(idx, FreezeLayer {
+            child,
+            memdc: Default::default(),
+            hbmp: Default::default(),
+            bits: std::ptr::null_mut(),
+            w, h, ready: false,
+        });
+    }
+}
+
+/// 把一帧 BGRA 写进冻结层 DIB（尺寸变化时重建），随后触发子窗重绘
+#[cfg(windows)]
+fn update_freeze_frame(idx: usize, w: i32, h: i32, pixels: &[u8]) {
+    use windows::Win32::Graphics::Gdi::{
+        CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, InvalidateRect,
+        SelectObject, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS,
+    };
+    let need = (w as usize) * (h as usize) * 4;
+    if w <= 0 || h <= 0 || pixels.len() < need { return; }
+    let child = {
+        let mut map = FREEZES.lock().unwrap();
+        let Some(l) = map.get_mut(&idx) else { return; };
+        unsafe {
+            if l.w != w || l.h != h || l.memdc.is_invalid() {
+                let mut bmi: BITMAPINFO = std::mem::zeroed();
+                bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+                bmi.bmiHeader.biWidth = w;
+                bmi.bmiHeader.biHeight = -h; // top-down
+                bmi.bmiHeader.biPlanes = 1;
+                bmi.bmiHeader.biBitCount = 32;
+                bmi.bmiHeader.biCompression = 0; // BI_RGB
+                let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
+                let Ok(hbmp) = CreateDIBSection(None, &bmi, DIB_RGB_COLORS, &mut bits, None, 0)
+                    else { return; };
+                let memdc = CreateCompatibleDC(None);
+                if memdc.is_invalid() { let _ = DeleteObject(hbmp.into()); return; }
+                SelectObject(memdc, hbmp.into());
+                if !l.memdc.is_invalid() { let _ = DeleteDC(l.memdc); }
+                if !l.hbmp.is_invalid() { let _ = DeleteObject(l.hbmp.into()); }
+                l.memdc = memdc;
+                l.hbmp = hbmp;
+                l.bits = bits.cast::<u8>();
+                l.w = w;
+                l.h = h;
+            }
+            if !l.bits.is_null() {
+                std::ptr::copy_nonoverlapping(pixels.as_ptr(), l.bits, need);
+                l.ready = true;
+            }
+            l.child
+        }
+    };
+    unsafe { let _ = InvalidateRect(Some(child), None, false); } // 锁外触发重绘
+}
+
+/// 该显示器的冻结层是否已就绪可显
+#[cfg(windows)]
+fn freeze_ready(idx: usize) -> bool {
+    FREEZES.lock().unwrap().get(&idx).map(|l| l.ready).unwrap_or(false)
+}
+
+/// 销毁全部冻结层的 GDI 资源（显示器数量变化重建前调用）
+#[cfg(windows)]
+fn freezes_drop_all() {
+    use windows::Win32::Graphics::Gdi::{DeleteDC, DeleteObject};
+    let mut map = FREEZES.lock().unwrap();
+    for (_, l) in map.drain() {
+        unsafe {
+            if !l.memdc.is_invalid() { let _ = DeleteDC(l.memdc); }
+            if !l.hbmp.is_invalid() { let _ = DeleteObject(l.hbmp.into()); }
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn freezes_drop_all() {}
+
+/// 新会话开始：把全部冻结层标记为「未就绪」。
+/// 遮罩窗是复用的——上一会话的旧帧还留在冻结层 DIB 里，若不失效，
+/// shot_ready 会因 ready 仍为 true 而【立即亮窗】，用户先看到上一次的
+/// 截图、等新帧 blit 完才换成当前画面（"先闪旧截图再变新截图"的根因）。
+/// 失效后 shot_ready 会一直等到【本会话】帧真正写入才显示窗口，
+/// 且 ready=false 时 WM_PAINT 的黑帧兜底也绝不会有机会上屏（窗口未显）。
+#[cfg(windows)]
+fn invalidate_freezes() {
+    let mut map = FREEZES.lock().unwrap();
+    for (_, l) in map.iter_mut() {
+        l.ready = false;
+    }
+}
+
+#[cfg(not(windows))]
+fn invalidate_freezes() {}
+
+// ---------- overlay creation ----------
+
+fn create_overlays<R: Runtime>(app: &AppHandle<R>, geoms: &[ShotMonitorGeom]) {
+    let url = match app.config().build.dev_url.clone() {
+        Some(u) => WebviewUrl::External(u),
+        None => WebviewUrl::App("index.html".into()),
+    };
+    for g in geoms {
+        let idx = g.index;
+        let label = format!("{OVERLAY_PREFIX}-{idx}");
+        let (x, y, w, h) = (g.x, g.y, g.width, g.height);
+        let url2 = url.clone();
+        let app2 = app.clone();
+        crate::defer_to_main_loop(app.clone(), move || {
+            // 保持隐藏：等前端画好遮罩/高亮后调 shot_ready 才显示。
+            // 冻结画面由原生冻结层（子 HWND）直接贴出，webview 仅需透明背景+遮罩 UI
+            if let Ok(win) = WebviewWindowBuilder::new(&app2, &label, url2)
+                .title("screenshot").decorations(false).transparent(true)
+                .always_on_top(true).skip_taskbar(true).resizable(false)
+                .shadow(false).visible(false).focused(false).build()
+            {
+                let _ = win.set_position(PhysicalPosition::new(x, y));
+                let _ = win.set_size(PhysicalSize::new(w, h));
+                #[cfg(windows)]
+                if let Some(parent) = hwnd_of_webview(&win) {
+                    attach_freeze_layer(idx, parent, w as i32, h as i32);
+                    disable_show_animation(parent);
+                }
+                // 兜底：仅当本会话前端从未就绪（页面加载失败等）时超时强制显示。
+                // 不能只看 is_visible——用户可能在 3 秒内已正常完成截图（窗口被隐藏），
+                // 此时绝不能把遮罩窗重新弹出来；预热建窗时 SHOOTING=false 同理不弹
+                let idx2 = idx;
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(3000));
+                    if SHOOTING.load(Ordering::SeqCst) && !OVERLAY_READY.load(Ordering::SeqCst) {
+                        match win.is_visible() {
+                            Ok(false) => {
+                                let _ = win.show();
+                                if idx2 == CURSOR_MON.load(Ordering::SeqCst) { let _ = win.set_focus(); }
+                            }
+                            _ => {}
+                        }
+                    }
+                });
+            }
+        });
+    }
+}
+
+/// 呼出截图时准备遮罩窗：
+/// - 已有同数量遮罩窗（预热/上次隐藏复用的）→ 只更新位置尺寸 + 推送刷新事件，
+///   页面 JS 保持热身状态，呼出接近零启动开销；
+/// - 数量对不上（显示器热插拔）→ 销毁重建。
+fn ensure_overlays<R: Runtime>(app: &AppHandle<R>, shots: &[MonitorShot]) {
+    let existing: Vec<WebviewWindow<R>> = app.webview_windows().into_iter()
+        .filter(|(l, _)| l.starts_with(OVERLAY_PREFIX))
+        .map(|(_, w)| w).collect();
+    if existing.len() != shots.len() {
+        // 旧窗口连同其冻结层一起销毁（GDI 资源须在主线程释放）
+        {
+            let app2 = app.clone();
+            crate::defer_to_main_loop(app.clone(), move || { freezes_drop_all(); });
+            let _ = app2;
+        }
+        for w in existing { let _ = w.close(); }
+        let geoms: Vec<ShotMonitorGeom> = shots.iter().map(|s| s.geom.clone()).collect();
+        create_overlays(app, &geoms);
+        return;
+    }
+    for shot in shots {
+        let label = format!("{OVERLAY_PREFIX}-{}", shot.geom.index);
+        if let Some(w) = app.get_webview_window(&label) {
+            let _ = w.set_position(PhysicalPosition::new(shot.geom.x, shot.geom.y));
+            let _ = w.set_size(PhysicalSize::new(shot.geom.width, shot.geom.height));
+            // 通知已加载的页面重新拉取本屏数据（新窗口收不到也没关系，走挂载拉取）
+            let _ = w.emit("shot-refresh", ());
+        }
+    }
+}
+
+/// 启动后预热：为每台显示器提前把隐藏遮罩窗建好（WebView 页面加载完毕、
+/// JS 就绪待命）。没有这一步，首次呼出要付 WebView2 创建 + 前端应用加载
+/// 的数百毫秒；预热后首次呼出即走"复用+换帧"快路径。
+pub fn prewarm_overlays<R: Runtime>(app: &AppHandle<R>) {
+    if SHOOTING.load(Ordering::SeqCst) { return; }
+    let existing = app.webview_windows().keys()
+        .filter(|k| k.starts_with(OVERLAY_PREFIX))
+        .count();
+    let monitors = match app.available_monitors() { Ok(m) => m, Err(_) => return };
+    if existing == monitors.len() || monitors.is_empty() { return; }
+    let geoms: Vec<ShotMonitorGeom> = monitors.iter().enumerate()
+        .map(|(i, m)| ShotMonitorGeom {
+            index: i, x: m.position().x, y: m.position().y,
+            width: m.size().width, height: m.size().height,
+        })
+        .collect();
+    create_overlays(app, &geoms);
+    diag_write("[shot] prewarmed overlay windows");
+}
+
+// ---------- smart detection ----------
+
+/// 悬停/初始识别：在窗口 Z 序快照里找包含该全局坐标的最顶层窗口
+fn candidate_at(cands: &[ShotRect], gx: i32, gy: i32) -> Option<ShotRect> {
+    cands.iter()
+        .find(|r| gx >= r.x && gx < r.x + r.width as i32 && gy >= r.y && gy < r.y + r.height as i32)
+        .cloned()
+}
+
+#[cfg(windows)]
+struct SnapCtx {
+    own_roots: Vec<isize>,
+    out: Vec<ShotRect>,
+}
+
+#[cfg(windows)]
+unsafe extern "system" fn snap_enum_proc(
+    hwnd: windows::Win32::Foundation::HWND,
+    lp: windows::Win32::Foundation::LPARAM,
+) -> windows::core::BOOL {
+    use windows::core::BOOL;
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS};
+    use windows::Win32::UI::WindowsAndMessaging::{GetAncestor, GetWindowRect, IsIconic, IsWindowVisible, GA_ROOT};
+
+    let ctx = &mut *(lp.0 as *mut SnapCtx);
+    // 只要可见、未最小化的顶层窗口（EnumWindows 本就按 Z 序从顶到底枚举）
+    if !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() { return BOOL(1); }
+    let root = GetAncestor(hwnd, GA_ROOT);
+    if ctx.own_roots.contains(&(root.0 as isize)) { return BOOL(1); }
+    // UWP 挂起/不在当前虚拟桌面的窗口被 cloak，视觉上不存在，跳过
+    let mut cloaked: u32 = 0;
+    if DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &mut cloaked as *mut _ as *mut _, std::mem::size_of::<u32>() as u32).is_ok() && cloaked != 0 {
+        return BOOL(1);
+    }
+    // DWM 扩展边框不含不可见阴影余量，比 GetWindowRect 更贴近视觉边界
+    let mut rect: RECT = std::mem::zeroed();
+    if DwmGetWindowAttribute(root, DWMWA_EXTENDED_FRAME_BOUNDS, &mut rect as *mut _ as *mut _, std::mem::size_of::<RECT>() as u32).is_err() {
+        if GetWindowRect(root, &mut rect).is_err() { return BOOL(1); }
+    }
+    let w = rect.right - rect.left;
+    let h = rect.bottom - rect.top;
+    if w >= 16 && h >= 16 {
+        ctx.out.push(ShotRect { x: rect.left, y: rect.top, width: w as u32, height: h as u32 });
+    }
+    BOOL(1)
+}
+
+/// 呼出瞬间对桌面可见顶层窗口做一次 Z 序快照（从最顶层到最底层）。
+///
+/// 为什么不用 WindowFromPoint 做悬停识别：遮罩窗是置顶且接收鼠标输入的窗口，
+/// 截图期间光标下的"最顶层窗口"永远是遮罩自己——活调 WindowFromPoint 必然
+/// 命中遮罩、被排除后返回空。之前只在遮罩建好前的那一瞬间能识别成功，
+/// 表现即"时灵时不灵"。改为呼出瞬间枚举一次列表，悬停时纯查表：
+/// 稳定、确定、零系统调用开销。代价是会话期间新弹出的窗口不参与识别。
+#[cfg(windows)]
+fn snapshot_windows<R: Runtime>(app: &AppHandle<R>) -> Vec<ShotRect> {
+    use windows::Win32::Foundation::LPARAM;
+    use windows::Win32::UI::WindowsAndMessaging::EnumWindows;
+
+    let own_roots: Vec<isize> = app.webview_windows().values()
+        .filter_map(|w| hwnd_of_webview(w))
+        .map(|h| h.0 as isize)
+        .collect();
+    let mut ctx = SnapCtx { own_roots, out: Vec::new() };
+    unsafe {
+        let _ = EnumWindows(Some(snap_enum_proc), LPARAM(&mut ctx as *mut SnapCtx as isize));
+    }
+    ctx.out
+}
+
+#[cfg(not(windows))]
+fn snapshot_windows<R: Runtime>(_: &AppHandle<R>) -> Vec<ShotRect> { Vec::new() }
+
+// ---------- internal ----------
+
+pub(crate) fn begin_impl<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    if SHOOTING.swap(true, Ordering::SeqCst) { return Ok(()); }
+    let cfg: ShotConfig = app.try_state::<ConfigState>()
+        .map(|s| s.0.lock().unwrap().shot.clone())
+        .unwrap_or_default();
+    if !cfg.enabled { SHOOTING.store(false, Ordering::SeqCst); return Err("disabled".into()); }
+    let delay = cfg.delay_ms;
+    let capture_cursor = cfg.capture_cursor;
+    std::thread::spawn(move || {
+        if delay > 0 { std::thread::sleep(std::time::Duration::from_millis(delay as u64)); }
+        match capture_all(&app, capture_cursor) {
+            Ok(shots) => {
+                // find cursor monitor
+                let cursor = app.cursor_position().unwrap_or(PhysicalPosition::new(0.0, 0.0));
+                let mut cursor_mon = 0usize;
+                for s in &shots {
+                    let g = &s.geom;
+                    if cursor.x >= g.x as f64 && cursor.x < (g.x + g.width as i32) as f64
+                        && cursor.y >= g.y as f64 && cursor.y < (g.y + g.height as i32) as f64
+                    { cursor_mon = g.index; break; }
+                }
+                CURSOR_MON.store(cursor_mon, Ordering::SeqCst);
+                // 窗口 Z 序快照：此刻本会话遮罩窗还不存在，列表天然干净。
+                // 初始高亮与后续悬停识别统一查这份表
+                let cands = snapshot_windows(&app);
+                // 智能识别在截图瞬间完成：光标处命中的第一个（最顶层）窗口
+                let snap = if cfg.smart_detect {
+                    candidate_at(&cands, cursor.x as i32, cursor.y as i32)
+                } else { None };
+                // 记忆区域回退：仅当智能识别未命中且开关开启
+                let prefill = if snap.is_none() && cfg.remember_region {
+                    *LAST_REGION.lock().unwrap()
+                } else { None };
+                // store
+                OVERLAY_READY.store(false, Ordering::SeqCst);
+                // 冻结层旧帧失效：本会话帧写入前不得亮窗（防旧画面闪现）
+                invalidate_freezes();
+                if let Some(state) = app.try_state::<ShotState>() {
+                    *state.shots.lock().unwrap() = shots.clone();
+                    *state.candidates.lock().unwrap() = cands;
+                    *state.initial_snap.lock().unwrap() = snap;
+                    *state.prefill.lock().unwrap() = prefill;
+                }
+                // 帧先送进原生冻结层（主线程执行），随后才通知前端——
+                // 保证前端就绪时冻结层必已可显示，亮窗即见完整冻结画面
+                {
+                    let app3 = app.clone();
+                    let shots2 = shots.clone();
+                    crate::defer_to_main_loop(app.clone(), move || {
+                        for s in &shots2 {
+                            let g = &s.geom;
+                            let Some(win) = app3.get_webview_window(&format!("{OVERLAY_PREFIX}-{}", g.index)) else { continue };
+                            let Some(parent) = hwnd_of_webview(&win) else { continue };
+                            attach_freeze_layer(g.index, parent, g.width as i32, g.height as i32);
+                            update_freeze_frame(g.index, g.width as i32, g.height as i32, &s.bgra);
+                        }
+                    });
+                }
+                ensure_overlays(&app, &shots);
+                diag_write(&format!("[shot] begin ok, {} monitors", shots.len()));
+            }
+            Err(e) => {
+                SHOOTING.store(false, Ordering::SeqCst);
+                diag_write(&format!("[shot] capture failed: {e}"));
+            }
+        }
+    });
+    Ok(())
+}
+
+// ---------- commands ----------
+
+#[tauri::command]
+pub fn shot_begin(app: AppHandle) -> Result<(), String> {
+    begin_impl(app)
+}
+
+#[derive(Serialize)]
+pub struct ShotGeomResp {
+    #[serde(flatten)]
+    pub geom: ShotMonitorGeom,
+    /// 智能识别初始高亮框（本显示器局部坐标）
+    pub snap: Option<ShotRect>,
+    /// 上次截取区域预填（本显示器局部坐标；仅当无智能识别结果时给出）
+    pub prefill: Option<ShotRect>,
+}
+
+/// 全局矩形 → 本显示器局部坐标，并裁剪到显示器范围内（不相交/过小则 None）
+fn clip_to_monitor(r: &ShotRect, g: &ShotMonitorGeom) -> Option<ShotRect> {
+    let lx = r.x - g.x;
+    let ly = r.y - g.y;
+    let x = lx.max(0);
+    let y = ly.max(0);
+    let w = ((r.width as i32) - (x - lx)).min(g.width as i32 - x).max(0) as u32;
+    let h = ((r.height as i32) - (y - ly)).min(g.height as i32 - y).max(0) as u32;
+    if x >= g.width as i32 || y >= g.height as i32 { return None; }
+    if w > 4 && h > 4 { Some(ShotRect { x, y, width: w, height: h }) } else { None }
+}
+
+#[tauri::command]
+pub fn shot_geometry(window: WebviewWindow) -> Result<ShotGeomResp, String> {
+    let idx = overlay_index(window.label()).ok_or("not overlay")?;
+    let state = window.try_state::<ShotState>().ok_or("no state")?;
+    let shots = state.shots.lock().unwrap();
+    let shot = shots.iter().find(|s| s.geom.index == idx).ok_or("not found")?;
+    let g = shot.geom.clone();
+    drop(shots);
+    let snap = state.initial_snap.lock().unwrap().clone().and_then(|r| clip_to_monitor(&r, &g));
+    // 记忆区域：智能识别没有命中时才作为预填选区（Snipaste 优先级：智能识别 > 记忆区域）
+    let prefill = if snap.is_none() {
+        state.prefill.lock().unwrap().clone().and_then(|last| {
+            clip_to_monitor(&ShotRect { x: last[0], y: last[1], width: last[2] as u32, height: last[3] as u32 }, &g)
+        })
+    } else { None };
+    Ok(ShotGeomResp { geom: g, snap, prefill })
+}
+
+/// 当前显示器的截屏原始 BGRA（二进制 IPC；宽高从 shot_geometry 取）。
+/// 仅作自定义协议不可用时的兜底路径。
+#[tauri::command]
+pub fn shot_image_raw(window: WebviewWindow) -> Result<tauri::ipc::Response, String> {
+    let idx = overlay_index(window.label()).ok_or("not overlay")?;
+    let state = window.try_state::<ShotState>().ok_or("no state")?;
+    let shots = state.shots.lock().unwrap();
+    let shot = shots.iter().find(|s| s.geom.index == idx).ok_or("not found")?;
+    Ok(tauri::ipc::Response::new(shot.bgra.as_ref().clone()))
+}
+
+/// 把 BGRA 像素包成 top-down 32bpp BMP（54 字节头 + 原样像素，零压缩零转换，
+/// 编码成本≈一次 memcpy；Chromium 解码走 SIMD，比 PNG 快一个数量级）
+fn wrap_bmp(bgra: &[u8], w: u32, h: u32) -> Vec<u8> {
+    let mut v = Vec::with_capacity(54 + bgra.len());
+    v.extend_from_slice(b"BM");
+    v.extend_from_slice(&((54u32 + bgra.len() as u32)).to_le_bytes()); // 文件大小
+    v.extend_from_slice(&0u16.to_le_bytes()); // 保留
+    v.extend_from_slice(&0u16.to_le_bytes()); // 保留
+    v.extend_from_slice(&54u32.to_le_bytes()); // 像素数据偏移
+    v.extend_from_slice(&40u32.to_le_bytes()); // BITMAPINFOHEADER 大小
+    v.extend_from_slice(&(w as i32).to_le_bytes()); // 宽
+    v.extend_from_slice(&(-(h as i32)).to_le_bytes()); // 负高 = top-down
+    v.extend_from_slice(&1u16.to_le_bytes()); // planes
+    v.extend_from_slice(&32u16.to_le_bytes()); // bpp
+    v.extend_from_slice(&0u32.to_le_bytes()); // BI_RGB 无压缩
+    v.extend_from_slice(&(bgra.len() as u32).to_le_bytes()); // 数据大小
+    v.extend_from_slice(&2835u32.to_le_bytes()); // 水平 DPI
+    v.extend_from_slice(&2835u32.to_le_bytes()); // 垂直 DPI
+    v.extend_from_slice(&0u32.to_le_bytes()); // 调色板
+    v.extend_from_slice(&0u32.to_le_bytes()); // 重要色
+    v.extend_from_slice(bgra);
+    v
+}
+
+// ---------- 自定义协议：帧/贴图直出 ----------
+//
+// 前端统一经 http://screenshot.localhost 访问（WebView2 自定义协议映射）：
+// - GET /frame/{显示器索引}   当前冻结帧 → BMP 流式回传（原生解码，绕开 IPC 序列化）
+// - GET /pin/{id}             贴图图片文件原字节直出（取代 base64 data URL）
+//
+// 【截图输出不走协议】此前试过 POST /output/* 让前端把 PNG 字节经协议上传，
+// 实测 WebView2 的 WebResourceRequested 对 POST body 投递不可靠（请求到不了
+// handler 时 fetch 挂起、遮罩永不隐藏 → 全屏遮罩吞掉所有点击，表现为整个
+// 桌面卡死）。输出已改为 Tauri 原生二进制 IPC：invoke 直接携带 ArrayBuffer
+// 原始字节 + 请求头传元数据，见下方 shot_output 命令。
+type ProtoResp = tauri::http::Response<std::borrow::Cow<'static, [u8]>>;
+
+pub fn frame_protocol<R: Runtime>(
+    ctx: tauri::UriSchemeContext<'_, R>,
+    request: tauri::http::Request<Vec<u8>>,
+) -> Result<ProtoResp, Box<dyn std::error::Error>> {
+    use tauri::Manager;
+    let path = request.uri().path().to_string();
+
+    // GET /pin/{id}：贴图图片文件直出
+    if let Some(id) = path.strip_prefix("/pin/") {
+        let id = id.split('?').next().unwrap_or("");
+        return serve_pin_file(ctx.app_handle(), id);
+    }
+
+    // GET /frame/{idx}：当前冻结帧 BMP
+    let idx: usize = path
+        .strip_prefix("/frame/")
+        .and_then(|s| s.split('?').next())
+        .and_then(|s| s.parse().ok())
+        .ok_or("bad frame path")?;
+    let state = ctx.app_handle().state::<ShotState>();
+    let shots = state.shots.lock().unwrap();
+    let shot = shots.iter().find(|s| s.geom.index == idx).ok_or("frame not ready")?;
+    let body = wrap_bmp(&shot.bgra, shot.geom.width, shot.geom.height);
+    drop(shots);
+    tauri::http::Response::builder()
+        .header("Content-Type", "image/bmp")
+        .header("Access-Control-Allow-Origin", "*")
+        .header("Cache-Control", "no-store")
+        .body(std::borrow::Cow::Owned(body))
+        .map_err(Into::into)
+}
+
+fn not_found() -> Result<ProtoResp, Box<dyn std::error::Error>> {
+    tauri::http::Response::builder()
+        .status(404)
+        .header("Access-Control-Allow-Origin", "*")
+        .body(std::borrow::Cow::Borrowed(&b""[..]))
+        .map_err(Into::into)
+}
+
+/// GET /pin/{id}：把贴图图片文件原字节直接回给 webview。
+/// 取代旧 pin_image_data 命令（读文件→base64→JSON IPC 传数 MB 字符串→webview
+/// 再解码巨型 data URL），现在由 WebView2 原生网络栈读盘直传，GIF 动画原生支持。
+fn serve_pin_file<R: Runtime>(
+    app: &AppHandle<R>,
+    id: &str,
+) -> Result<ProtoResp, Box<dyn std::error::Error>> {
+    // id 白名单：uuid 仅十六进制与连字符，杜绝任何路径拼接可能
+    if id.is_empty() || id.len() > 64 || !id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-') {
+        return not_found();
+    }
+    let file = {
+        let Some(store) = app.try_state::<crate::pin::PinStore>() else { return not_found(); };
+        let entries = store.0.lock().unwrap();
+        match entries.iter().find(|p| p.id == id) {
+            Some(p) => std::path::PathBuf::from(&p.file),
+            None => return not_found(),
+        }
+    };
+    let mime = if file.extension().and_then(|e| e.to_str()) == Some("gif") {
+        "image/gif"
+    } else {
+        "image/png"
+    };
+    let bytes = std::fs::read(&file).map_err(|_| -> Box<dyn std::error::Error> { "pin file gone".into() })?;
+    tauri::http::Response::builder()
+        .header("Content-Type", mime)
+        .header("Access-Control-Allow-Origin", "*")
+        .header("Cache-Control", "no-store")
+        .body(std::borrow::Cow::Owned(bytes))
+        .map_err(Into::into)
+}
+
+/// 前端画好遮罩/高亮后调用：此刻才显示遮罩窗（冻结画面由原生层提供）。
+/// 光标所在显示器额外抢焦点（保证键盘事件立即可用）。
+#[tauri::command]
+pub async fn shot_ready(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
+    OVERLAY_READY.store(true, Ordering::SeqCst);
+    let idx = overlay_index(window.label()).ok_or("not overlay")?;
+    // 冻结层更新闭包在主循环排队中，可能比事件晚到一拍：短暂等待就绪再亮窗
+    #[cfg(windows)]
+    {
+        let mut waited = 0u32;
+        while !freeze_ready(idx) && waited < 300 {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            waited += 5;
+        }
+    }
+    if let Some(w) = app.get_webview_window(window.label()) {
+        let _ = w.show();
+        if idx == CURSOR_MON.load(Ordering::SeqCst) {
+            let _ = w.set_focus();
+            #[cfg(windows)]
+            if let Some(hwnd) = hwnd_of_webview(&w) {
+                crate::acrylic::force_foreground_robust(hwnd);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 全局物理坐标下的光标位置（截图启动瞬间定位初始智能高亮用）
+#[tauri::command]
+pub fn shot_cursor_global(app: AppHandle) -> (i32, i32) {
+    let p = app.cursor_position().unwrap_or(PhysicalPosition::new(0.0, 0.0));
+    (p.x as i32, p.y as i32)
+}
+
+/// 智能识别：返回全局物理坐标 (x,y) 处的窗口矩形。
+/// 基于 begin 时拍的窗口 Z 序快照查表（活调 WindowFromPoint 只会命中遮罩自身）
+#[tauri::command]
+pub fn shot_window_rect_at(app: AppHandle, x: i32, y: i32) -> Option<ShotRect> {
+    let state = app.try_state::<ShotState>()?;
+    let cands = state.candidates.lock().unwrap();
+    candidate_at(&cands, x, y)
+}
+
+#[tauri::command]
+pub fn shot_last_region() -> Option<[i32; 4]> {
+    LAST_REGION.lock().unwrap().clone()
+}
+
+/// PNG 原始字节 → 解码 RGBA → 写入剪贴板（后台线程执行，整图解码不占主线程）
+fn copy_png_to_clipboard(png: &[u8]) -> Result<(), String> {
+    let img = image::load_from_memory(png).map_err(|e| format!("decode: {e}"))?;
+    let rgba = img.to_rgba8();
+    let mut cb = arboard::Clipboard::new().map_err(|e| format!("clipboard: {e}"))?;
+    cb.set_image(arboard::ImageData {
+        width: rgba.width() as usize,
+        height: rgba.height() as usize,
+        bytes: std::borrow::Cow::Borrowed(rgba.as_raw()),
+    }).map_err(|e| format!("set image: {e}"))
+}
+
+/// 截图输出（复制 / 另存为 / 贴图）：选区 PNG【原始字节】经 Tauri 原生二进制
+/// 通道直传（前端 invoke 携带 ArrayBuffer，零 base64、零 JSON 序列化），
+/// 元数据走请求头。async 命令运行于 tokio 线程池——重活全部不占主线程。
+///
+/// 头字段：
+///   x-shot-action = pin | save | copy
+///   x-shot-x / x-shot-y   （pin：屏幕全局物理坐标）
+///   x-shot-path           （save：用户在另存为对话框选择的目标路径）
+#[tauri::command]
+pub async fn shot_output(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    use tauri::ipc::InvokeBody;
+    let hdr = |k: &str| {
+        request.headers().get(k).and_then(|v| v.to_str().ok()).map(|s| s.to_string())
+    };
+    let action = hdr("x-shot-action").unwrap_or_default();
+    let body = match request.body() {
+        InvokeBody::Raw(b) => b,
+        InvokeBody::Json(_) => return Err("期望二进制请求体".into()),
+    };
+    match action.as_str() {
+        "pin" => {
+            let x: i32 = hdr("x-shot-x").and_then(|v| v.parse().ok()).unwrap_or(0);
+            let y: i32 = hdr("x-shot-y").and_then(|v| v.parse().ok()).unwrap_or(0);
+            let pin = crate::pin::create_store_entry(&app, &body, "image/png", x, y)?;
+            // 装进预建的隐藏复用窗：图片就绪后先显贴图、再由 pin_ready 收遮罩
+            // （此处绝不提前 hide_all——那会先露出裸桌面，正是"贴图闪一下"的根源）
+            crate::pin::attach_to_staging(&app, pin);
+        }
+        "save" => {
+            let dest = hdr("x-shot-path").filter(|p| !p.is_empty()).ok_or("缺少保存路径")?;
+            std::fs::write(&dest, &body).map_err(|e| format!("write: {e}"))?;
+            hide_all(&app);
+        }
+        "copy" => {
+            // 整图解码成 RGBA 是重活：丢到阻塞线程池，本命令立即继续
+            let png = body.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                if let Err(e) = copy_png_to_clipboard(&png) {
+                    diag_write(&format!("[shot] copy failed: {e}"));
+                }
+            });
+            hide_all(&app);
+        }
+        _ => return Err(format!("未知输出动作 {action}")),
+    }
+    Ok(())
+}
+
+pub(crate) fn cancel_impl<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    hide_all(app);
+    Ok(())
+}
+
+/// 遮罩窗被非命令途径（Alt+F4 等）销毁时重置"截图进行中"标志，
+/// 否则之后每次 shot_begin 都会因标志未复位而静默失败。
+/// 注意：遮罩窗现在是复用的（正常结束=隐藏），只有全部销毁（显示器热插拔
+/// 重建、系统关机等）才算会话异常终止；部分销毁时 SHOOTING 必须保持，
+/// 否则重建过程中用户再按快捷键会触发并发截图。
+pub fn on_overlay_destroyed<R: Runtime>(app: &AppHandle<R>) {
+    let remaining = app.webview_windows().keys()
+        .filter(|k| k.starts_with(OVERLAY_PREFIX))
+        .count();
+    if remaining == 0 {
+        SHOOTING.store(false, Ordering::SeqCst);
+    }
+}
+
+#[tauri::command]
+pub fn shot_cancel(app: AppHandle) -> Result<(), String> {
+    cancel_impl(&app)
+}
+
+#[tauri::command]
+pub fn shot_save_region(region: [i32; 4]) {
+    *LAST_REGION.lock().unwrap() = Some(region);
+}

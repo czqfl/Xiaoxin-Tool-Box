@@ -242,6 +242,12 @@
   border-style: solid;
   color: var(--danger);
 }
+/* 录入态行内提示（如"需搭配修饰键"），显示在录入框正下方 */
+.shortcut-input-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
 /* 行内状态提示：默认=淡灰说明文字；ok/err=彩色胶囊 + 圆形图标徽标 + 淡入动画 */
 .shortcut-hint {
   display: flex;
@@ -740,4 +746,13 @@
 .files-add:hover {
   border-color: var(--accent);
   background: var(--accent-soft);
+}
+
+/* 截图贴图页：子标签栏（复用全局 .segmented 胶囊样式） */
+.shot-settings-tabs {
+  margin-bottom: 16px;
+}
+.shot-settings-tabs .segmented button {
+  padding: 5px 18px;
+  font-size: 12.5px;
 }

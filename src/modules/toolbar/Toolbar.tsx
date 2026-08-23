@@ -24,6 +24,7 @@ import {
   IconSettings,
   IconSnippet,
   IconTranslate,
+  IconScreenshot,
 } from "../../components/icons";
 import "./toolbar.css";
 
@@ -76,6 +77,11 @@ export const TOOLS: Record<ToolKey, { label: string; color: string; icon: React.
     label: "常用语速贴",
     color: "var(--tool-snippets)",
     icon: <IconSnippet size={14} />,
+  },
+  screenshot: {
+    label: "截图",
+    color: "var(--tool-screenshot)",
+    icon: <IconScreenshot size={14} />,
   },
   settings: {
     label: "打开设置",

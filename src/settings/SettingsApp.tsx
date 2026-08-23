@@ -12,6 +12,7 @@ import { AboutPage } from "./AboutPage";
 import { TranslationPage } from "./TranslationPage";
 import { ToolbarPage } from "./ToolbarPage";
 import { FilesPage } from "./FilesPage";
+import { ScreenshotPage } from "./ScreenshotPage";
 import { SettingsErrorBoundary } from "./ErrorBoundary";
 import {
   IconClipboard,
@@ -22,6 +23,7 @@ import {
   IconKeyboard,
   IconSettings,
   IconTranslate,
+  IconScreenshot,
 } from "../components/icons";
 import "../styles/settings.css";
 
@@ -33,6 +35,7 @@ type Page =
   | "translation"
   | "toolbar"
   | "files"
+  | "screenshot"
   | "about";
 
 const NAV_ITEMS: Array<{ key: Page; label: string; icon: React.ReactNode }> = [
@@ -41,6 +44,7 @@ const NAV_ITEMS: Array<{ key: Page; label: string; icon: React.ReactNode }> = [
   { key: "translation", label: "翻译设置", icon: <IconTranslate size={15} /> },
   { key: "shortcut", label: "快捷键设置", icon: <IconKeyboard size={15} /> },
   { key: "files", label: "快速文件", icon: <IconFiles size={15} /> },
+  { key: "screenshot", label: "截图贴图", icon: <IconScreenshot size={15} /> },
   { key: "general", label: "通用设置", icon: <IconSettings size={15} /> },
   { key: "toolbar", label: "悬浮工具栏", icon: <IconGrid size={15} /> },
   { key: "about", label: "关于", icon: <IconInfo size={15} /> },
@@ -94,6 +98,8 @@ export function SettingsApp() {
         translation: "划词翻译",
         port: "呼出端口工具",
         files: "呼出快速文件",
+        screenshot: "开始截图",
+        pins: "显示/隐藏全部贴图",
       };
       setShortcutFailed(names[target] ?? target);
       setPage("shortcut");
@@ -176,6 +182,7 @@ export function SettingsApp() {
         {page === "translation" && <TranslationPage />}
         {page === "toolbar" && <ToolbarPage />}
         {page === "files" && <FilesPage />}
+        {page === "screenshot" && <ScreenshotPage />}
         {page === "about" && <AboutPage />}
       </main>
       </div>

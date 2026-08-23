@@ -272,6 +272,14 @@ export const IconSnippet = (p: IconProps) => (
   </svg>
 );
 
+/** 截图：相机快门（经典截图工具图标） */
+export const IconScreenshot = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+    <circle cx="12" cy="13" r="4" />
+  </svg>
+);
+
 export const IconEye = (p: IconProps & { filled?: boolean }) => {
   const { filled, ...rest } = p;
   return (
@@ -386,5 +394,77 @@ export const IconSortName = (p: IconProps) => (
     >
       a
     </text>
+  </svg>
+);
+
+export const IconSquare = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="4" y="5" width="16" height="14" rx="1" />
+  </svg>
+);
+
+export const IconCircleOutline = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="8" />
+  </svg>
+);
+
+export const IconArrowDiag = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M5 19 19 5M11.5 5H19v7.5" />
+  </svg>
+);
+
+export const IconLineDiag = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M5 19 19 5" />
+  </svg>
+);
+
+export const IconBrushTool = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="m17 3 4 4-9.5 9.5-4.7 1.2L8 13l9-10Z" />
+    <path d="m13.5 6.5 4 4" />
+  </svg>
+);
+
+export const IconMosaicGrid = (p: IconProps) => (
+  <svg {...base({ strokeWidth: 1.6, ...p })}>
+    <rect x="4" y="4" width="16" height="16" rx="1" />
+    <path d="M9.3 4v16M14.6 4v16M4 9.3h16M4 14.6h16" />
+  </svg>
+);
+
+export const IconNumBadge = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M10 8.5h1.6V15.2M8.4 15.2h4.8" />
+  </svg>
+);
+
+export const IconUndoArrow = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M8 5 3 10l5 5" />
+    <path d="M3 10h10a7 7 0 0 1 7 7v2" />
+  </svg>
+);
+
+export const IconRedoArrow = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="m16 5 5 5-5 5" />
+    <path d="M21 10H11a7 7 0 0 0-7 7v2" />
+  </svg>
+);
+
+export const IconSaveImage = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M12 3v11m0 0 4-4m-4 4-4-4" />
+    <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+  </svg>
+);
+
+export const IconCropSelect = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="4" y="5" width="16" height="14" rx="1" strokeDasharray="3 3" />
   </svg>
 );

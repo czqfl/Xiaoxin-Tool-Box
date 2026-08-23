@@ -269,6 +269,8 @@ export const listInstalledApps = () =>
 // ---- 快捷键 ----
 export const testShortcut = (shortcut: string) =>
   invoke<void>("shortcut_test", { shortcut });
+/** 应用快捷键：Rust 原子注册（新键失败旧键不动）+ 唯一持久化 + 全量广播。
+ *  返回更新后的完整配置，前端只做内存同步、绝不回写覆盖 */
 export const applyShortcut = (
   target:
     | "clipboard"
@@ -277,11 +279,111 @@ export const applyShortcut = (
     | "translation"
     | "port"
     | "files"
-    | "snippets",
+    | "snippets"
+    | "screenshot"
+    | "pins",
   shortcut: string
-) => invoke<void>("shortcut_apply", { target, shortcut });
+) => invoke<import("../types").AppConfig>("shortcut_apply", { target, shortcut });
+/** 运行时【真实生效】的绑定列表（["pins=Ctrl+N", ...]）——与配置声称值对照，
+ *  用于在设置页直接暴露"改了不生效/旧键还在"这类脱节问题 */
+export const shortcutRuntimeBindings = () =>
+  invoke<string[]>("shortcut_runtime_bindings");
+/** 推倒重来：全量注销所有热键后按运行时配置重新注册（排查修复用）。
+ *  返回重注册后的完整配置，前端仅内存同步 */
+export const resyncShortcuts = () =>
+  invoke<import("../types").AppConfig>("shortcut_resync");
 /** 录入捕获：钩子接管 Win 组合，避免系统功能抢先（与 capture_end 成对使用） */
 export const beginShortcutCapture = () =>
   safe(invoke("shortcut_capture_begin"), undefined);
 export const endShortcutCapture = () =>
   safe(invoke("shortcut_capture_end"), undefined);
+
+// ---- 截图 ----
+export interface ShotGeom {
+  index: number; x: number; y: number; width: number; height: number;
+  /** 智能识别初始高亮框（本显示器局部坐标；呼出瞬间即已识别好） */
+  snap: { x: number; y: number; width: number; height: number } | null;
+  /** 上次截取区域预填（本显示器局部坐标；仅当智能识别未命中时给出） */
+  prefill: { x: number; y: number; width: number; height: number } | null;
+}
+/** 开始截图（冻结屏幕 + 创建遮罩窗口） */
+export const shotBegin = () => invoke<void>("shot_begin");
+/** 获取当前遮罩窗口所在显示器的几何信息（含智能高亮框/预填选区） */
+export const shotGeometry = () => invoke<ShotGeom>("shot_geometry");
+/** 获取当前显示器的截屏原始 RGBA 二进制（配合 shot_geometry 的宽高使用）。
+ *  Rust 端返回 tauri::ipc::Response，前端直接拿到 ArrayBuffer */
+export const shotImageDataRaw = () => invoke<ArrayBuffer>("shot_image_raw");
+/** 截图帧自定义协议地址（BMP 流式加载，绕开 IPC 序列化瓶颈）。
+ *  带时间戳参数防缓存；Windows 下自定义协议映射为 http://<scheme>.localhost */
+export const shotFrameUrl = (index: number) =>
+  `http://screenshot.localhost/frame/${index}?v=${Date.now()}`;
+/** 前端画好第一帧后调用：Rust 端此刻才显示遮罩窗（避免黑屏闪烁），并抢焦点 */
+export const shotReady = () => invoke<void>("shot_ready");
+/** 全局物理坐标下的光标位置（截图启动瞬间定位初始智能高亮） */
+export const shotCursorGlobal = () =>
+  invoke<[number, number]>("shot_cursor_global");
+/** 智能窗口识别：返回全局物理坐标下鼠标处的窗口矩形 */
+export const shotWindowRectAt = (x: number, y: number) =>
+  invoke<{ x: number; y: number; width: number; height: number } | null>("shot_window_rect_at", { x, y });
+/** 获取上次记住的选区 */
+export const shotLastRegion = () =>
+  invoke<number[] | null>("shot_last_region");
+/** 保存本次选区记忆 */
+export const shotSaveRegion = (region: [number, number, number, number]) =>
+  invoke("shot_save_region", { region });
+/** 截图输出（复制/另存为/贴图）：PNG【原始字节】经 Tauri 原生二进制通道直传。
+ *  invoke 直接携带 ArrayBuffer（零 base64、零 JSON 序列化），元数据走请求头。
+ *  带 15s 超时兜底：万一通道异常也绝不让遮罩窗卡在屏幕上吞掉全部点击 */
+export const shotOutputPost = (
+  action: "copy" | "save" | "pin",
+  png: Blob,
+  params?: Record<string, string | number>,
+): Promise<void> => {
+  const headers: Record<string, string> = { "x-shot-action": action };
+  if (params?.x !== undefined) headers["x-shot-x"] = String(params.x);
+  if (params?.y !== undefined) headers["x-shot-y"] = String(params.y);
+  if (params?.path !== undefined) headers["x-shot-path"] = String(params.path);
+  return png.arrayBuffer().then((buf) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, rej) => {
+      timer = setTimeout(() => rej(new Error("shot_output 超时")), 15000);
+    });
+    return Promise.race([
+      invoke<void>("shot_output", buf, { headers: new Headers(headers) }),
+      timeout,
+    ]).finally(() => timer && clearTimeout(timer));
+  });
+};
+/** 取消截图（关闭遮罩窗口） */
+export const shotCancel = () => invoke<void>("shot_cancel");
+
+// ---- 贴图 ----
+/** 创建贴图（PNG data URL, 屏幕坐标） */
+export const pinCreate = (png: string, x: number, y: number) =>
+  invoke<{ id: string }>("pin_create", { png, x, y });
+/** 从剪贴板创建贴图 */
+export const pinFromClipboard = () => invoke<{ id: string }>("pin_from_clipboard");
+/** 列出所有贴图 */
+export const pinList = () => invoke<Array<{ id: string }>>("pin_list");
+/** 更新贴图属性 */
+export const pinUpdate = (id: string, patch: Record<string, unknown>) =>
+  invoke<void>("pin_update", { id, ...patch });
+/** 关闭单个贴图 */
+export const pinClose = (id: string) => invoke<void>("pin_close", { id });
+/** 贴图画好后调用：Rust 端此刻才显示贴图窗（避免空窗闪烁） */
+export const pinReady = () => invoke<void>("pin_ready");
+/** 贴图图片协议地址：GET /pin/{id} 文件原字节直出（WebView2 原生读盘+解码，
+ *  取代 base64 data URL——数 MB 字符串走 IPC + 巨型 data URL 解码要数秒） */
+export const pinImageUrl = (id: string) =>
+  `http://screenshot.localhost/pin/${id}?v=${Date.now()}`;
+/** 复制贴图原图到剪贴板 */
+export const pinCopyImage = (id: string) => invoke<void>("pin_copy_image", { id });
+/** 切换贴图鼠标穿透 */
+export const pinSetClickThrough = (on: boolean) =>
+  invoke<void>("pin_set_click_through", { on });
+/** 隐藏全部贴图 */
+export const pinHideAll = () => invoke<void>("pin_hide_all");
+/** 显示全部贴图 */
+export const pinShowAll = () => invoke<void>("pin_show_all");
+/** 清除全部贴图（删除窗口 + 文件） */
+export const pinClearAll = () => invoke<void>("pin_clear_all");

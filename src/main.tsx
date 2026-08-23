@@ -18,6 +18,10 @@ async function bootstrap() {
   if (panelLabels.includes(label)) {
     document.documentElement.dataset.window = "panel";
   }
+  // 截图遮罩窗：webview 背景透明，露出底下的原生冻结层（Rust 子 HWND 直贴位图）
+  if (label.startsWith("shot-overlay")) {
+    document.documentElement.dataset.window = "shot";
+  }
 
   const [{ default: React }, { default: ReactDOM }, { default: App }] = await Promise.all([
     import("react"),

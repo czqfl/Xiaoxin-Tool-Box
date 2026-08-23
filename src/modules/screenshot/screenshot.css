@@ -1,0 +1,36 @@
+/* 遮罩窗背景必须透明：冻结画面由 Rust 原生冻结层（子 HWND）贴在 webview 之下，
+   webview 只画压暗遮罩/选区/工具栏。不透明背景会盖住原生层 */
+html[data-window="panel"], html[data-window="shot"] { background: transparent; }
+html[data-window="shot"] body { background: transparent; }
+.shot-overlay { background: transparent; user-select: none; }
+.shot-mag { position: fixed; border: 2px solid rgba(255,255,255,0.8); border-radius: 6px; overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,0.5); z-index: 100; background: #000; }
+.shot-mag canvas { display: block; }
+.shot-mag-info { background: rgba(0,0,0,0.7); }
+.shot-toolbar-float { position: fixed; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; z-index: 200; max-width: calc(100vw - 16px); }
+.shot-toolbar { display: flex; align-items: center; gap: 2px; background: rgba(30,30,30,0.95); border-radius: 6px; padding: 3px 5px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); backdrop-filter: blur(12px); flex-wrap: nowrap; white-space: nowrap; }
+.shot-toolbar-panel { display: flex; align-items: center; gap: 8px; background: rgba(30,30,30,0.95); border-radius: 6px; padding: 5px 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); backdrop-filter: blur(12px); white-space: nowrap; }
+.shot-panel-label { color: #999; font-size: 11px; user-select: none; }
+.shot-text-editor { position: fixed; z-index: 300; display: inline-flex; align-items: center; background: transparent; border: 1.5px solid rgba(255,255,255,0.95); outline: 1px solid rgba(0,0,0,0.35); border-radius: 3px; padding: 3px 8px; }
+.shot-text-editor input { border: none; outline: none; background: transparent; font: bold 16px sans-serif; min-width: 150px; color: #fff; caret-color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.85), 0 0 3px rgba(0,0,0,0.6); }
+.shot-text-editor input::placeholder { color: rgba(255,255,255,0.55); text-shadow: 0 1px 2px rgba(0,0,0,0.8); }
+.shot-sw-badge { position: fixed; left: 50%; bottom: 36px; transform: translateX(-50%); z-index: 400; background: rgba(20,20,20,0.85); color: #fff; font-size: 13px; padding: 6px 14px; border-radius: 16px; pointer-events: none; backdrop-filter: blur(8px); }
+.shot-toolbar-float { position: fixed; }
+.shot-toolbar button { background: transparent; border: 1px solid transparent; color: #ccc; padding: 4px; border-radius: 4px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; }
+.shot-toolbar button:hover:not(:disabled) { background: rgba(255,255,255,0.12); color: #fff; }
+.shot-toolbar button.active { background: rgba(76,141,255,0.3); border-color: #4c8dff; color: #fff; }
+.shot-toolbar button:disabled { opacity: 0.3; cursor: default; }
+.shot-toolbar-group { display: flex; gap: 1px; align-items: center; }
+.shot-toolbar-sep { width: 1px; height: 18px; background: rgba(255,255,255,0.15); margin: 0 4px; flex-shrink: 0; }
+.shot-toolbar-actions { gap: 3px; }
+.shot-btn-primary { background: #4c8dff !important; color: #fff !important; }
+.shot-btn-primary:hover:not(:disabled) { background: #3a7bf0 !important; }
+.shot-btn-pin { background: rgba(54,179,126,0.85) !important; color: #fff !important; }
+.shot-btn-pin:hover:not(:disabled) { background: #36b37e !important; }
+.shot-w-dot span { display: block; border-radius: 50%; background: #bbb; pointer-events: none; }
+.shot-w-dot.active span { background: #fff; }
+.shot-color-btn { width: 15px !important; height: 15px !important; min-width: 15px !important; min-height: 15px !important; border-radius: 50%; border: 2px solid transparent !important; cursor: pointer; padding: 0 !important; }
+.shot-color-btn.active { border-color: #fff !important; transform: scale(1.15); }
+.shot-hint { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); color: rgba(255,255,255,0.7); font-size: 16px; background: rgba(0,0,0,0.5); padding: 12px 24px; border-radius: 8px; pointer-events: none; z-index: 50; }
+.shot-sw-wheel { width: 30px !important; height: 30px !important; min-width: 30px !important; min-height: 30px !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; }
+.shot-sw-wheel span { display: block; border-radius: 50%; background: #bbb; pointer-events: none; }
+.shot-sw-wheel:hover span { background: #fff; }

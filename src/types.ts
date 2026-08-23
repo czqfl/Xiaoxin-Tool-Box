@@ -85,16 +85,13 @@ export interface FolderConfig {
 export interface ShortcutsConfig {
   clipboard: string;
   folder: string;
-  /** 呼出账号密码面板的快捷键 */
   credentials: string;
-  /** 划词翻译快捷键 */
   translation: string;
-  /** 呼出端口工具面板的快捷键 */
   port: string;
-  /** 呼出快速文件面板的快捷键 */
   files: string;
-  /** 呼出语速贴面板的快捷键 */
   snippets: string;
+  screenshot: string;
+  pins: string;
 }
 
 /** 端口工具面板配置 */
@@ -199,6 +196,7 @@ export type ToolKey =
   | "port"
   | "files"
   | "snippets"
+  | "screenshot"
   | "settings";
 
 /** 悬浮工具栏配置：常驻小工具条，快速呼出各面板 */
@@ -263,25 +261,50 @@ export interface TranslateResult {
   provider: string;
 }
 
+/** 截图功能配置 */
+export interface ShotConfig {
+  enabled: boolean;
+  delay_ms: number;
+  capture_cursor: boolean;
+  smart_detect: boolean;
+  magnifier: boolean;
+  remember_region: boolean;
+  auto_copy: boolean;
+  save_format: string;
+  jpg_quality: number;
+  save_dir?: string | null;
+}
+
+/** 贴图配置 */
+export interface PinConfig {
+  opacity: number;
+  border_shadow: boolean;
+  restore_on_start: boolean;
+}
+
+/** 标注工具默认参数 */
+export interface AnnotateConfig {
+  stroke_width: number;
+  font_size: number;
+  mosaic_block: number;
+  colors: string[];
+}
+
 export interface AppConfig {
   clipboard: ClipboardConfig;
   folder: FolderConfig;
   credentials: CredentialConfig;
   shortcuts: ShortcutsConfig;
   general: GeneralConfig;
-  /** 划词翻译配置 */
   translator: TranslatorConfig;
-  /** 端口工具面板配置 */
   port: PortConfig;
-  /** 快速文件面板配置 */
   files: FilesConfig;
-  /** 悬浮工具栏配置 */
   toolbar: ToolbarConfig;
-  /** 语速贴面板配置 */
   snippets: SnippetsConfig;
-  /** 各面板上次关闭位置（窗口标签 -> 屏幕坐标），持久化，呼出时恢复 */
+  shot: ShotConfig;
+  pin: PinConfig;
+  annotate: AnnotateConfig;
   panel_positions: Record<string, [number, number]>;
-  /** 各面板上次关闭尺寸（窗口标签 -> 物理像素宽高），持久化，呼出时恢复 */
   panel_sizes?: Record<string, [number, number]>;
 }
 

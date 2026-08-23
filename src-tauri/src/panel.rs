@@ -185,7 +185,13 @@ pub fn panel_toggle(app: tauri::AppHandle, label: String) -> Result<(), String> 
         "port" => PORT_PANEL,
         "files" => FILES_PANEL,
         "snippets" => SNIPPETS_PANEL,
-        _ => return Err("未知面板".into()),
+        "screenshot" => {
+            // screenshot is not a panel; trigger via shot_begin
+            let _ = crate::screenshot::shot_begin(app.clone());
+            broadcast_panel_visibility(&app, "screenshot", true);
+            return Ok(());
+        }
+        _ => return Err("unknown panel".into()),
     };
     crate::panel::toggle_panel(&app, full);
     Ok(())

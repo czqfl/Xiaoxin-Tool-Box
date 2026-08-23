@@ -4,6 +4,10 @@ use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use tauri::{Manager, State};
 
+/// 配置变更广播事件（与前端 core/events.ts 的 EVT_CONFIG_CHANGED 同名）：
+/// 快捷键保存等场景由 Rust 广播全量配置，前端各窗口只同步内存、不回写
+pub const EVT_CONFIG_CHANGED: &str = "config://changed";
+
 /// 粘贴模式：普通 / 先进先出 / 后进先出
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -121,6 +125,10 @@ pub struct ShortcutsConfig {
     pub files: String,
     /// 呼出语速贴面板
     pub snippets: String,
+    /// 开始截图
+    pub screenshot: String,
+    /// 显示 / 隐藏全部贴图
+    pub pins: String,
 }
 
 impl Default for ShortcutsConfig {
@@ -138,6 +146,10 @@ impl Default for ShortcutsConfig {
             files: "Alt+Q".into(),
             // 语速贴：Alt+K（K = 快捷/Quick，快捷短语一键粘贴）
             snippets: "Alt+K".into(),
+            // 截图：Ctrl+Alt+A（QQ 截图习惯键位）
+            screenshot: "Ctrl+Alt+A".into(),
+            // 显示/隐藏全部贴图：Ctrl+Alt+P（Pin）
+            pins: "Ctrl+Alt+P".into(),
         }
     }
 }
@@ -290,6 +302,105 @@ impl Default for SnippetsConfig {
     }
 }
 
+/// 截图功能配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ShotConfig {
+    /// 是否启用截图功能（关闭时快捷键/入口不生效）
+    pub enabled: bool,
+    /// 呼出截图后的延时毫秒数（延时截图；0 = 立即）
+    pub delay_ms: u32,
+    /// 截图是否包含鼠标指针
+    pub capture_cursor: bool,
+    /// 智能识别窗口/控件边缘（鼠标悬停自动吸附选框）
+    pub smart_detect: bool,
+    /// 放大镜（像素级取色）
+    pub magnifier: bool,
+    /// 记住上次截取区域（下次呼出预填同样区域）
+    pub remember_region: bool,
+    /// 选区完成后默认动作：复制到剪贴板（回车触发）
+    pub auto_copy: bool,
+    /// 保存格式："png" | "jpg"
+    pub save_format: String,
+    /// JPG 保存质量（1-100）
+    pub jpg_quality: u8,
+    /// 默认保存目录；为空时用系统的图片目录
+    pub save_dir: Option<String>,
+}
+
+impl Default for ShotConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            delay_ms: 0,
+            capture_cursor: false,
+            smart_detect: true,
+            magnifier: true,
+            remember_region: true,
+            auto_copy: true,
+            save_format: "png".into(),
+            jpg_quality: 90,
+            save_dir: None,
+        }
+    }
+}
+
+/// 贴图配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PinConfig {
+    /// 新贴图默认不透明度（百分比 1-100）
+    pub opacity: u8,
+    /// 贴图边框阴影
+    pub border_shadow: bool,
+    /// 开机恢复上次的贴图布局
+    pub restore_on_start: bool,
+}
+
+impl Default for PinConfig {
+    fn default() -> Self {
+        Self {
+            opacity: 100,
+            border_shadow: true,
+            restore_on_start: true,
+        }
+    }
+}
+
+/// 标注工具默认参数
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AnnotateConfig {
+    /// 默认画笔粗细（px）
+    pub stroke_width: u32,
+    /// 文字工具默认字号（px）
+    pub font_size: u32,
+    /// 马赛克块大小（px）
+    pub mosaic_block: u32,
+    /// 标注色板（十六进制颜色列表）
+    pub colors: Vec<String>,
+}
+
+impl Default for AnnotateConfig {
+    fn default() -> Self {
+        Self {
+            stroke_width: 3,
+            font_size: 18,
+            mosaic_block: 12,
+            colors: vec![
+                "#e5484d".into(),
+                "#ff8d1a".into(),
+                "#ffd60a".into(),
+                "#36b37e".into(),
+                "#4c8dff".into(),
+                "#b06fd6".into(),
+                "#ffffff".into(),
+                "#000000".into(),
+            ],
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum ThemeMode {
@@ -405,6 +516,15 @@ pub struct AppConfig {
     pub toolbar: ToolbarConfig,
     /// 语速贴面板配置
     pub snippets: SnippetsConfig,
+    /// 截图功能配置
+    #[serde(default)]
+    pub shot: ShotConfig,
+    /// 贴图配置
+    #[serde(default)]
+    pub pin: PinConfig,
+    /// 标注工具默认参数
+    #[serde(default)]
+    pub annotate: AnnotateConfig,
     /// 各面板上次关闭时的窗口位置（标签 -> 屏幕坐标），下次呼出恢复（记忆位置）
     pub panel_positions: std::collections::HashMap<String, (i32, i32)>,
     /// 各面板上次关闭时的窗口尺寸（标签 -> 物理像素宽高），下次呼出恢复（记忆大小）
@@ -423,10 +543,14 @@ pub fn config_load(paths: State<'_, AppPaths>) -> AppConfig {
 #[tauri::command]
 pub fn config_save(
     app: tauri::AppHandle,
-    config: AppConfig,
+    mut config: AppConfig,
     paths: State<'_, AppPaths>,
     state: State<'_, ConfigState>,
 ) -> Result<(), String> {
+    // 快捷键的唯一写入口是 shortcut_apply（注册成功才落盘）。任何窗口持陈旧
+    // 快照调用整份 config_save 时，一律以运行时当前快捷键覆盖回去——根除
+    // 「旧配置把刚改好的快捷键悄悄改回、重启后旧键复活」的问题。
+    config.shortcuts = state.0.lock().unwrap().shortcuts.clone();
     save_json(&paths.config_file, &config).map_err(|e| format!("保存配置失败：{e}"))?;
     *state.0.lock().unwrap() = config.clone();
     // 粘贴模式变化时同步全局 Ctrl+V 顺序粘贴快捷键的注册状态
@@ -463,9 +587,11 @@ pub fn config_export_to(
 }
 
 /// 导入配置：从备份文件恢复（校验 JSON 后写回 data 目录并更新运行时状态）。
-/// 导入成功后由前端触发全量重载（load + 广播），快捷键等即时生效。
+/// 导入后立即【推倒重来】重注册全部快捷键——先全量注销再按新配置注册，
+/// 运行时与配置严格一致，无需重启（杜绝"旧键残留/新键不生效"）。
 #[tauri::command]
 pub fn config_import_from(
+    app: tauri::AppHandle,
     path: String,
     paths: State<'_, AppPaths>,
     state: State<'_, ConfigState>,
@@ -474,6 +600,7 @@ pub fn config_import_from(
     let config: AppConfig =
         serde_json::from_str(&content).map_err(|e| format!("配置格式不正确：{e}"))?;
     save_json(&paths.config_file, &config).map_err(|e| format!("保存失败：{e}"))?;
-    *state.0.lock().unwrap() = config;
+    *state.0.lock().unwrap() = config.clone();
+    crate::shortcut::resync_all(&app, &config);
     Ok(())
 }

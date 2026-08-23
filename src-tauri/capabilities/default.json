@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "所有窗口共享的基础权限",
-  "windows": ["settings", "clipboard-panel", "folder-panel", "credential-panel", "port-panel", "files-panel", "snippets-panel", "translate-popup", "toolbar"],
+  "windows": ["settings", "clipboard-panel", "folder-panel", "credential-panel", "port-panel", "files-panel", "snippets-panel", "translate-popup", "toolbar", "shot-overlay-*", "pin-*", "pin-staging"],
   "permissions": [
     "core:default",
     "core:window:allow-show",
@@ -17,6 +17,9 @@
     "core:window:allow-set-always-on-top",
     "core:window:allow-start-dragging",
     "core:window:allow-set-theme",
+    "core:window:allow-set-ignore-cursor-events",
+    "core:window:allow-outer-position",
+    "core:window:allow-outer-size",
     "core:webview:default",
     "core:event:allow-listen",
     "core:event:allow-unlisten",

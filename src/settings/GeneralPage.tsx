@@ -51,7 +51,10 @@ export function GeneralPage() {
     }
   };
 
-  /** 从备份文件恢复全部配置（含快捷键、翻译凭据、面板位置） */
+  /** 从备份文件恢复全部配置（含快捷键、翻译凭据、面板位置）。
+   *  后端 config_import_from 已推倒重来重注册全部快捷键（即时生效）；
+   *  这里 load() 拉回新配置后必须广播【新值】——广播旧闭包快照会把
+   *  其他窗口的配置同步回恢复前的状态（"旧配置复活"通道之一） */
   const doImport = async () => {
     try {
       const picked = await open({
@@ -61,10 +64,9 @@ export function GeneralPage() {
       });
       if (!picked) return;
       await importConfigFrom(picked as string);
-      // 重载配置并广播给所有窗口，快捷键等立即生效
       await load();
-      await broadcastConfigChanged(config);
-      setConfigMsg("已恢复配置，部分设置需重启应用完全生效（如快捷键）");
+      await broadcastConfigChanged(useConfigStore.getState().config);
+      setConfigMsg("已恢复配置，快捷键已按新配置重新生效");
     } catch (err) {
       setConfigMsg(`导入失败：${err instanceof Error ? err.message : String(err)}`);
     }

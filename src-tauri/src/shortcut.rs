@@ -31,12 +31,78 @@ pub struct ShortcutBindingsInner {
     pub files: Option<Shortcut>,
     /// 呼出语速贴面板
     pub snippets: Option<Shortcut>,
+    /// 截图
+    pub screenshot: Option<Shortcut>,
+    /// 显示/隐藏全部贴图
+    pub pins: Option<Shortcut>,
 }
 
 pub fn parse(shortcut: &str) -> Result<Shortcut, String> {
     shortcut.parse::<Shortcut>().map_err(|_| {
         format!("快捷键格式不正确：{shortcut}（示例：Ctrl+Alt+C、Alt+F5）")
     })
+}
+
+/// 全部快捷键目标（顺序 = 注册顺序 = 绑定表字段顺序）
+const TARGETS: [&str; 9] = [
+    "clipboard",
+    "folder",
+    "credentials",
+    "translation",
+    "port",
+    "files",
+    "snippets",
+    "screenshot",
+    "pins",
+];
+
+fn is_valid_target(t: &str) -> bool {
+    TARGETS.contains(&t)
+}
+
+/// 读配置中某 target 的快捷键字符串
+fn config_shortcut(config: &AppConfig, target: &str) -> String {
+    match target {
+        "clipboard" => config.shortcuts.clipboard.clone(),
+        "folder" => config.shortcuts.folder.clone(),
+        "credentials" => config.shortcuts.credentials.clone(),
+        "translation" => config.shortcuts.translation.clone(),
+        "port" => config.shortcuts.port.clone(),
+        "files" => config.shortcuts.files.clone(),
+        "snippets" => config.shortcuts.snippets.clone(),
+        "screenshot" => config.shortcuts.screenshot.clone(),
+        _ => config.shortcuts.pins.clone(),
+    }
+}
+
+/// 写配置中某 target 的快捷键字符串
+fn set_config_shortcut(config: &mut AppConfig, target: &str, value: String) {
+    match target {
+        "clipboard" => config.shortcuts.clipboard = value,
+        "folder" => config.shortcuts.folder = value,
+        "credentials" => config.shortcuts.credentials = value,
+        "translation" => config.shortcuts.translation = value,
+        "port" => config.shortcuts.port = value,
+        "files" => config.shortcuts.files = value,
+        "snippets" => config.shortcuts.snippets = value,
+        "screenshot" => config.shortcuts.screenshot = value,
+        _ => config.shortcuts.pins = value,
+    }
+}
+
+/// 写运行时绑定表字段
+fn set_binding(inner: &mut ShortcutBindingsInner, target: &str, v: Option<Shortcut>) {
+    match target {
+        "clipboard" => inner.clipboard = v,
+        "folder" => inner.folder = v,
+        "credentials" => inner.credentials = v,
+        "translation" => inner.translation = v,
+        "port" => inner.port = v,
+        "files" => inner.files = v,
+        "snippets" => inner.snippets = v,
+        "screenshot" => inner.screenshot = v,
+        _ => inner.pins = v,
+    }
 }
 
 /// Win 组合键被系统 shell 保留，RegisterHotKey 无法注册，
@@ -91,21 +157,6 @@ fn register_combo<R: Runtime>(
         .map_err(|_| "该快捷键已被系统或其他应用占用，请更换其他组合".to_string())
 }
 
-/// 注销单个面板热键（区分钩子接管与插件注册）
-fn unregister_combo<R: Runtime>(app: &AppHandle<R>, target: &str, s: Shortcut) {
-    if is_hook_combo(&s) {
-        #[cfg(windows)]
-        {
-            crate::keyhook::set_panel_hotkey(target, s.mods == Modifiers::ALT, 0);
-            if s.mods == Modifiers::ALT {
-                let _ = app.global_shortcut().unregister(s);
-            }
-        }
-        return;
-    }
-    let _ = app.global_shortcut().unregister(s);
-}
-
 /// 冲突检测：尝试注册后立即回滚。若与当前应用已绑定一致则直接视为可用
 #[tauri::command]
 pub fn shortcut_test(
@@ -123,6 +174,8 @@ pub fn shortcut_test(
             || inner.port == Some(parsed)
             || inner.files == Some(parsed)
             || inner.snippets == Some(parsed)
+            || inner.screenshot == Some(parsed)
+            || inner.pins == Some(parsed)
         {
             return Ok(());
         }
@@ -136,7 +189,11 @@ pub fn shortcut_test(
             gs.register(parsed).map_err(|_| {
                 "该快捷键已被系统或其他应用占用，请更换其他组合".to_string()
             })?;
-            let _ = gs.unregister(parsed);
+            if let Err(e) = gs.unregister(parsed) {
+                crate::storage::diag_write(&format!(
+                    "[shortcut] test unregister {parsed} FAILED: {e}"
+                ));
+            }
             return Ok(());
         }
         // Win 组合：钩子总是能拦截（Win+L 等系统直取组合除外），无需试注册
@@ -145,7 +202,10 @@ pub fn shortcut_test(
     let gs = app.global_shortcut();
     gs.register(parsed)
         .map_err(|_| "该快捷键已被系统或其他应用占用，请更换其他组合".to_string())?;
-    let _ = gs.unregister(parsed);
+    if let Err(e) = gs.unregister(parsed) {
+        // 试注册后的注销若失败会留下幽灵热键，必须留痕
+        crate::storage::diag_write(&format!("[shortcut] test unregister {parsed} FAILED: {e}"));
+    }
     Ok(())
 }
 
@@ -163,100 +223,92 @@ pub fn shortcut_capture_end() {
     crate::keyhook::set_capture_mode(false);
 }
 
-/// 应用新快捷键：注册成功后注销旧绑定，并持久化到配置
+/// 应用新快捷键：【推倒重来】全量注销所有运行时热键，再按更新后的配置
+/// 全部重建——运行时与配置严格一致，任何一步失败自动回滚为原配置重建，
+/// 从根上杜绝「新旧键混存」（旧键还在触发=卡死、新键不生效的典型症状）。
+/// 持久化只发生在这里（单一写入口），随后以 config://changed 广播全量配置。
+/// 返回更新后的完整配置供前端直接同步。
 #[tauri::command]
 pub fn shortcut_apply(
     app: AppHandle,
     target: String,
     shortcut: String,
-    bindings: State<'_, ShortcutBindings>,
     paths: State<'_, AppPaths>,
     config_state: State<'_, ConfigState>,
-) -> Result<(), String> {
-    if target != "clipboard"
-        && target != "folder"
-        && target != "credentials"
-        && target != "translation"
-        && target != "port"
-        && target != "files"
-        && target != "snippets"
-    {
+) -> Result<AppConfig, String> {
+    if !is_valid_target(&target) {
         return Err("未知的快捷键目标".into());
     }
-    let parsed = parse(&shortcut)?;
-    let mut inner = bindings.0.lock().unwrap();
-    let current = if target == "clipboard" {
-        inner.clipboard
-    } else if target == "folder" {
-        inner.folder
-    } else if target == "credentials" {
-        inner.credentials
-    } else if target == "translation" {
-        inner.translation
-    } else if target == "port" {
-        inner.port
-    } else if target == "files" {
-        inner.files
-    } else {
-        inner.snippets
-    };
-    if current == Some(parsed) {
-        return Ok(());
+    parse(&shortcut)?; // 提前校验格式，避免进入重建流程才发现
+
+    let current = config_state.0.lock().unwrap().clone();
+    if config_shortcut(&current, &target) == shortcut {
+        // 无变化：直接返回当前配置（不重复注册/落盘）
+        return Ok(current);
     }
 
-    register_combo(&app, &target, parsed)?;
-    if let Some(old) = current {
-        unregister_combo(&app, &target, old);
-    }
-    if target == "clipboard" {
-        inner.clipboard = Some(parsed);
-    } else if target == "folder" {
-        inner.folder = Some(parsed);
-    } else if target == "credentials" {
-        inner.credentials = Some(parsed);
-    } else if target == "translation" {
-        inner.translation = Some(parsed);
-    } else if target == "port" {
-        inner.port = Some(parsed);
-    } else if target == "files" {
-        inner.files = Some(parsed);
-    } else {
-        inner.snippets = Some(parsed);
-    }
-    drop(inner);
+    let mut next = current.clone();
+    set_config_shortcut(&mut next, &target, shortcut.clone());
 
-    // 持久化到配置文件与运行时配置状态
-    let mut config = config_state.0.lock().unwrap().clone();
-    if target == "clipboard" {
-        config.shortcuts.clipboard = shortcut;
-    } else if target == "folder" {
-        config.shortcuts.folder = shortcut;
-    } else if target == "credentials" {
-        config.shortcuts.credentials = shortcut;
-    } else if target == "translation" {
-        config.shortcuts.translation = shortcut;
-    } else if target == "port" {
-        config.shortcuts.port = shortcut;
-    } else if target == "files" {
-        config.shortcuts.files = shortcut;
-    } else {
-        config.shortcuts.snippets = shortcut;
+    // 全清 → 按新配置重建
+    if let Err(e) = resync_all_result(&app, &next) {
+        // 回滚：全清 → 按原配置重建，保证运行时与磁盘一致、绝不混存
+        crate::storage::diag_write(&format!(
+            "[shortcut] apply {target}={shortcut} FAILED: {e} → rollback to previous"
+        ));
+        let _ = resync_all_result(&app, &current);
+        return Err(e);
     }
-    let _ = save_json(&paths.config_file, &config);
-    *config_state.0.lock().unwrap() = config;
-    Ok(())
+
+    // 持久化 + 运行时状态 + 广播（唯一写点）
+    let _ = save_json(&paths.config_file, &next);
+    *config_state.0.lock().unwrap() = next.clone();
+    let _ = app.emit(crate::config::EVT_CONFIG_CHANGED, &next);
+    crate::storage::diag_write(&format!("[shortcut] applied {target} = {shortcut}（全量重建）"));
+    Ok(next)
 }
 
-/// 启动时按配置注册全局热键；失败则通知前端并打开设置页引导修改
+/// 运行时【真实生效】的快捷键绑定（区别于配置文件里声称的值）。
+/// 设置页据此展示实际注册状态——配置与运行时一旦脱节立刻可见，
+/// 这正是排查"改了快捷键却不生效/旧的还在"的决定性依据。
+#[tauri::command]
+pub fn shortcut_runtime_bindings(bindings: State<'_, ShortcutBindings>) -> Vec<String> {
+    let inner = bindings.0.lock().unwrap();
+    let mut out: Vec<String> = Vec::new();
+    let mut push = |name: &str, s: &Option<Shortcut>| {
+        if let Some(s) = s {
+            out.push(format!("{name}={s}"));
+        }
+    };
+    push("clipboard", &inner.clipboard);
+    push("folder", &inner.folder);
+    push("credentials", &inner.credentials);
+    push("translation", &inner.translation);
+    push("port", &inner.port);
+    push("files", &inner.files);
+    push("snippets", &inner.snippets);
+    push("screenshot", &inner.screenshot);
+    push("pins", &inner.pins);
+    out
+}
+
+/// 启动时按配置注册全局热键（先全清再按配置重建，保证与磁盘一致）；
+/// 失败则通知前端并打开设置页引导修改
 pub fn register_initial<R: Runtime>(app: &AppHandle<R>, config: &AppConfig) {
-    register_one(app, "clipboard", &config.shortcuts.clipboard);
-    register_one(app, "folder", &config.shortcuts.folder);
-    register_one(app, "credentials", &config.shortcuts.credentials);
-    register_one(app, "translation", &config.shortcuts.translation);
-    register_one(app, "port", &config.shortcuts.port);
-    register_one(app, "files", &config.shortcuts.files);
-    register_one(app, "snippets", &config.shortcuts.snippets);
+    if let Err(e) = resync_all_result(app, config) {
+        crate::storage::diag_write(&format!("[shortcut] initial FAILED: {e}"));
+        notify_failed(app, "initial");
+    }
     sync_seq_shortcut(app, config.clipboard.paste_mode);
+    // 启动即记录配置声称的快捷键全貌：与 diag 里 registered/FAILED 行对照，
+    // 任何"配置与运行时脱节"（改了不生效、旧的还在）都能一眼定位
+    crate::storage::diag_write(&format!(
+        "[shortcut] initial from config: shot={} pins={} cb={} fd={} cr={} tr={} pt={} fl={} sn={}",
+        config.shortcuts.screenshot, config.shortcuts.pins,
+        config.shortcuts.clipboard, config.shortcuts.folder,
+        config.shortcuts.credentials, config.shortcuts.translation,
+        config.shortcuts.port, config.shortcuts.files, config.shortcuts.snippets,
+    ));
 }
 
 /// 按粘贴模式同步全局 Ctrl+V 顺序粘贴：顺序模式由低级钩子拦截，普通模式放行
@@ -266,37 +318,73 @@ pub fn sync_seq_shortcut<R: Runtime>(app: &AppHandle<R>, mode: PasteMode) {
     crate::keyhook::set_seq_paste_enabled(mode != PasteMode::Normal);
 }
 
-fn register_one<R: Runtime>(app: &AppHandle<R>, target: &str, shortcut_str: &str) {
-    let parsed = match parse(shortcut_str) {
-        Ok(p) => p,
-        Err(_) => {
-            notify_failed(app, target);
-            return;
-        }
-    };
-    match register_combo(app, target, parsed) {
-        Ok(()) => {
-            if let Some(b) = app.try_state::<ShortcutBindings>() {
-                let mut inner = b.0.lock().unwrap();
-                if target == "clipboard" {
-                    inner.clipboard = Some(parsed);
-                } else if target == "folder" {
-                    inner.folder = Some(parsed);
-                } else if target == "credentials" {
-                    inner.credentials = Some(parsed);
-                } else if target == "translation" {
-                    inner.translation = Some(parsed);
-                } else if target == "port" {
-                    inner.port = Some(parsed);
-                } else if target == "files" {
-                    inner.files = Some(parsed);
-                } else {
-                    inner.snippets = Some(parsed);
-                }
-            }
-        }
-        Err(_) => notify_failed(app, target),
+/// 全量注销所有运行时热键：插件侧 unregister_all + 钩子槽位清零 + 绑定表清空。
+/// 用于「推倒重来」场景——先删干净再注册，杜绝新旧残留并存
+/// （旧键还在触发、新键不生效正是残留并存的典型症状）。
+pub fn unregister_all_runtime<R: Runtime>(app: &AppHandle<R>) {
+    let _ = app.global_shortcut().unregister_all();
+    #[cfg(windows)]
+    for target in TARGETS {
+        crate::keyhook::set_panel_hotkey(target, false, 0);
+        crate::keyhook::set_panel_hotkey(target, true, 0);
     }
+    if let Some(b) = app.try_state::<ShortcutBindings>() {
+        *b.0.lock().unwrap() = ShortcutBindingsInner::default();
+    }
+}
+
+/// 全量重建：注销全部 → 按给定配置逐个注册。任一 target 失败即返回错误
+/// （此时运行时处于"已清空+部分重建"状态，调用方必须回滚/重试）。
+pub fn resync_all_result<R: Runtime>(
+    app: &AppHandle<R>,
+    config: &AppConfig,
+) -> Result<(), String> {
+    unregister_all_runtime(app);
+    crate::storage::diag_write("[shortcut] resync: all cleared, re-registering");
+    for target in TARGETS {
+        let s = config_shortcut(config, target);
+        register_one_result(app, target, &s)?;
+    }
+    Ok(())
+}
+
+/// 推倒重来：全量注销后按给定配置重新注册全部快捷键（失败仅留痕，不中断）。
+/// 导入配置/恢复备份后调用，保证运行时与配置严格一致（无需重启）。
+pub fn resync_all<R: Runtime>(app: &AppHandle<R>, config: &AppConfig) {
+    if let Err(e) = resync_all_result(app, config) {
+        crate::storage::diag_write(&format!("[shortcut] resync partial failure: {e}"));
+    }
+}
+
+/// 手动触发全量重注册（设置页排查用）：以运行时配置为准推倒重来，
+/// 返回重注册后的完整配置。
+#[tauri::command]
+pub fn shortcut_resync(
+    app: AppHandle,
+    config_state: State<'_, ConfigState>,
+) -> Result<AppConfig, String> {
+    let config = config_state.0.lock().unwrap().clone();
+    resync_all(&app, &config);
+    Ok(config)
+}
+
+
+/// 注册单个 target 并写入绑定表；失败返回具体错误（供 apply 回滚 / 启动留痕）
+fn register_one_result<R: Runtime>(
+    app: &AppHandle<R>,
+    target: &str,
+    shortcut_str: &str,
+) -> Result<(), String> {
+    let parsed = parse(shortcut_str)
+        .map_err(|e| format!("{target} 快捷键格式错误：{e}"))?;
+    register_combo(app, target, parsed)
+        .map_err(|e| format!("{target} 注册失败：{e}"))?;
+    if let Some(b) = app.try_state::<ShortcutBindings>() {
+        let mut inner = b.0.lock().unwrap();
+        set_binding(&mut inner, target, Some(parsed));
+    }
+    crate::storage::diag_write(&format!("[shortcut] registered {target} = {shortcut_str}"));
+    Ok(())
 }
 
 fn notify_failed<R: Runtime>(app: &AppHandle<R>, target: &str) {
@@ -328,6 +416,8 @@ pub fn panel_label_for(
 
 /// 供 lib.rs 中全局热键 handler 调用（仅插件注册的非 Win 组合会到这里）
 pub fn handle_shortcut_pressed<R: Runtime>(app: &AppHandle<R>, shortcut: &Shortcut) {
+    // 记录具体组合串：区分"哪个键触发了动作"，改键后旧键残留一眼可见
+    crate::storage::diag_write(&format!("[shortcut] pressed {}", shortcut.into_string()));
     let Some(bindings) = app.try_state::<ShortcutBindings>() else {
         return;
     };
@@ -338,6 +428,29 @@ pub fn handle_shortcut_pressed<R: Runtime>(app: &AppHandle<R>, shortcut: &Shortc
     };
     if is_translate {
         crate::translate::trigger_selection_translate(app);
+        return;
+    }
+    // 截图快捷键
+    let is_screenshot = {
+        let inner = bindings.0.lock().unwrap();
+        inner.screenshot == Some(*shortcut)
+    };
+    if is_screenshot {
+        crate::storage::diag_write("[shortcut] screenshot triggered");
+        let _ = crate::screenshot::begin_impl(app.clone());
+        return;
+    }
+    // 贴图显示/隐藏
+    let is_pins = {
+        let inner = bindings.0.lock().unwrap();
+        inner.pins == Some(*shortcut)
+    };
+    if is_pins {
+        // toggle: 有可见贴图 → 全隐藏；否则全显示。
+        // 整个动作移出主线程（见 pin::toggle_all 注释）——热键回调里直接做
+        // 窗口操作一旦卡住会冻结全部窗口
+        crate::storage::diag_write("[shortcut] pins toggle triggered");
+        crate::pin::toggle_all(app);
         return;
     }
     let label = {
