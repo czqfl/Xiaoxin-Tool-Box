@@ -1302,7 +1302,7 @@ export function ScreenshotOverlay() {
                 const Ic = cur[1]; const c = cur[3];
                 return (
                   <button key={i} className={active ? "active" : ""} data-tip={btnTip(b)}
-                    style={active ? { background: "rgba(var(--accent-rgb), 0.28)", boxShadow: "inset 0 0 0 1px rgba(var(--accent-rgb), 0.55), 0 0 12px rgba(var(--accent-rgb), 0.40)" } : undefined}
+                    style={active ? { background: "rgba(var(--accent-rgb), 0.28)", boxShadow: "inset 0 0 0 1px rgba(var(--accent-rgb), 0.55)" } : undefined}
                     onClick={() => applyToolButton(b)}>
                     <span style={{ color: active ? "#fff" : c, display: "inline-flex" }}><Ic /></span>
                   </button>
