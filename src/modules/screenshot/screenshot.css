@@ -64,11 +64,8 @@ html[data-window="shot"] body { background: transparent; }
 .shot-toolbar::before { content: ""; position: absolute; inset: 0; z-index: -1; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
 .shot-toolbar-panel { display: flex; align-items: center; gap: 7px; background: rgba(var(--bg-panel-rgb), var(--panel-opacity)); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-radius: 0; padding: 8px 10px; white-space: nowrap; align-self: stretch; }
 .shot-toolbar button { background: transparent; border: none; color: var(--text-primary); padding: 5px; border-radius: 2px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; min-width: 27px; min-height: 27px; position: relative; transition: background var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
-/* 图标：细线 + 在深色玻璃上以自身颜色发出柔和光晕（Snipaste 式高级感）。
-   几何已在组件内重校（统一边距/圆角），此处只负责发光与过渡。 */
-.shot-toolbar button svg { filter: drop-shadow(0 0 2.5px currentColor); transition: filter var(--dur-fast) var(--ease-out); }
-.shot-toolbar button:hover svg,
-.shot-toolbar button.active svg { filter: drop-shadow(0 0 4px currentColor); }
+/* 图标：纯细线描边，【不发光】——drop-shadow 会让细线图标发糊、不利索。
+   可读性靠图标自身颜色 + 悬停/激活时按钮背景反馈（几何已在组件内重校）。 */
 .shot-toolbar button:hover:not(:disabled) { background: var(--bg-item-hover); color: var(--text-primary); }
 .shot-toolbar button.active { background: rgba(var(--accent-rgb), 0.32); color: var(--accent-text); }
 .shot-toolbar button:disabled { opacity: 0.3; cursor: default; }
