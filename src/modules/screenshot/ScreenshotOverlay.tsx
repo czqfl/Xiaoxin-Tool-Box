@@ -270,10 +270,18 @@ export function ScreenshotOverlay() {
         // 遮罩+高亮是纯 SVG/DOM：画好即可亮窗（冻结画面由 Rust 原生冻结层直接贴出）
         await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
         await shotReady().catch(() => {});
-        // 帧数据后台加载进 bg canvas：供放大镜与输出合成，不阻塞显示
+        // 帧数据后台加载进 bg canvas：供放大镜与输出合成，不阻塞显示。
+        // 必须带超时兜底：自定义协议 fetch / IPC 兜底一旦挂起，frameReady 永不
+        // resolve → doOutput 卡死 → 遮罩永不隐藏 → 全屏吞输入（历史卡死根因）。
         frameReadyRef.current = (async () => {
           try {
-            const resp = await fetch(shotFrameUrl(g.index));
+            const ac = new AbortController();
+            const ft = setTimeout(() => ac.abort(), 8000);
+            const resp = await fetch(shotFrameUrl(g.index), { signal: ac.signal }).catch(() => {
+              // 协议不可用（挂起/超时/未注册）时抛错走 IPC 兜底
+              throw new Error("frame protocol unavailable");
+            });
+            clearTimeout(ft);
             if (!resp.ok) throw new Error(`frame ${resp.status}`);
             const bmp = await createImageBitmap(await resp.blob());
             // 旧会话迟到的帧：直接丢弃，绝不画进本会话画布
@@ -621,8 +629,14 @@ export function ScreenshotOverlay() {
     if (outputtingRef.current) return;
     outputtingRef.current = true;
     try {
-      // 极快确认（呼出瞬间回车）时帧可能尚未加载进 canvas：等它就绪再合成
-      try { await frameReadyRef.current; } catch {}
+      // 极快确认（呼出瞬间回车）时帧可能尚未加载进 canvas：等它就绪再合成。
+      // 5s 兜底：帧加载异常挂起时也继续输出流程（遮罩必收，绝不卡死在屏幕）
+      try {
+        await Promise.race([
+          frameReadyRef.current,
+          new Promise<void>((r) => setTimeout(r, 5000)),
+        ]);
+      } catch {}
       if (!bgRef.current || !geom) return;
       // 读 ref 而非 state：键盘 handler 闭包可能捕获旧 render 的 doOutput，
       // 方向键移动选区后 region state 未触发重注册，state 会是过期值
