@@ -29,7 +29,7 @@ use std::ffi::c_void;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Dwm::{
     DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE,
-    DWMWCP_ROUND,
+    DWMWCP_DONOTROUND, DWMWCP_ROUND,
 };
 use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 
@@ -117,10 +117,11 @@ pub fn clear_blur(hwnd: HWND) -> bool {
     unsafe { set_window_composition_attribute(hwnd, &mut data) }
 }
 
-/// Win11：窗口自身设为系统原生圆角。
+/// Win11：窗口自身设为系统原生圆角（rounded=true）或直角（rounded=false）。
 /// DWM 物理裁剪窗口四角，配合不透明窗口是消除"圆角后矩形背景"的确定性方案。
-pub fn apply_rounded_corners(hwnd: HWND) -> bool {
-    let pref = DWMWCP_ROUND;
+/// 工具栏要求直角（用户明确不要圆角），走 DWMWCP_DONOTROUND。
+pub fn apply_rounded_corners(hwnd: HWND, rounded: bool) -> bool {
+    let pref = if rounded { DWMWCP_ROUND } else { DWMWCP_DONOTROUND };
     unsafe {
         DwmSetWindowAttribute(
             hwnd,

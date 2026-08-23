@@ -74,8 +74,30 @@ fn refresh_panel_acrylic<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<
         .try_state::<ConfigState>()
         .map(|s| s.0.lock().unwrap().general.acrylic_enabled)
         .unwrap_or(true);
-    crate::apply_panel_effects_for(window, acrylic);
+    crate::apply_panel_effects_for(window, acrylic, true);
 }
+
+/// 工具栏显示后补刷亚克力（与面板同理，但走直角 rounded=false）。
+/// 【关键】工具栏此前只在启动时由 apply_panel_acrylic 刷一次；若启动瞬间
+/// ConfigState 尚未就绪，window_theme_is_light 会回退到系统主题、把模糊着色算成
+/// 近黑，且 webview 透明也可能在窗口就绪前失效 → 工具栏露出黑窗体。面板靠每次
+/// show 重刷绕过了该时序坑，工具栏这里补上同样的重刷，确保显示时拿到正确主题
+/// 着色与透明背景。rounded=false：用户明确要求工具栏不要圆角。
+#[cfg(windows)]
+fn refresh_toolbar_effects<R: Runtime>(app: &AppHandle<R>) {
+    let Some(window) = app.get_webview_window(TOOLBAR_WINDOW) else {
+        return;
+    };
+    let acrylic = app
+        .try_state::<ConfigState>()
+        .map(|s| s.0.lock().unwrap().general.acrylic_enabled)
+        .unwrap_or(true);
+    crate::apply_panel_effects_for(&window, acrylic, false);
+}
+
+/// 非 Windows 平台：亚克力/直角均为空操作，保持调用点跨平台一致。
+#[cfg(not(windows))]
+fn refresh_toolbar_effects<R: Runtime>(_app: &AppHandle<R>) {}
 
 pub const CLIPBOARD_PANEL: &str = "clipboard-panel";
 pub const FOLDER_PANEL: &str = "folder-panel";
@@ -209,6 +231,8 @@ pub fn set_toolbar_visible_impl<R: Runtime>(app: &AppHandle<R>, on: bool) {
             position_toolbar_default(app, &window);
         }
         let _ = window.show();
+        // 显示后补刷亚克力（直角）：与 show_toolbar_initial 同源修复
+        refresh_toolbar_effects(app);
     } else {
         remember_position(app, &window, TOOLBAR_WINDOW);
         let _ = window.hide();
@@ -375,6 +399,9 @@ pub fn show_toolbar_initial<R: Runtime>(app: &AppHandle<R>) {
         position_toolbar_bottom_right(app, &window);
     }
     let _ = window.show();
+    // 显示后补刷亚克力（直角）：修正启动早期 ConfigState 未就绪导致模糊着色
+    // 算成近黑、webview 透明未生效而露出黑窗体的时序问题
+    refresh_toolbar_effects(app);
 }
 
 /// 切换面板置顶状态。
@@ -390,7 +417,7 @@ pub fn panel_set_always_on_top(window: WebviewWindow, on: bool) -> Result<(), St
             .try_state::<ConfigState>()
             .map(|s| s.0.lock().unwrap().general.acrylic_enabled)
             .unwrap_or(true);
-        crate::apply_panel_effects_for(&window, acrylic);
+        crate::apply_panel_effects_for(&window, acrylic, true);
     }
     Ok(())
 }

@@ -129,6 +129,8 @@ pub struct ShortcutsConfig {
     pub screenshot: String,
     /// 显示 / 隐藏全部贴图
     pub pins: String,
+    /// 屏幕取色（独立呼出十字取色模式）
+    pub picker: String,
 }
 
 impl Default for ShortcutsConfig {
@@ -150,6 +152,8 @@ impl Default for ShortcutsConfig {
             screenshot: "Ctrl+Alt+A".into(),
             // 显示/隐藏全部贴图：Ctrl+Alt+P（Pin）
             pins: "Ctrl+Alt+P".into(),
+            // 屏幕取色：Alt+D（Dropper 吸管；纯 Alt 组合由钩子吞键，不泄漏按键）
+            picker: "Alt+D".into(),
         }
     }
 }
@@ -314,6 +318,8 @@ pub struct ShotConfig {
     pub capture_cursor: bool,
     /// 智能识别窗口/控件边缘（鼠标悬停自动吸附选框）
     pub smart_detect: bool,
+    /// 元素级识别（UIA）：智能识别开启时进一步下钻到按钮/输入框等界面组件
+    pub smart_element: bool,
     /// 放大镜（像素级取色）
     pub magnifier: bool,
     /// 记住上次截取区域（下次呼出预填同样区域）
@@ -335,6 +341,7 @@ impl Default for ShotConfig {
             delay_ms: 0,
             capture_cursor: false,
             smart_detect: true,
+            smart_element: true,
             magnifier: true,
             remember_region: true,
             auto_copy: true,
@@ -394,7 +401,11 @@ impl Default for AnnotateConfig {
                 "#36b37e".into(),
                 "#4c8dff".into(),
                 "#b06fd6".into(),
+                "#ff6fa5".into(),
                 "#ffffff".into(),
+                "#c9c9cd".into(),
+                "#8a94a6".into(),
+                "#595959".into(),
                 "#000000".into(),
             ],
         }
@@ -566,7 +577,12 @@ pub fn config_save(
         crate::panel::TOOLBAR_WINDOW,
     ] {
         if let Some(w) = app.get_webview_window(label) {
-            crate::apply_panel_effects_for(&w, config.general.acrylic_enabled);
+            // 工具栏用直角（用户明确不要圆角）；其余面板保留系统原生圆角
+            crate::apply_panel_effects_for(
+                &w,
+                config.general.acrylic_enabled,
+                label != crate::panel::TOOLBAR_WINDOW,
+            );
         }
     }
     // 设置窗口（带原生边框）：主题切换后立即同步标题栏深浅

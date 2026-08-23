@@ -47,12 +47,13 @@ use tauri_plugin_global_shortcut::ShortcutState;
 pub(crate) fn apply_panel_effects_for<R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
     acrylic: bool,
+    rounded: bool,
 ) {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     if let Ok(handle) = window.window_handle() {
         if let RawWindowHandle::Win32(h) = handle.as_raw() {
             let hwnd = windows::Win32::Foundation::HWND(h.hwnd.get() as _);
-            let _ = acrylic::apply_rounded_corners(hwnd);
+            let _ = acrylic::apply_rounded_corners(hwnd, rounded);
             if acrylic {
                 let _ = acrylic::apply_blur(hwnd, window_theme_is_light(window));
             } else {
@@ -118,7 +119,7 @@ fn apply_panel_acrylic<R: tauri::Runtime>(app: &tauri::AppHandle<R>, acrylic: bo
         translate::TRANSLATE_PANEL,
     ] {
         if let Some(w) = app.get_webview_window(label) {
-            apply_panel_effects_for(&w, acrylic);
+            apply_panel_effects_for(&w, acrylic, true);
         }
     }
 }
@@ -337,11 +338,13 @@ pub fn run() {
             snippets::snippets_delete,
             snippets::snippets_paste,
             screenshot::shot_begin,
+            screenshot::shot_begin_picker,
             screenshot::shot_geometry,
             screenshot::shot_image_raw,
             screenshot::shot_ready,
             screenshot::shot_cursor_global,
             screenshot::shot_window_rect_at,
+            screenshot::shot_ui_rect_at,
             screenshot::shot_last_region,
             // 截图输出（复制/另存为/贴图）：原生二进制 IPC 直传 PNG 字节
             screenshot::shot_output,

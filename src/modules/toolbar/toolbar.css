@@ -9,11 +9,9 @@
   align-items: center;
   gap: 2px;
   padding: 4px;
-  border-radius: var(--radius-panel);
-  /* 边框用 strong 档：轮廓清晰，浅色/复杂壁纸上不至于隐形 */
-  border: 1px solid var(--border-strong);
+  /* 用户明确要求：工具栏不要边框、不要圆角（直角贴合主题玻璃观感） */
   background: rgba(var(--bg-panel-rgb), var(--panel-opacity));
-  /* 悬浮感三件套：明显投影（--shadow-toolbar）+ 顶部高光（strong 档），
+  /* 悬浮感：明显投影（--shadow-toolbar）+ 顶部高光（strong 档），
      让贴边的工具条在任意壁纸上都"浮起来" */
   box-shadow: var(--shadow-toolbar), var(--panel-highlight-strong);
   transition: background var(--dur-fast) var(--ease-out);
