@@ -576,14 +576,10 @@ export function ScreenshotOverlay() {
 
   /** 选区层绘制（普通 2D 画布，非 desynchronized）：
    *  压暗遮罩 + 选区镂空 + 智能高亮 + 边框 + 8 手柄，全部读 ref 直绘。
-   *  【拖拽热路径已下沉到原生层】拖拽/缩放期间本函数直接跳过（nativeDragRef）：
-   *  webview 管线天生落后光标 1~3 帧，原生线程直绘冻结层才能零延迟跟手；
-   *  本画布被清空保持全透明让位，松手交还时按最终矩形重画。
    *  【为什么不能用 desynchronized】该低延迟模式在 DPR≠1（如 150% 缩放）的
    *  Chromium 下存在合成偏移：内容按 DPR=1 合成、窗口是 1.5×，越远离原点
    *  偏移越大——正是"矩形框右下角不跟手"的元凶。 */
   const paintSelCanvas = (phaseNow?: Phase) => {
-    if (nativeDragRef.current) return; // 原生接管期间让位（webview 层保持全透明）
     const cv = selCanvasRef.current;
     if (!cv || !geom || geom.picker) return;
     if (cv.width !== geom.width) cv.width = geom.width;
@@ -794,8 +790,6 @@ export function ScreenshotOverlay() {
     nativeDragRef.current = true;
     cancelSelPaint();
     const g = geomRef.current;
-    const cv = selCanvasRef.current;
-    if (cv && g) cv.getContext("2d")?.clearRect(0, 0, cv.width || g.width, cv.height || g.height);
     const anchor = mode === 0 && dragRef.current ? cssToGlobal(dragRef.current) : { x: 0, y: 0 };
     let s = { sx: 0, sy: 0, sw: 0, sh: 0 };
     if (start && g) {
