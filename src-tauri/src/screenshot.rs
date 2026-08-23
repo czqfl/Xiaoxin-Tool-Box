@@ -659,19 +659,20 @@ pub(crate) fn begin_impl<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
                 }
                 ensure_overlays(&app, &shots);
                 diag_write(&format!("[shot] begin ok, {} monitors", shots.len()));
-                // 看门狗：遮罩就绪后若 60s 内会话未结束（未输出/未取消），强制收场。
-                // 全屏置顶遮罩一旦因任何异常残留（前端挂起、输出链路失败等）会吞掉
-                // 整个桌面的键盘鼠标输入——表现就是"按什么键都卡死"。超时兜底从根上
-                // 杜绝遮罩永久残留（历史卡死根因，见 frame_protocol 注释）。
+                // 看门狗：只兜底「遮罩从未就绪」的异常会话。前端就绪（OVERLAY_READY）
+                // 说明遮罩正常显示、用户可交互——此后由用户 Esc/输出/取消操作收场，
+                // 看门狗退出，绝不 60s 踢掉正在慢慢选区的正常截图。
+                // 全屏置顶遮罩若前端挂起（页面加载失败、事件链路中断）会吞掉整个桌面
+                // 的输入——表现就是"按什么键都卡死"；此时才 60s 强制收场兜底。
                 {
                     let app_wd = app.clone();
                     std::thread::spawn(move || {
                         for _ in 0..120 {
                             std::thread::sleep(std::time::Duration::from_millis(500));
                             if !SHOOTING.load(Ordering::SeqCst) { return; }
-                            if !OVERLAY_READY.load(Ordering::SeqCst) { continue; }
+                            if OVERLAY_READY.load(Ordering::SeqCst) { return; }
                         }
-                        diag_write("[shot] watchdog: session stuck >60s, force hide overlays");
+                        diag_write("[shot] watchdog: overlay never ready >60s, force hide");
                         SHOOTING.store(false, Ordering::SeqCst);
                         hide_all(&app_wd);
                     });

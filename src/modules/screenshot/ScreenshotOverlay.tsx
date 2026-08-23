@@ -841,7 +841,15 @@ export function ScreenshotOverlay() {
 
       {/* initial hint */}
       {phase === "idle" && !dragging && (
-        <div className="shot-hint">{cfg.shot.smart_detect ? "点击窗口直接截取，或拖拽自定义区域 | Esc 取消" : "拖拽选择截图区域 | Esc 取消"}</div>
+        <div className="shot-hint">
+          {cfg.shot.smart_detect ? "点击窗口直接截取，或拖拽自定义区域 | Esc 取消" : "拖拽选择截图区域 | Esc 取消"}
+        </div>
+      )}
+      {/* 选区确定后：明确告知贴图/复制快捷键——按错键不迷茫 */}
+      {phase === "selected" && !textEdit && (
+        <div className="shot-hint">
+          <b>F8</b> 贴图 · <b>Ctrl+T</b> 贴图 · <b>Ctrl+C</b> 复制 · <b>Enter</b> 复制 · <b>Esc</b> 取消
+        </div>
       )}
     </div>
   );
