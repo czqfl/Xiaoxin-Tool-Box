@@ -347,6 +347,9 @@ pub fn run() {
             screenshot::shot_output,
             screenshot::shot_cancel,
             screenshot::shot_save_region,
+            // 原生拖拽层：框选/缩放热路径由 Rust 直绘冻结层，前端只报开始/结束
+            screenshot::shot_drag_begin,
+            screenshot::shot_drag_end,
             pin::pin_create,
             pin::pin_from_clipboard,
             pin::pin_list,

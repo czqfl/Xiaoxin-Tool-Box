@@ -110,6 +110,9 @@ pub fn is_overlay_label(label: &str) -> bool {
 pub(crate) fn hide_all<R: Runtime>(app: &AppHandle<R>) {
     SHOOTING.store(false, Ordering::SeqCst);
     PICKER.store(false, Ordering::SeqCst);
+    // 拖拽进行中被收场（Esc/输出/贴图）：停更线程 + 还原冻结层原帧，
+    // 避免下一会话亮窗瞬间残留上一场拖拽的压暗/边框
+    drag_stop(app);
     let labels: Vec<String> = app.webview_windows().keys()
         .filter(|k| k.starts_with(OVERLAY_PREFIX))
         .cloned().collect();
@@ -291,7 +294,9 @@ unsafe extern "system" fn freeze_wndproc(
     if msg == WM_PAINT {
         let mut ps = PAINTSTRUCT::default();
         let hdc = BeginPaint(hwnd, &mut ps);
-        // 锁内只取值，BitBlt 放锁外避免与更新路径互卡（实际同为主线程，防御性）
+        // 与原生拖拽层的 DIB 直写互斥（锁序：先 BITS 后 FREEZES），防边框撕裂
+        let _bits_guard = FREEZE_BITS_LOCK.lock().unwrap();
+        // 锁内只取值，BitBlt 也在锁内完成——拖拽更新线程写一半时绝不 blit
         let frame = FREEZES.lock().unwrap().values()
             .find(|l| l.child == hwnd)
             .map(|l| (l.memdc, l.w, l.h, l.ready));
@@ -366,6 +371,8 @@ fn update_freeze_frame(idx: usize, w: i32, h: i32, pixels: &[u8]) {
     };
     let need = (w as usize) * (h as usize) * 4;
     if w <= 0 || h <= 0 || pixels.len() < need { return; }
+    // 全局锁序统一为【先 BITS 后 FREEZES】（与 WM_PAINT/拖拽直写一致），防死锁
+    let _bits_guard = FREEZE_BITS_LOCK.lock().unwrap();
     let child = {
         let mut map = FREEZES.lock().unwrap();
         let Some(l) = map.get_mut(&idx) else { return; };
@@ -393,6 +400,8 @@ fn update_freeze_frame(idx: usize, w: i32, h: i32, pixels: &[u8]) {
                 l.h = h;
             }
             if !l.bits.is_null() {
+                // 与 WM_PAINT / 拖拽直写互斥，防止帧替换与绘制并发撕裂
+                let _bits_guard = FREEZE_BITS_LOCK.lock().unwrap();
                 std::ptr::copy_nonoverlapping(pixels.as_ptr(), l.bits, need);
                 l.ready = true;
             }
@@ -408,10 +417,37 @@ fn freeze_ready(idx: usize) -> bool {
     FREEZES.lock().unwrap().get(&idx).map(|l| l.ready).unwrap_or(false)
 }
 
+/// 原生即时亮窗：冻结帧写入后【立刻】show + 抢焦点，不等前端 shot_ready。
+///
+/// 为什么可以不等前端：冻结层贴出的是呼出瞬间的真实屏幕像素，与用户眼前
+/// 的画面完全一致——窗口凭空出现也不会有任何可感知的跳变；压暗遮罩/选区
+/// UI 由 webview 稍后淡入补上。此前必须等「事件→JS 拉几何→React 渲染→
+/// 双 rAF→IPC shot_ready」整条链路走完才敢亮窗，白付几十到一百多毫秒，
+/// 这正是"呼出比 Snipaste 慢一拍"的最大剩余来源（Snipaste 是纯原生直绘）。
+///
+/// OVERLAY_READY 已置位（webview 先就绪）时本函数是幂等的重复 show。
+pub(crate) fn native_show_overlay<R: Runtime>(app: &AppHandle<R>, idx: usize) {
+    if !SHOOTING.load(Ordering::SeqCst) { return; }
+    if let Some(w) = app.get_webview_window(&format!("{OVERLAY_PREFIX}-{idx}")) {
+        let _ = w.show();
+        if idx == CURSOR_MON.load(Ordering::SeqCst) {
+            let _ = w.set_focus();
+            #[cfg(windows)]
+            if let Some(hwnd) = hwnd_of_webview(&w) {
+                crate::acrylic::force_foreground_robust(hwnd);
+            }
+        }
+    }
+}
+
 /// 销毁全部冻结层的 GDI 资源（显示器数量变化重建前调用）
 #[cfg(windows)]
 fn freezes_drop_all() {
     use windows::Win32::Graphics::Gdi::{DeleteDC, DeleteObject};
+    // 先停掉可能在直写 DIB 的拖拽线程，再在 BITS 锁内释放，杜绝 use-after-free
+    DRAG_ACTIVE.store(false, Ordering::SeqCst);
+    *DIM_CACHE.lock().unwrap() = None;
+    let _bits_guard = FREEZE_BITS_LOCK.lock().unwrap();
     let mut map = FREEZES.lock().unwrap();
     for (_, l) in map.drain() {
         unsafe {
@@ -440,6 +476,230 @@ fn invalidate_freezes() {
 
 #[cfg(not(windows))]
 fn invalidate_freezes() {}
+
+// ---------- native drag layer ----------
+// 原生拖拽层：左键框选/手柄缩放期间，专用线程高频轮询 GetCursorPos，
+// 把「压暗遮罩 + 选区镂空 + 主题色边框 (+ 缩放手柄)」直接写进冻结层 DIB。
+//
+// 为什么不画在 webview 里：WebView2 的 鼠标事件→rAF→光栅化→合成器 管线
+// 天生落后真实光标 1~3 帧（60Hz 下 16~50ms），此前 SVG→canvas、去
+// desynchronized、事件内直绘、rAF 合并都试过，仍达不到 Snipaste 的"零延迟
+// 跟手"——Snipaste 是原生 GDI 直绘，光标移动到像素上屏只隔一次 DWM 合成。
+// 现在热路径完全绕开 webview：前端仅在按下后首次移动、松手时各发一次 IPC，
+// 拖动过程【零通信】，原生线程自己读光标、自己画。
+//
+// 绘制目标选冻结层（webview 之下）而非新建窗口：无 z 序/输入穿透问题；
+// 前端激活时清空自己的选区画布保持全透明让位，松手交还时先按最终矩形
+// 重画自己的层再通知原生还原，无缝衔接。
+
+#[cfg(windows)]
+#[derive(Clone)]
+struct DragParams {
+    mon: usize,
+    /// 0=框选（anchor→光标），1=手柄缩放（hx/hy 定活动边，s* 为起始矩形）
+    mode: u8,
+    /// 全局物理坐标
+    ax: i32,
+    ay: i32,
+    hx: i8,
+    hy: i8,
+    sx: i32,
+    sy: i32,
+    sw: u32,
+    sh: u32,
+    /// 主题强调色 RGB（前端从 CSS 变量取，保证与 UI 配色一致）
+    accent: [u8; 3],
+    /// 物理/CSS 像素比（150% DPI = 1.5），边框/手柄尺寸换算用
+    scale: f64,
+}
+
+#[cfg(windows)]
+static DRAG_ACTIVE: AtomicBool = AtomicBool::new(false);
+#[cfg(windows)]
+static DRAG_UPDATER_RUNNING: AtomicBool = AtomicBool::new(false);
+#[cfg(windows)]
+static DRAG_PARAMS: std::sync::LazyLock<Mutex<Option<DragParams>>> =
+    std::sync::LazyLock::new(|| Mutex::new(None));
+/// 全屏 50% 压暗副本：拖拽开始时构建一次，之后逐行 memcpy 复用（纯内存带宽活）
+#[cfg(windows)]
+static DIM_CACHE: std::sync::LazyLock<Mutex<Option<std::sync::Arc<Vec<u8>>>>> =
+    std::sync::LazyLock::new(|| Mutex::new(None));
+/// 冻结层 DIB 写入（更新线程）与 WM_PAINT BitBlt（主线程）互斥，防边框撕裂。
+/// 锁序统一为【先 BITS 后 FREEZES】。
+#[cfg(windows)]
+static FREEZE_BITS_LOCK: std::sync::LazyLock<Mutex<()>> =
+    std::sync::LazyLock::new(|| Mutex::new(()));
+
+/// 结束原生拖拽：停更线程 + 还原冻结层为原始帧（去掉压暗/边框残留）
+#[cfg(windows)]
+fn drag_stop<R: Runtime>(app: &AppHandle<R>) {
+    DRAG_ACTIVE.store(false, Ordering::SeqCst);
+    *DRAG_PARAMS.lock().unwrap() = None;
+    *DIM_CACHE.lock().unwrap() = None;
+    let Some(state) = app.try_state::<ShotState>() else { return };
+    let shots = state.shots.lock().unwrap();
+    let _bits = FREEZE_BITS_LOCK.lock().unwrap();
+    let mut map = FREEZES.lock().unwrap();
+    for (idx, l) in map.iter_mut() {
+        let Some(s) = shots.iter().find(|s| s.geom.index == *idx) else { continue };
+        let need = (l.w as usize) * (l.h as usize) * 4;
+        if l.bits.is_null() || s.bgra.len() < need || !l.ready { continue; }
+        unsafe { std::ptr::copy_nonoverlapping(s.bgra.as_ptr(), l.bits, need); }
+        unsafe { let _ = windows::Win32::Graphics::Gdi::InvalidateRect(Some(l.child), None, false); }
+    }
+}
+
+#[cfg(not(windows))]
+fn drag_stop<R: Runtime>(_: &AppHandle<R>) {}
+
+/// 拖拽更新线程：轮询光标 → 计算矩形 → 写冻结层 DIB → 触发重绘。
+/// sleep 1ms ≈ 数百 Hz，远超刷新率；单次全帧重写约 16MB memcpy 级别，
+/// 相比 webview 管线的合成排队可忽略。退出条件：会话结束/参数被清。
+#[cfg(windows)]
+fn drag_updater<R: Runtime>(app: AppHandle<R>) {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+    loop {
+        if !DRAG_ACTIVE.load(Ordering::SeqCst) || !SHOOTING.load(Ordering::SeqCst) { break; }
+        let Some(p) = DRAG_PARAMS.lock().unwrap().clone() else { break };
+        let mut pt = POINT::default();
+        unsafe { if GetCursorPos(&mut pt).is_err() { break; } }
+        // 光标裁剪到起始显示器内：与 webview 版语义一致（矩形不出本屏）
+        let g = app.try_state::<ShotState>().and_then(|st| {
+            st.shots.lock().unwrap().iter()
+                .find(|s| s.geom.index == p.mon).map(|s| s.geom.clone())
+        });
+        let Some(g) = g else { break };
+        let px = pt.x.clamp(g.x, g.x + g.width as i32 - 1);
+        let py = pt.y.clamp(g.y, g.y + g.height as i32 - 1);
+        // 由模式计算全局矩形；缩放模式的固定锚点取对边/对角
+        let (fx, fy) = if p.mode == 1 {
+            let fx = match p.hx { -1 => p.sx + p.sw as i32, 1 => p.sx, _ => p.sx + p.sw as i32 / 2 };
+            let fy = match p.hy { -1 => p.sy + p.sh as i32, 1 => p.sy, _ => p.sy + p.sh as i32 / 2 };
+            (fx, fy)
+        } else {
+            (p.ax, p.ay)
+        };
+        let gx = fx.min(px);
+        let gy = fy.min(py);
+        let gr: [i32; 4] = [gx, gy, (px - gx).max(0), (py - gy).max(0)];
+        // 全局 → 本显示器局部物理坐标
+        let lr: [i32; 4] = [gr[0] - g.x, gr[1] - g.y, gr[2].max(0), gr[3].max(0)];
+        let Some(pristine) = shot_frame_of(&app, p.mon) else { break };
+        paint_drag_frame(p.mon, lr, &p, &pristine);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    DRAG_UPDATER_RUNNING.store(false, Ordering::SeqCst);
+}
+
+/// 会话中该显示器的原始帧像素（BGRA）
+#[cfg(windows)]
+fn shot_frame_of<R: Runtime>(app: &AppHandle<R>, idx: usize) -> Option<std::sync::Arc<Vec<u8>>> {
+    let state = app.try_state::<ShotState>()?;
+    let shots = state.shots.lock().unwrap();
+    shots.iter().find(|s| s.geom.index == idx).map(|s| s.bgra.clone())
+}
+
+/// 把「压暗 + 镂空 + 边框 (+手柄)」写进指定显示器的冻结层 DIB
+#[cfg(windows)]
+fn paint_drag_frame(idx: usize, r: [i32; 4], p: &DragParams, pristine: &[u8]) {
+    // 压暗缓存：首帧构建（每字节 >>1 即 50% 变暗），此后只读复用
+    let dim: std::sync::Arc<Vec<u8>> = {
+        let mut cache = DIM_CACHE.lock().unwrap();
+        if cache.is_none() {
+            let mut v = pristine.to_vec();
+            for b in v.iter_mut() { *b >>= 1; }
+            *cache = Some(std::sync::Arc::new(v));
+        }
+        match cache.as_ref() { Some(d) => d.clone(), None => return }
+    };
+
+    let target = {
+        let _bits = FREEZE_BITS_LOCK.lock().unwrap();
+        let map = FREEZES.lock().unwrap();
+        let Some(l) = map.get(&idx) else { return };
+        if l.bits.is_null() || !l.ready || l.w <= 0 || l.h <= 0 { return; }
+        unsafe { composite_drag(l.bits, l.w, l.h, pristine, &dim, r, p); }
+        l.child
+    };
+    unsafe { let _ = windows::Win32::Graphics::Gdi::InvalidateRect(Some(target), None, false); }
+}
+
+/// 直接往 DIB 位图写「压暗 + 选区镂空 + 边框 (+缩放手柄)」。
+/// 行外/两侧 memcpy 自预构建的压暗副本，镂空行中央 memcpy 自原始帧——
+/// 全程零逐像素混合运算（50% 压暗已在缓存里做好），单帧成本≈几次大 memcpy。
+///
+/// # Safety
+/// `bits` 必须指向 ≥ w*h*4 字节的可写 DIB 内存；调用方需持有 FREEZE_BITS_LOCK。
+#[cfg(windows)]
+unsafe fn composite_drag(
+    bits: *mut u8, w: i32, h: i32,
+    pristine: &[u8], dim: &[u8],
+    r: [i32; 4], p: &DragParams,
+) {
+    if w <= 0 || h <= 0 || pristine.len() < (w as usize) * (h as usize) * 4 { return; }
+    let stride = (w as usize) * 4;
+    let bt = ((1.5f64 * p.scale).round() as i32).max(2).min(6); // 边框厚（物理px）
+    let hs = ((8f64 * p.scale).round() as i32).max(8);          // 手柄边长
+    let x0 = r[0].clamp(0, w);
+    let y0 = r[1].clamp(0, h);
+    let x1 = (r[0] + r[2] as i32).clamp(0, w);
+    let y1 = (r[1] + r[3] as i32).clamp(0, h);
+    if x1 - x0 < 2 || y1 - y0 < 2 { return; }
+    let [ar, ag, ab] = p.accent;
+    let border_px: [u8; 4] = [ab, ag, ar, 0xFF]; // DIB 字节序 BGRA
+    let handle_px: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
+
+    let copy_row = |row: *mut u8, src: &[u8], xa: i32, xb: i32| {
+        let len = ((xb - xa).max(0) as usize) * 4;
+        if len > 0 {
+            std::ptr::copy_nonoverlapping(src.as_ptr().add(xa as usize * 4), row.add(xa as usize * 4), len);
+        }
+    };
+    let fill_span = |row: *mut u8, xa: i32, xb: i32, px: [u8; 4]| {
+        for x in xa.max(0)..xb.min(w) {
+            let o = row.add(x as usize * 4);
+            *o = px[0]; *o.add(1) = px[1]; *o.add(2) = px[2]; *o.add(3) = px[3];
+        }
+    };
+
+    // 缩放模式画手柄（框选阶段与 webview 行为一致：只有边框没有手柄）
+    let mut handles: Vec<[i32; 4]> = Vec::with_capacity(8);
+    if p.mode == 1 {
+        let hw = hs;
+        for hy in [r[1], r[1] + r[3] as i32 / 2, r[1] + r[3] as i32] {
+            for hx in [r[0], r[0] + r[2] as i32 / 2, r[0] + r[2] as i32] {
+                handles.push([hx - hw / 2, hy - hw / 2, hx - hw / 2 + hw, hy - hw / 2 + hw]);
+            }
+        }
+    }
+
+    for y in 0..h {
+        let row = bits.add(y as usize * stride);
+        if y < y0 || y >= y1 {
+            copy_row(row, dim, 0, w); // 选区行之外：整行压暗
+            continue;
+        }
+        copy_row(row, dim, 0, x0);       // 左侧压暗
+        copy_row(row, pristine, x0, x1); // 选区内：透出原亮度
+        copy_row(row, dim, x1, w);       // 右侧压暗
+        // 边框：上下边缘整段 + 中间行两侧竖条（内描边）
+        if y < (y0 + bt).min(y1) || y >= (y1 - bt).max(y0) {
+            fill_span(row, x0, x1, border_px);
+        } else {
+            fill_span(row, x0, x0 + bt, border_px);
+            fill_span(row, x1 - bt, x1, border_px);
+        }
+        // 手柄：accent 底 + 白芯（覆盖在边框之上）
+        for hr in &handles {
+            if y >= hr[1] && y < hr[3] {
+                fill_span(row, hr[0], hr[2], border_px);
+                fill_span(row, hr[0] + 1, hr[2] - 1, handle_px);
+            }
+        }
+    }
+}
 
 // ---------- overlay creation ----------
 
@@ -479,6 +739,9 @@ fn create_overlays<R: Runtime>(app: &AppHandle<R>, geoms: &[ShotMonitorGeom]) {
                             update_freeze_frame(idx, w as i32, h as i32, &s.bgra);
                         }
                     }
+                    // 会话进行中的补写路径同样原生即时亮窗（与统一写帧闭包同速）；
+                    // 预热建窗时 SHOOTING=false，native_show_overlay 直接入空
+                    native_show_overlay(&app2, idx);
                 }
                 // 兜底：仅当本会话前端从未就绪（页面加载失败等）时超时强制显示。
                 // 不能只看 is_visible——用户可能在 3 秒内已正常完成截图（窗口被隐藏），
@@ -696,6 +959,22 @@ pub(crate) fn begin_impl<R: Runtime>(app: AppHandle<R>, picker: bool) -> Result<
                             attach_freeze_layer(g.index, parent, g.width as i32, g.height as i32);
                             update_freeze_frame(g.index, g.width as i32, g.height as i32, &s.bgra);
                         }
+                        // 原生即时亮窗：帧已贴出即显示。给前端留 ~24ms 宽限
+                        // （复用窗口时它要先收到 shot-refresh 清掉上一会话的
+                        // 选区/工具栏残留 DOM，再画本会话压暗层）——期间若前端
+                        // 先调了 shot_ready（OVERLAY_READY 置位）则立即交还，
+                        // 走的还是"前端就绪才亮"的老次序，绝不闪旧内容。
+                        // 预热建窗路径 SHOOTING=false 时 native_show_overlay 直接入空。
+                        std::thread::spawn(move || {
+                            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(24);
+                            while std::time::Instant::now() < deadline {
+                                if OVERLAY_READY.load(Ordering::SeqCst) { return; }
+                                std::thread::sleep(std::time::Duration::from_millis(3));
+                            }
+                            for s in &shots2 {
+                                native_show_overlay(&app3, s.geom.index);
+                            }
+                        });
                     });
                 }
                 diag_write(&format!("[shot] begin ok, {} monitors", shots.len()));
@@ -1128,4 +1407,47 @@ pub fn shot_cancel(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn shot_save_region(region: [i32; 4]) {
     *LAST_REGION.lock().unwrap() = Some(region);
+}
+
+/// 原生拖拽开始：登记参数（起始点/手柄模式/主题色/DPI 比）并拉起更新线程。
+/// 只在按下后首次移动时调用一次——拖动过程零 IPC，原生线程自己轮询光标。
+#[tauri::command]
+pub fn shot_drag_begin(
+    app: AppHandle,
+    window: WebviewWindow,
+    mode: u8,
+    ax: i32,
+    ay: i32,
+    hx: i8,
+    hy: i8,
+    sx: i32,
+    sy: i32,
+    sw: u32,
+    sh: u32,
+    accent: Vec<u8>,
+    scale: f64,
+) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let idx = overlay_index(window.label()).ok_or("not overlay")?;
+        let a = [accent.first().copied().unwrap_or(76), accent.get(1).copied().unwrap_or(141), accent.get(2).copied().unwrap_or(255)];
+        *DRAG_PARAMS.lock().unwrap() = Some(DragParams {
+            mon: idx, mode, ax, ay, hx, hy, sx, sy, sw, sh,
+            accent: a, scale,
+        });
+        *DIM_CACHE.lock().unwrap() = None; // 新一场拖拽重建压暗缓存
+        DRAG_ACTIVE.store(true, Ordering::SeqCst);
+        if !DRAG_UPDATER_RUNNING.swap(true, Ordering::SeqCst) {
+            let app2 = app.clone();
+            std::thread::spawn(move || drag_updater(app2));
+        }
+    }
+    Ok(())
+}
+
+/// 原生拖拽结束：前端已按最终矩形重画自己的层，这里停线程并还原冻结层原帧
+#[tauri::command]
+pub fn shot_drag_end(app: AppHandle) -> Result<(), String> {
+    drag_stop(&app);
+    Ok(())
 }

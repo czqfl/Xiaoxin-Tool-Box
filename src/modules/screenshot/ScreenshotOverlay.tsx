@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
   shotGeometry, shotImageDataRaw, shotWindowRectAt, shotUiRectAt, shotReady, shotFrameUrl,
-  shotOutputPost, shotCancel, shotSaveRegion, diagLog, copyText,
+  shotOutputPost, shotCancel, shotSaveRegion, diagLog, copyText, shotDragBegin, shotDragEnd,
 } from "../../core/tauri";
 import { useConfigStore } from "../../stores/configStore";
 import "./screenshot.css";
@@ -47,8 +47,12 @@ const Svg = ({ children }: { children: React.ReactNode }) => (
 );
 const IcoRect = () => <Svg><rect x="4.5" y="6.5" width="15" height="11" rx="2"/></Svg>;
 const IcoEllipse = () => <Svg><ellipse cx="12" cy="12" rx="8.5" ry="6.5"/></Svg>;
+// 形状组图标：矩形 + 椭圆轮廓叠合（Snipaste 风格，未激活时显示）
+const IcoShape = () => <Svg><rect x="3.5" y="5.5" width="12" height="10" rx="1.5"/><ellipse cx="15" cy="14" rx="6" ry="5"/></Svg>;
 const IcoArrow = () => <Svg><path d="M6 18L18 6M18 6H12M18 6V12"/></Svg>;
 const IcoLine = () => <Svg><path d="M5.5 18.5L18.5 5.5"/></Svg>;
+// 线组图标：折线 + 箭头（与参考图同款：线与箭头分属一类工具）
+const IcoLineGroup = () => <Svg><path d="M4 20 L11 13 L18 16"/><path d="M14 14 L18 16 L18 12"/></Svg>;
 const IcoBrush = () => <Svg><path d="M16.5 4.5l3 3L9 18l-4 1 1-4z"/><path d="M13.5 7.5l3 3"/></Svg>;
 const IcoMosaic = () => <Svg><rect x="4" y="4" width="7" height="7" rx="1.6"/><rect x="13" y="4" width="7" height="7" rx="1.6"/><rect x="4" y="13" width="7" height="7" rx="1.6"/><rect x="13" y="13" width="7" height="7" rx="1.6"/></Svg>;
 const IcoTextT = () => <Svg><path d="M5 6.5h14"/><path d="M12 6.5V19"/></Svg>;
@@ -63,16 +67,15 @@ const IcoClose = () => <Svg><path d="M6 6l12 12M18 6L6 18"/></Svg>;
 /** 工具条按钮（Snipaste 式）：同类形状合并为一键，重复点击在组内循环切换
  *  （矩形→椭圆→矩形…），悬停提示「名称、名称 (Ctrl+N)」，Ctrl+数字直达。
  *  每组图标带主题色：常态即彩色描边，激活时同色底+白色描边 */
-const TOOL_BUTTONS: { items: [Tool, () => JSX.Element, string, string][]; hotkey: string }[] = [
-  { items: [["rect", IcoRect, "矩形", "#64d2ff"], ["ellipse", IcoEllipse, "椭圆", "#64d2ff"]], hotkey: "Ctrl+1" },
-  { items: [["line", IcoLine, "直线", "#32d74b"]], hotkey: "Ctrl+2" },
-  // 箭头独立成键：旧版与直线合并成组（点一次变箭头、再点变回直线），
-  // 用户完全发现不了这个功能——独立按钮 + 独立快捷键，与 Snipaste 一致
-  { items: [["arrow", IcoArrow, "箭头", "#ff375f"]], hotkey: "Ctrl+3" },
-  { items: [["brush", IcoBrush, "画笔", "#ff9f0a"]], hotkey: "Ctrl+4" },
-  { items: [["mosaic", IcoMosaic, "马赛克", "#bf5af2"]], hotkey: "Ctrl+5" },
-  { items: [["text", IcoTextT, "文字", "#ffd60a"]], hotkey: "Ctrl+6" },
-  { items: [["number", IcoNumber, "序号", "#ff453a"]], hotkey: "Ctrl+7" },
+const TOOL_BUTTONS: { items: [Tool, () => JSX.Element, string, string][]; groupIcon?: () => JSX.Element; hotkey: string }[] = [
+  // 形状组：未激活显示组合图标（IcoShape），激活后显示当前子工具图标
+  { items: [["rect", IcoRect, "矩形", "#64d2ff"], ["ellipse", IcoEllipse, "椭圆", "#64d2ff"]], groupIcon: IcoShape, hotkey: "Ctrl+1" },
+  // 线组：未激活显示组合图标（IcoLineGroup），激活后显示当前子工具图标
+  { items: [["line", IcoLine, "直线", "#32d74b"], ["arrow", IcoArrow, "箭头", "#32d74b"]], groupIcon: IcoLineGroup, hotkey: "Ctrl+2" },
+  { items: [["brush", IcoBrush, "画笔", "#ff9f0a"]], hotkey: "Ctrl+3" },
+  { items: [["mosaic", IcoMosaic, "马赛克", "#bf5af2"]], hotkey: "Ctrl+4" },
+  { items: [["text", IcoTextT, "文字", "#ffd60a"]], hotkey: "Ctrl+5" },
+  { items: [["number", IcoNumber, "序号", "#ff453a"]], hotkey: "Ctrl+6" },
 ];
 
 /** 按钮的悬停提示文案：「矩形、椭圆 (Ctrl+1)」；单工具为「画笔 (Ctrl+3)」 */
@@ -214,6 +217,8 @@ export function ScreenshotOverlay() {
   const [region, setRegion] = useState<Rect>({x:0,y:0,w:0,h:0});
   const [snap, setSnap] = useState<Rect|null>(null);
   const [tool, setTool] = useState<Tool>("select");
+  // 子工具选择 popover：哪个组展开了下拉菜单（index or null）
+  const [submenuOpen, setSubmenuOpen] = useState<number | null>(null);
   const [color, setColor] = useState("#e5484d");
   const [sw, setSw] = useState(3);
   // 滚轮无级调节粗细时的提示徽标（短暂显示当前像素值）
@@ -309,7 +314,23 @@ export function ScreenshotOverlay() {
   const applyToolButton = (b: { items: [Tool, () => JSX.Element, string, string][] }) => {
     const idx = b.items.findIndex(([t]) => t === toolRef.current);
     setTool(b.items[(idx + 1) % b.items.length][0]);
+    setSubmenuOpen(null); // 切了工具顺手关掉子菜单
   };
+  // 点击工具栏外部（遮罩/选区层）或 Esc → 关闭子选择 popover
+  useEffect(() => {
+    if (submenuOpen === null) return;
+    const closeIfOutside = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && !t.closest(".shot-toolbtn")) setSubmenuOpen(null);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setSubmenuOpen(null); };
+    document.addEventListener("mousedown", closeIfOutside);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", closeIfOutside);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [submenuOpen]);
 
   // 压暗遮罩淡入：show() 那一刻原生冻结层立即上屏（全亮度），webview 的
   // 压暗层要晚 1~2 帧才首次 present——硬切就是一次"亮→暗"的闪。
@@ -360,6 +381,11 @@ export function ScreenshotOverlay() {
     // 只刷新几何/帧数据，不再重复复位。复位若发生在已亮窗的会话上，
     // 智能高亮会被清掉再重画，表现为"呼出瞬间选框来回闪几下"
     dragRef.current = null; resizeRef.current = null; downPtRef.current = null;
+    // 原生拖拽层复位：上一会话若在拖拽中被强制收场，这里兜底停更+还原；
+    // 并挂上重置标记隐藏旧工具栏等浮层 DOM（原生即时亮窗后、本页收到
+    // shot-refresh 前的窗口期，防止残留 UI 在新画面上闪现）
+    if (nativeDragRef.current) { nativeDragRef.current = false; void shotDragEnd().catch(() => {}); }
+    rootRef.current?.setAttribute("data-resetting", "1");
     setAnnos([]); setUndos([]); setTextEdit(null); setNumCnt(1); setShowMag(false);
     setRegion({x:0,y:0,w:0,h:0}); regRef.current = {x:0,y:0,w:0,h:0};
     setPhase("idle"); setSnap(null); setDragging(false); phaseRef.current = "idle";
@@ -407,6 +433,8 @@ export function ScreenshotOverlay() {
         setDimFx(true);
         await new Promise<void>((r) => requestAnimationFrame(() => r()));
         await shotReady().catch(() => {});
+        // 本会话 UI 已就绪：解除重置标记，工具栏/提示等浮层恢复可见
+        rootRef.current?.removeAttribute("data-resetting");
         // 帧数据后台加载进 bg canvas：供放大镜与输出合成，不阻塞显示。
         // 必须带超时兜底：自定义协议 fetch / IPC 兜底一旦挂起，frameReady 永不
         // resolve → doOutput 卡死 → 遮罩永不隐藏 → 全屏吞输入（历史卡死根因）。
@@ -512,8 +540,8 @@ export function ScreenshotOverlay() {
       else if (e.code === "KeyC" && e.ctrlKey && phase === "selected") { e.preventDefault(); if (!e.repeat) void doOutput("copy"); }
       // 贴图不再用内置 Ctrl+T/F8：全局「显示/隐藏贴图」热键（用户可在快捷键页
       // 自定义，如 F8）在截图会话中由 Rust 转发 shot://pin-hotkey 事件触发贴图
-      // Ctrl+1~7 直达工具条按钮；重复按同键在组内循环（仅矩形?椭圆仍成组，
-      // 其余工具各占一键、按一下即选中）
+      // Ctrl+1~6 直达工具条按钮；重复按同键在组内循环（仅矩形?椭圆/直线?箭头成组，
+      // 其余工具各占一键、按一下即选中；组按钮的子选择 popover 由右侧下拉箭头触发）
       else if (e.ctrlKey && e.code.startsWith("Digit") && phase === "selected") {
         const n = Number(e.code.slice(5));
         if (n >= 1 && n <= TOOL_BUTTONS.length) { e.preventDefault(); if (!e.repeat) applyToolButton(TOOL_BUTTONS[n - 1]); }
@@ -551,14 +579,14 @@ export function ScreenshotOverlay() {
 
   /** 选区层绘制（普通 2D 画布，非 desynchronized）：
    *  压暗遮罩 + 选区镂空 + 智能高亮 + 边框 + 8 手柄，全部读 ref 直绘。
-   *  【为什么弃用 SVG】SVG/DOM 属性更新必须走 Chromium 合成器的完整帧调度，
-   *  快速拖动时边框右下角永远落后光标一到两帧（"错位/不跟手"的根因）；
-   *  改为读 ref 直绘 + onMove 快速路径（事件内同步重绘，不经 rAF/state）。
+   *  【拖拽热路径已下沉到原生层】拖拽/缩放期间本函数直接跳过（nativeDragRef）：
+   *  webview 管线天生落后光标 1~3 帧，原生线程直绘冻结层才能零延迟跟手；
+   *  本画布被清空保持全透明让位，松手交还时按最终矩形重画。
    *  【为什么不能用 desynchronized】该低延迟模式在 DPR≠1（如 150% 缩放）的
    *  Chromium 下存在合成偏移：内容按 DPR=1 合成、窗口是 1.5×，越远离原点
-   *  偏移越大——正是"矩形框右下角不跟手"的元凶。普通画布靠浏览器正常合成，
-   *  坐标用物理像素（与画布位图 1:1），CSS 尺寸自动缩放，任何 DPI 下都重合。 */
+   *  偏移越大——正是"矩形框右下角不跟手"的元凶。 */
   const paintSelCanvas = (phaseNow?: Phase) => {
+    if (nativeDragRef.current) return; // 原生接管期间让位（webview 层保持全透明）
     const cv = selCanvasRef.current;
     if (!cv || !geom || geom.picker) return;
     if (cv.width !== geom.width) cv.width = geom.width;
@@ -744,6 +772,54 @@ export function ScreenshotOverlay() {
   const phaseRef = useRef(phase);
   useEffect(() => { phaseRef.current = phase; }, [phase]);
 
+  /* ---- 原生拖拽层接管 ----
+   * 拖拽/缩放热路径下沉到 Rust：原生线程高频轮询光标、把压暗+镂空+边框
+   * 直绘进冻结层 DIB（webview 之下），从光标移动到像素上屏只隔一次 DWM
+   * 合成，与 Snipaste 同级延迟。前端只在【首次移动】和【松手】各发一次 IPC。
+   * nativeDrag=true 期间本组件的选区画布保持全透明（清空 + 跳过重绘）让位，
+   * 否则 webview 的压暗层会盖住原生绘制。 */
+  const nativeDragRef = useRef(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  /** CSS 像素 → 全局物理坐标（原生层工作在物理像素，无 DPI 折算误差） */
+  const cssToGlobal = (pt: Pt): Pt => {
+    const g = geomRef.current;
+    const k = cssScale();
+    return g ? { x: Math.round(pt.x * k) + g.x, y: Math.round(pt.y * k) + g.y } : { x: pt.x, y: pt.y };
+  };
+  /** 从缓存的主题色字符串 "rgb(r,g,b)" 解析 RGB（解析失败回退默认强调色） */
+  const accentRGB = (): [number, number, number] => {
+    const m = (accentRef.current ?? "").match(/\d+/g);
+    return m && m.length >= 3 ? [Number(m[0]), Number(m[1]), Number(m[2])] : [76, 141, 255];
+  };
+  /** 激活原生绘制并清空 webview 选区画布让位（幂等；每场拖拽只发一次 IPC） */
+  const beginNativeDrag = (mode: number, hx = 0, hy = 0, start?: Rect) => {
+    if (nativeDragRef.current || pickerModeRef.current) return;
+    nativeDragRef.current = true;
+    cancelSelPaint();
+    const g = geomRef.current;
+    const cv = selCanvasRef.current;
+    if (cv && g) cv.getContext("2d")?.clearRect(0, 0, cv.width || g.width, cv.height || g.height);
+    const anchor = mode === 0 && dragRef.current ? cssToGlobal(dragRef.current) : { x: 0, y: 0 };
+    let s = { sx: 0, sy: 0, sw: 0, sh: 0 };
+    if (start && g) {
+      const sp = cssToGlobal({ x: start.x, y: start.y });
+      const k = cssScale();
+      s = { sx: sp.x, sy: sp.y, sw: Math.round(start.w * k), sh: Math.round(start.h * k) };
+    }
+    void shotDragBegin({
+      mode, ax: anchor.x, ay: anchor.y, hx, hy, ...s,
+      accent: accentRGB(), scale: cssScale(),
+    }).catch(() => {});
+  };
+  /** 松手交还：先解除让位标志让 webview 能重画最终矩形，画完再通知 Rust
+   *  还原冻结层——两个提交落在同一刷新周期，无缝衔接无闪烁 */
+  const handoverNativeDrag = (paint: () => void) => {
+    const wasNative = nativeDragRef.current;
+    nativeDragRef.current = false;
+    paint();
+    if (wasNative) void shotDragEnd().catch(() => {});
+  };
+
   // 放大镜逐帧绘制（在 applyMoveVisual 的 rAF 里调用）：
   // 直改 style + canvas.drawImage 采样冻结帧，无 setState → 拖动零重渲染
   const drawMagnifier = () => {
@@ -839,7 +915,11 @@ export function ScreenshotOverlay() {
       if (h < 0) { y += h; h = -h; }
       // 只写 ref + 直改 DOM，不 setState——拖拽/缩放期间任何 setState 都会
       // 触发整组件重渲染，是掉帧延迟的根源；state 在松手时（onUp）统一提交
-      if (w >= 2 && h >= 2) { const r = {x,y,w,h}; regRef.current = r; queueSelPaint(); }
+      if (w >= 2 && h >= 2) {
+        const r = {x,y,w,h}; regRef.current = r;
+        beginNativeDrag(1, hx, hy, start); // 首次移动时原生层接管（幂等）
+        queueSelPaint(); // 原生接管后此调用为空操作（paintSelCanvas 内部让位）
+      }
       return;
     }
     // phase 必须读 ref：mousedown 刚把 phase 置回 idle 时 React 还没提交，
@@ -848,6 +928,7 @@ export function ScreenshotOverlay() {
       const s = dragRef.current;
       const r = { x: Math.min(s.x,pt.x), y: Math.min(s.y,pt.y), w: Math.abs(pt.x-s.x), h: Math.abs(pt.y-s.y) };
       regRef.current = r;
+      beginNativeDrag(0); // 首次移动时原生层接管（幂等）
       queueSelPaint();
       // 兜底再清一次智能高亮引用（可视 snap 已在 mousedown 时立即隐藏）
       if ((r.w > 2 || r.h > 2) && snapRef.current) { snapRef.current = null; setSnap(null); }
@@ -863,15 +944,16 @@ export function ScreenshotOverlay() {
       mouseGlobalRef.current = { x: pt.x * cssScale() + geom.x, y: pt.y * cssScale() + geom.y };
     }
     movePtRef.current = pt;
-    // 【快速路径】拖拽/缩放中的选区矩形同步直绘：不经 rAF、零 setState——
-    // DOM 更新与本次 mousemove 事件同帧上屏。此前经 rAF 排程，事件若在
-    // 帧尾到达会被推迟整整一帧（~16ms），快速甩动时边框右下角追不上光标。
-    // rAF 通道现在只负责放大镜等非实时关键视觉
+    // 【原生快速路径】拖拽/缩放热路径由 Rust 直绘冻结层：首次移动时发一次
+    // shotDragBegin 登记锚点，此后拖动过程零 IPC——原生线程高频轮询光标
+    // 自绘，从光标移动到像素上屏只隔一次 DWM 合成（Snipaste 级延迟）。
+    // 本画布被清空让位；regRef 持续更新供松手时提交最终矩形
     if (dragRef.current && phaseRef.current === "idle") {
       const s = dragRef.current;
       const r = { x: Math.min(s.x,pt.x), y: Math.min(s.y,pt.y), w: Math.abs(pt.x-s.x), h: Math.abs(pt.y-s.y) };
       regRef.current = r;
-      queueSelPaint();
+      beginNativeDrag(0);
+      queueSelPaint(); // 原生接管后为空操作（paintSelCanvas 内部让位）
       if ((r.w > 2 || r.h > 2) && snapRef.current) { snapRef.current = null; setSnap(null); }
     } else if (resizeRef.current) {
       const { hx, hy, start, startPt } = resizeRef.current;
@@ -883,7 +965,11 @@ export function ScreenshotOverlay() {
       else if (hy === 1) { h = start.h + dy; }
       if (w < 0) { x += w; w = -w; }
       if (h < 0) { y += h; h = -h; }
-      if (w >= 2 && h >= 2) { const r = {x,y,w,h}; regRef.current = r; queueSelPaint(); }
+      if (w >= 2 && h >= 2) {
+        const r = {x,y,w,h}; regRef.current = r;
+        beginNativeDrag(1, hx, hy, start);
+        queueSelPaint();
+      }
     }
     // 手柄悬停光标反馈（手柄由画布绘制，无 CSS :hover 可用）
     if (phaseRef.current === "selected" && !dragRef.current && !resizeRef.current) {
@@ -990,10 +1076,10 @@ export function ScreenshotOverlay() {
     cancelSelPaint(); // applyMoveVisual 里排队的重绘作废，下面按最终状态显式重画
     if (resizeRef.current) {
       resizeRef.current = null;
-      // 拖拽期间走的是直绘路径，松手把最终矩形同步回 state 并按最终状态重画
-      //（手柄出现、边框定型）
+      // 拖拽期间走的是原生直绘路径，松手把最终矩形同步回 state 并按最终状态重画
+      //（手柄出现、边框定型），随后交还原生层还原冻结帧
       setRegion(regRef.current);
-      paintSelCanvas();
+      handoverNativeDrag(() => paintSelCanvas());
       const sc = cssScale();
       shotSaveRegion([regRef.current.x*sc+(geom?.x??0),regRef.current.y*sc+(geom?.y??0),regRef.current.w*sc,regRef.current.h*sc]); return;
     }
@@ -1011,7 +1097,7 @@ export function ScreenshotOverlay() {
       phaseRef.current = "selected";
       // 关键：上面 applyMoveVisual 已把画布清成 0×0（点击时起点=终点），
       // 必须立即按最终矩形重画，否则边框和亮区消失
-      paintSelCanvas("selected");
+      handoverNativeDrag(() => paintSelCanvas("selected"));
       const sc = cssScale();
       shotSaveRegion([r.x*sc+(geom?.x??0),r.y*sc+(geom?.y??0),r.w*sc,r.h*sc]);
       return;
@@ -1020,11 +1106,11 @@ export function ScreenshotOverlay() {
     if (r.w > 2 && r.h > 2) {
       setRegion(r); regRef.current = r; setPhase("selected");
       phaseRef.current = "selected";
-      paintSelCanvas("selected");
+      handoverNativeDrag(() => paintSelCanvas("selected"));
       const sc = cssScale();
       shotSaveRegion([r.x*sc+(geom?.x??0),r.y*sc+(geom?.y??0),r.w*sc,r.h*sc]);
     }
-    else { setPhase("idle"); phaseRef.current = "idle"; paintSelCanvas("idle"); }
+    else { setPhase("idle"); phaseRef.current = "idle"; handoverNativeDrag(() => paintSelCanvas("idle")); }
   };
 
   // 选区 PNG 预编码缓存：选区/标注稳定后空闲时提前编码，
@@ -1174,7 +1260,7 @@ export function ScreenshotOverlay() {
   const displayW = "100vw", displayH = "100vh";
 
   return (
-    <div className="shot-overlay" style={{width:displayW,height:displayH,position:"fixed",top:0,left:0,overflow:"hidden",cursor:"crosshair"}}
+    <div ref={rootRef} className="shot-overlay" style={{width:displayW,height:displayH,position:"fixed",top:0,left:0,overflow:"hidden",cursor:"crosshair"}}
       onWheel={(ev) => {
         // 选区阶段滚轮=无级调节画笔粗细（1~24px，一格 1px，与速度无关）；
         // 面板里的三挡位保留作为快捷预设
@@ -1288,24 +1374,48 @@ export function ScreenshotOverlay() {
         const insideY = region.y + region.h - 40;
         const ty = outsideY + 32 <= vh - 6 ? outsideY : Math.max(insideY, 8);
         const panelOpen = NEEDS_CONFIG.includes(tool);
-        // 工具栏贴近屏幕底缘时，按钮 tooltip 翻转到上方显示——tooltip 默认在
-        // 按钮下方 ~40px 处，工具栏位于选区内下方位置时会整体超出屏幕
+        // 工具栏贴近屏幕底缘时：tooltip 翻到上方（已有 .tips-above CSS）；
+        // 配置面板（色板/粗细）也必须翻到工具栏【上方】，否则会跑出屏幕
         const tipsAbove = ty >= vh - 80;
+        const panelAbove = tipsAbove;
         return (
-          <div className={`shot-toolbar-float${panelOpen ? " has-panel" : ""}${tipsAbove ? " tips-above" : ""}`} style={{ right: rightPx, top: ty }}>
+          <div className={`shot-toolbar-float${panelOpen ? " has-panel" : ""}${tipsAbove ? " tips-above" : ""}${panelAbove ? " panel-above" : ""}`} style={{ right: rightPx, top: ty }}>
             <div className="shot-toolbar">
               {TOOL_BUTTONS.map((b, i) => {
                 const active = b.items.some(([t]) => t === tool);
-                // 组按钮图标跟随当前子工具（如组内未激活取第一个）；图标保留
-                // 各自的功能色，激活态高亮统一跟随【应用主题色】
                 const cur = b.items.find(([t]) => t === tool) ?? b.items[0];
-                const Ic = cur[1]; const c = cur[3];
+                // Snipaste 风格两级选择器：未激活显示【组图标】（形状/线这类语义）；
+                // 激活后显示当前子工具图标——一眼看出选中的是矩形还是椭圆、线还是箭头
+                const MainIcon = active ? cur[1] : (b.groupIcon ?? b.items[0][1]);
+                const c = b.items[0][3]; // 组功能色（与子工具一致，统一即可）
+                const isGroup = b.items.length > 1;
                 return (
-                  <button key={i} className={active ? "active" : ""} data-tip={btnTip(b)}
-                    style={active ? { background: "rgba(var(--accent-rgb), 0.28)", boxShadow: "inset 0 0 0 1px rgba(var(--accent-rgb), 0.55)" } : undefined}
-                    onClick={() => applyToolButton(b)}>
-                    <span style={{ color: active ? "#fff" : c, display: "inline-flex" }}><Ic /></span>
-                  </button>
+                  <div key={i} className={`shot-toolbtn${active ? " active" : ""}${isGroup ? " has-submenu" : ""}`}>
+                    <button className={"shot-toolbtn-main" + (active ? " active" : "")} data-tip={btnTip(b)}
+                      onClick={() => applyToolButton(b)}>
+                      <span style={{ color: active ? "#fff" : c, display: "inline-flex" }}><MainIcon /></span>
+                    </button>
+                    {/* 下拉小箭头：组工具（形状/线）才显示，展开子选择 popover */}
+                    {isGroup && (
+                      <button className="shot-toolbtn-caret" aria-label="选择子工具"
+                        data-tip={b.items.map(([, , n]) => n).join(" / ")}
+                        onClick={(ev) => { ev.stopPropagation(); setSubmenuOpen(submenuOpen === i ? null : i); }}>
+                        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 4 L5 7 L8 4"/></svg>
+                      </button>
+                    )}
+                    {/* 子工具 popover：列出组内所有子工具（图标 + 名称），
+                        点击切换 tool 并关闭。贴近底缘时与面板一起翻到上方 */}
+                    {submenuOpen === i && (
+                      <div className={`shot-toolbtn-submenu${panelAbove ? " above" : ""}`} onClick={(ev) => ev.stopPropagation()}>
+                        {b.items.map(([t, Ic, name, cc]) => (
+                          <button key={t} className={tool === t ? "active" : ""} data-tip={name}
+                            onClick={() => { setTool(t); setSubmenuOpen(null); }}>
+                            <span style={{ color: tool === t ? "#fff" : cc, display: "inline-flex" }}><Ic /></span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 );
               })}
               <div className="shot-toolbar-sep" />

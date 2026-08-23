@@ -339,6 +339,18 @@ export const shotLastRegion = () =>
 /** 保存本次选区记忆 */
 export const shotSaveRegion = (region: [number, number, number, number]) =>
   invoke("shot_save_region", { region });
+/** 原生拖拽开始：登记锚点/手柄模式/主题色，之后拖动过程零 IPC
+ *  （Rust 线程自己轮询光标并直绘冻结层），只在按下后首次移动时调一次 */
+export interface ShotDragParams {
+  mode: number; ax: number; ay: number; hx: number; hy: number;
+  sx: number; sy: number; sw: number; sh: number;
+  accent: [number, number, number]; scale: number;
+  [k: string]: unknown;
+}
+export const shotDragBegin = (p: ShotDragParams) =>
+  invoke<void>("shot_drag_begin", p);
+/** 原生拖拽结束：前端已按最终矩形重画自己的层，Rust 还原冻结层原帧 */
+export const shotDragEnd = () => invoke<void>("shot_drag_end");
 /** 截图输出（复制/另存为/贴图）：PNG【原始字节】经 Tauri 原生二进制通道直传。
  *  invoke 直接携带 ArrayBuffer（零 base64、零 JSON 序列化），元数据走请求头。
  *  带 15s 超时兜底：万一通道异常也绝不让遮罩窗卡在屏幕上吞掉全部点击 */

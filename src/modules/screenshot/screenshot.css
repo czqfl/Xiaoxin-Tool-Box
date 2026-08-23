@@ -60,6 +60,8 @@ html[data-window="shot"] body { background: transparent; }
    把按钮 tooltip(::after, z-index:320) 关死在条内——颜色面板（后置兄弟）反而
    盖住 tooltip（"提示框被颜色面板挡住"根因）。伪元素做模糊效果相同，
    且不产生条级层叠上下文，tooltip 可正常浮到面板之上 */
+/* 工具栏贴近屏幕底缘时：把色板/粗细面板翻转到工具栏【上方】（旧版跑到屏幕外） */
+.shot-toolbar-float.panel-above { flex-direction: column-reverse; }
 .shot-toolbar { display: flex; align-items: center; gap: 1px; background: rgba(var(--bg-panel-rgb), var(--panel-opacity)); border-radius: 0; padding: 3px 4px; flex-wrap: nowrap; white-space: nowrap; position: relative; }
 .shot-toolbar::before { content: ""; position: absolute; inset: 0; z-index: -1; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
 .shot-toolbar-panel { display: flex; align-items: center; gap: 7px; background: rgba(var(--bg-panel-rgb), var(--panel-opacity)); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-radius: 0; padding: 8px 10px; white-space: nowrap; align-self: stretch; }
@@ -69,6 +71,37 @@ html[data-window="shot"] body { background: transparent; }
 .shot-toolbar button:hover:not(:disabled) { background: var(--bg-item-hover); color: var(--text-primary); }
 .shot-toolbar button.active { background: rgba(var(--accent-rgb), 0.32); color: var(--accent-text); }
 .shot-toolbar button:disabled { opacity: 0.3; cursor: default; }
+
+/* ---- 两级选择器（Snipaste 风格）：主按钮 + 下拉小箭头 + 子菜单 popover ---- */
+/* .shot-toolbtn 是按钮组容器：主按钮（左侧图标）+ 可能的 caret（右侧下拉） */
+.shot-toolbtn { position: relative; display: inline-flex; align-items: stretch; }
+.shot-toolbtn-main { /* 继承 .shot-toolbar button 的基样式；只是包一层方便做 caret 分隔线 */ }
+.shot-toolbtn-main.active { background: rgba(var(--accent-rgb), 0.28); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.55); }
+/* 下拉小箭头：组工具（形状/线）才有；比主按钮窄，激活时与主按钮共享视觉 */
+.shot-toolbtn-caret {
+  min-width: 16px !important; width: 16px; padding: 0 0 0 2px !important; margin-left: 1px;
+  border-left: 1px solid rgba(255,255,255,0.18);
+  color: var(--text-secondary);
+  border-radius: 0 2px 2px 0 !important;
+}
+.shot-toolbtn.has-submenu .shot-toolbtn-main { border-radius: 2px 0 0 2px !important; }
+.shot-toolbtn.active .shot-toolbtn-caret { background: rgba(var(--accent-rgb), 0.28); color: #fff; border-left-color: rgba(var(--accent-rgb), 0.55); }
+.shot-toolbtn-caret:hover { background: var(--bg-item-hover); color: var(--text-primary); }
+.shot-toolbtn.active .shot-toolbtn-caret:hover { background: rgba(var(--accent-rgb), 0.38); }
+/* 子工具 popover：浮在主按钮正下方（贴近底缘时翻到上方），列出组内所有子工具图标 */
+.shot-toolbtn-submenu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 220;
+  display: inline-flex; gap: 1px; padding: 4px; align-items: center;
+  background: rgba(var(--bg-panel-rgb), var(--panel-opacity));
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.08);
+  border-radius: 2px;
+  animation: shot-submenu-in 100ms var(--ease-out) both;
+}
+.shot-toolbtn-submenu.above { top: auto; bottom: calc(100% + 4px); }
+.shot-toolbtn-submenu button { min-width: 27px; min-height: 27px; }
+.shot-toolbtn-submenu button.active { background: rgba(var(--accent-rgb), 0.28); color: var(--accent-text); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.55); }
+@keyframes shot-submenu-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
 /* 悬停提示：条下方浮出「名称 (快捷键)」小标签 */
 .shot-toolbar button[data-tip]:hover::after {
   content: attr(data-tip);
@@ -81,7 +114,7 @@ html[data-window="shot"] body { background: transparent; }
    位置始终基于工具栏当前实际位置计算，绝不超出屏幕可视范围 */
 .tips-above .shot-toolbar button[data-tip]:hover::after { top: auto; bottom: calc(100% + 9px); }
 /* 工具栏两端按钮的 tooltip 向条内侧对齐，防止水平方向超出屏幕 */
-.shot-toolbar > button:first-of-type[data-tip]:hover::after { left: 0; transform: none; }
+.shot-toolbar > .shot-toolbtn:first-child .shot-toolbtn-main[data-tip]:hover::after { left: 0; transform: none; }
 .shot-toolbar .shot-toolbar-actions button:last-child[data-tip]:hover::after { left: auto; right: 0; transform: none; }
 .shot-toolbar-group { display: flex; gap: 1px; align-items: center; }
 .shot-toolbar-sep { width: 1px; height: 16px; background: var(--border-strong); margin: 0 5px; flex-shrink: 0; }
@@ -131,6 +164,19 @@ html[data-window="shot"] body { background: transparent; }
 :root[data-theme="mint"] .shot-toolbar button.active,
 :root[data-theme="skyblue"] .shot-toolbar button.active,
 :root[data-theme="red"] .shot-toolbar button.active { background: rgba(var(--accent-rgb), 0.92); color: #fff; }
+/* 子菜单 popover 在浅色主题下用同样的「深玻璃 + accent 微染」基色，与主条协调 */
+:root[data-theme="light"] .shot-toolbtn-submenu,
+:root[data-theme="mint"] .shot-toolbtn-submenu,
+:root[data-theme="skyblue"] .shot-toolbtn-submenu,
+:root[data-theme="red"] .shot-toolbtn-submenu {
+  background:
+    linear-gradient(rgba(var(--accent-rgb), 0.18), rgba(var(--accent-rgb), 0.18)),
+    rgba(24, 26, 30, 0.9);
+}
+:root[data-theme="light"] .shot-toolbtn-submenu button,
+:root[data-theme="mint"] .shot-toolbtn-submenu button,
+:root[data-theme="skyblue"] .shot-toolbtn-submenu button,
+:root[data-theme="red"] .shot-toolbtn-submenu button { color: #f2f4f7; }
 :root[data-theme="light"] .shot-toolbar-sep,
 :root[data-theme="mint"] .shot-toolbar-sep,
 :root[data-theme="skyblue"] .shot-toolbar-sep,
@@ -160,3 +206,13 @@ html[data-window="shot"] body { background: transparent; }
   color: #fff; font: 600 11px/1.7 Consolas, "Courier New", monospace;
 }
 /* 选区提示条已并入左下角 .shot-hint-panel（选区操作提示 + 覆盖隐藏） */
+/* ---- 原生即时亮窗竞态保护 ----
+   呼出时 Rust 在冻结帧写入后 ~24ms 即亮窗（不等前端链路），本页收到
+   shot-refresh 后会先挂 data-resetting 再逐帧复位 UI——期间隐藏上一会话
+   残留的浮层 DOM，防止旧工具栏/提示/文字编辑器在新画面上闪现 */
+.shot-overlay[data-resetting="1"] .shot-toolbar-float,
+.shot-overlay[data-resetting="1"] .shot-hint-panel,
+.shot-overlay[data-resetting="1"] .shot-mag,
+.shot-overlay[data-resetting="1"] .shot-text-editor,
+.shot-overlay[data-resetting="1"] .shot-sw-badge,
+.shot-overlay[data-resetting="1"] .shot-toolbtn-submenu { display: none !important; }
