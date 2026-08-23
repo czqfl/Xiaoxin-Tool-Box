@@ -1446,9 +1446,11 @@ export function ScreenshotOverlay() {
                     {isGroup && submenuOpen === i && (
                       <div className={`shot-toolbtn-submenu${panelAbove ? " above" : ""}`} onClick={(ev) => ev.stopPropagation()}>
                         <div className="shot-submenu-tools">
+                          {/* 选图形后面板保持展开：可继续调颜色/粗细；
+                              收起靠再点一级图标或点面板外部 */}
                           {b.items.map(([t, Ic, name, cc]) => (
                             <button key={t} className={tool === t ? "active" : ""} data-tip={name}
-                              onClick={() => { setTool(t); setSubmenuOpen(null); }}>
+                              onClick={() => setTool(t)}>
                               <span style={{ color: tool === t ? "#fff" : cc, display: "inline-flex" }}><Ic /></span>
                             </button>
                           ))}
