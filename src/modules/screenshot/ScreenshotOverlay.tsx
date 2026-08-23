@@ -316,20 +316,14 @@ export function ScreenshotOverlay() {
     setTool(b.items[(idx + 1) % b.items.length][0]);
     setSubmenuOpen(null); // 切了工具顺手关掉子菜单
   };
-  // 点击工具栏外部（遮罩/选区层）或 Esc → 关闭子选择 popover
+  // 枚举面板收起只靠：再点一级图标（toggle）/ Esc。
+  // 【不能】用"点击面板外部关闭"——用户在选区内按下开始画图形时，mousedown
+  // 落在面板外，会把刚选好的图形/颜色面板一并关掉（主人反馈的 bug，线组同病）
   useEffect(() => {
     if (submenuOpen === null) return;
-    const closeIfOutside = (e: MouseEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (t && !t.closest(".shot-toolbtn")) setSubmenuOpen(null);
-    };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setSubmenuOpen(null); };
-    document.addEventListener("mousedown", closeIfOutside);
     document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", closeIfOutside);
-      document.removeEventListener("keydown", onKey);
-    };
+    return () => document.removeEventListener("keydown", onKey);
   }, [submenuOpen]);
 
   // 压暗遮罩淡入：show() 那一刻原生冻结层立即上屏（全亮度），webview 的
