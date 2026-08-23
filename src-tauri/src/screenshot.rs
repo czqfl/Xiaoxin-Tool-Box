@@ -400,8 +400,7 @@ fn update_freeze_frame(idx: usize, w: i32, h: i32, pixels: &[u8]) {
                 l.h = h;
             }
             if !l.bits.is_null() {
-                // 与 WM_PAINT / 拖拽直写互斥，防止帧替换与绘制并发撕裂
-                let _bits_guard = FREEZE_BITS_LOCK.lock().unwrap();
+                // 已在 BITS 锁内：与 WM_PAINT / 拖拽直写互斥，防帧替换撕裂
                 std::ptr::copy_nonoverlapping(pixels.as_ptr(), l.bits, need);
                 l.ready = true;
             }

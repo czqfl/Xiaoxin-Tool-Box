@@ -72,23 +72,12 @@ html[data-window="shot"] body { background: transparent; }
 .shot-toolbar button.active { background: rgba(var(--accent-rgb), 0.32); color: var(--accent-text); }
 .shot-toolbar button:disabled { opacity: 0.3; cursor: default; }
 
-/* ---- 两级选择器（Snipaste 风格）：主按钮 + 下拉小箭头 + 子菜单 popover ---- */
-/* .shot-toolbtn 是按钮组容器：主按钮（左侧图标）+ 可能的 caret（右侧下拉） */
+/* ---- 两级选择器：一级类别图标恒定，点按后在其正下方平铺枚举子图形 ---- */
+/* .shot-toolbtn 是按钮组容器（一级图标 + 可选的子图形枚举） */
 .shot-toolbtn { position: relative; display: inline-flex; align-items: stretch; }
-.shot-toolbtn-main { /* 继承 .shot-toolbar button 的基样式；只是包一层方便做 caret 分隔线 */ }
+.shot-toolbtn-main { /* 继承 .shot-toolbar button 的基样式 */ }
 .shot-toolbtn-main.active { background: rgba(var(--accent-rgb), 0.28); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.55); }
-/* 下拉小箭头：组工具（形状/线）才有；比主按钮窄，激活时与主按钮共享视觉 */
-.shot-toolbtn-caret {
-  min-width: 16px !important; width: 16px; padding: 0 0 0 2px !important; margin-left: 1px;
-  border-left: 1px solid rgba(255,255,255,0.18);
-  color: var(--text-secondary);
-  border-radius: 0 2px 2px 0 !important;
-}
-.shot-toolbtn.has-submenu .shot-toolbtn-main { border-radius: 2px 0 0 2px !important; }
-.shot-toolbtn.active .shot-toolbtn-caret { background: rgba(var(--accent-rgb), 0.28); color: #fff; border-left-color: rgba(var(--accent-rgb), 0.55); }
-.shot-toolbtn-caret:hover { background: var(--bg-item-hover); color: var(--text-primary); }
-.shot-toolbtn.active .shot-toolbtn-caret:hover { background: rgba(var(--accent-rgb), 0.38); }
-/* 子工具 popover：浮在主按钮正下方（贴近底缘时翻到上方），列出组内所有子工具图标 */
+/* 子图形枚举：点一级图标后直接平铺在正下方（非下拉框），列出一行子工具图标 */
 .shot-toolbtn-submenu {
   position: absolute; top: calc(100% + 4px); left: 0; z-index: 220;
   display: inline-flex; gap: 1px; padding: 4px; align-items: center;
@@ -101,7 +90,7 @@ html[data-window="shot"] body { background: transparent; }
 .shot-toolbtn-submenu.above { top: auto; bottom: calc(100% + 4px); }
 .shot-toolbtn-submenu button { min-width: 27px; min-height: 27px; }
 .shot-toolbtn-submenu button.active { background: rgba(var(--accent-rgb), 0.28); color: var(--accent-text); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.55); }
-@keyframes shot-submenu-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes shot-submenu-in { from { opacity: 0; } to { opacity: 1; } }
 /* 悬停提示：条下方浮出「名称 (快捷键)」小标签 */
 .shot-toolbar button[data-tip]:hover::after {
   content: attr(data-tip);

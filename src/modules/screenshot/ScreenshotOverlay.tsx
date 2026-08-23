@@ -482,6 +482,9 @@ export function ScreenshotOverlay() {
       } catch {}
       if (!rerunRef.current) break;
     }
+    // 兜底：会话加载中途失败（几何拉取异常等）也要解除重置标记，
+    // 否则浮层 DOM 永久隐藏、遮罩只剩冻结画面无法交互提示
+    rootRef.current?.removeAttribute("data-resetting");
     loadingRef.current = false;
   };
 
@@ -1383,29 +1386,25 @@ export function ScreenshotOverlay() {
             <div className="shot-toolbar">
               {TOOL_BUTTONS.map((b, i) => {
                 const active = b.items.some(([t]) => t === tool);
-                const cur = b.items.find(([t]) => t === tool) ?? b.items[0];
-                // Snipaste 风格两级选择器：未激活显示【组图标】（形状/线这类语义）；
-                // 激活后显示当前子工具图标——一眼看出选中的是矩形还是椭圆、线还是箭头
-                const MainIcon = active ? cur[1] : (b.groupIcon ?? b.items[0][1]);
+                // 一级图标【恒定不变】：形状/线组固定显示类别图标（矩形+椭圆、
+                // 折线+箭头），不随激活变成子工具图标——保持主排图标稳定可认
+                const MainIcon = b.groupIcon ?? b.items[0][1];
                 const c = b.items[0][3]; // 组功能色（与子工具一致，统一即可）
                 const isGroup = b.items.length > 1;
                 return (
                   <div key={i} className={`shot-toolbtn${active ? " active" : ""}${isGroup ? " has-submenu" : ""}`}>
-                    <button className={"shot-toolbtn-main" + (active ? " active" : "")} data-tip={btnTip(b)}
-                      onClick={() => applyToolButton(b)}>
+                    <button className={"shot-toolbtn-main" + (active ? " active" : "")} data-tip={submenuOpen === i ? undefined : btnTip(b)}
+                      onClick={() => {
+                        // 组工具：点击一级图标直接在其下方展开子图形枚举（无下拉框）；
+                        // 单工具：直接激活
+                        if (isGroup) setSubmenuOpen(submenuOpen === i ? null : i);
+                        else applyToolButton(b);
+                      }}>
                       <span style={{ color: active ? "#fff" : c, display: "inline-flex" }}><MainIcon /></span>
                     </button>
-                    {/* 下拉小箭头：组工具（形状/线）才显示，展开子选择 popover */}
-                    {isGroup && (
-                      <button className="shot-toolbtn-caret" aria-label="选择子工具"
-                        data-tip={b.items.map(([, , n]) => n).join(" / ")}
-                        onClick={(ev) => { ev.stopPropagation(); setSubmenuOpen(submenuOpen === i ? null : i); }}>
-                        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 4 L5 7 L8 4"/></svg>
-                      </button>
-                    )}
-                    {/* 子工具 popover：列出组内所有子工具（图标 + 名称），
-                        点击切换 tool 并关闭。贴近底缘时与面板一起翻到上方 */}
-                    {submenuOpen === i && (
+                    {/* 子图形枚举：点一级图标后直接平铺在其正下方（不浮出下拉框）；
+                        点选切换 tool 并关闭。贴近底缘时翻到上方 */}
+                    {isGroup && submenuOpen === i && (
                       <div className={`shot-toolbtn-submenu${panelAbove ? " above" : ""}`} onClick={(ev) => ev.stopPropagation()}>
                         {b.items.map(([t, Ic, name, cc]) => (
                           <button key={t} className={tool === t ? "active" : ""} data-tip={name}
