@@ -652,6 +652,23 @@ pub(crate) fn begin_impl<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
                 }
                 ensure_overlays(&app, &shots);
                 diag_write(&format!("[shot] begin ok, {} monitors", shots.len()));
+                // 看门狗：遮罩就绪后若 60s 内会话未结束（未输出/未取消），强制收场。
+                // 全屏置顶遮罩一旦因任何异常残留（前端挂起、输出链路失败等）会吞掉
+                // 整个桌面的键盘鼠标输入——表现就是"按什么键都卡死"。超时兜底从根上
+                // 杜绝遮罩永久残留（历史卡死根因，见 frame_protocol 注释）。
+                {
+                    let app_wd = app.clone();
+                    std::thread::spawn(move || {
+                        for _ in 0..120 {
+                            std::thread::sleep(std::time::Duration::from_millis(500));
+                            if !SHOOTING.load(Ordering::SeqCst) { return; }
+                            if !OVERLAY_READY.load(Ordering::SeqCst) { continue; }
+                        }
+                        diag_write("[shot] watchdog: session stuck >60s, force hide overlays");
+                        SHOOTING.store(false, Ordering::SeqCst);
+                        hide_all(&app_wd);
+                    });
+                }
             }
             Err(e) => {
                 SHOOTING.store(false, Ordering::SeqCst);
