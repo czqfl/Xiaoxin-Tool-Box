@@ -29,6 +29,12 @@ function ImageThumb({ entryId }: { entryId: string }) {
   const cached = useClipboardStore((s) => s.imageCache[entryId]);
   const [src, setSrc] = useState(cached ?? "");
 
+  // entryId 变化时必须重置 src：组件实例可能被 React 复用到另一条目上
+  // （列表渲染漏 key 等场景），残留旧 data-url 会显示不相干的图片
+  useEffect(() => {
+    setSrc(useClipboardStore.getState().imageCache[entryId] ?? "");
+  }, [entryId]);
+
   useEffect(() => {
     if (src) return;
     let cancelled = false;

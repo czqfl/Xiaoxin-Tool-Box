@@ -61,6 +61,8 @@ export function PinWindow() {
     void listen<{ id: string }>("pin://assign", (e) => {
       idRef.current = e.payload.id;
       replayIntro();
+      // 新贴图由 Rust 重设了窗口尺寸：作废旧缓存，下次滚轮重新拉取
+      sizeRef.current = null;
       setSrc(pinImageUrl(e.payload.id));
     }).then((f) => { un = f; });
     return () => { un?.(); };
@@ -89,13 +91,24 @@ export function PinWindow() {
 
   // 左键按住状态：左键+滚轮 = 调透明度（Snipaste 同款交互）
   const btnHeld = useRef(false);
+  // opacity 镜像：滚轮 effect 只挂载一次，经此读取最新值
+  const opacityRef = useRef(opacity);
+  opacityRef.current = opacity;
 
-  // 缩放角标：显示比例，停止滚动 ~1s 后自动隐藏
-  const showZoomBadge = (scale: number) => {
-    setZoomLabel(`${Math.round(scale * 100)}%`);
+  // 角标：缩放比例 / 透明度（左上角），停止操作 ~1s 后自动隐藏
+  const showBadge = (text: string) => {
+    setZoomLabel(text);
     window.clearTimeout(zoomHideTimer.current);
     zoomHideTimer.current = window.setTimeout(() => setZoomLabel(null), 1000);
   };
+
+  // ---- 滚轮缩放的尺寸缓存与 rAF 合并 ----
+  // 【为什么不能逐事件 outerSize()】每次滚轮都异步查窗口尺寸再 setSize，
+  // 连续滚动时多个在途 IPC 返回的"过期尺寸"互相覆盖 → 窗口忽大忽小闪烁。
+  // 缓存当前尺寸后同步累乘，rAF 把同帧内多次滚动合并成一次 setSize
+  const sizeRef = useRef<{ w: number; h: number } | null>(null);
+  const pendingSizeRef = useRef<{ w: number; h: number } | null>(null);
+  const zoomRafRef = useRef(0);
 
   // mouse wheel: 普通滚动=缩放；左键按住滚动=透明度 ±5%（范围 5%~100%）
   useEffect(() => {
@@ -104,21 +117,36 @@ export function PinWindow() {
     const h = (e: WheelEvent) => {
       e.preventDefault();
       const win = getCurrentWindow();
-      // Ctrl+滚轮 或 左键按住+滚轮：调透明度 ±5%（范围 5%~100%，Snipaste 同款）
+      // Ctrl+滚轮 或 左键按住+滚轮：调透明度 ±5%（范围 5%~100%，Snipaste 同款），
+      // 左上角角标实时提示当前透明度
       if ((e.ctrlKey || btnHeld.current) && idRef.current) {
-        setOpacity((o) => Math.min(1, Math.max(0.05, +(o - Math.sign(e.deltaY) * 0.05).toFixed(2))));
+        const nv = Math.min(1, Math.max(0.05, +(opacityRef.current - Math.sign(e.deltaY) * 0.05).toFixed(2)));
+        setOpacity(nv);
+        showBadge(`透明度 ${Math.round(nv * 100)}%`);
         debouncePersist();
         return;
       }
-      win.outerSize().then((size) => {
-        const factor = e.deltaY > 0 ? 0.9 : 1.1;
-        const nw = Math.max(40, Math.round(size.width * factor));
-        const nh = Math.max(40, Math.round(size.height * factor));
-        win.setSize(new PhysicalSize(nw, nh)).catch(() => {});
-        // 左上角实时缩放比例：当前窗宽 / 图片原始宽（未缩放即 100%）
-        if (baseWRef.current > 0) showZoomBadge(nw / baseWRef.current);
-        debouncePersist();
-      });
+      let base = sizeRef.current;
+      if (!base) {
+        // 首次滚动：拉一次当前尺寸建立缓存（此后全部同步计算）
+        void win.outerSize().then((s) => { sizeRef.current = { w: s.width, h: s.height }; }).catch(() => {});
+        return;
+      }
+      const factor = e.deltaY > 0 ? 0.9 : 1.1;
+      const nw = Math.max(40, Math.round(base.w * factor));
+      const nh = Math.max(40, Math.round(base.h * factor));
+      sizeRef.current = { w: nw, h: nh };
+      pendingSizeRef.current = { w: nw, h: nh };
+      if (!zoomRafRef.current) {
+        zoomRafRef.current = requestAnimationFrame(() => {
+          zoomRafRef.current = 0;
+          const p = pendingSizeRef.current;
+          if (p) getCurrentWindow().setSize(new PhysicalSize(p.w, p.h)).catch(() => {});
+        });
+      }
+      // 左上角实时缩放比例：当前窗宽 / 图片原始宽（未缩放即 100%）
+      if (baseWRef.current > 0) showBadge(`${Math.round((nw / baseWRef.current) * 100)}%`);
+      debouncePersist();
     };
     window.addEventListener("mousedown", md);
     window.addEventListener("mouseup", mu);

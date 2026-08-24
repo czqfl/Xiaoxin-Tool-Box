@@ -5,7 +5,7 @@
   "identifier": "com.xiaoxin.toolbox.app",
   "build": {
     "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:1421",
+    "devUrl": "http://localhost:1422",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
@@ -153,7 +153,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -165,7 +167,10 @@
       "nsis": {
         "installerIcon": "icons/icon.ico",
         "installMode": "both",
-        "languages": ["SimpChinese", "English"],
+        "languages": [
+          "SimpChinese",
+          "English"
+        ],
         "displayLanguageSelector": false,
         "compression": "lzma"
       }

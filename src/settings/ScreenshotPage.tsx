@@ -1,7 +1,8 @@
-﻿/** Screenshot & Pin settings page with sub-tabs */
+/** Screenshot & Pin settings page with sub-tabs */
 import { useState } from "react";
 import { useConfigStore } from "../stores/configStore";
 import { Segmented, SettingGroup, SettingRow, Slider, Switch } from "./components";
+import { ShortcutRow } from "./ShortcutRow";
 
 type Tab = "shot" | "pin" | "annotate";
 
@@ -42,9 +43,30 @@ export function ScreenshotPage() {
       {tab === "shot" && (
         <>
           <SettingGroup>
-            <SettingRow title="启用截图功能" desc="关闭后快捷键和工具栏入口不再生效">
+            <SettingRow title="启用截图功能" desc="关闭后快捷键（含取色/贴图）注销，工具栏入口一并隐藏">
               <Switch checked={config.shot.enabled} onChange={(v) => updateShot({ enabled: v })} />
             </SettingRow>
+            {config.shot.enabled && (
+              <>
+                <ShortcutRow
+                  target="screenshot"
+                  title="开始截图"
+                  desc="点击快捷键后按下新组合，例如 Ctrl+Alt+A（冻结屏幕 + 全屏遮罩选区）"
+                />
+                <ShortcutRow
+                  target="picker"
+                  title="屏幕取色"
+                  desc="点击快捷键后按下新组合，例如 Alt+D（十字线跟随鼠标显示坐标与颜色，C 复制颜色，Shift 切换 RGB/HEX）"
+                />
+                <ShortcutRow
+                  target="pins"
+                  title="显示 / 隐藏全部贴图"
+                  desc="点击快捷键后按下新组合，例如 Ctrl+Alt+P（一键显示或隐藏所有贴在桌面上的图片）"
+                />
+              </>
+            )}
+          </SettingGroup>
+          <SettingGroup>
             <SettingRow title="延时截图" desc="按下快捷键后等待的时间，0 为立即">
               <Segmented
                 value={String(config.shot.delay_ms)}

@@ -85,6 +85,14 @@ struct StartPayload {
 /// 剪贴板"又发现 DeepSeek 回答区 / VS Code 等自绘编辑器不标准暴露文本选区，UIA 拿不到。
 /// 最终落到混合方案：UIA 覆盖常规场景零副作用，剪贴板兜底补上残差应用，二者结合最稳。
 pub fn trigger_selection_translate<R: Runtime>(app: &AppHandle<R>) {
+    // 功能停用守卫：快捷键已不注册，这里兜工具栏残留图标等残余入口
+    if app
+        .try_state::<crate::config::ConfigState>()
+        .map(|s| !s.0.lock().unwrap().translator.enabled)
+        .unwrap_or(false)
+    {
+        return;
+    }
     let app = app.clone();
 
     // 面板若还开着（上一次翻译没关），先隐藏，让源应用回到前台。

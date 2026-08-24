@@ -16,7 +16,8 @@ import type {
   FilesSortMode,
   InstalledApp,
 } from "../types";
-import { Segmented, SettingGroup, SettingRow } from "./components";
+import { Segmented, SettingGroup, SettingRow, Switch } from "./components";
+import { ShortcutRow } from "./ShortcutRow";
 import { GlassSelect, type GlassOption } from "../components/GlassSelect";
 import { IconFiles, IconPlus, IconTrash } from "../components/icons";
 
@@ -140,6 +141,25 @@ export function FilesPage() {
       <p className="page-desc">
         在统一位置快速新建 / 打开 / 管理多种类型文件；可配置文件类型，并为每种类型单独指定默认打开程序
       </p>
+
+      <div className="setting-group-title">功能</div>
+      <SettingGroup>
+        <SettingRow title="启用快速文件功能" desc="关闭后快捷键注销，工具栏 / 托盘 / 侧栏入口一并隐藏">
+          <Switch
+            checked={config.files.enabled}
+            onChange={(on) => {
+              void update({ ...config, files: { ...config.files, enabled: on } });
+            }}
+          />
+        </SettingRow>
+        {config.files.enabled && (
+          <ShortcutRow
+            target="files"
+            title="呼出快速文件面板"
+            desc="点击快捷键后按下新组合，例如 Alt+Q（快速新建 / 管理各类文件）"
+          />
+        )}
+      </SettingGroup>
 
       <SettingGroup>
         <SettingRow

@@ -89,6 +89,20 @@ pub const SNIPPETS_PANEL: &str = "snippets-panel";
 /// 悬浮工具栏窗口（常驻小工具条，不参与面板互斥，独立显隐）
 pub const TOOLBAR_WINDOW: &str = "toolbar";
 
+/// 面板标签 → 所属功能开关 key（无对应功能的面板返回 None，不受开关约束）。
+/// toggle_panel / 托盘菜单构建共用，保证停用功能的一切入口同步失效。
+pub fn panel_feature(label: &str) -> Option<&'static str> {
+    match label {
+        CLIPBOARD_PANEL => Some("clipboard"),
+        FOLDER_PANEL => Some("folder"),
+        CREDENTIAL_PANEL => Some("credentials"),
+        PORT_PANEL => Some("port"),
+        FILES_PANEL => Some("files"),
+        SNIPPETS_PANEL => Some("snippets"),
+        _ => None,
+    }
+}
+
 /// 面板显隐变化广播（payload: { label, visible }）。
 /// 工具栏前端据此给"当前打开的面板"图标加高亮标志；settings / translate-popup 也广播。
 pub const EVT_PANEL_VISIBILITY: &str = "panel://visibility-changed";
@@ -445,7 +459,20 @@ fn ensure_panel_window<R: Runtime>(
 /// 先落到工具栏窗口（目标面板瞬时失焦），若用聚焦判定则第二次点击永远不成立、
 /// 面板关不掉（"要双击才能关"的根因）。各面板独立开合、互不影响。
 pub fn toggle_panel<R: Runtime>(app: &AppHandle<R>, label: &str) {
-    // 窗口可能已被销毁（旧版本点 X）→ 自动重建，避免"以后都打不开"
+    // 功能停用守卫：停用功能的面板一律不响应（快捷键已不注册，这里兜
+    // 托盘残留菜单/工具栏残留图标/事件竞态等一切残余入口）
+    if panel_feature(label)
+        .map(|key| {
+            app.try_state::<ConfigState>()
+                .map(|s| !s.0.lock().unwrap().feature_enabled(key))
+                .unwrap_or(false)
+        })
+        .unwrap_or(false)
+    {
+        crate::storage::diag_write(&format!("[toggle_panel] {label} blocked: feature disabled"));
+        return;
+    }
+    // 面板窗口已被销毁（旧版本的 X / 系统自动重建）时先重建，避免"以后都打不开"
     let Some(window) = ensure_panel_window(app, label) else {
         return;
     };
@@ -728,4 +755,82 @@ pub fn toolbar_geometry(window: tauri::WebviewWindow) -> Result<ToolbarGeometry,
         mon_w: mon.2,
         mon_h: mon.3,
     })
+}
+
+/// 工具栏跨屏裁剪：把窗口可见区域限制在其所在显示器内（SetWindowRgn）。
+///
+/// 【为什么需要】多屏时窗口系统没有"屏幕外"概念——贴边收起把工具栏滑出
+/// 本屏边界，藏起来的部分会原样显示在相邻屏幕上（"收起后屁股露在另一个
+/// 屏幕"）。收起/弹出动画期间前端逐帧调用本命令并传入当帧位置：跨界时
+/// 仅显示落在本屏内的部分（收起静止时即只剩贴边的 SLIVER 亮轨条）；完全
+/// 回到本屏内时清除区域（恢复完整窗口与 DWM 阴影）。
+///
+/// x/y 由前端传入当帧动画位置（与 setPosition 同帧，避免读回滞后一帧的
+/// 闪烁）；尺寸取窗口当前实际值（动画期间不变）。
+#[tauri::command]
+pub fn toolbar_apply_clip(
+    window: tauri::WebviewWindow,
+    x: i32,
+    y: i32,
+) -> Result<bool, String> {
+    #[cfg(windows)]
+    {
+        use windows::Win32::Graphics::Gdi::{CreateRectRgn, SetWindowRgn};
+        let app = window.app_handle();
+        let size = window.outer_size().map_err(|e| e.to_string())?;
+        // 所在显示器：用窗口与各显示器的重叠面积判定（而非窗口中心）。
+        // 收起态窗口大部分在屏外，中心可能落在相邻屏幕——用中心判定会裁到
+        // 错误的显示器，导致"屁股露在另一个屏幕"。重叠面积最大者即正确归属。
+        let mon = app
+            .available_monitors()
+            .ok()
+            .and_then(|ms| {
+                let mut best: Option<(i32, _)> = None;
+                for m in ms {
+                    let p = m.position();
+                    let s = m.size();
+                    let ix0 = x.max(p.x);
+                    let iy0 = y.max(p.y);
+                    let ix1 = (x + size.width as i32).min(p.x + s.width as i32);
+                    let iy1 = (y + size.height as i32).min(p.y + s.height as i32);
+                    let area = (ix1 - ix0).max(0) * (iy1 - iy0).max(0);
+                    if area > 0 {
+                        match best {
+                            Some((best_area, _)) if best_area >= area => {}
+                            _ => best = Some((area, m)),
+                        }
+                    }
+                }
+                best.map(|(_, m)| m)
+            });
+        let Some(hwnd) = hwnd_of(&window) else { return Ok(false) };
+        let Some(m) = mon else {
+            // 找不到所在显示器（极端）：清区域保持可见，退化为旧行为
+            unsafe { SetWindowRgn(hwnd, None, true) };
+            return Ok(false);
+        };
+        let (mx, my) = (m.position().x, m.position().y);
+        let (mw, mh) = (m.size().width as i32, m.size().height as i32);
+        let ix0 = x.max(mx);
+        let iy0 = y.max(my);
+        let ix1 = (x + size.width as i32).min(mx + mw);
+        let iy1 = (y + size.height as i32).min(my + mh);
+        if ix0 >= ix1 || iy0 >= iy1 {
+            return Ok(false);
+        }
+        // 完全在本屏内：清区域（null = 整窗可见，恢复阴影）
+        if ix0 == x && iy0 == y && ix1 == x + size.width as i32 && iy1 == y + size.height as i32 {
+            unsafe { SetWindowRgn(hwnd, None, true) };
+            return Ok(false);
+        }
+        // 跨界：区域 = 窗口 ∩ 本屏（窗口局部坐标）
+        let rgn = unsafe { CreateRectRgn(ix0 - x, iy0 - y, ix1 - x, iy1 - y) };
+        unsafe { SetWindowRgn(hwnd, Some(rgn), true) };
+        Ok(true)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (&window, x, y);
+        Ok(false)
+    }
 }

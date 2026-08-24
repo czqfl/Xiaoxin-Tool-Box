@@ -20,6 +20,9 @@ pub enum PasteMode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ClipboardConfig {
+    /// 是否启用剪贴板功能（关闭：快捷键不注册、工具栏/托盘/设置入口隐藏）
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     /// 历史容量上限
     pub max_history: u32,
     /// 是否监听图片
@@ -37,6 +40,7 @@ pub struct ClipboardConfig {
 impl Default for ClipboardConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             max_history: 200,
             watch_images: true,
             watch_files: true,
@@ -75,6 +79,9 @@ pub enum FolderSplit {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FolderConfig {
+    /// 是否启用文件夹功能（关闭：快捷键不注册、入口隐藏）
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     /// 是否显示访问次数
     pub show_visit_count: bool,
     /// 卡片展示模式
@@ -96,6 +103,7 @@ pub struct FolderConfig {
 impl Default for FolderConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             show_visit_count: true,
             layout: FolderLayout::Grid,
             split: FolderSplit::Columns,
@@ -162,6 +170,9 @@ impl Default for ShortcutsConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PortConfig {
+    /// 是否启用端口工具功能（关闭：快捷键不注册、入口隐藏）
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     /// 端口工具面板是否置顶显示（置顶时常驻，失焦不自动隐藏）
     pub always_on_top: bool,
 }
@@ -169,6 +180,7 @@ pub struct PortConfig {
 impl Default for PortConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             always_on_top: false,
         }
     }
@@ -205,6 +217,9 @@ impl Default for FileTypeDef {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FilesConfig {
+    /// 是否启用快速文件功能（关闭：快捷键不注册、入口隐藏）
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     /// 文件统一保存位置（绝对路径）。为空时回退到 data 目录下的 quickfiles 子目录。
     pub location: Option<String>,
     /// 可新建的文件类型列表（每种类型单独配置扩展名/强调色/默认打开方式）
@@ -222,6 +237,7 @@ pub struct FilesConfig {
 impl Default for FilesConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             location: None,
             file_types: vec![
                 FileTypeDef { ext: "txt".into(), label: "文本".into(), color: "#8a94a6".into(), opener: None },
@@ -255,6 +271,9 @@ pub struct ToolbarConfig {
     /// 贴边自动收起：贴到屏幕边缘后鼠标离开自动滑出、靠近边缘自动弹出
     #[serde(default = "default_true")]
     pub auto_hide: bool,
+    /// 工具栏尺寸档位："small"(28px) / "medium"(34px) / "large"(40px)
+    #[serde(default)]
+    pub size: String,
     /// 工具栏停靠位置（物理像素）；None = 尚未记忆，启动用右下角默认位。
     /// 用户拖动工具栏后落定即保存，重启恢复到上次位置。
     #[serde(default)]
@@ -285,6 +304,7 @@ impl Default for ToolbarConfig {
             ],
             orientation: default_toolbar_orientation(),
             auto_hide: default_true(),
+            size: "small".into(),
             position: None,
         }
     }
@@ -294,6 +314,9 @@ impl Default for ToolbarConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SnippetsConfig {
+    /// 是否启用语速贴功能（关闭：快捷键不注册、入口隐藏）
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     /// 语速贴面板是否置顶显示（置顶时常驻，失焦不自动隐藏）
     pub always_on_top: bool,
 }
@@ -301,6 +324,7 @@ pub struct SnippetsConfig {
 impl Default for SnippetsConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             always_on_top: false,
         }
     }
@@ -422,6 +446,9 @@ pub enum ThemeMode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CredentialConfig {
+    /// 是否启用账号密码功能（关闭：快捷键不注册、入口隐藏）
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     /// 账号密码面板是否置顶显示
     pub always_on_top: bool,
     /// 是否默认显示全部密码（按配置持久化，下次打开遵循）
@@ -431,6 +458,7 @@ pub struct CredentialConfig {
 impl Default for CredentialConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             always_on_top: false,
             show_passwords: false,
         }
@@ -468,6 +496,9 @@ impl Default for GeneralConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TranslatorConfig {
+    /// 是否启用划词翻译功能（关闭：快捷键不注册、入口隐藏）
+    #[serde(default = "default_true")]
+    pub enabled: bool,
     /// 翻译服务商："youdao" | "baidu"
     pub provider: String,
     /// 有道智云 APP Key
@@ -488,6 +519,7 @@ pub struct TranslatorConfig {
 impl Default for TranslatorConfig {
     fn default() -> Self {
         Self {
+            enabled: true,
             provider: "youdao".into(),
             youdao_key: String::new(),
             youdao_secret: String::new(),
@@ -536,6 +568,25 @@ pub struct AppConfig {
     pub panel_sizes: std::collections::HashMap<String, (u32, u32)>,
 }
 
+impl AppConfig {
+    /// 功能开关统一判定：快捷键注册、托盘/工具栏/设置入口、面板呼出
+    /// 全部以此为准。key 与快捷键 target、工具栏工具键同名词。
+    pub fn feature_enabled(&self, key: &str) -> bool {
+        match key {
+            "clipboard" => self.clipboard.enabled,
+            "folder" => self.folder.enabled,
+            "credentials" => self.credentials.enabled,
+            "translation" => self.translator.enabled,
+            "port" => self.port.enabled,
+            "files" => self.files.enabled,
+            "snippets" => self.snippets.enabled,
+            "screenshot" => self.shot.enabled,
+            "toolbar" => self.toolbar.enabled,
+            _ => true,
+        }
+    }
+}
+
 /// 运行时共享的配置状态，供剪贴板监听线程等读取。
 pub struct ConfigState(pub Mutex<AppConfig>);
 
@@ -557,6 +608,9 @@ pub fn config_save(
     config.shortcuts = state.0.lock().unwrap().shortcuts.clone();
     save_json(&paths.config_file, &config).map_err(|e| format!("保存配置失败：{e}"))?;
     *state.0.lock().unwrap() = config.clone();
+    // 全量重注册快捷键：功能启用开关变化（停用的功能热键即时注销）、
+    // 快捷键以外的配置调整都借此保证运行时与配置严格一致（推倒重来语义）
+    crate::shortcut::resync_all(&app, &config);
     // 粘贴模式变化时同步全局 Ctrl+V 顺序粘贴快捷键的注册状态
     crate::shortcut::sync_seq_shortcut(&app, config.clipboard.paste_mode);
     // 面板亚克力开关变化时立即生效（开：重新上亚克力；关：清除亚克力）

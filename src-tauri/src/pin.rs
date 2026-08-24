@@ -413,24 +413,17 @@ pub fn pin_file_path(app: AppHandle, id: String) -> Option<String> {
 //  原 pin_image_data 的 base64 data URL 路径已删除）
 #[tauri::command]
 pub async fn pin_copy_image(app: AppHandle, id: String) -> Result<(), String> {
+    let app2 = app.clone();
     let file = pin_file_path(app, id).ok_or("not found")?;
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
         let bytes = std::fs::read(&file).map_err(|e| format!("read: {e}"))?;
         // GIF 直接按文件字节写入剪贴板图像会丢动画，取第一帧静态化
         let img = image::load_from_memory(&bytes).map_err(|e| format!("decode: {e}"))?;
-        copy_rgba(img.to_rgba8())
+        // app 带入：写剪贴板要用本应用窗口做属主（见 screenshot::copy_rgba_to_clipboard）
+        crate::screenshot::copy_rgba_to_clipboard(&app2, &img.to_rgba8())
     })
     .await
     .map_err(|e| format!("join: {e}"))?
-}
-
-fn copy_rgba(rgba: image::RgbaImage) -> Result<(), String> {
-    let mut cb = arboard::Clipboard::new().map_err(|e| format!("clipboard: {e}"))?;
-    cb.set_image(arboard::ImageData {
-        width: rgba.width() as usize,
-        height: rgba.height() as usize,
-        bytes: std::borrow::Cow::Borrowed(rgba.as_raw()),
-    }).map_err(|e| format!("set image: {e}"))
 }
 
 /// 贴图窗口被非 pin_close 途径（Alt+F4 等）销毁时同步清理存储条目。

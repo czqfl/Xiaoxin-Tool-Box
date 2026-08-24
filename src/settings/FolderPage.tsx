@@ -6,6 +6,7 @@ import { sortFolders, useFolderStore } from "../stores/folderStore";
 import * as api from "../modules/folder/api";
 import { Segmented, SettingGroup, SettingRow, Switch } from "./components";
 import { IconTrash } from "../components/icons";
+import { ShortcutRow } from "./ShortcutRow";
 
 export function FolderPage() {
   const config = useConfigStore((s) => s.config);
@@ -60,6 +61,23 @@ export function FolderPage() {
     <div className="settings-page">
       <h2>文件夹设置</h2>
       <p className="page-desc">管理固定文件夹与面板展示方式</p>
+
+      <div className="setting-group-title">功能</div>
+      <SettingGroup>
+        <SettingRow title="启用文件夹功能" desc="关闭后快捷键注销，工具栏 / 托盘 / 侧栏入口一并隐藏">
+          <Switch
+            checked={config.folder.enabled}
+            onChange={(on) => patch({ enabled: on })}
+          />
+        </SettingRow>
+        {config.folder.enabled && (
+          <ShortcutRow
+            target="folder"
+            title="呼出文件夹面板"
+            desc="点击快捷键后按下新组合，例如 Ctrl+Alt+F"
+          />
+        )}
+      </SettingGroup>
 
       <SettingGroup>
         <SettingRow title="添加固定文件夹" desc="输入完整路径、点击浏览选择，或直接在面板中拖拽添加">

@@ -7,6 +7,7 @@ import { broadcastConfigChanged } from "../core/events";
 
 const defaultConfig: AppConfig = {
   clipboard: {
+    enabled: true,
     max_history: 200,
     watch_images: true,
     watch_files: true,
@@ -15,6 +16,7 @@ const defaultConfig: AppConfig = {
     paste_mode: "normal",
   },
   folder: {
+    enabled: true,
     show_visit_count: true,
     layout: "grid",
     split: "columns",
@@ -25,6 +27,7 @@ const defaultConfig: AppConfig = {
     vscode_path: null,
   },
   credentials: {
+    enabled: true,
     always_on_top: false,
     show_passwords: false,
   },
@@ -48,6 +51,7 @@ const defaultConfig: AppConfig = {
     acrylic_opacity: 60,
   },
   translator: {
+    enabled: true,
     provider: "youdao",
     youdao_key: "",
     youdao_secret: "",
@@ -58,9 +62,11 @@ const defaultConfig: AppConfig = {
     always_on_top: false,
   },
   port: {
+    enabled: true,
     always_on_top: false,
   },
   files: {
+    enabled: true,
     location: null,
     file_types: [
       { ext: "txt", label: "文本", color: "#8a94a6", opener: null },
@@ -80,9 +86,11 @@ const defaultConfig: AppConfig = {
     tools: ["clipboard", "folder", "credentials", "translation", "port", "files", "snippets", "screenshot", "settings"],
     orientation: "vertical",
     auto_hide: true,
+    size: "small",
     position: null,
   },
   snippets: {
+    enabled: true,
     always_on_top: false,
   },
   shot: {
@@ -123,13 +131,27 @@ interface ConfigStore {
   sync: (next: AppConfig) => void;
 }
 
+/** 旧版本配置补齐：缺字段（如新增的 enabled 开关）用默认值填充，
+ *  避免 undefined 在布尔语境被当 false——那会把全部功能当成"已停用" */
+function mergeDefaults(next: AppConfig): AppConfig {
+  const merged = { ...defaultConfig, ...next } as AppConfig;
+  for (const k of Object.keys(defaultConfig) as Array<keyof AppConfig>) {
+    const d = defaultConfig[k];
+    const v = merged[k] as unknown;
+    if (d && typeof d === "object" && !Array.isArray(d) && v && typeof v === "object" && !Array.isArray(v)) {
+      (merged as Record<string, unknown>)[k] = { ...(d as object), ...(v as object) };
+    }
+  }
+  return merged;
+}
+
 export const useConfigStore = create<ConfigStore>((set) => ({
   config: defaultConfig,
   loaded: false,
 
   load: async () => {
     try {
-      const config = await loadConfig();
+      const config = mergeDefaults(await loadConfig());
       set({ config, loaded: true });
       applyTheme(config.general.theme);
       applyPanelStyle(
@@ -157,9 +179,13 @@ export const useConfigStore = create<ConfigStore>((set) => ({
     if (!next || typeof next !== "object" || !next.general || !next.clipboard) {
       return;
     }
-    set({ config: next, loaded: true });
-    applyTheme(next.general.theme);
-    applyPanelStyle(next.general.acrylic_opacity, next.general.acrylic_enabled);
+    const merged = mergeDefaults(next);
+    set({ config: merged, loaded: true });
+    applyTheme(merged.general.theme);
+    applyPanelStyle(
+      merged.general.acrylic_opacity,
+      merged.general.acrylic_enabled
+    );
   },
 }));
 

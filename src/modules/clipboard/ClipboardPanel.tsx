@@ -399,6 +399,7 @@ export function ClipboardPanel() {
       : 0;
     return (
       <ClipboardItem
+        key={entry.id}
         entry={entry}
         queueOrder={qOrder || undefined}
         isCurrent={sequential && displayList[0]?.id === entry.id}

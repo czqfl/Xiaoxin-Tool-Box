@@ -57,7 +57,9 @@ export type FolderSplit = "columns" | "rows";
 export type ThemeMode = "system" | "light" | "dark" | "mint" | "skyblue" | "red";
 
 export interface ClipboardConfig {
-  max_history: number;
+    /** 是否启用剪贴板功能（关闭：快捷键不注册、入口隐藏） */
+  enabled: boolean;
+max_history: number;
   watch_images: boolean;
   watch_files: boolean;
   close_after_paste: boolean;
@@ -68,7 +70,9 @@ export interface ClipboardConfig {
 }
 
 export interface FolderConfig {
-  show_visit_count: boolean;
+    /** 是否启用文件夹功能（关闭：快捷键不注册、入口隐藏） */
+  enabled: boolean;
+show_visit_count: boolean;
   layout: FolderLayout;
   split: FolderSplit;
   page_size: number;
@@ -98,7 +102,9 @@ export interface ShortcutsConfig {
 
 /** 端口工具面板配置 */
 export interface PortConfig {
-  /** 端口工具面板是否置顶显示（置顶时常驻，失焦不自动隐藏） */
+    /** 是否启用端口工具功能（关闭：快捷键不注册、入口隐藏） */
+  enabled: boolean;
+/** 端口工具面板是否置顶显示（置顶时常驻，失焦不自动隐藏） */
   always_on_top: boolean;
 }
 
@@ -116,7 +122,9 @@ export interface FileTypeDef {
 
 /** 快速文件面板配置：统一位置新建/打开/管理多种类型文件 */
 export interface FilesConfig {
-  /** 文件统一保存位置（绝对路径）；为空回退到 data/quickfiles */
+    /** 是否启用快速文件功能（关闭：快捷键不注册、入口隐藏） */
+  enabled: boolean;
+/** 文件统一保存位置（绝对路径）；为空回退到 data/quickfiles */
   location?: string | null;
   /** 可新建的文件类型列表（每种类型单独配置扩展名/强调色/默认打开方式） */
   file_types: FileTypeDef[];
@@ -211,13 +219,17 @@ export interface ToolbarConfig {
   orientation: "horizontal" | "vertical";
   /** 贴边自动收起：工具栏贴到屏幕边缘后，鼠标离开自动滑出（靠近边缘自动弹出） */
   auto_hide: boolean;
+  /** 尺寸档位：small=28px / medium=34px / large=40px（按钮边长，图标随档位缩放） */
+  size?: "small" | "medium" | "large";
   /** 工具栏停靠位置（物理像素）；null = 未记忆，启动用右下角默认位 */
   position?: [number, number] | null;
 }
 
 /** 语速贴面板配置 */
 export interface SnippetsConfig {
-  /** 语速贴面板是否置顶显示（置顶时常驻，失焦不自动隐藏） */
+    /** 是否启用语速贴功能（关闭：快捷键不注册、入口隐藏） */
+  enabled: boolean;
+/** 语速贴面板是否置顶显示（置顶时常驻，失焦不自动隐藏） */
   always_on_top: boolean;
 }
 
@@ -232,7 +244,9 @@ export interface GeneralConfig {
 }
 
 export interface CredentialConfig {
-  /** 账号密码面板是否置顶显示 */
+    /** 是否启用账号密码功能（关闭：快捷键不注册、入口隐藏） */
+  enabled: boolean;
+/** 账号密码面板是否置顶显示 */
   always_on_top: boolean;
   /** 是否默认显示全部密码（持久化，下次打开遵循） */
   show_passwords: boolean;
@@ -243,7 +257,9 @@ export type TranslateProvider = "youdao" | "baidu";
 
 /** 划词翻译配置（凭据与目标语言，持久化到 config.json） */
 export interface TranslatorConfig {
-  provider: TranslateProvider;
+    /** 是否启用划词翻译功能（关闭：快捷键不注册、入口隐藏） */
+  enabled: boolean;
+provider: TranslateProvider;
   youdao_key: string;
   youdao_secret: string;
   baidu_appid: string;

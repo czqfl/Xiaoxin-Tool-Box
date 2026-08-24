@@ -169,7 +169,12 @@ fn capture_all<R: Runtime>(app: &AppHandle<R>, capture_cursor: bool) -> Result<V
         let hbmp = unsafe { CreateCompatibleBitmap(screen_dc, mw, mh) };
         let old = unsafe { SelectObject(mem_dc, hbmp.into()) };
 
-        let rop = windows::Win32::Graphics::Gdi::ROP_CODE(SRCCOPY.0 | 0x4000_0000);
+        // 纯 SRCCOPY，不带 CAPTUREBLT(0x40000000)：CAPTUREBLT 强制 GDI 走
+        // 分层窗口合成路径——2560×1600 下 BitBlt 从 ~50ms 暴涨到几百毫秒
+        // （"按快捷键后屏幕还动 0.5 秒才冻结"的主因），且文档明确会造成
+        // 分层窗口/指针可见闪烁（托盘图标闪现）。代价：半透明分层窗口
+        // （如贴图）不进入冻结帧——与 Snipaste 行为一致
+        let rop = SRCCOPY;
         if unsafe { BitBlt(mem_dc, 0, 0, mw, mh, Some(screen_dc), pos.x, pos.y, rop) }.is_err() {
             unsafe { SelectObject(mem_dc, old); let _ = DeleteObject(hbmp.into()); let _ = DeleteDC(mem_dc); let _ = ReleaseDC(None, screen_dc); }
             return Err(format!("BitBlt failed monitor {i}"));
@@ -900,8 +905,9 @@ pub(crate) fn begin_impl<R: Runtime>(app: AppHandle<R>, picker: bool) -> Result<
     let cfg: ShotConfig = app.try_state::<ConfigState>()
         .map(|s| s.0.lock().unwrap().shot.clone())
         .unwrap_or_default();
-    // 取色是独立工具（有自己的快捷键）：不受「启用截图功能」开关限制
-    if !cfg.enabled && !picker {
+    // 功能停用守卫：截图功能关闭时截图与取色（同一功能）都不生效。
+    // 快捷键已不注册（resync 跳过），这里兜工具栏残留图标等残余入口
+    if !cfg.enabled {
         SHOOTING.store(false, Ordering::SeqCst);
         PICKER.store(false, Ordering::SeqCst);
         return Err("disabled".into());
@@ -936,6 +942,9 @@ pub(crate) fn begin_impl<R: Runtime>(app: AppHandle<R>, picker: bool) -> Result<
                 let prefill = if snap.is_none() && remember_region {
                     *LAST_REGION.lock().unwrap()
                 } else { None };
+                // 快照条目数（cands/snap 随后 move 进 state，先留档供诊断）
+                let cands_count = cands.len();
+                let snap_diag = snap.as_ref().map(|r| format!("{}x{}@{},{}", r.width, r.height, r.x, r.y)).unwrap_or_else(|| "None".into());
                 // store
                 OVERLAY_READY.store(false, Ordering::SeqCst);
                 // 冻结层旧帧失效：本会话帧写入前不得亮窗（防旧画面闪现）
@@ -945,6 +954,19 @@ pub(crate) fn begin_impl<R: Runtime>(app: AppHandle<R>, picker: bool) -> Result<
                     *state.candidates.lock().unwrap() = cands;
                     *state.initial_snap.lock().unwrap() = snap;
                     *state.prefill.lock().unwrap() = prefill;
+                }
+                // 诊断：会话开始时的识别基础数据（候选窗口数/初始命中/光标显示器几何）。
+                // 悬停识别失效时对照：cands=0 → 快照失败；snap=None 且 cands>0 →
+                // 光标处无窗口（桌面）；后续 rect@ 查询全 None 而 cands>0 → 坐标系错位
+                {
+                    let g0 = &shots[cursor_mon].geom;
+                    diag_write(&format!(
+                        "[shot] begin smart: cands={} snap={} cursor=({},{}) mon{}=({},{},{},{})",
+                        if smart_detect { cands_count } else { 0 },
+                        snap_diag,
+                        cursor.x as i32, cursor.y as i32,
+                        g0.index, g0.x, g0.y, g0.width, g0.height,
+                    ));
                 }
                 // 先确保遮罩窗就位（复用或调度重建），随后才把帧写入冻结层——
                 // 顺序绝不能反：重建路径（显示器数量变化/预热未完成）下，若写帧
@@ -1223,12 +1245,32 @@ pub fn shot_cursor_global(app: AppHandle) -> (i32, i32) {
 }
 
 /// 智能识别：返回全局物理坐标 (x,y) 处的窗口矩形。
-/// 基于 begin 时拍的窗口 Z 序快照查表（活调 WindowFromPoint 只会命中遮罩自身）
+/// 基于 begin 时拍的窗口 Z 序快照查表（活调 WindowFromPoint 只会命中遮罩自身）。
+/// 参数收 f64 自行取整：前端若传来小数坐标，i32 反序列化会直接 reject，
+/// 表现恰为"悬停识别一次后全部静默失效"
 #[tauri::command]
-pub fn shot_window_rect_at(app: AppHandle, x: i32, y: i32) -> Option<ShotRect> {
+pub fn shot_window_rect_at(app: AppHandle, x: f64, y: f64) -> Option<ShotRect> {
+    let (x, y) = (x.round() as i32, y.round() as i32);
     let state = app.try_state::<ShotState>()?;
     let cands = state.candidates.lock().unwrap();
-    candidate_at(&cands, x, y)
+    let hit = candidate_at(&cands, x, y);
+    // 诊断：仅当命中结果相对上次发生变化时记一条（悬停跨窗口/进出桌面时），
+    // 用于定位"悬停识别失效"类问题——坐标错会表现为恒 None，快照空则 count=0
+    static LAST: std::sync::Mutex<Option<(i32, i32, Option<(i32, i32, u32, u32)>, usize)>> =
+        std::sync::Mutex::new(None);
+    let sig = (x, y, hit.as_ref().map(|r| (r.x, r.y, r.width, r.height)), cands.len());
+    let mut last = LAST.lock().unwrap();
+    if last.map(|l| l.2 != sig.2 || l.3 != sig.3).unwrap_or(true) {
+        diag_write(&format!(
+            "[shot] rect@({x},{y}) -> {} cands={}",
+            hit.as_ref().map(|r| format!("({},{},{},{})", r.x, r.y, r.width, r.height))
+                .unwrap_or_else(|| "None".into()),
+            cands.len(),
+        ));
+        *last = Some(sig);
+    }
+    drop(last);
+    hit
 }
 
 /// 元素级智能识别（UIA）：返回全局物理坐标 (x,y) 处最合适 UI 元素的矩形。
@@ -1243,19 +1285,25 @@ pub fn shot_window_rect_at(app: AppHandle, x: i32, y: i32) -> Option<ShotRect> {
 /// 输入框/标签页等细粒度组件。过小（<10px，噪点）与异常返回 None，
 /// 前端自动回退窗口级识别。
 #[cfg(windows)]
-pub fn ui_element_rect_at(app: &AppHandle, x: i32, y: i32) -> Option<ShotRect> {
+pub fn ui_element_rect_at(app: &AppHandle, x: f64, y: f64) -> Option<ShotRect> {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
     use windows::Win32::UI::Accessibility::{CUIAutomation, IUIAutomationElement, TreeScope_Children};
+    let (x, y) = (x.round() as i32, y.round() as i32);
 
-    // 快照查表：光标下最顶层的目标窗口（含其 HWND）
-    let state = app.try_state::<ShotState>()?;
-    let cands = state.candidates.lock().unwrap();
-    let target = cands.iter().find(|w| {
-        x >= w.rect.x && x < w.rect.x + w.rect.width as i32
-            && y >= w.rect.y && y < w.rect.y + w.rect.height as i32
-    })?;
-    let hwnd = HWND(target.hwnd as *mut _);
+    // 快照查表：光标下最顶层的目标窗口（含其 HWND）。
+    // 查到立即【释放锁】再做 UIA——Chromium 系应用首次查询会触发无障碍树
+    // 激活，ElementFromHandle/FindAll 可达数秒；锁被占住会把并行的
+    // shot_window_rect_at（窗口级识别）一并卡死，表现为悬停迟迟无高亮
+    let (hwnd, target) = {
+        let state = app.try_state::<ShotState>()?;
+        let cands = state.candidates.lock().unwrap();
+        let t = cands.iter().find(|w| {
+            x >= w.rect.x && x < w.rect.x + w.rect.width as i32
+                && y >= w.rect.y && y < w.rect.y + w.rect.height as i32
+        })?.clone();
+        (HWND(t.hwnd as *mut _), t)
+    };
 
     // COM 线程初始化：命令跑在 tokio 线程池，各线程首次使用时初始化一次；
     // 已初始化（含模式不符）的错误直接忽略，CoCreateInstance 仍可成功
@@ -1305,15 +1353,27 @@ pub fn ui_element_rect_at(app: &AppHandle, x: i32, y: i32) -> Option<ShotRect> {
     // 仍停留在窗口根元素）也返回 None，避免与窗口级识别重复
     if w < 10 || h < 10 { return None; }
     if w >= target.rect.width as i32 && h >= target.rect.height as i32 { return None; }
+    // 元素矩形必须落在目标窗口可见边界内（±1px 容忍 DWM 舍入）：UIA 树里
+    // 不少容器带不可见阴影/边框余量，最大化窗口的内容宿主甚至会越出屏幕
+    // （实测记事本最大化返回 (-2,99) 2564×1383）——采纳它高亮框就缺一截/
+    // 出屏，表现为"最大化窗口识别不到"。越界即放弃元素级，回退窗口级。
+    let tol = 1;
+    let wx = target.rect.x; let wy = target.rect.y;
+    let wr2 = wx + target.rect.width as i32;
+    let wb = wy + target.rect.height as i32;
+    if cur_rect.left < wx - tol || cur_rect.top < wy - tol
+        || cur_rect.right > wr2 + tol || cur_rect.bottom > wb + tol {
+        return None;
+    }
     Some(ShotRect { x: cur_rect.left, y: cur_rect.top, width: w.max(0) as u32, height: h.max(0) as u32 })
 }
 
 #[cfg(not(windows))]
-pub fn ui_element_rect_at(_: &AppHandle, _x: i32, _y: i32) -> Option<ShotRect> { None }
+pub fn ui_element_rect_at(_: &AppHandle, _x: f64, _y: f64) -> Option<ShotRect> { None }
 
 /// 元素级识别命令：与 shot_window_rect_at 并行调用，前端择优（取更精细者）
 #[tauri::command]
-pub fn shot_ui_rect_at(app: AppHandle, x: i32, y: i32) -> Option<ShotRect> {
+pub fn shot_ui_rect_at(app: AppHandle, x: f64, y: f64) -> Option<ShotRect> {
     ui_element_rect_at(&app, x, y)
 }
 
@@ -1323,15 +1383,133 @@ pub fn shot_last_region() -> Option<[i32; 4]> {
 }
 
 /// PNG 原始字节 → 解码 RGBA → 写入剪贴板（后台线程执行，整图解码不占主线程）
-fn copy_png_to_clipboard(png: &[u8]) -> Result<(), String> {
+fn copy_png_to_clipboard<R: Runtime>(app: &AppHandle<R>, png: &[u8]) -> Result<(), String> {
     let img = image::load_from_memory(png).map_err(|e| format!("decode: {e}"))?;
-    let rgba = img.to_rgba8();
-    let mut cb = arboard::Clipboard::new().map_err(|e| format!("clipboard: {e}"))?;
-    cb.set_image(arboard::ImageData {
-        width: rgba.width() as usize,
-        height: rgba.height() as usize,
-        bytes: std::borrow::Cow::Borrowed(rgba.as_raw()),
-    }).map_err(|e| format!("set image: {e}"))
+    copy_rgba_to_clipboard(app, &img.to_rgba8())
+}
+
+/// RGBA 位图写入剪贴板（Windows：Win32 直写；其他平台：arboard）。
+///
+/// 【为什么 Windows 不用 arboard】arboard 在 Windows 以 `OpenClipboard(NULL)`
+/// 打开（无属主窗口），`EmptyClipboard()` 后剪贴板属主为 NULL，随后的
+/// `SetClipboardData` 会报 ERROR_CLIPBOARD_NOT_OPEN(1418)——本机剪贴板
+/// 监听方多（含本应用自己的历史监听），几乎必现。改为用本应用自己的
+/// 窗口句柄做属主打开 + 显式重试跨过瞬时占用。截图复制与贴图复制共用。
+pub(crate) fn copy_rgba_to_clipboard<R: Runtime>(app: &AppHandle<R>, rgba: &image::RgbaImage) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let owner = app.webview_windows().values()
+            .find_map(|w| hwnd_of_webview(w))
+            .map(|h| h.0 as isize)
+            .unwrap_or(0);
+        clipboard_set_image_windows(owner, rgba)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+        let mut cb = arboard::Clipboard::new().map_err(|e| format!("clipboard: {e}"))?;
+        cb.set_image(arboard::ImageData {
+            width: rgba.width() as usize,
+            height: rgba.height() as usize,
+            bytes: std::borrow::Cow::Borrowed(rgba.as_raw()),
+        }).map_err(|e| format!("set image: {e}"))
+    }
+}
+
+/// Win32 直写剪贴板位图：CF_DIBV5（兼容性最好）+ "PNG" 注册格式（无损）。
+/// 打开失败/写入失败都整体重试（重开剪贴板），总窗口 ~300ms。
+#[cfg(windows)]
+fn clipboard_set_image_windows(owner_hwnd: isize, rgba: &image::RgbaImage) -> Result<(), String> {
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Graphics::Gdi::{BITMAPV5HEADER, BI_BITFIELDS};
+    use windows::Win32::System::DataExchange::{
+        CloseClipboard, EmptyClipboard, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
+    };
+    use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+
+    // ---- 预编码两份数据（DIBV5 = BGRA 行序自下而上；PNG 原样）----
+    let (w, h) = (rgba.width() as i32, rgba.height() as i32);
+    let mut bgra = rgba.as_raw().clone();
+    for px in bgra.chunks_exact_mut(4) { px.swap(0, 2); } // RGBA -> BGRA
+    let row = (w * 4) as usize;
+    let mut rows: Vec<&[u8]> = bgra.chunks_exact(row).collect();
+    rows.reverse(); // DIB 自下而上
+    let mut dib: Vec<u8> = Vec::with_capacity(4 * row * h as usize + 124);
+    for r in rows { dib.extend_from_slice(r); }
+
+    let header = BITMAPV5HEADER {
+        bV5Size: std::mem::size_of::<BITMAPV5HEADER>() as u32,
+        bV5Width: w,
+        bV5Height: h, // 正高 = 自下而上
+        bV5Planes: 1,
+        bV5BitCount: 32,
+        bV5Compression: BI_BITFIELDS,
+        bV5SizeImage: (4 * w * h) as u32,
+        bV5RedMask: 0x00ff_0000,
+        bV5GreenMask: 0x0000_ff00,
+        bV5BlueMask: 0x0000_00ff,
+        bV5AlphaMask: 0xff00_0000,
+        // LCS_sRGB = 'sRGB' 四字符码（windows crate 未导出该常量，直接给值）
+        bV5CSType: 0x7352_4742u32,
+        ..Default::default()
+    };
+    let mut dib_buf: Vec<u8> = Vec::with_capacity(std::mem::size_of::<BITMAPV5HEADER>() + dib.len());
+    dib_buf.extend_from_slice(unsafe { std::slice::from_raw_parts(
+        &header as *const BITMAPV5HEADER as *const u8, std::mem::size_of::<BITMAPV5HEADER>()) });
+    dib_buf.extend_from_slice(&dib);
+
+    let png_bytes: Vec<u8> = {
+        let mut out = std::io::Cursor::new(Vec::new());
+        rgba.write_to(&mut out, image::ImageFormat::Png)
+            .map_err(|e| format!("png encode: {e}"))?;
+        out.into_inner()
+    };
+
+    let png_fmt = unsafe {
+        let f = RegisterClipboardFormatW(windows::core::w!("PNG"));
+        if f == 0 { return Err("register PNG format failed".into()); }
+        f
+    };
+
+    /// 全局内存拷入并 SetClipboardData；成功后系统接管内存，失败时释放
+    unsafe fn put_format(fmt: u32, data: &[u8]) -> Result<(), String> {
+        let h = GlobalAlloc(GMEM_MOVEABLE, data.len()).map_err(|e| format!("alloc: {e}"))?;
+        let p = GlobalLock(h);
+        if p.is_null() {
+            let _ = windows::Win32::Foundation::GlobalFree(Some(h));
+            return Err("global lock failed".into());
+        }
+        std::ptr::copy_nonoverlapping(data.as_ptr(), p as *mut u8, data.len());
+        let _ = GlobalUnlock(h);
+        match SetClipboardData(fmt, Some(HANDLE(h.0))) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                let _ = windows::Win32::Foundation::GlobalFree(Some(h));
+                Err(format!("SetClipboardData({fmt}): {e}"))
+            }
+        }
+    }
+
+    let hwnd = windows::Win32::Foundation::HWND(owner_hwnd as *mut _);
+    let mut last = String::from("open failed");
+    for attempt in 0..10 {
+        if attempt > 0 { std::thread::sleep(std::time::Duration::from_millis(30)); }
+        unsafe {
+            if OpenClipboard(Some(hwnd)).is_err() { last = "open failed".into(); continue; }
+            let r = (|| -> Result<(), String> {
+                EmptyClipboard().map_err(|e| format!("empty: {e}"))?;
+                // DIBV5 优先：多数应用认它；PNG 随后（无损，支持的应用取用）
+                put_format(17, &dib_buf)?; // CF_DIBV5
+                if let Err(e) = put_format(png_fmt, &png_bytes) {
+                    diag_write(&format!("[shot] clipboard png fmt skipped: {e}"));
+                }
+                Ok(())
+            })();
+            let _ = CloseClipboard();
+            match r { Ok(()) => return Ok(()), Err(e) => last = e }
+        }
+    }
+    Err(last)
 }
 
 /// 截图输出（复制 / 另存为 / 贴图）：选区 PNG【原始字节】经 Tauri 原生二进制
@@ -1368,10 +1546,12 @@ pub async fn shot_output(app: AppHandle, request: tauri::ipc::Request<'_>) -> Re
             hide_all(&app);
         }
         "copy" => {
-            // 整图解码成 RGBA 是重活：丢到阻塞线程池，本命令立即继续
+            // 整图解码成 RGBA 是重活：丢到阻塞线程池，本命令立即继续。
+            // app 句柄一并带入：写剪贴板要用本应用窗口做属主（见 copy_rgba_to_clipboard）
             let png = body.clone();
+            let app2 = app.clone();
             tauri::async_runtime::spawn_blocking(move || {
-                if let Err(e) = copy_png_to_clipboard(&png) {
+                if let Err(e) = copy_png_to_clipboard(&app2, &png) {
                     diag_write(&format!("[shot] copy failed: {e}"));
                 }
             });

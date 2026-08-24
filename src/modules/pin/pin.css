@@ -5,26 +5,34 @@ html[data-window="pin"], html[data-window="pin"] body { background: transparent 
 
 .pin-window { position: relative; width: 100%; height: 100%; cursor: move; overflow: hidden; }
 .pin-window img { display: block; pointer-events: none; }
-.pin-shadow { filter: drop-shadow(0 2px 8px rgba(0,0,0,0.4)); }
+.pin-shadow { filter: drop-shadow(0 4px 14px rgba(0,0,0,0.45)) drop-shadow(0 1px 3px rgba(0,0,0,0.35)); }
 
-/* ---- Snipaste 式贴图边框 ----
-   贴图瞬间：边框闪过几种颜色（~1.8s），最后定格在随机主题色 --pin-accent；
-   稳态规则：悬停/拖动 → 主题色；闲置 → 白色。动画结束由 onAnimationEnd
-   摘掉 flash 类，避免 fill-mode 把定格色永久钉死 */
+/* ---- Snipaste 式贴图边框（细边 + 仅外侧柔光）----
+   边框颜色用 currentColor，动画只驱动 color 一个属性，边框与光晕同步变色。
+   光晕用 box-shadow（只向外部扩散，不像 drop-shadow 会沿环形内侧也发光）。
+   闲置白色微光，悬停/拖动/彩闪时主题色辉光；~1s 闪完定格 --pin-accent */
 .pin-border {
   position: absolute; inset: 0; z-index: 10; pointer-events: none;
-  border: 2px solid #fff;
+  border: 1px solid currentColor;
+  color: rgba(255,255,255,0.85);
+  box-shadow: 0 0 4px -1px currentColor;
 }
-.pin-window:hover .pin-border, .pin-window.pin-dragging .pin-border { border-color: var(--pin-accent); }
-.pin-border-flash { animation: pin-border-intro 1.8s ease-out both; }
+.pin-window:hover .pin-border, .pin-window.pin-dragging .pin-border {
+  color: var(--pin-accent);
+  box-shadow: 0 0 7px 0 currentColor;
+}
+.pin-border-flash {
+  animation: pin-border-intro 1s ease-out both;
+  box-shadow: 0 0 6px 0 currentColor;
+}
 @keyframes pin-border-intro {
-  0%   { border-color: #ff453a; }
-  15%  { border-color: #ff9f0a; }
-  30%  { border-color: #ffd60a; }
-  45%  { border-color: #32d74b; }
-  60%  { border-color: #64d2ff; }
-  75%  { border-color: #bf5af2; }
-  100% { border-color: var(--pin-accent); }
+  0%   { color: #ff453a; }
+  16%  { color: #ffd60a; }
+  33%  { color: #32d74b; }
+  50%  { color: #64d2ff; }
+  66%  { color: #bf5af2; }
+  83%  { color: #ff9f0a; }
+  100% { color: var(--pin-accent); }
 }
 
 /* 左上角缩放比例角标：滚轮缩放时实时显示，停止后淡出 */

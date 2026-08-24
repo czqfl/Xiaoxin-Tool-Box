@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   clearScreen: false,
   server: {
-    port: 1421,
+    port: 1422,
     strictPort: true,
   },
   envPrefix: ["VITE_", "TAURI_ENV_"],

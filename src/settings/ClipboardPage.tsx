@@ -1,6 +1,7 @@
 /** 剪贴板设置页 */
 import { useConfigStore } from "../stores/configStore";
 import { Segmented, SettingGroup, SettingRow, Switch } from "./components";
+import { ShortcutRow } from "./ShortcutRow";
 
 export function ClipboardPage() {
   const config = useConfigStore((s) => s.config);
@@ -17,6 +18,23 @@ export function ClipboardPage() {
     <div className="settings-page">
       <h2>剪贴板设置</h2>
       <p className="page-desc">管理剪贴板历史监听与粘贴行为</p>
+
+      <div className="setting-group-title">功能</div>
+      <SettingGroup>
+        <SettingRow title="启用剪贴板功能" desc="关闭后快捷键注销，工具栏 / 托盘 / 侧栏入口一并隐藏">
+          <Switch
+            checked={config.clipboard.enabled}
+            onChange={(on) => patch({ enabled: on })}
+          />
+        </SettingRow>
+        {config.clipboard.enabled && (
+          <ShortcutRow
+            target="clipboard"
+            title="呼出剪贴板面板"
+            desc="点击快捷键后按下新组合，例如 Ctrl+Alt+C"
+          />
+        )}
+      </SettingGroup>
 
       <SettingGroup>
         <SettingRow

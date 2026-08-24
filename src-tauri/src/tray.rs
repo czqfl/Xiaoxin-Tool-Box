@@ -142,29 +142,35 @@ fn toggle_settings_window<R: Runtime>(app: &AppHandle<R>) {
 }
 
 pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
-    let clipboard_item =
-        MenuItem::with_id(app, "toggle_clipboard", "剪贴板面板", true, None::<&str>)?;
-    let folder_item =
-        MenuItem::with_id(app, "toggle_folder", "文件夹面板", true, None::<&str>)?;
-    let cred_item =
-        MenuItem::with_id(app, "toggle_credential", "账号密码面板", true, None::<&str>)?;
-    let port_item = MenuItem::with_id(app, "toggle_port", "端口工具", true, None::<&str>)?;
-    let toolbar_item =
-        MenuItem::with_id(app, "toggle_toolbar", "悬浮工具栏", true, None::<&str>)?;
+    // 按功能开关构建菜单：停用功能不显示对应入口（toggle_panel 内还有守卫兜底）
+    let enabled = |key: &str| {
+        app.try_state::<crate::config::ConfigState>()
+            .map(|s| s.0.lock().unwrap().feature_enabled(key))
+            .unwrap_or(true)
+    };
+    let mut items: Vec<MenuItem<R>> = Vec::new();
+    let push_panel = |app: &AppHandle<R>, id: &str, text: &str, key: &str, items: &mut Vec<MenuItem<R>>| -> tauri::Result<()> {
+        if enabled(key) {
+            items.push(MenuItem::with_id(app, id, text, true, None::<&str>)?);
+        }
+        Ok(())
+    };
+    push_panel(app, "toggle_clipboard", "剪贴板面板", "clipboard", &mut items)?;
+    push_panel(app, "toggle_folder", "文件夹面板", "folder", &mut items)?;
+    push_panel(app, "toggle_credential", "账号密码面板", "credentials", &mut items)?;
+    push_panel(app, "toggle_port", "端口工具", "port", &mut items)?;
+    if enabled("toolbar") {
+        items.push(MenuItem::with_id(app, "toggle_toolbar", "悬浮工具栏", true, None::<&str>)?);
+    }
     let open_item = MenuItem::with_id(app, "open_settings", "打开设置", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-    let menu = Menu::with_items(
-        app,
-        &[
-            &clipboard_item,
-            &folder_item,
-            &cred_item,
-            &port_item,
-            &toolbar_item,
-            &open_item,
-            &quit_item,
-        ],
-    )?;
+    let refs: Vec<&dyn tauri::menu::IsMenuItem<R>> = items
+        .iter()
+        .map(|i| i as &dyn tauri::menu::IsMenuItem<R>)
+        .chain(std::iter::once(&open_item as &dyn tauri::menu::IsMenuItem<R>))
+        .chain(std::iter::once(&quit_item as &dyn tauri::menu::IsMenuItem<R>))
+        .collect();
+    let menu = Menu::with_items(app, &refs)?;
     // 复用应用默认图标，双主题下均为中性彩色，无需切换
     let icon = app
         .default_window_icon()

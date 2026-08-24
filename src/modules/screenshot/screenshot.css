@@ -10,8 +10,9 @@ html[data-window="shot"] body { background: transparent; }
 .shot-dim-fade { animation: shot-dim-in 180ms ease-out both; }
 
 /* ---- 放大镜：镜头区固定正方形，信息区在镜头下方分三行（坐标/颜色/提示） ---- */
+/* z-index 260 > 工具栏 200：鼠标移到工具栏附近时坐标/颜色信息不被盖住 */
 .shot-mag {
-  position: fixed; z-index: 100; background: #000;
+  position: fixed; z-index: 260; background: #000;
   border: 1px solid rgba(255,255,255,0.9); outline: 1px solid rgba(0,0,0,0.55);
   box-shadow: 0 3px 14px rgba(0,0,0,0.6); overflow: hidden;
 }
@@ -65,7 +66,7 @@ html[data-window="shot"] body { background: transparent; }
 .shot-toolbar { display: flex; align-items: center; gap: 1px; background: rgba(var(--bg-panel-rgb), var(--panel-opacity)); border-radius: 0; padding: 3px 4px; flex-wrap: nowrap; white-space: nowrap; position: relative; }
 .shot-toolbar::before { content: ""; position: absolute; inset: 0; z-index: -1; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
 .shot-toolbar-panel { display: flex; align-items: center; gap: 7px; background: rgba(var(--bg-panel-rgb), var(--panel-opacity)); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-radius: 0; padding: 8px 10px; white-space: nowrap; align-self: stretch; }
-.shot-toolbar button { background: transparent; border: none; color: var(--text-primary); padding: 5px; border-radius: 2px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; min-width: 27px; min-height: 27px; position: relative; transition: background var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
+.shot-toolbar button { background: transparent; border: none; color: var(--text-primary); padding: 6px; border-radius: 2px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; min-width: 34px; min-height: 34px; position: relative; transition: background var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
 /* 图标：纯细线描边，【不发光】——drop-shadow 会让细线图标发糊、不利索。
    可读性靠图标自身颜色 + 悬停/激活时按钮背景反馈（几何已在组件内重校）。 */
 .shot-toolbar button:hover:not(:disabled) { background: var(--bg-item-hover); color: var(--text-primary); }
@@ -200,15 +201,20 @@ html[data-window="shot"] body { background: transparent; }
 :root[data-theme="red"] .shot-toolbar-sep { background: rgba(255, 255, 255, 0.2); }
 
 /* 文字标注编辑器 */
-.shot-text-editor { position: fixed; z-index: 300; display: inline-flex; align-items: center; background: transparent; border: 1.5px solid rgba(255,255,255,0.95); outline: 1px solid rgba(0,0,0,0.35); border-radius: 2px; padding: 3px 8px; }
-.shot-text-editor input { border: none; outline: none; background: transparent; font: bold 16px sans-serif; min-width: 150px; color: #fff; caret-color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.85), 0 0 3px rgba(0,0,0,0.6); }
+.shot-text-editor { position: fixed; z-index: 300; display: inline-flex; align-items: center; gap: 5px; background: transparent; border: 1.5px solid rgba(255,255,255,0.95); outline: 1px solid rgba(0,0,0,0.35); border-radius: 2px; padding: 3px 6px; transform: translateY(-50%); }
+/* line-height 与 font-size 相等：DOM 行盒顶部 == em 盒顶部，与 canvas
+   textBaseline="top" 精确对应；颜色/光标色由内联 style 实时跟随色板 */
+.shot-text-editor input { border: none; outline: none; background: transparent; font: bold 16px/16px sans-serif; min-width: 150px; text-shadow: 0 1px 2px rgba(0,0,0,0.85), 0 0 3px rgba(0,0,0,0.6); }
 .shot-text-editor input::placeholder { color: rgba(255,255,255,0.55); text-shadow: 0 1px 2px rgba(0,0,0,0.8); }
+.shot-text-x { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: none; border-radius: 50%; background: rgba(255,255,255,0.14); color: rgba(255,255,255,0.9); cursor: pointer; flex-shrink: 0; }
+.shot-text-x:hover { background: rgba(255,69,58,0.75); color: #fff; }
 .shot-sw-badge { position: fixed; left: 50%; bottom: 36px; transform: translateX(-50%); z-index: 400; background: rgba(20,20,20,0.88); color: #fff; font-size: 13px; padding: 6px 14px; border-radius: 3px; pointer-events: none; backdrop-filter: blur(8px); }
 
 /* 左下角固定操作提示区（Snipaste 式）：黑色半透明底 + 键帽式快捷键列表。
    未选区显示基础操作，选定后切换为选区操作；选区覆盖提示区时整体隐藏 */
 .shot-hint-panel {
-  position: fixed; left: 12px; bottom: 12px; z-index: 55; pointer-events: none;
+  /* bottom 抬高到 Windows 任务栏上方（任务栏约 40~48px），避免被遮挡 */
+  position: fixed; left: 12px; bottom: 56px; z-index: 55; pointer-events: none;
   background: rgba(12,12,14,0.72); border-radius: 4px; padding: 9px 14px 10px;
   backdrop-filter: blur(8px);
   box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 4px 14px rgba(0,0,0,0.35);

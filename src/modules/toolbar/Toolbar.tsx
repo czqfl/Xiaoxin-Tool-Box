@@ -6,7 +6,7 @@
  *  动态反馈（磁吸）：鼠标在图标间移动时，图标随鼠标位置实时产生
  *  「磁性牵引」——靠近的图标放大提亮，两侧图标被轻微拉向鼠标。
  *  用 requestAnimationFrame + 直接写 DOM transform，零 React 重渲染，最流畅。 */
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, cloneElement, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize, PhysicalPosition } from "@tauri-apps/api/dpi";
@@ -15,6 +15,7 @@ import { panelActive, panelToggle } from "../../core/tauri";
 import { EVT_CONFIG_CHANGED, EVT_PANEL_VISIBILITY, onEvent } from "../../core/events";
 import { diagLog } from "../../core/tauri";
 import { useConfigStore } from "../../stores/configStore";
+import { featureEnabled } from "../../settings/FeaturePage";
 import {
   IconClipboard,
   IconFiles,
@@ -28,16 +29,20 @@ import {
 } from "../../components/icons";
 import "./toolbar.css";
 
-/** 紧凑尺寸：按钮 28px、间距 2px、内边距 4px（比原 36/3/5 缩小约 1/4） */
-const BTN = 28;
+/** 尺寸档位：按钮边长 + 图标边长（设置页「悬浮工具栏」可选，默认 small） */
+const SIZE_PRESETS: Record<string, { btn: number; icon: number }> = {
+  small: { btn: 28, icon: 14 },
+  medium: { btn: 34, icon: 18 },
+  large: { btn: 40, icon: 22 },
+};
 const GAP = 2;
 const PAD = 4;
 
-/** 磁吸参数（可调）：牵引强度 / 距离衰减 / 放大强度 */
-const PULL_STRENGTH = 5; // 最大位移 px
+/** 纾佸惛鍙傛暟锛堝彲璋冿級锛氱壍寮曞己搴?/ 璺濈琛板噺 / 鏀惧ぇ寮哄害 */
+const PULL_STRENGTH = 5; // 鏈€澶т綅绉?px
 const PULL_FALLOFF = 55; // 牵引随距离衰减的尺度（越小越"集中在鼠标附近"）
 const SCALE_STRENGTH = 0.3; // 最大放大倍率增量
-const SCALE_FALLOFF = 900; // 放大随距离平方衰减（高斯）
+const SCALE_FALLOFF = 900; // 鏀惧ぇ闅忚窛绂诲钩鏂硅“鍑忥紙楂樻柉锛?
 
 /** 工具定义：图标（含专属辨识色，收编为 theme.css 的 --tool-* 令牌，
  *  深色主题自动适配）+ 提示文案（顺序即设置页勾选顺序）。
@@ -111,8 +116,8 @@ const DRAG_THRESHOLD = 10;
 
 /** 贴边自动收起参数（参考桌面悬浮工具条靠边收起语义：
  *  事件驱动——鼠标离开窗口收起、悬停收起条弹出、弹出后鼠标不在窗口内自动再收起） */
-const SLIVER = 12; // 收起后露出的窗口真实边缘宽度（12px：够宽够显眼，配品牌色亮轨）
-const EDGE_MARGIN = 12; // 距屏幕边缘多少像素内算"贴边"
+const SLIVER = 12; // 鏀惰捣鍚庨湶鍑虹殑绐楀彛鐪熷疄杈圭紭瀹藉害锛?2px锛氬瀹藉鏄剧溂锛岄厤鍝佺墝鑹蹭寒杞級
+const EDGE_MARGIN = 12; // 璺濆睆骞曡竟缂樺灏戝儚绱犲唴绠?璐磋竟"
 const HIDE_DELAY = 250; // 鼠标离开贴边工具栏后，延时收起（ms）
 const SLIDE_MS = 160; // 收起/弹出的滑动动画时长（ms，轻快不拖沓）
 /** 收起后：光标靠近屏幕边缘多少像素内自动弹出（物理像素）。
@@ -140,6 +145,11 @@ export function Toolbar() {
   const config = useConfigStore((s) => s.config);
   const load = useConfigStore((s) => s.load);
   const sync = useConfigStore((s) => s.sync);
+  /** 尺寸档位（设置页可调）：按钮/图标边长随档位变化，磁吸与窗口尺寸同步计算 */
+  const sizeKey = config?.toolbar?.size ?? "small";
+  const preset = SIZE_PRESETS[sizeKey] ?? SIZE_PRESETS.small;
+  const BTN = preset.btn;
+  const iconSize = preset.icon;
   /** 排列方向（供 rAF 磁吸闭包读取；配置变化时经 .current 同步） */
   const orientation = config?.toolbar?.orientation ?? "horizontal";
   const isVertical = orientation === "vertical";
@@ -149,7 +159,7 @@ export function Toolbar() {
   /** 贴边自动收起状态（配置开关经 ref 同步给轮询闭包） */
   const autoHideRef = useRef(config?.toolbar?.auto_hide ?? true);
   autoHideRef.current = config?.toolbar?.auto_hide ?? true;
-  const collapsedRef = useRef(false); // 是否已收起（滑出屏幕）
+  const collapsedRef = useRef(false); // 是否已收起（滑出屏幕外）
   const pinnedEdgeRef = useRef<Edge | null>(null); // 当前贴边方向（轮询记录）
   const restorePosRef = useRef<{ x: number; y: number } | null>(null); // 收起前位置
   const restoreWaRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null); // 收起时所在显示器工作区
@@ -157,7 +167,7 @@ export function Toolbar() {
   const snappingRef = useRef(false); // 收起/弹出动画进行中
   const hideTimerRef = useRef<number | undefined>(undefined); // 收起延时
 
-  /** 判断工具栏是否贴显示器边缘（容差 EDGE_MARGIN） */
+  /** 鍒ゆ柇宸ュ叿鏍忔槸鍚﹁创鏄剧ず鍣ㄨ竟缂橈紙瀹瑰樊 EDGE_MARGIN锛?*/
   function detectEdge(g: ToolbarGeometry): Edge | null {
     if (Math.abs(g.win_x - g.mon_x) <= EDGE_MARGIN) return "left";
     if (Math.abs(g.win_x + g.win_w - (g.mon_x + g.mon_w)) <= EDGE_MARGIN) return "right";
@@ -180,7 +190,7 @@ export function Toolbar() {
     }
   }
 
-  // ---- 靠边收起/弹出（悬浮工具条贴边吸附）----
+  // ---- 闈犺竟鏀惰捣/寮瑰嚭锛堟偓娴伐鍏锋潯璐磋竟鍚搁檮锛?---
   // 缓动：弹出用轻微回弹（easeOutBack），收起用缓入（被"吸入"边缘）
   const easeOutBackSoft = (t: number): number => {
     const c1 = 0.9;
@@ -189,8 +199,10 @@ export function Toolbar() {
   };
   const easeInCubic = (t: number): number => t * t * t;
 
-  /** rAF 逐帧移动窗口物理位置（替代瞬移，平滑滑入滑出） */
-  function animateWindowTo(tx: number, ty: number, duration: number, easing: (t: number) => number): Promise<void> {
+  /** rAF 逐帧移动窗口物理位置（替代瞬移，平滑滑入滑出）。
+   *  clip=true 时逐帧调用 toolbar_apply_clip 把可见区域裁到本屏内——
+   *  多屏下滑出本屏的"藏起"部分会显示在相邻屏幕上，必须显式裁掉 */
+  function animateWindowTo(tx: number, ty: number, duration: number, easing: (t: number) => number, clip = false): Promise<void> {
     return new Promise((resolve) => {
       const win = getCurrentWindow();
       void win
@@ -205,6 +217,7 @@ export function Toolbar() {
             const x = Math.round(sx + (tx - sx) * e);
             const y = Math.round(sy + (ty - sy) * e);
             void win.setPosition(new PhysicalPosition(x, y)).catch(() => {});
+            if (clip) void invoke("toolbar_apply_clip", { x, y }).catch(() => {});
             if (t < 1) requestAnimationFrame(step);
             else resolve();
           };
@@ -214,7 +227,7 @@ export function Toolbar() {
     });
   }
 
-  /** 收起：平滑滑出屏幕，仅露 SLIVER 条（记录原位 + 所在工作区，供弹出夹取） */
+  /** 鏀惰捣锛氬钩婊戞粦鍑哄睆骞曪紝浠呴湶 SLIVER 鏉★紙璁板綍鍘熶綅 + 鎵€鍦ㄥ伐浣滃尯锛屼緵寮瑰嚭澶瑰彇锛?*/
   async function collapseToEdge() {
     const edge = pinnedEdgeRef.current;
     if (!edge || collapsedRef.current || snappingRef.current) return;
@@ -229,7 +242,9 @@ export function Toolbar() {
       else if (edge === "right") x = geo.mon_x + geo.mon_w - SLIVER;
       else if (edge === "top") y = geo.mon_y - geo.win_h + SLIVER;
       else y = geo.mon_y + geo.mon_h - SLIVER;
-      await animateWindowTo(x, y, SLIDE_MS, easeInCubic);
+      await animateWindowTo(x, y, SLIDE_MS, easeInCubic, true);
+      // 动画末帧后再夹一次：确保静止时区域精确为贴边亮轨条（跨界部分全裁掉）
+      await invoke("toolbar_apply_clip", { x, y }).catch(() => {});
       collapsedRef.current = true;
       // 收起态：加品牌色亮轨 + 呼吸柔光（露出的细条在任何壁纸上都醒目）
       barRef.current?.classList.add("edge-collapsed", `edge-${edge}`);
@@ -272,7 +287,9 @@ export function Toolbar() {
         tx = Math.min(Math.max(tx, wa.x), Math.max(wa.x, maxX));
         ty = Math.min(Math.max(ty, wa.y), Math.max(wa.y, maxY));
       }
-      await animateWindowTo(tx, ty, SLIDE_MS, easeOutBackSoft);
+      await animateWindowTo(tx, ty, SLIDE_MS, easeOutBackSoft, true);
+      // 完全回到本屏内后最后一次调用会自动清除裁剪区域（恢复整屏显示与阴影）。
+      await invoke("toolbar_apply_clip", { x: tx, y: ty }).catch(() => {});
       collapsedRef.current = false;
       restorePosRef.current = null;
       restoreWaRef.current = null;
@@ -292,7 +309,7 @@ export function Toolbar() {
     dragged: boolean;
   } | null>(null);
   /** 当前打开的面板集合（高亮对应图标）。各面板独立开合、可同时显示多个，
-   *  故用集合而非单个 key（后打开的覆盖前一个的旧实现已移除） */
+   *  故用集合而非单个 key（后打开的覆盖前一个的旧实现已移除）。 */
   const [activeKeys, setActiveKeys] = useState<ReadonlySet<ToolKey>>(new Set());
 
   /** 刷新高亮：全量查询当前可见面板（比增量维护事件状态更可靠，杜绝漂移） */
@@ -409,7 +426,7 @@ export function Toolbar() {
     }
   };
 
-  /** 鼠标进入窗口（含收起条）：图标磁吸恢复 + 收起态 → 悬停弹出 */
+  /** 榧犳爣杩涘叆绐楀彛锛堝惈鏀惰捣鏉★級锛氬浘鏍囩鍚告仮澶?+ 鏀惰捣鎬?鈫?鎮仠寮瑰嚭 */
   const handleEnter = () => {
     pointerInsideRef.current = true;
     if (hideTimerRef.current) {
@@ -441,7 +458,7 @@ export function Toolbar() {
     }
   };
 
-  // 卸载时取消 rAF
+  // 鍗歌浇鏃跺彇娑?rAF
   useEffect(
     () => () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -467,11 +484,16 @@ export function Toolbar() {
     };
   }, [load, sync]);
 
-  // 按配置的工具数量与排列方向调整窗口尺寸（按钮 28 + 间距 2 + 两端 4px padding）
+  // 按配置的工具数量与排列方向调整窗口尺寸（按钮 34 + 间距 2 + 两端 4px padding）
   const tools = config?.toolbar?.tools ?? [];
-  /** 仅保留 TOOLS 中真实存在的工具键：历史配置若残留已移除的功能
-   *  （如便签），既不渲染也不撑出多余窗口宽度，避免工具栏末尾出现空位。 */
-  const validTools = tools.filter((k) => TOOLS[k]);
+  /** 仅保留 TOOLS 中真实存在【且功能未停用】的工具键：历史配置若残留已移除的
+   *  功能（如便签）不渲染；功能开关页停用的模块同样从工具栏隐藏——与托盘/
+   *  设置侧栏行为一致，避免"功能关了工具栏还有"。设置入口不受开关控制。 */
+  const validTools = tools.filter((k) => {
+    if (!TOOLS[k]) return false;
+    if (k === "settings") return true;
+    return config ? featureEnabled(config, k) : true;
+  });
   useEffect(() => {
     if (!validTools.length) return;
     const main = validTools.length * (BTN + GAP) + PAD * 2;
@@ -479,7 +501,7 @@ export function Toolbar() {
     getCurrentWindow()
       .setSize(new LogicalSize(isVertical ? cross : main, isVertical ? main : cross))
       .catch(() => undefined);
-  }, [validTools.length, isVertical]);
+  }, [validTools.length, isVertical, BTN]);
 
   // 启动兜底：若工具栏因历史 off-screen 残留等完全落在显示器外，夹回屏内，
   // 避免「开启收起后 / 重启后完全找不到」。收起态由 collapsedRef 内存控制，重启本应
@@ -537,7 +559,7 @@ export function Toolbar() {
           if (cursorNearEdge(geo, pinnedEdgeRef.current, EDGE_REVEAL)) {
             void expandFromEdge();
           }
-          return; // 已收起：本轮不处理"再收起"
+          return; // 宸叉敹璧凤細鏈疆涓嶅鐞?鍐嶆敹璧?
         }
         // 【修复"快速离开无法收起"】展开态下，除了事件驱动（handleLeave），
         // 再由轮询兜底检测：光标确实离开贴边方向（超出 EDGE_REVEAL）、且已不在
@@ -616,7 +638,7 @@ export function Toolbar() {
         }
       }}
     >
-      {tools.map((key, i) => {
+      {validTools.map((key, i) => {
         const tool = TOOLS[key];
         if (!tool) return null;
         const active = activeKeys.has(key);
@@ -630,13 +652,17 @@ export function Toolbar() {
             className={`toolbar-btn${active ? " active" : ""}`}
             data-key={key}
             title={active ? `${tool.label}（面板已打开）` : tool.label}
-            style={{ transition: "transform 90ms var(--ease-out)" }}
+            style={{
+              width: BTN,
+              height: BTN,
+              transition: "transform 90ms var(--ease-out)",
+            }}
           >
             <span
               className="toolbar-icon"
               style={{ "--tool-color": tool.color } as CSSProperties}
             >
-              {tool.icon}
+              {cloneElement(tool.icon as React.ReactElement<{ size?: number }>, { size: iconSize })}
             </span>
           </button>
         );

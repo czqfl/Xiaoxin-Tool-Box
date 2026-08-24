@@ -312,6 +312,7 @@ pub fn run() {
             panel::toolbar_set_click_through,
             panel::toolbar_probe_click_through,
             panel::toolbar_geometry,
+            panel::toolbar_apply_clip,
             shortcut::shortcut_test,
             shortcut::shortcut_apply,
             shortcut::shortcut_runtime_bindings,
@@ -337,11 +338,15 @@ pub fn run() {
             snippets::snippets_delete,
             snippets::snippets_paste,
             screenshot::shot_begin,
+            // 屏幕取色：复用遮罩窗的纯取色模式（前端 shotBeginPicker 包装待接入）
+            screenshot::shot_begin_picker,
             screenshot::shot_geometry,
             screenshot::shot_image_raw,
             screenshot::shot_ready,
             screenshot::shot_cursor_global,
             screenshot::shot_window_rect_at,
+            // 元素级智能识别（UIA）：与窗口级并行，前端择优取更精细矩形
+            screenshot::shot_ui_rect_at,
             screenshot::shot_last_region,
             // 截图输出（复制/另存为/贴图）：原生二进制 IPC 直传 PNG 字节
             screenshot::shot_output,

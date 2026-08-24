@@ -35,6 +35,7 @@
 
 .toolbar-btn {
   position: relative;
+  /* 按钮尺寸由 JS 按 toolbar.size 档位 inline 覆盖（28/34/40），此处仅兜底 */
   width: 28px;
   height: 28px;
   flex-shrink: 0;
@@ -42,7 +43,7 @@
   align-items: center;
   justify-content: center;
   border: none;
-  border-radius: 6px;
+  border-radius: 8px;
   background: transparent;
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out);

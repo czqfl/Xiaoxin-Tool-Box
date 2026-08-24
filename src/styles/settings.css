@@ -756,3 +756,65 @@
   padding: 5px 18px;
   font-size: 12.5px;
 }
+
+/* ---- 功能开关页：卡片式布局 ----
+   响应式网格，每张卡片独立呈现一个功能：名称 + 开关 + 描述 + 状态徽标。
+   停用的卡片整体降透明度并去饱和，一眼区分运行状态 */
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.feature-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  transition: border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+}
+.feature-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+}
+.feature-card.disabled {
+  opacity: 0.62;
+}
+.feature-card.disabled .feature-card-title {
+  color: var(--text-tertiary);
+}
+.feature-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.feature-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.feature-card-desc {
+  flex: 1;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-tertiary);
+  min-height: 34px;
+}
+.feature-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.feature-badge {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.feature-badge.on {
+  color: var(--accent);
+}

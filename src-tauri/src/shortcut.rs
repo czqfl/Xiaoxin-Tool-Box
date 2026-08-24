@@ -341,8 +341,18 @@ pub fn unregister_all_runtime<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+/// 快捷键目标 → 所属功能开关 key（截图/贴图/取色同属截图功能）。
+/// 功能停用时其快捷键一律不注册（resync 跳过），入口同步隐藏。
+fn feature_of_target(target: &str) -> &str {
+    match target {
+        "screenshot" | "pins" | "picker" => "screenshot",
+        t => t,
+    }
+}
+
 /// 全量重建：注销全部 → 按给定配置逐个注册。任一 target 失败即返回错误
 /// （此时运行时处于"已清空+部分重建"状态，调用方必须回滚/重试）。
+/// 功能停用的 target 直接跳过注册（绑定表保持 None，热键不生效）。
 pub fn resync_all_result<R: Runtime>(
     app: &AppHandle<R>,
     config: &AppConfig,
@@ -350,6 +360,13 @@ pub fn resync_all_result<R: Runtime>(
     unregister_all_runtime(app);
     crate::storage::diag_write("[shortcut] resync: all cleared, re-registering");
     for target in TARGETS {
+        if !config.feature_enabled(feature_of_target(target)) {
+            crate::storage::diag_write(&format!(
+                "[shortcut] skip {target}: feature '{}' disabled",
+                feature_of_target(target)
+            ));
+            continue;
+        }
         let s = config_shortcut(config, target);
         register_one_result(app, target, &s)?;
     }

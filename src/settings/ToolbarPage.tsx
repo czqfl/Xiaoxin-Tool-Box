@@ -157,6 +157,20 @@ export function ToolbarPage() {
           />
         </SettingRow>
 
+        <SettingRow title="图标大小" desc="调整工具栏按钮尺寸，切换后即时生效">
+          <Segmented
+            value={config.toolbar.size ?? "small"}
+            options={[
+              { value: "small", label: "小" },
+              { value: "medium", label: "中" },
+              { value: "large", label: "大" },
+            ]}
+            onChange={(v) =>
+              patchToolbar({ size: v as "small" | "medium" | "large" })
+            }
+          />
+        </SettingRow>
+
         <SettingRow
           title="贴边自动收起"
           desc="工具栏拖到屏幕边缘后，鼠标离开自动滑出屏幕（仅露一小条），鼠标靠近边缘自动弹出"
