@@ -25,6 +25,9 @@ body {
   font-optical-sizing: auto;
   text-rendering: optimizeLegibility;
   color: var(--text-primary);
+  /* 数字等宽（计数/快捷键/坐标对齐不跳动——列表类应用的隐形细节） */
+  font-variant-numeric: tabular-nums;
+  -webkit-tap-highlight-color: transparent;
   /* 应用背景：品牌色径向微光（顶部）叠中性底——有层次但不抢内容 */
   background:
     radial-gradient(
@@ -59,19 +62,30 @@ button {
   cursor: pointer;
 }
 
-/* 细滚动条：默认中性，hover 亮出品牌色（克制） */
+/* 细滚动条：悬浮式细拇指（透明边框内缩，视觉仅 ~4px），hover 亮出品牌色。
+   「平时隐形、滚动时浮现」是大厂应用的通用细节——轨道永不显示实底 */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 12px;
+  height: 12px;
 }
 ::-webkit-scrollbar-thumb {
   background: var(--border-strong);
-  border-radius: 4px;
+  background-clip: padding-box;
+  border: 4px solid transparent;
+  border-radius: 8px;
+  min-height: 32px;
+  transition: background var(--dur-fast) var(--ease-out);
 }
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(var(--accent-rgb), 0.45);
+  background-clip: padding-box;
 }
-::-webkit-scrollbar-track {
+::-webkit-scrollbar-thumb:active {
+  background: rgba(var(--accent-rgb), 0.6);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
   background: transparent;
 }
 
@@ -126,6 +140,8 @@ button {
   font-weight: 500;
   color: var(--text-primary);
   background: var(--bg-elevated);
+  /* 精致感关键细节：极轻的环境投影 + 悬停时轻微抬升——按钮不再"贴"在面板上 */
+  box-shadow: var(--shadow-item);
   transition: background var(--dur-fast) var(--ease-out),
     border-color var(--dur-fast) var(--ease-out),
     transform var(--dur-fast) var(--ease-out),
@@ -134,9 +150,11 @@ button {
 .btn:hover {
   background: var(--bg-item-hover);
   border-color: var(--border-strong);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08);
 }
 .btn:active {
   transform: scale(0.97);
+  box-shadow: none;
 }
 .btn:disabled {
   opacity: 0.5;
@@ -145,18 +163,28 @@ button {
   box-shadow: none;
 }
 .btn-primary {
-  /* 主按钮：品牌蓝纯色、无渐变无外发光——更平更稳的桌面级质感 */
+  /* 主按钮：品牌色纯色 + 顶部 1px 内高光（塑料按键式的微立体），
+     无渐变无外发光——平而不扁的桌面级质感 */
   background: var(--accent);
   border-color: transparent;
   color: var(--accent-text);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 1px 2px rgba(0, 0, 0, 0.1),
+    0 2px 8px rgba(var(--accent-rgb), 0.25);
 }
 .btn-primary:hover {
   background: var(--accent-hover);
   border-color: transparent;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 1px 2px rgba(0, 0, 0, 0.12),
+    0 3px 12px rgba(var(--accent-rgb), 0.32);
 }
 .btn-primary:active {
   background: var(--accent-active);
   transform: scale(0.97);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
 .btn-primary:disabled {
   background: var(--accent-soft);
@@ -234,6 +262,9 @@ button {
   background: var(--bg-input);
   color: var(--text-primary);
   outline: none;
+  /* 精致感细节：输入框默认带一丝内阴影（凹陷暗示可输入），
+     聚焦时内阴影退场、焦点环登场——状态切换更有"回应感" */
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.03);
   transition: border-color var(--dur-fast) var(--ease-out),
     box-shadow var(--dur-fast) var(--ease-out);
 }
@@ -241,6 +272,7 @@ button {
   border-color: var(--border-strong);
 }
 .text-input:focus {
+  background: var(--bg-elevated);
   border-color: rgba(var(--accent-rgb), 0.5);
   box-shadow: var(--ring);
 }

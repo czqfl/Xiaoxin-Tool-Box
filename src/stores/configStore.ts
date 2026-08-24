@@ -103,8 +103,11 @@ const defaultConfig: AppConfig = {
     remember_region: true,
     auto_copy: true,
     save_format: "png",
-    jpg_quality: 90,
+    jpg_quality: 95,
     save_dir: null,
+    history_enabled: true,
+    history_max_count: 20,
+    history_max_days: 7,
   },
   pin: {
     opacity: 100,
@@ -139,7 +142,7 @@ function mergeDefaults(next: AppConfig): AppConfig {
     const d = defaultConfig[k];
     const v = merged[k] as unknown;
     if (d && typeof d === "object" && !Array.isArray(d) && v && typeof v === "object" && !Array.isArray(v)) {
-      (merged as Record<string, unknown>)[k] = { ...(d as object), ...(v as object) };
+      (merged as unknown as Record<string, unknown>)[k] = { ...(d as object), ...(v as object) };
     }
   }
   return merged;
@@ -166,9 +169,11 @@ export const useConfigStore = create<ConfigStore>((set) => ({
 
   update: async (next, broadcast = true) => {
     set({ config: next });
+    // 主题/外观立即生效（applyTheme 内部已去重），持久化与广播都不阻塞渲染：
+    // 磁盘写入放后台，广播先发——其他窗口同步越早，整体切换观感越跟手
+    void saveConfig(next);
     applyTheme(next.general.theme);
     applyPanelStyle(next.general.acrylic_opacity, next.general.acrylic_enabled);
-    await saveConfig(next);
     if (broadcast) {
       await broadcastConfigChanged(next);
     }

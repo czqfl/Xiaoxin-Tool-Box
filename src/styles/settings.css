@@ -41,6 +41,7 @@
   box-shadow: 0 2px 8px var(--accent-soft);
 }
 .settings-nav-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -64,6 +65,19 @@
   color: var(--accent);
   font-weight: 600;
   transform: none;
+}
+/* 精致感细节：激活项左侧圆头指示条（飞书/Notion 式），比纯底色多一层
+   「位置感」——扫视侧栏时一眼锚定当前页 */
+.settings-nav-item.active::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 16px;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
 }
 .settings-sidebar-footer {
   margin-top: auto;
@@ -96,6 +110,7 @@
 .settings-page h2 {
   font-size: 18px;
   font-weight: 600;
+  letter-spacing: -0.01em;
   margin-bottom: 4px;
 }
 .settings-page .page-desc {
@@ -109,6 +124,8 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
   background: var(--bg-elevated);
+  /* 精致感细节：卡片环境投影——分组卡片从平铺底色上"浮"起来 */
+  box-shadow: var(--shadow-card);
   margin-bottom: 16px;
   overflow: hidden;
 }
@@ -525,7 +542,7 @@
 
 /* ---- 彩色点缀：导航 active 渐变 + 分组左侧色条 + 标题 ---- */
 .settings-nav-item.active {
-  /* 天蓝淡底渐变 + 左侧靛蓝色条，比纯色块更有层次 */
+  /* 淡底渐变（与顶部 .active 的圆头指示条配合，层次感更足） */
   background: linear-gradient(
     90deg,
     var(--accent-soft),
@@ -533,7 +550,6 @@
   );
   color: var(--accent);
   font-weight: 600;
-  box-shadow: inset 3px 0 0 var(--accent);
 }
 /* 分组卡片：左侧品牌蓝细条，视觉上"编组" */
 .setting-group {

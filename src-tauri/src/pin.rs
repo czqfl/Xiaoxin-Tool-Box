@@ -41,6 +41,23 @@ pub struct PinData {
 
 pub struct PinStore(pub Mutex<Vec<PinData>>);
 
+/// 贴图窗四周的透明外边距（【物理像素】）。
+/// 窗口比图片四周各大 PIN_MARGIN：CSS 边框贴着图片边缘画，向外泛光
+/// （box-shadow）落在透明边距里——旧版窗口=图片尺寸，光晕整个落在
+/// 客户区外被裁掉；且高 DPI 下逻辑视口舍入会把最右/最下一行像素裁掉，
+/// 表现为"缩放后部分边框消失"。前端用 12/devicePixelRatio 换算 CSS 边距。
+const PIN_MARGIN: i32 = 12;
+
+/// 图片几何 → 窗口位置（图片位左移一个边距）
+fn win_pos(pin_x: i32, pin_y: i32) -> PhysicalPosition<i32> {
+    PhysicalPosition::new(pin_x - PIN_MARGIN, pin_y - PIN_MARGIN)
+}
+
+/// 图片几何 → 窗口尺寸（图片尺寸加两侧边距）
+fn win_size(pin_w: u32, pin_h: u32) -> PhysicalSize<u32> {
+    PhysicalSize::new(pin_w + (PIN_MARGIN * 2) as u32, pin_h + (PIN_MARGIN * 2) as u32)
+}
+
 fn pins_file<R: Runtime>(app: &AppHandle<R>) -> std::path::PathBuf {
     let paths = app.try_state::<AppPaths>().unwrap();
     paths.data_dir.join("pins.json")
@@ -69,14 +86,17 @@ pub fn restore_pins<R: Runtime>(app: &AppHandle<R>) {
     if !cfg.restore_on_start { return; }
     let entries = load_pins(app);
     if entries.is_empty() { return; }
-    let store = app.try_state::<PinStore>();
-    if let Some(s) = &store {
-        *s.0.lock().unwrap() = entries.clone();
+    // 【只恢复最近一张】此前逐条建窗会把所有历史贴图倾巢而出——
+    // 每张贴图都是一个完整 WebView2 窗口，启动瞬间连建 N 个既慢又扰人。
+    // 存储仍保留全部条目（清空/列表功能不受影响），只给最近一张建窗。
+    let latest = entries.last().cloned();
+    if let Some(s) = app.try_state::<PinStore>() {
+        *s.0.lock().unwrap() = entries;
     }
-    for pin in &entries {
-        create_window(app, pin);
+    if let Some(pin) = latest {
+        create_window(app, &pin);
     }
-    diag_write(&format!("[pin] restored {} pins", entries.len()));
+    diag_write("[pin] restored latest pin only");
 }
 
 fn create_window<R: Runtime>(app: &AppHandle<R>, pin: &PinData) {
@@ -93,8 +113,8 @@ fn create_window<R: Runtime>(app: &AppHandle<R>, pin: &PinData) {
             .always_on_top(true).skip_taskbar(true).resizable(false)
             .shadow(false).visible(false).focused(false).build();
         if let Ok(w) = win {
-            let _ = w.set_position(PhysicalPosition::new(pin2.x, pin2.y));
-            let _ = w.set_size(PhysicalSize::new(pin2.width, pin2.height));
+            let _ = w.set_position(win_pos(pin2.x, pin2.y));
+            let _ = w.set_size(win_size(pin2.width, pin2.height));
             let _ = w.set_always_on_top(true);
             // 不在这里 show：等前端把贴图渲染好调 pin_ready 再显示，
             // 否则窗口先出现、图片后到，肉眼可见地"闪一下"
@@ -169,8 +189,8 @@ pub(crate) fn attach_to_staging<R: Runtime>(app: &AppHandle<R>, pin: PinData) {
     // 【先摆放再装图】staging 预建时是屏幕外 (-32000,-32000)、240×160 的空壳，
     // 不先挪到目标位置与尺寸就显示的话，贴图会以小尺寸出现在屏幕左上角
     if let Some(w) = app.get_webview_window(STAGING_LABEL) {
-        let _ = w.set_position(PhysicalPosition::new(pin.x, pin.y));
-        let _ = w.set_size(PhysicalSize::new(pin.width, pin.height));
+        let _ = w.set_position(win_pos(pin.x, pin.y));
+        let _ = w.set_size(win_size(pin.width, pin.height));
         let _ = w.set_always_on_top(true);
         #[cfg(windows)]
         if let Some(hwnd) = crate::screenshot::hwnd_of_webview(&w) {
@@ -284,8 +304,10 @@ pub fn pin_update(app: AppHandle, id: String, x: i32, y: i32, width: u32, height
     }
     if let Some(w) = window_of_pin(&app, &id) {
         let _ = w.set_ignore_cursor_events(click_through);
-        let _ = w.set_position(PhysicalPosition::new(x, y));
-        let _ = w.set_size(PhysicalSize::new(width, height));
+        // x/y/width/height 是【图片区域】几何（前端已减掉透明边距），
+        // 落窗时统一加回边距——与 create_window/attach_to_staging 保持同一约定
+        let _ = w.set_position(win_pos(x, y));
+        let _ = w.set_size(win_size(width, height));
         let _ = w.set_always_on_top(true);
     }
     persist(&store, &app);
@@ -317,13 +339,13 @@ pub fn pin_hide_all(app: AppHandle) -> Result<(), String> {
 }
 
 pub(crate) fn show_all_impl<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
-    // 【极简显隐】热键切换路径只做 show()：位置与尺寸在窗口创建及用户每次
-    // 调整时已经持久化到 PinData，无需也不应在此逐窗 set_position/set_size
-    // ——那些同步窗口操作是"按一下热键整个界面卡死"的最后风险面。
+    // 【只显示最近一张】用户要求：一键唤回不再把所有贴图倾巢而出，
+    // 只弹出最近创建的那张（存储 Vec 顺序 = 创建顺序，取末位）。
+    // 其余保持隐藏；热键再按一次 = 全部隐藏。
     // 鼠标穿透解除改由贴图窗前端监听可见性事件自行处理（见 PinWindow.tsx）
     let store = app.try_state::<PinStore>().ok_or("no state")?;
-    let entries = store.0.lock().unwrap().clone();
-    for pin in &entries {
+    let latest = { store.0.lock().unwrap().last().cloned() };
+    if let Some(pin) = latest {
         if let Some(w) = window_of_pin(app, &pin.id) {
             let _ = w.show();
         }
@@ -352,17 +374,6 @@ pub(crate) fn toggle_all<R: Runtime>(app: &AppHandle<R>) {
             diag_write("[pin] toggle skipped: previous toggle still in flight");
             return;
         }
-        // 无贴图时直接短路：空转 show/hide 毫无可见效果，还会让用户误判
-        // "快捷键坏了"（diag 里触发了一片、屏幕上却毫无动静）
-        let count = app2
-            .try_state::<PinStore>()
-            .map(|s| s.0.lock().unwrap().len())
-            .unwrap_or(0);
-        if count == 0 {
-            diag_write("[pin] toggle skipped: no pins");
-            TOGGLE_BUSY.store(false, Ordering::SeqCst);
-            return;
-        }
         let any_visible = {
             match app2.try_state::<PinStore>() {
                 Some(s) => {
@@ -376,9 +387,215 @@ pub(crate) fn toggle_all<R: Runtime>(app: &AppHandle<R>) {
                 None => false,
             }
         };
-        let _ = if any_visible { hide_all_impl(&app2) } else { show_all_impl(&app2) };
+        // 有可见贴图 → 全部隐藏（这是鼠标穿透贴图的唯一可靠出口之一）
+        if any_visible {
+            let _ = hide_all_impl(&app2);
+            if let Some(c) = read_clipboard() { *LAST_CLIP_SIG.lock().unwrap() = Some(c.sig()); }
+            TOGGLE_BUSY.store(false, Ordering::SeqCst);
+            return;
+        }
+        // 无可见贴图：剪贴板有【新】内容（与上次热键操作时不同）→ 直接贴出来；
+        // 内容没变 → 只唤回最近一张（避免反复把同一段文字贴成新贴图）
+        let clip = read_clipboard();
+        let sig = clip.as_ref().map(|c| c.sig());
+        let seen = *LAST_CLIP_SIG.lock().unwrap();
+        let is_new = sig.is_some() && sig != seen;
+        diag_write(&format!(
+            "[pin] toggle: any_visible={any_visible} clip={} sig_new={is_new}",
+            match &clip { Some(ClipContent::Image(_)) => "image", Some(ClipContent::Html(h)) =>
+                if h.starts_with("<div style=") { "text" } else { "html" }, None => "none" },
+        ));
+        if is_new {
+            if pin_clip(&app2, clip.unwrap()) {
+                *LAST_CLIP_SIG.lock().unwrap() = sig;
+                TOGGLE_BUSY.store(false, Ordering::SeqCst);
+                return;
+            }
+        }
+        let count = app2
+            .try_state::<PinStore>()
+            .map(|s| s.0.lock().unwrap().len())
+            .unwrap_or(0);
+        if count == 0 {
+            diag_write("[pin] toggle skipped: no pins, clipboard empty");
+            TOGGLE_BUSY.store(false, Ordering::SeqCst);
+            return;
+        }
+        let _ = show_all_impl(&app2);
+        *LAST_CLIP_SIG.lock().unwrap() = sig;
         TOGGLE_BUSY.store(false, Ordering::SeqCst);
     });
+}
+
+// ---------- 剪贴板贴图（图片 / 富文本 / 纯文本，Snipaste 式） ----------
+
+/// 提取 Windows CF_HTML 的正文片段（arboard 拿到的可能带完整文档壳与注释）
+fn extract_html_fragment(s: &str) -> String {
+    if let Some(a) = s.find("<!--StartFragment-->") {
+        let start = a + "<!--StartFragment-->".len();
+        if let Some(b) = s[start..].find("<!--EndFragment-->") {
+            return s[start..start + b].to_string();
+        }
+    }
+    s.trim().to_string()
+}
+
+/// 纯文本 → 简单样式 HTML（无富文本信息时的兜底观感）
+fn text_to_html(t: &str) -> String {
+    let esc = t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+    format!(
+        "<div style=\"font:14px/1.6 'Microsoft YaHei',sans-serif;background:#ffffff;color:#111111;\
+         padding:10px 14px;white-space:pre-wrap;word-break:break-word;\">{esc}</div>"
+    )
+}
+
+enum ClipContent {
+    Image(Vec<u8>),
+    Html(String),
+}
+
+impl ClipContent {
+    /// 内容签名：判断「自上次热键操作以来剪贴板是否换过内容」，
+    /// 避免同一段文字反复被贴成新贴图、盖掉「唤回隐藏贴图」语义。
+    /// 【采样哈希】大截图有几 MB 字节，全量 FNV 要扫几百万次循环；
+    /// 这里只取长度 + 首中尾三个 4KB 窗口——碰撞率对"内容是否变化"判定足够，
+    /// 复杂度从 O(n) 降到 O(1)
+    fn sig(&self) -> u64 {
+        // FNV-1a
+        fn h(bytes: &[u8]) -> u64 {
+            let mut hash: u64 = 0xcbf29ce484222325;
+            for b in bytes {
+                hash ^= *b as u64;
+                hash = hash.wrapping_mul(0x100000001b3);
+            }
+            hash
+        }
+        fn sample(b: &[u8]) -> u64 {
+            const WIN: usize = 4096;
+            let n = b.len();
+            if n <= WIN * 3 { return h(b); }
+            let mut buf = [0u8; WIN * 3];
+            buf[..WIN].copy_from_slice(&b[..WIN]);
+            let mid = n / 2 - WIN / 2;
+            buf[WIN..WIN * 2].copy_from_slice(&b[mid..mid + WIN]);
+            buf[WIN * 2..].copy_from_slice(&b[n - WIN..]);
+            h(&buf)
+        }
+        match self {
+            ClipContent::Image(b) => (b.len() as u64).rotate_left(32) ^ sample(b),
+            ClipContent::Html(s) => h(s.as_bytes()),
+        }
+    }
+}
+
+fn read_clipboard() -> Option<ClipContent> {
+    // 重试两次：VSCode/WPS 等应用复制瞬间可能短暂占用剪贴板，
+    // 首次 OpenClipboard 失败并不代表没有内容
+    for attempt in 0..3 {
+        match try_read_clipboard_once() {
+            Some(c) => return Some(c),
+            None if attempt < 2 => { std::thread::sleep(std::time::Duration::from_millis(40)); }
+            None => {}
+        }
+    }
+    None
+}
+
+fn try_read_clipboard_once() -> Option<ClipContent> {
+    let mut cb = arboard::Clipboard::new().ok()?;
+    if let Ok(img) = cb.get_image() {
+        let w = img.width as u32;
+        let hh = img.height as u32;
+        if w > 0 && hh > 0 {
+            let rgba = img.bytes.into_owned();
+            if let Some(buf) = image::RgbaImage::from_raw(w, hh, rgba) {
+                let mut png = std::io::Cursor::new(Vec::new());
+                if buf.write_to(&mut png, image::ImageFormat::Png).is_ok() {
+                    return Some(ClipContent::Image(png.into_inner()));
+                }
+            }
+        }
+    }
+    if let Ok(html) = cb.get().html() {
+        let frag = extract_html_fragment(&html);
+        if !frag.is_empty() { return Some(ClipContent::Html(frag)); }
+    }
+    if let Ok(text) = cb.get().text() {
+        let t = text.trim();
+        if !t.is_empty() { return Some(ClipContent::Html(text_to_html(t))); }
+    }
+    None
+}
+
+fn pin_clip<R: Runtime>(app: &AppHandle<R>, clip: ClipContent) -> bool {
+    let cursor = app.cursor_position().unwrap_or(PhysicalPosition::new(0.0, 0.0));
+    let (px, py) = (cursor.x as i32 + 12, cursor.y as i32 + 12);
+    let r = match clip {
+        ClipContent::Image(bytes) => create_store_entry(app, &bytes, "image/png", px, py),
+        ClipContent::Html(html) => create_html_pin(app, html, px, py),
+    };
+    match r {
+        Ok(pin) => { attach_to_staging(app, pin); true }
+        Err(e) => { diag_write(&format!("[pin] clipboard paste: {e}")); false }
+    }
+}
+
+/// 上一次热键操作时看到的剪贴板内容签名（None=还没见过）
+static LAST_CLIP_SIG: Mutex<Option<u64>> = Mutex::new(None);
+
+/// 建一张 HTML 贴图（落盘 .html 入库）。尺寸未知先给占位值，
+/// 前端渲染量完实际尺寸后经 pin_resize 回填再亮窗
+pub(crate) fn create_html_pin<R: Runtime>(app: &AppHandle<R>, html: String, x: i32, y: i32) -> Result<PinData, String> {
+    let cfg: PinConfig = app.try_state::<ConfigState>()
+        .map(|s| s.0.lock().unwrap().pin.clone())
+        .unwrap_or_default();
+    let id = uuid::Uuid::new_v4().to_string();
+    let dir = pins_dir(app);
+    let file = dir.join(format!("{id}.html"));
+    std::fs::write(&file, html).map_err(|e| format!("write file: {e}"))?;
+    let pin = PinData {
+        id: id.clone(),
+        file: file.to_string_lossy().to_string(),
+        x, y,
+        width: 360, height: 160, // 占位：前端测量后 pin_resize 校正
+        opacity: cfg.opacity as f64 / 100.0,
+        rotation: 0,
+        flip_h: false, flip_v: false,
+        shadow: cfg.border_shadow,
+        click_through: false,
+    };
+    let store = app.try_state::<PinStore>().ok_or("no state")?;
+    store.0.lock().unwrap().push(pin.clone());
+    persist(&store, app);
+    Ok(pin)
+}
+
+/// HTML 贴图尺寸回填：前端渲染完量出物理像素尺寸后调用。
+#[tauri::command]
+pub fn pin_resize(_window: tauri::WebviewWindow, app: AppHandle, id: String, width: u32, height: u32) -> Result<(), String> {
+    let store = app.try_state::<PinStore>().ok_or("no state")?;
+    {
+        let mut entries = store.0.lock().unwrap();
+        let pin = entries.iter_mut().find(|p| p.id == id).ok_or("not found")?;
+        pin.width = width.max(40);
+        pin.height = height.max(40);
+    }
+    if let Some(w) = window_of_pin(&app, &id) {
+        let _ = w.set_size(win_size(width.max(40), height.max(40)));
+    }
+    persist(&store, &app);
+    Ok(())
+}
+
+/// 贴图内容类型："image" | "html"。
+/// 前端据此决定用 <img> 还是富文本容器渲染——协议 URL 不带扩展名，
+/// 旧版靠 src 后缀判断永远判不中，HTML 贴图因此整条链路失效
+#[tauri::command]
+pub fn pin_kind(app: AppHandle, id: String) -> Result<String, String> {
+    let store = app.try_state::<PinStore>().ok_or("no state")?;
+    let entries = store.0.lock().unwrap();
+    let pin = entries.iter().find(|p| p.id == id).ok_or("not found")?;
+    Ok(if pin.file.ends_with(".html") { "html" } else { "image" }.into())
 }
 
 #[tauri::command]
@@ -398,6 +615,13 @@ pub fn pin_clear_all(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn pin_set_click_through(window: tauri::WebviewWindow, on: bool) -> Result<(), String> {
     window.set_ignore_cursor_events(on).map_err(|e| e.to_string())
+}
+
+/// Esc 隐藏单个贴图（【不销毁】）：全局「显示/隐藏贴图」热键可整批唤回。
+/// 旧版 Esc=关闭删除，用户想再看只能重新截图——改为隐藏（Snipaste 行为）
+#[tauri::command]
+pub fn pin_hide_one(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.hide().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -455,6 +679,10 @@ fn create_from_b64<R: Runtime>(app: &AppHandle<R>, b64: &str, x: i32, y: i32) ->
 
 /// 只做「落盘 + 入存储」，不建窗——供 staging 复用路径使用
 pub(crate) fn create_store_entry<R: Runtime>(app: &AppHandle<R>, bytes: &[u8], mime: &str, x: i32, y: i32) -> Result<PinData, String> {
+    // HTML 贴图：尺寸未知（前端量完经 pin_resize 回填），这里只落盘
+    if mime.contains("html") {
+        return create_html_pin(app, String::from_utf8_lossy(bytes).to_string(), x, y);
+    }
     // 只读图片头拿尺寸，不做完整解码——旧实现 image::load_from_memory 会把
     // 整张图解开成 RGBA 位图（大区域要数百毫秒），而这里需要的只有宽高，
     // 文件字节本身原样落盘、显示由 webview 原生解码，完整解码纯属浪费。
@@ -467,7 +695,7 @@ pub(crate) fn create_store_entry<R: Runtime>(app: &AppHandle<R>, bytes: &[u8], m
     let h = h.max(1);
 
     let id = uuid::Uuid::new_v4().to_string();
-    let ext = if mime.contains("gif") { "gif" } else { "png" };
+    let ext = if mime.contains("gif") { "gif" } else if mime.contains("html") { "html" } else if mime.contains("bmp") { "bmp" } else { "png" };
     let dir = pins_dir(app);
     let file = dir.join(format!("{id}.{ext}"));
     std::fs::write(&file, bytes).map_err(|e| format!("write file: {e}"))?;

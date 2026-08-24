@@ -7,12 +7,20 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
 import {
-  pinImageUrl, pinUpdate, pinClose, pinSetClickThrough, pinCopyImage, pinReady,
+  pinImageUrl, pinUpdate, pinClose, pinSetClickThrough, pinCopyImage, pinReady, pinHideOne, pinResize, pinKind, diagLog,
 } from "../../core/tauri";
 import "./pin.css";
 
 /** 贴图边框随机定格色板（Snipaste 式：贴图瞬间彩闪几下，随后定格其中一色） */
 const PIN_ACCENTS = ["#0a84ff", "#ff453a", "#32d74b", "#bf5af2", "#ff9f0a", "#64d2ff"];
+
+/** 贴图窗四周透明边距（【物理像素】，与 Rust 端 PIN_MARGIN 严格一致）。
+ *  窗口比图片四周各大 12px：CSS 边框贴图片边缘画，向外泛光落在边距里。
+ *  旧版窗口=图片尺寸时，box-shadow 光晕整个落在客户区外被裁掉，
+ *  且高 DPI 下逻辑视口舍入会裁掉最右/最下一行——"缩放后边框消失"的根因 */
+const PIN_MARGIN = 12;
+/** CSS 像素边距：物理边距 ÷ 当前 DPI 缩放 */
+const pinMarginCss = () => PIN_MARGIN / (window.devicePixelRatio || 1);
 
 export function PinWindow() {
   // 边框主题色：每次贴图从调色板随机取一个——开场彩闪结束后定格于此
@@ -61,12 +69,82 @@ export function PinWindow() {
     void listen<{ id: string }>("pin://assign", (e) => {
       idRef.current = e.payload.id;
       replayIntro();
+      tAssignRef.current = Date.now();
       // 新贴图由 Rust 重设了窗口尺寸：作废旧缓存，下次滚轮重新拉取
       sizeRef.current = null;
+      htmlSizedRef.current = false;
+      // 自愈重试额度按贴图重置（复用窗跨多张贴图存活，不复位会导致
+      // 第一张失败后所有后续贴图永远失去重试机会）
+      retriedRef.current = false;
+      setHtml(null);
+      setKind("image");
       setSrc(pinImageUrl(e.payload.id));
     }).then((f) => { un = f; });
     return () => { un?.(); };
   }, [isStaging]);
+
+  // ---- HTML 贴图（剪贴板富文本/纯文本）----
+  // 【不能用 src 后缀判断】协议 URL /pin/{id} 不带扩展名——旧版
+  // src.endsWith(".html") 永远判不中，HTML 贴图整条链路失效（前端永不调
+  // pinReady → Rust 1.5s 兜底重建 → 表现为"贴图极慢/卡"）。
+  // 现经 pin_kind 查询内容类型：html 拉取文本渲染（保留剪贴板内联样式），
+  // 量完实际尺寸回填窗口再亮窗；image 走 <img> 原路
+  const [kind, setKind] = useState<"image" | "html">("image");
+  const [html, setHtml] = useState<string | null>(null);
+  const htmlWrapRef = useRef<HTMLDivElement | null>(null);
+  const htmlRef = useRef<HTMLDivElement | null>(null);
+  // HTML 自然尺寸（首次渲染量出）：滚轮缩放窗口时按 窗口宽/自然宽 比例
+  // transform:scale 内容——文字贴图缩放必须像图片一样整体跟随边框
+  const htmlNatRef = useRef<{ w: number; h: number } | null>(null);
+  const htmlSizedRef = useRef(false);
+  const tAssignRef = useRef(0);
+  useEffect(() => {
+    if (!idRef.current || !src) return;
+    let alive = true;
+    pinKind(idRef.current).then((k) => { if (alive) setKind(k); }).catch(() => {});
+    return () => { alive = false; };
+  }, [src]);
+  useEffect(() => {
+    if (kind !== "html" || !src) { setHtml(null); return; }
+    let alive = true;
+    fetch(src).then((r) => r.text()).then((t) => { if (alive) setHtml(t); }).catch(() => {});
+    return () => { alive = false; };
+  }, [kind, src]);
+  useEffect(() => {
+    if (html === null || !idRef.current || htmlSizedRef.current) return;
+    const el = htmlRef.current;
+    if (!el) return;
+    htmlSizedRef.current = true;
+    const natW = el.offsetWidth, natH = el.offsetHeight;
+    htmlNatRef.current = { w: natW, h: natH };
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.max(40, Math.min(4000, Math.round(natW * dpr)));
+    const h = Math.max(40, Math.min(6000, Math.round(natH * dpr)));
+    void pinResize(idRef.current, w, h).then(() => {
+      diagLog(`[pin] html sized ${w}x${h} +${Date.now() - tAssignRef.current}ms, ready`);
+      readyWhenPainted(null);
+      applyHtmlScale();
+    }).catch(() => {});
+  }, [html]);
+
+  /** 按当前窗口内容宽 / HTML 自然宽 计算 scale 并直改 DOM。
+   *  监听 webview resize（滚轮 setSize 会触发）：贴图放大缩小，
+   *  文字/富文本与图片一样整体跟随边框变化 */
+  const applyHtmlScale = () => {
+    const wrap = htmlWrapRef.current, inner = htmlRef.current;
+    const nat = htmlNatRef.current;
+    if (!wrap || !inner || !nat || nat.w < 1) return;
+    const availW = Math.max(1, wrap.clientWidth);
+    const k = availW / nat.w;
+    inner.style.transformOrigin = "0 0";
+    inner.style.transform = `scale(${k})`;
+    wrap.style.height = `${Math.round(nat.h * k)}px`;
+  };
+  useEffect(() => {
+    if (kind !== "html") return;
+    window.addEventListener("resize", applyHtmlScale);
+    return () => window.removeEventListener("resize", applyHtmlScale);
+  }, [kind]);
 
   // 持久化：每渲染刷新闭包（旧版一次性 ref 会把过期状态写回覆盖用户调整）
   const persistNowRef = useRef(async () => {});
@@ -77,8 +155,12 @@ export function PinWindow() {
     try {
       const pos = await win.outerPosition();
       const size = await win.outerSize();
+      // 持久化的是【图片区域】几何：窗口坐标/尺寸扣掉四周透明边距，
+      // 与 Rust 端约定一致（落窗时由 Rust 加回），恢复/缩放比例才不会漂移
+      const m = PIN_MARGIN;
       await pinUpdate(id, {
-        x: pos.x, y: pos.y, width: size.width, height: size.height,
+        x: pos.x + m, y: pos.y + m,
+        width: Math.max(1, size.width - m * 2), height: Math.max(1, size.height - m * 2),
         opacity, rotation, flip_h: flipH, flip_v: flipV, shadow, click_through: clickThrough,
       });
     } catch {}
@@ -95,11 +177,11 @@ export function PinWindow() {
   const opacityRef = useRef(opacity);
   opacityRef.current = opacity;
 
-  // 角标：缩放比例 / 透明度（左上角），停止操作 ~1s 后自动隐藏
-  const showBadge = (text: string) => {
+  // 角标：缩放比例 / 透明度 / 操作提示（左上角），默认 ~1s 后自动隐藏
+  const showBadge = (text: string, ms = 1000) => {
     setZoomLabel(text);
     window.clearTimeout(zoomHideTimer.current);
-    zoomHideTimer.current = window.setTimeout(() => setZoomLabel(null), 1000);
+    zoomHideTimer.current = window.setTimeout(() => setZoomLabel(null), ms);
   };
 
   // ---- 滚轮缩放的尺寸缓存与 rAF 合并 ----
@@ -128,15 +210,20 @@ export function PinWindow() {
       }
       let base = sizeRef.current;
       if (!base) {
-        // 首次滚动：拉一次当前尺寸建立缓存（此后全部同步计算）
-        void win.outerSize().then((s) => { sizeRef.current = { w: s.width, h: s.height }; }).catch(() => {});
+        // 首次滚动：拉一次当前窗口尺寸建立缓存（此后全部同步计算）。
+        // 缓存与缩放计算都用【图片区域】尺寸（窗口扣掉四周透明边距），
+        // 落窗 setSize 时再加回边距
+        void win.outerSize().then((s) => {
+          sizeRef.current = { w: Math.max(40, s.width - PIN_MARGIN * 2), h: Math.max(40, s.height - PIN_MARGIN * 2) };
+        }).catch(() => {});
         return;
       }
       const factor = e.deltaY > 0 ? 0.9 : 1.1;
       const nw = Math.max(40, Math.round(base.w * factor));
       const nh = Math.max(40, Math.round(base.h * factor));
       sizeRef.current = { w: nw, h: nh };
-      pendingSizeRef.current = { w: nw, h: nh };
+      // 窗口尺寸 = 图片尺寸 + 四周透明边距（Rust 端同款约定）
+      pendingSizeRef.current = { w: nw + PIN_MARGIN * 2, h: nh + PIN_MARGIN * 2 };
       if (!zoomRafRef.current) {
         zoomRafRef.current = requestAnimationFrame(() => {
           zoomRafRef.current = 0;
@@ -178,8 +265,11 @@ export function PinWindow() {
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (!idRef.current) return;
-      if (e.key === "Delete" || e.key === "Escape") {
+      // Delete=彻底删除；Esc=仅隐藏（贴图热键可整批唤回，Snipaste 行为）
+      if (e.key === "Delete") {
         pinClose(idRef.current).catch(() => {});
+      } else if (e.key === "Escape") {
+        pinHideOne().catch(() => {});
       } else if (e.key === "r" && e.ctrlKey) {
         setRotation((r) => (r + 90) % 360);
       }
@@ -230,8 +320,17 @@ export function PinWindow() {
     const actions = [
       { label: "复制到剪贴板", action: () => pinCopyImage(id).catch(() => {}) },
       { label: shadow ? "关闭阴影" : "开启阴影", action: () => setShadow(!shadow) },
-      { label: clickThrough ? "取消鼠标穿透" : "开启鼠标穿透",
-        action: () => pinSetClickThrough(!clickThrough).then(() => setClickThrough(!clickThrough)).catch(() => {}) },
+      // 鼠标穿透：点击/滚轮全部穿过贴图直达下面的窗口（Snipaste 同款）。
+      // 穿透后贴图收不到任何鼠标事件——出口是贴图热键（隐藏后唤回自动解除）
+      { label: clickThrough ? "取消鼠标穿透" : "开启鼠标穿透（贴图热键唤回）",
+        action: () => {
+          const turningOn = !clickThrough;
+          pinSetClickThrough(turningOn).then(() => {
+            setClickThrough(turningOn);
+            if (turningOn) showBadge("已鼠标穿透 · 按贴图热键隐藏/唤回", 4000);
+          }).catch(() => {});
+        } },
+      { label: "隐藏此贴图（贴图热键唤回）", action: () => pinHideOne().catch(() => {}) },
       { label: "关闭此贴图", action: () => pinClose(id).catch(() => {}) },
     ];
     const menu = document.createElement("div");
@@ -250,22 +349,29 @@ export function PinWindow() {
     setTimeout(() => document.addEventListener("click", close), 0);
   };
 
-  // 图片解码完成后等两帧再亮窗：img.onload 只代表解码入队，
-  // 首次合成可能晚一拍，立即 show 会闪一帧透明/空窗
-  const readyWhenPainted = () =>
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => { void pinReady().catch(() => {}); }));
+  // 图片就绪信号：decode() 在解码完成（可无闪烁呈现）时才 resolve，
+  // 比 onload 更早且语义更准；省掉旧版"等两帧 rAF"的额外 1~2 帧延迟
+  const readyWhenPainted = (img: HTMLImageElement | null) => {
+    const fire = () => { void pinReady().catch(() => {}); };
+    if (img?.decode) {
+      img.decode().then(fire, fire);
+    } else {
+      requestAnimationFrame(() => requestAnimationFrame(fire));
+    }
+  };
 
   return (
     <div className={`pin-window${shadow ? " pin-shadow" : ""}${dragging ? " pin-dragging" : ""}`}
-      style={{ opacity, "--pin-accent": accent } as React.CSSProperties}
+      style={{ opacity, "--pin-accent": accent, "--pin-m": `${pinMarginCss()}px` } as React.CSSProperties}
       onMouseDown={onMouseDown} onContextMenu={onContext}
       onDoubleClick={() => { if (idRef.current) pinClose(idRef.current).catch(() => {}); }}>
-      {src && (
+      {src && kind === "image" && (
         <img src={src} draggable={false}
           onLoad={(e) => {
-            baseWRef.current = (e.target as HTMLImageElement).naturalWidth || 0;
-            readyWhenPainted();
+            const el = e.target as HTMLImageElement;
+            baseWRef.current = el.naturalWidth || 0;
+            if (tAssignRef.current) diagLog(`[pin] img decoded +${Date.now() - tAssignRef.current}ms`);
+            readyWhenPainted(el);
           }}
           onError={() => {
             // 加载失败绝不调用 pinReady——那会 show 出一块空白/底色矩形（必闪）。
@@ -280,6 +386,14 @@ export function PinWindow() {
             transform: `rotate(${rotation}deg) scaleX(${flipH?-1:1}) scaleY(${flipV?-1:1})`,
             width: "100%", height: "100%", objectFit: "contain",
           }} />
+      )}
+      {/* HTML 贴图（剪贴板富文本/纯文本）：保留剪贴板内联样式原样渲染；
+          外层 wrap 跟随窗口宽度，内层按比例 transform:scale 整体缩放 */}
+      {kind === "html" && html !== null && (
+        <div ref={htmlWrapRef} className="pin-html-wrap">
+          <div ref={htmlRef} className="pin-html"
+            dangerouslySetInnerHTML={{ __html: html }} />
+        </div>
       )}
       {/* Snipaste 式边框：贴图瞬间彩闪几下定格随机主题色；此后悬停/拖动时
           显示主题色、闲置时白色，让贴图边界在任何桌面都清晰可辨 */}

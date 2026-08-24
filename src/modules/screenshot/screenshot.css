@@ -63,9 +63,9 @@ html[data-window="shot"] body { background: transparent; }
    且不产生条级层叠上下文，tooltip 可正常浮到面板之上 */
 /* 工具栏贴近屏幕底缘时：把色板/粗细面板翻转到工具栏【上方】（旧版跑到屏幕外） */
 .shot-toolbar-float.panel-above { flex-direction: column-reverse; }
-.shot-toolbar { display: flex; align-items: center; gap: 1px; background: rgba(var(--bg-panel-rgb), var(--panel-opacity)); border-radius: 0; padding: 3px 4px; flex-wrap: nowrap; white-space: nowrap; position: relative; }
-.shot-toolbar::before { content: ""; position: absolute; inset: 0; z-index: -1; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
-.shot-toolbar-panel { display: flex; align-items: center; gap: 7px; background: rgba(var(--bg-panel-rgb), var(--panel-opacity)); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-radius: 0; padding: 8px 10px; white-space: nowrap; align-self: stretch; }
+.shot-toolbar { display: flex; align-items: center; gap: 1px; background: rgba(var(--bg-panel-rgb), var(--panel-opacity)); border-radius: 10px; padding: 3px 4px; flex-wrap: nowrap; white-space: nowrap; position: relative; }
+.shot-toolbar::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+.shot-toolbar-panel { display: flex; align-items: center; gap: 7px; background: rgba(var(--bg-panel-rgb), var(--panel-opacity)); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-radius: 8px; padding: 8px 10px; white-space: nowrap; align-self: stretch; }
 .shot-toolbar button { background: transparent; border: none; color: var(--text-primary); padding: 6px; border-radius: 2px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; min-width: 34px; min-height: 34px; position: relative; transition: background var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
 /* 图标：纯细线描边，【不发光】——drop-shadow 会让细线图标发糊、不利索。
    可读性靠图标自身颜色 + 悬停/激活时按钮背景反馈（几何已在组件内重校）。 */
@@ -88,7 +88,7 @@ html[data-window="shot"] body { background: transparent; }
   background: rgba(var(--bg-panel-rgb), var(--panel-opacity));
   backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
   box-shadow: 0 4px 14px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.08);
-  border-radius: 2px;
+  border-radius: 10px;
   animation: shot-submenu-in 100ms var(--ease-out) both;
 }
 .shot-toolbtn-submenu.above { top: auto; bottom: calc(100% + 4px); }
@@ -211,23 +211,56 @@ html[data-window="shot"] body { background: transparent; }
 .shot-sw-badge { position: fixed; left: 50%; bottom: 36px; transform: translateX(-50%); z-index: 400; background: rgba(20,20,20,0.88); color: #fff; font-size: 13px; padding: 6px 14px; border-radius: 3px; pointer-events: none; backdrop-filter: blur(8px); }
 
 /* 左下角固定操作提示区（Snipaste 式）：黑色半透明底 + 键帽式快捷键列表。
-   未选区显示基础操作，选定后切换为选区操作；选区覆盖提示区时整体隐藏 */
+   未选区显示基础操作，选定后切换为选区操作；选区覆盖提示区时整体隐藏。
+   字号加大、行距放宽：可读性优先（用户反馈"提示文字变大，格式清晰"） */
 .shot-hint-panel {
   /* bottom 抬高到 Windows 任务栏上方（任务栏约 40~48px），避免被遮挡 */
   position: fixed; left: 12px; bottom: 56px; z-index: 55; pointer-events: none;
-  background: rgba(12,12,14,0.72); border-radius: 4px; padding: 9px 14px 10px;
+  background: rgba(12,12,14,0.72); border-radius: 10px; padding: 12px 18px 13px;
   backdrop-filter: blur(8px);
   box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 4px 14px rgba(0,0,0,0.35);
 }
 .shot-hint-row {
-  display: flex; align-items: center; gap: 10px;
-  color: rgba(255,255,255,0.82); font-size: 12px; line-height: 2.15; white-space: nowrap;
+  display: flex; align-items: center; gap: 12px;
+  color: rgba(255,255,255,0.9); font-size: 15px; line-height: 2.1; white-space: nowrap;
 }
 .shot-hint-row kbd {
-  min-width: 20px; text-align: center; padding: 1px 7px; border-radius: 3px;
+  min-width: 26px; text-align: center; padding: 2px 9px; border-radius: 5px;
   border: 1px solid rgba(255,255,255,0.45); background: rgba(255,255,255,0.09);
-  color: #fff; font: 600 11px/1.7 Consolas, "Courier New", monospace;
+  color: #fff; font: 600 13px/1.7 Consolas, "Courier New", monospace;
 }
+/* 正在浏览历史截屏时的引导行（主题色高亮） */
+.shot-hint-row.shot-hint-viewing { color: var(--accent-text, #8ab4ff); }
+.shot-hint-row.shot-hint-viewing kbd { border-color: currentColor; }
+
+/* 截图历史缩略图列表（H 开关）：左下角提示区上方横排玻璃面板 */
+.shot-hist-panel {
+  position: fixed; left: 12px; bottom: 200px; z-index: 300;
+  display: flex; align-items: stretch; gap: 12px; padding: 12px;
+  max-width: min(760px, calc(100vw - 24px)); overflow-x: auto;
+  background: rgba(12,12,14,0.78); backdrop-filter: blur(10px);
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 6px 20px rgba(0,0,0,0.45);
+  animation: shot-submenu-in 120ms var(--ease-out) both;
+}
+.shot-hist-item { cursor: pointer; text-align: center; flex: none; }
+.shot-hist-item img {
+  display: block; height: 96px; width: auto; border-radius: 6px;
+  border: 2px solid transparent; transition: border-color var(--dur-fast) var(--ease-out);
+}
+.shot-hist-item:hover img, .shot-hist-item.active img { border-color: var(--accent, #4c8dff); }
+.shot-hist-item span {
+  display: block; margin-top: 5px; color: rgba(255,255,255,0.85); font-size: 12px;
+}
+.shot-hist-live {
+  height: 96px; min-width: 150px; display: flex; align-items: center; justify-content: center;
+  border-radius: 6px; border: 2px solid transparent; color: #fff; font-size: 15px;
+  background:
+    repeating-conic-gradient(rgba(255,255,255,0.14) 0% 25%, transparent 0% 50%) 50%/22px 22px,
+    linear-gradient(135deg, rgba(76,141,255,0.35), rgba(160,110,220,0.35));
+}
+.shot-hist-item:hover .shot-hist-live, .shot-hist-item.active .shot-hist-live { border-color: var(--accent, #4c8dff); }
+.shot-hist-empty { color: rgba(255,255,255,0.75); font-size: 14px; align-self: center; padding: 30px 20px; }
 /* 选区提示条已并入左下角 .shot-hint-panel（选区操作提示 + 覆盖隐藏） */
 /* ---- 原生即时亮窗竞态保护 ----
    呼出时 Rust 在冻结帧写入后 ~24ms 即亮窗（不等前端链路），本页收到
@@ -235,7 +268,78 @@ html[data-window="shot"] body { background: transparent; }
    残留的浮层 DOM，防止旧工具栏/提示/文字编辑器在新画面上闪现 */
 .shot-overlay[data-resetting="1"] .shot-toolbar-float,
 .shot-overlay[data-resetting="1"] .shot-hint-panel,
+.shot-overlay[data-resetting="1"] .shot-hist-panel,
+.shot-overlay[data-resetting="1"] .shot-ocr-panel,
+.shot-overlay[data-resetting="1"] .shot-ocr-pop,
+.shot-overlay[data-resetting="1"] .shot-ocr-selrect,
 .shot-overlay[data-resetting="1"] .shot-mag,
 .shot-overlay[data-resetting="1"] .shot-text-editor,
 .shot-overlay[data-resetting="1"] .shot-sw-badge,
 .shot-overlay[data-resetting="1"] .shot-toolbtn-submenu { display: none !important; }
+
+/* ---- OCR 文字识别 ---- */
+/* 结果面板：玻璃卡片，贴在选区右侧/左侧。
+   【核心交互】识别文本像普通文本一样可直接划选（面板解除 body 的
+   user-select:none），划选后 Ctrl+C 原生复制 */
+.shot-ocr-panel {
+  position: fixed; z-index: 300;
+  display: flex; flex-direction: column;
+  background: rgba(12,12,14,0.78); backdrop-filter: blur(10px);
+  border-radius: 10px; overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 6px 20px rgba(0,0,0,0.45);
+  animation: shot-submenu-in 120ms var(--ease-out) both;
+  user-select: text; cursor: auto;
+}
+.shot-ocr-head {
+  display: flex; align-items: center; gap: 8px; flex: none;
+  padding: 9px 12px; color: #fff; font-size: 14px;
+  background: rgba(255,255,255,0.05);
+  user-select: none;
+}
+.shot-ocr-head button {
+  background: rgba(255,255,255,0.08); border: none; color: rgba(255,255,255,0.92);
+  font-size: 12px; padding: 4px 10px; border-radius: 5px; cursor: pointer;
+}
+.shot-ocr-head button:hover { background: rgba(var(--accent-rgb), 0.4); color: #fff; }
+.shot-ocr-body { padding: 8px 12px; font-size: 13px; overflow-y: auto; }
+.shot-ocr-muted { color: rgba(255,255,255,0.65); }
+.shot-ocr-err { color: #ff8d8d; }
+.shot-ocr-lines { overflow-y: auto; padding: 4px 6px 8px; cursor: text; }
+.shot-ocr-line {
+  padding: 5px 8px; border-radius: 4px;
+  color: rgba(255,255,255,0.92); font-size: 13px; line-height: 1.55;
+  white-space: pre-wrap; word-break: break-word;
+}
+.shot-ocr-line::selection,
+.shot-ocr-lines ::selection { background: rgba(var(--accent-rgb), 0.45); color: #fff; }
+.shot-ocr-selbar {
+  flex: none; padding: 7px 12px; font-size: 12px;
+  color: var(--accent-text, #9cc0ff); background: rgba(255,255,255,0.05);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  user-select: none;
+}
+.shot-ocr-src {
+  color: rgba(255,255,255,0.6); font-size: 12px;
+  padding-bottom: 6px; margin-bottom: 6px;
+  border-bottom: 1px solid rgba(255,255,255,0.12);
+  max-height: 90px; overflow-y: auto;
+}
+.shot-ocr-out { color: #fff; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
+.shot-ocr-back {
+  margin-top: 8px; background: rgba(255,255,255,0.08); border: none;
+  color: rgba(255,255,255,0.92); font-size: 12px; padding: 4px 10px;
+  border-radius: 5px; cursor: pointer;
+}
+.shot-ocr-back:hover { background: rgba(var(--accent-rgb), 0.4); }
+/* 松手浮标：复制 / 翻译 */
+.shot-ocr-pop {
+  position: fixed; z-index: 320; display: flex; gap: 2px; padding: 3px;
+  background: rgba(12,12,14,0.88); backdrop-filter: blur(8px); border-radius: 7px;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1), 0 4px 14px rgba(0,0,0,0.45);
+  animation: shot-submenu-in 100ms var(--ease-out) both;
+}
+.shot-ocr-pop button {
+  background: transparent; border: none; color: rgba(255,255,255,0.92);
+  font-size: 13px; padding: 5px 12px; border-radius: 5px; cursor: pointer;
+}
+.shot-ocr-pop button:hover { background: rgba(var(--accent-rgb), 0.4); }

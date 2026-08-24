@@ -354,6 +354,12 @@ pub struct ShotConfig {
     pub jpg_quality: u8,
     /// 默认保存目录；为空时用系统的图片目录
     pub save_dir: Option<String>,
+    /// 截图历史（呼出时冻结的全屏画面）是否启用：< > 翻页重截、H 打开列表
+    pub history_enabled: bool,
+    /// 历史最多保留多少次截屏（按「一次呼出」计，多屏各存一张）
+    pub history_max_count: u32,
+    /// 历史最多保留多少天（超期自动清理）
+    pub history_max_days: u32,
 }
 
 impl Default for ShotConfig {
@@ -367,8 +373,11 @@ impl Default for ShotConfig {
             remember_region: true,
             auto_copy: true,
             save_format: "png".into(),
-            jpg_quality: 90,
+            jpg_quality: 95,
             save_dir: None,
+            history_enabled: true,
+            history_max_count: 20,
+            history_max_days: 7,
         }
     }
 }
@@ -441,6 +450,8 @@ pub enum ThemeMode {
     Skyblue,
     /// 红色主题（浅红背景 + 红品牌色，浅色系）
     Red,
+    /// 橙色主题（暖奶油背景 + 琥珀橙品牌色，浅色系）
+    Orange,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

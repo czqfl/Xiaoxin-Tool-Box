@@ -481,9 +481,94 @@
   color-scheme: light;
 }
 
+/* 橙色主题（orange）：暖调奶油底色 + 醇厚琥珀橙品牌色（非荧光橙、非土黄）。
+   与红色主题同构：暖白底提亮，橙感来自「饱和适中、偏暖的琥珀橙」，
+   文字用暖棕墨色，整体统一在暖色温里——任何界面元素都不遗漏 */
+:root[data-theme="orange"] {
+  /* 品牌色：琥珀橙（饱和但不过亮，深底白字对比足够） */
+  --accent: #e0780a;
+  --accent-hover: #cc6b06;
+  --accent-active: #b25d05;
+  --accent-soft: rgba(224, 120, 10, 0.13);
+  --accent-text: #ffffff;
+
+  --danger: #e5484d;
+  --danger-soft: rgba(229, 72, 77, 0.12);
+  --success: #2f9270;
+  --success-soft: rgba(47, 146, 112, 0.12);
+  --warning: #d97706;
+  --warning-soft: rgba(217, 119, 6, 0.14);
+
+  /* 水彩按钮色带（橙/金/暖珊瑚系，橙色主题下和谐） */
+  --water-a: rgba(224, 138, 42, 0.74);
+  --water-b: rgba(232, 108, 32, 0.68);
+  --water-c: rgba(226, 160, 62, 0.66);
+  --water-d: rgba(206, 120, 90, 0.62);
+  --water-e: rgba(214, 96, 70, 0.64);
+  --btn-text: #ffffff;
+  --btn-text-shadow: 0 1px 2px rgba(110, 60, 0, 0.3);
+
+  /* 内容类型色（保持语义：青/绿/琥珀低饱和，与橙拉开） */
+  --c-cyan: #2a9bb4;
+  --c-green: #3aa581;
+  --c-amber: #c98d2b;
+  --c-cyan-soft: rgba(42, 155, 180, 0.13);
+  --c-green-soft: rgba(58, 165, 129, 0.13);
+  --c-amber-soft: rgba(201, 141, 43, 0.14);
+  /* 工具栏图标辨识色（600 级，暖白底上清晰） */
+  --tool-clipboard: #d97b06;
+  --tool-folder: #ca8a04;
+  --tool-credentials: #2f9270;
+  --tool-translation: #b85c2e;
+  --tool-port: #d95f37;
+  --tool-settings: #bf6c25;
+  --tool-files: #dd7a4a;
+  --tool-snippets: #cf5b6e;
+  --accent-rgb: 224, 120, 10;
+
+  /* 背景：暖调奶油灰（橙韵不抢内容，与红/青/蓝主题同构） */
+  --bg-app: #f5efe6;
+  --bg-panel: rgba(252, 248, 241, 0.86);
+  --bg-panel-rgb: 252, 248, 241;
+  /* 设置界面侧栏/标题栏底色（暖奶油调，比内容区略深） */
+  --bg-sidebar: #ede5d7;
+  --panel-opacity: 0.75;
+  --bg-elevated: rgba(255, 253, 249, 0.96);
+  --bg-input: rgba(255, 252, 246, 0.92);
+  --bg-input-glass: rgba(252, 248, 241, 0.38);
+  --bg-item-hover: rgba(112, 72, 12, 0.05);
+  --bg-item-active: rgba(112, 72, 12, 0.09);
+  --bg-badge: rgba(112, 72, 12, 0.06);
+
+  /* 文本：暖棕墨（中性偏暖，不偏蓝保持稳定可读性） */
+  --text-primary: #29200f;
+  --text-secondary: #57493a;
+  --text-tertiary: #685a4b;
+  --text-inverse: #ffffff;
+
+  --border-subtle: rgba(118, 80, 18, 0.08);
+  --border-strong: rgba(118, 80, 18, 0.17);
+
+  --shadow-panel: 0 24px 64px rgba(118, 78, 16, 0.16), 0 4px 16px rgba(118, 78, 16, 0.07);
+  --shadow-item: 0 2px 8px rgba(118, 78, 16, 0.07);
+  --shadow-menu: 0 12px 32px rgba(118, 78, 16, 0.14);
+  --shadow-card: 0 1px 2px rgba(118, 78, 16, 0.05), 0 6px 20px rgba(118, 78, 16, 0.07);
+  --shadow-toolbar: 0 4px 18px rgba(118, 78, 16, 0.18), 0 1px 3px rgba(118, 78, 16, 0.1);
+
+  /* 控件 */
+  --switch-knob: #ffffff;
+
+  /* 焦点环 / 面板高光（橙系） */
+  --ring: 0 0 0 2px rgba(224, 120, 10, 0.28), 0 4px 18px rgba(224, 120, 10, 0.16);
+  --panel-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  --panel-highlight-strong: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+
+  color-scheme: light;
+}
+
 /* 未手动指定主题时跟随系统 */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]):not([data-theme="dark"]):not([data-theme="mint"]):not([data-theme="skyblue"]):not([data-theme="red"]) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]):not([data-theme="mint"]):not([data-theme="skyblue"]):not([data-theme="red"]):not([data-theme="orange"]) {
     /* 品牌色：与 data-theme="dark" 同步——暗底提亮天蓝 */
     --accent: #4c9eff;
     --accent-hover: #3a8ef2;
@@ -568,7 +653,7 @@
   /* 系统深色下的 body 顶部微光：与 data-theme="dark" 一致——
      由 base.css 的「品牌色微光」改为「极淡中性白」，去掉整体蓝调。
      同样只作用于无 data-window 的普通窗口（panel 窗口 body 保持透明） */
-  :root:not([data-theme="light"]):not([data-theme="dark"]):not([data-theme="mint"]):not([data-theme="skyblue"]):not([data-theme="red"]):not([data-window]) body {
+  :root:not([data-theme="light"]):not([data-theme="dark"]):not([data-theme="mint"]):not([data-theme="skyblue"]):not([data-theme="red"]):not([data-theme="orange"]):not([data-window]) body {
     background:
       radial-gradient(1100px 560px at 50% -8%, rgba(255, 255, 255, 0.022), transparent 62%),
       var(--bg-app);

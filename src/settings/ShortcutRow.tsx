@@ -188,7 +188,7 @@ export function ShortcutRow({
       const fresh = await applyShortcut(target, combo);
       if (fresh && typeof fresh === "object" && (fresh as { shortcuts?: unknown }).shortcuts) {
         sync(fresh);
-        setDraft((fresh as { shortcuts: Record<string, string> }).shortcuts[target]);
+        setDraft((fresh as unknown as { shortcuts: Record<string, string> }).shortcuts[target]);
       }
       setOk(true);
       setError("");

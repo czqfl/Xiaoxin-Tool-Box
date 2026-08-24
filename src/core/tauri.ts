@@ -336,6 +336,18 @@ export const shotUiRectAt = (x: number, y: number) =>
 /** 获取上次记住的选区 */
 export const shotLastRegion = () =>
   invoke<number[] | null>("shot_last_region");
+/** 截图历史条目（新→旧，仅与当前屏同分辨率的） */
+export interface ShotHistItem { file: string; ts: number; width: number; height: number }
+/** 列出截图历史 */
+export const shotHistoryList = () =>
+  invoke<ShotHistItem[]>("shot_history_list");
+/** 翻历史截屏：dir=-1 更旧 / +1 更新；或 index 直接跳（-1=实时）。
+ *  加载后 Rust 会推 shot-refresh 重载遮罩页。返回当前文件名，"live" = 实时画面 */
+export const shotHistoryStep = (dir: number, index?: number) =>
+  invoke<string>("shot_history_step", { dir, index: index ?? null });
+/** 历史缩略图/原图协议地址（文件名白名单校验由 Rust 端负责） */
+export const shotHistoryUrl = (file: string) =>
+  `http://screenshot.localhost/history/${file}?v=${Date.now()}`;
 /** 保存本次选区记忆 */
 export const shotSaveRegion = (region: [number, number, number, number]) =>
   invoke("shot_save_region", { region });
@@ -374,8 +386,54 @@ export const shotOutputPost = (
     ]).finally(() => timer && clearTimeout(timer));
   });
 };
+/** 贴图最快路径：选区原始 BGRA 像素直传（免 PNG 编码/解码），
+ *  Rust 端包成零压缩 BMP 落盘，WebView2 解码 BMP 近乎 memcpy */
+export const shotPinPost = (
+  bgra: Uint8Array, w: number, h: number, x: number, y: number,
+): Promise<void> => {
+  const headers = new Headers({
+    "x-shot-w": String(w), "x-shot-h": String(h),
+    "x-shot-x": String(x), "x-shot-y": String(y),
+  });
+  // 统一传 ArrayBuffer（与 shotOutputPost 同款已验证通道）
+  const buf = (bgra.byteOffset === 0 && bgra.byteLength === bgra.buffer.byteLength)
+    ? bgra.buffer
+    : bgra.slice().buffer;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, rej) => {
+    timer = setTimeout(() => rej(new Error("shot_output 超时")), 15000);
+  });
+  return Promise.race([
+    invoke<void>("shot_output", buf as ArrayBuffer, { headers }),
+    timeout,
+  ]).finally(() => timer && clearTimeout(timer));
+};
+
 /** 取消截图（关闭遮罩窗口） */
 export const shotCancel = () => invoke<void>("shot_cancel");
+
+// ---- 选区文字识别（OCR） ----
+export interface ShotOcrWord { t: string; x: number; y: number; w: number; h: number }
+export interface ShotOcrLine {
+  text: string;
+  /** 行矩形（图像内物理像素），由词矩形并集推导 */
+  x: number; y: number; w: number; h: number;
+  words: ShotOcrWord[];
+}
+/** 选区 PNG 原始字节 → Windows.Media.Ocr 逐行识别结果。
+ *  带 20s 超时兜底（首次识别可能要装语言包/初始化引擎） */
+export const shotOcrPost = (png: Blob): Promise<ShotOcrLine[]> => {
+  return png.arrayBuffer().then((buf) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, rej) => {
+      timer = setTimeout(() => rej(new Error("OCR 超时")), 20000);
+    });
+    return Promise.race([
+      invoke<ShotOcrLine[]>("shot_ocr", buf),
+      timeout,
+    ]).finally(() => timer && clearTimeout(timer));
+  });
+};
 
 // ---- 贴图 ----
 /** 创建贴图（PNG data URL, 屏幕坐标） */
@@ -401,6 +459,13 @@ export const pinCopyImage = (id: string) => invoke<void>("pin_copy_image", { id 
 /** 切换贴图鼠标穿透 */
 export const pinSetClickThrough = (on: boolean) =>
   invoke<void>("pin_set_click_through", { on });
+/** Esc 隐藏单个贴图（不销毁，贴图热键可整批唤回） */
+export const pinHideOne = () => invoke<void>("pin_hide_one");
+/** HTML 贴图尺寸回填（前端渲染测量出的物理像素尺寸） */
+export const pinResize = (id: string, width: number, height: number) =>
+  invoke<void>("pin_resize", { id, width, height });
+/** 贴图内容类型："image" | "html"（协议 URL 不带扩展名，渲染分支据此判断） */
+export const pinKind = (id: string) => invoke<"image" | "html">("pin_kind", { id });
 /** 隐藏全部贴图 */
 export const pinHideAll = () => invoke<void>("pin_hide_all");
 /** 显示全部贴图 */

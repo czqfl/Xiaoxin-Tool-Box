@@ -145,14 +145,19 @@ fn capture_all<R: Runtime>(app: &AppHandle<R>, capture_cursor: bool) -> Result<V
         GetDC, GetDIBits, ReleaseDC, SelectObject,
         BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, SRCCOPY,
     };
+    let t0 = std::time::Instant::now();
 
     let monitors = app.available_monitors().map_err(|e| e.to_string())?;
     if monitors.is_empty() { return Err("no monitors".into()); }
 
+    // 首选 DXGI 桌面复制（几毫秒/屏 + 分层窗口可见）；含鼠标指针时走 GDI
+    // （指针由 DrawIconEx 直接画进 GDI 位图）。DXGI 任一屏失败自动回退该屏 GDI。
+    let use_dxgi = !capture_cursor;
+
     let screen_dc = unsafe { GetDC(None) };
     if screen_dc.0.is_null() { return Err("GetDC failed".into()); }
 
-    let mut results = Vec::with_capacity(monitors.len());
+    let mut results: Vec<MonitorShot> = Vec::with_capacity(monitors.len());
 
     for (i, monitor) in monitors.iter().enumerate() {
         let pos = monitor.position();
@@ -161,54 +166,64 @@ fn capture_all<R: Runtime>(app: &AppHandle<R>, capture_cursor: bool) -> Result<V
         let mh = sz.height as i32;
         if mw <= 0 || mh <= 0 { continue; }
 
-        let mem_dc = unsafe { CreateCompatibleDC(Some(screen_dc)) };
-        if mem_dc.0.is_null() {
-            unsafe { ReleaseDC(None, screen_dc); }
-            return Err(format!("CreateCompatibleDC failed monitor {i}"));
+        let need = (mw as usize) * (mh as usize) * 4;
+        let mut pixels: Option<Vec<u8>> = None;
+        if use_dxgi {
+            if let Some(f) = crate::dupl::win::capture((pos.x, pos.y), mw, mh) {
+                if f.bgra.len() >= need { pixels = Some(f.bgra); }
+            }
         }
-        let hbmp = unsafe { CreateCompatibleBitmap(screen_dc, mw, mh) };
-        let old = unsafe { SelectObject(mem_dc, hbmp.into()) };
+        if pixels.is_none() {
+            // ---- GDI 回退路径（与老实现一致）----
+            let mem_dc = unsafe { CreateCompatibleDC(Some(screen_dc)) };
+            if mem_dc.0.is_null() {
+                unsafe { ReleaseDC(None, screen_dc); }
+                return Err(format!("CreateCompatibleDC failed monitor {i}"));
+            }
+            let hbmp = unsafe { CreateCompatibleBitmap(screen_dc, mw, mh) };
+            let old = unsafe { SelectObject(mem_dc, hbmp.into()) };
 
-        // 纯 SRCCOPY，不带 CAPTUREBLT(0x40000000)：CAPTUREBLT 强制 GDI 走
-        // 分层窗口合成路径——2560×1600 下 BitBlt 从 ~50ms 暴涨到几百毫秒
-        // （"按快捷键后屏幕还动 0.5 秒才冻结"的主因），且文档明确会造成
-        // 分层窗口/指针可见闪烁（托盘图标闪现）。代价：半透明分层窗口
-        // （如贴图）不进入冻结帧——与 Snipaste 行为一致
-        let rop = SRCCOPY;
-        if unsafe { BitBlt(mem_dc, 0, 0, mw, mh, Some(screen_dc), pos.x, pos.y, rop) }.is_err() {
-            unsafe { SelectObject(mem_dc, old); let _ = DeleteObject(hbmp.into()); let _ = DeleteDC(mem_dc); let _ = ReleaseDC(None, screen_dc); }
-            return Err(format!("BitBlt failed monitor {i}"));
+            // 纯 SRCCOPY，不带 CAPTUREBLT(0x40000000)：CAPTUREBLT 强制 GDI 走
+            // 分层窗口合成路径——2560×1600 下 BitBlt 从 ~50ms 暴涨到几百毫秒
+            // （"按快捷键后屏幕还动 0.5 秒才冻结"的主因），且文档明确会造成
+            // 分层窗口/指针可见闪烁（托盘图标闪现）。代价：半透明分层窗口
+            // （如贴图）不进入冻结帧——DXGI 路径无此问题
+            let rop = SRCCOPY;
+            if unsafe { BitBlt(mem_dc, 0, 0, mw, mh, Some(screen_dc), pos.x, pos.y, rop) }.is_err() {
+                unsafe { SelectObject(mem_dc, old); let _ = DeleteObject(hbmp.into()); let _ = DeleteDC(mem_dc); let _ = ReleaseDC(None, screen_dc); }
+                return Err(format!("BitBlt failed monitor {i}"));
+            }
+
+            if capture_cursor {
+                draw_cursor(mem_dc, *pos);
+            }
+
+            let mut bmi: BITMAPINFO = unsafe { std::mem::zeroed() };
+            bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+            bmi.bmiHeader.biWidth = mw;
+            bmi.bmiHeader.biHeight = -mh;
+            bmi.bmiHeader.biPlanes = 1;
+            bmi.bmiHeader.biBitCount = 32;
+            bmi.bmiHeader.biCompression = 0; // BI_RGB
+
+            let mut buf = vec![0u8; need];
+            let ok = unsafe {
+                GetDIBits(mem_dc, hbmp, 0, mh as u32, Some(buf.as_mut_ptr() as _), &mut bmi, DIB_RGB_COLORS)
+            };
+            unsafe { SelectObject(mem_dc, old); let _ = DeleteObject(hbmp.into()); let _ = DeleteDC(mem_dc); }
+            if ok == 0 { unsafe { ReleaseDC(None, screen_dc); } return Err(format!("GetDIBits failed monitor {i}")); }
+            pixels = Some(buf);
         }
-
-        // optional cursor
-        if capture_cursor {
-            draw_cursor(mem_dc, *pos);
-        }
-
-        // read pixels
-        let mut bmi: BITMAPINFO = unsafe { std::mem::zeroed() };
-        bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
-        bmi.bmiHeader.biWidth = mw;
-        bmi.bmiHeader.biHeight = -mh;
-        bmi.bmiHeader.biPlanes = 1;
-        bmi.bmiHeader.biBitCount = 32;
-        bmi.bmiHeader.biCompression = 0; // BI_RGB
-
-        let mut pixels = vec![0u8; (mw * mh * 4) as usize];
-        let ok = unsafe {
-            GetDIBits(mem_dc, hbmp, 0, mh as u32, Some(pixels.as_mut_ptr() as _), &mut bmi, DIB_RGB_COLORS)
-        };
-        unsafe { SelectObject(mem_dc, old); let _ = DeleteObject(hbmp.into()); let _ = DeleteDC(mem_dc); }
-        if ok == 0 { unsafe { ReleaseDC(None, screen_dc); } return Err(format!("GetDIBits failed monitor {i}")); }
-
-        // BGRA 原样保留：BMP 格式天然就是 BGRA，无需逐字节换通道
+        let bgra = pixels.unwrap();
+        // BGRA 原样保留：BMP/DXGI 天然就是 BGRA，无需逐字节换通道
 
         results.push(MonitorShot {
             geom: ShotMonitorGeom { index: i, x: pos.x, y: pos.y, width: sz.width, height: sz.height },
-            bgra: std::sync::Arc::new(pixels),
+            bgra: std::sync::Arc::new(bgra),
         });
     }
     unsafe { ReleaseDC(None, screen_dc); }
+    diag_write(&format!("[shot] capture_all {} mon in {} ms", results.len(), t0.elapsed().as_millis()));
     Ok(results)
 }
 
@@ -521,6 +536,8 @@ struct DragParams {
 static DRAG_ACTIVE: AtomicBool = AtomicBool::new(false);
 #[cfg(windows)]
 static DRAG_UPDATER_RUNNING: AtomicBool = AtomicBool::new(false);
+/// 原生拖拽层已画出第一帧（每次拖拽开始时复位）
+static DRAG_FIRST_PAINT: AtomicBool = AtomicBool::new(false);
 #[cfg(windows)]
 static DRAG_PARAMS: std::sync::LazyLock<Mutex<Option<DragParams>>> =
     std::sync::LazyLock::new(|| Mutex::new(None));
@@ -592,6 +609,11 @@ fn drag_updater<R: Runtime>(app: AppHandle<R>) {
         let lr: [i32; 4] = [gr[0] - g.x, gr[1] - g.y, gr[2].max(0), gr[3].max(0)];
         let Some(pristine) = shot_frame_of(&app, p.mon) else { break };
         paint_drag_frame(p.mon, lr, &p, &pristine);
+        // 首帧已画进冻结层：通知 webview 可以放心让位（清掉自己的选区画布）。
+        // 握手消除「webview 先清屏、原生层还没画出第一帧」间隙的全亮闪屏
+        if !DRAG_FIRST_PAINT.swap(true, Ordering::SeqCst) {
+            let _ = app.emit("shot://drag-first-paint", ());
+        }
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
     DRAG_UPDATER_RUNNING.store(false, Ordering::SeqCst);
@@ -897,7 +919,248 @@ fn snapshot_windows<R: Runtime>(app: &AppHandle<R>) -> Vec<SnapWin> {
 #[cfg(not(windows))]
 fn snapshot_windows<R: Runtime>(_: &AppHandle<R>) -> Vec<SnapWin> { Vec::new() }
 
-// ---------- internal ----------
+// ---------- 截图历史 ----------
+// 每次呼出把各屏冻结帧落盘 PNG（后台线程，不阻塞会话）：
+// data/shot_history/{毫秒时间戳}_{屏索引}.png（+ .thumb.png 缩略图供列表 UI）。
+// 前端 < > 逐条翻页「重截」（换冻结帧重新选区，Snipaste 同款），H 打开缩略图列表。
+// 条数/天数可配（ShotConfig.history_max_count / history_max_days），呼出时顺带清理。
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HistItem {
+    /// 文件名（不含目录）
+    pub file: String,
+    /// 毫秒时间戳
+    pub ts: i64,
+    pub width: u32,
+    pub height: u32,
+}
+
+fn hist_dir<R: Runtime>(app: &AppHandle<R>) -> Option<std::path::PathBuf> {
+    let dir = app.try_state::<crate::storage::AppPaths>()
+        .map(|p| p.data_dir.join("shot_history"))?;
+    let _ = std::fs::create_dir_all(&dir);
+    Some(dir)
+}
+
+/// 解析文件名 "{millis}_{mon}.png" → (millis, mon)
+fn parse_hist_name(name: &str) -> Option<(i64, usize)> {
+    let stem = name.strip_suffix(".png")?;
+    let (ts, mon) = stem.split_once('_')?;
+    Some((ts.parse().ok()?, mon.parse().ok()?))
+}
+
+/// 列出【指定显示器】的历史档（新→旧）。
+/// want: 只留与当前冻结帧同分辨率的条目（分辨率变了的历史无法整屏替换）
+fn hist_list(dir: &std::path::Path, mon: usize, want: Option<(u32, u32)>) -> Vec<HistItem> {
+    let mut items: Vec<HistItem> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            // 缩略图与别的显示器的档都不进本屏列表（跨屏翻页会张冠李戴）
+            if !name.ends_with(".png") || name.contains(".thumb.") { continue; }
+            let Some((ts, m)) = parse_hist_name(&name) else { continue };
+            if m != mon { continue; }
+            let (w, h) = match image::image_dimensions(e.path()) {
+                Ok(d) => d,
+                Err(_) => continue,
+            };
+            if let Some((ww, hh)) = want {
+                if w != ww || h != hh { continue; }
+            }
+            items.push(HistItem { file: name, ts, width: w, height: h });
+        }
+    }
+    items.sort_by(|a, b| b.ts.cmp(&a.ts));
+    items
+}
+
+/// 后台保存本次会话各屏帧 + 清理超期/超额旧档。任何失败静默（历史是附属功能，
+/// 绝不能影响截图主流程）。
+fn history_persist<R: Runtime>(app: AppHandle<R>, shots: &[MonitorShot]) {
+    // 线程要持有数据跨 'static：克隆 Arc（帧数据共享，零拷贝）
+    let shots_owned: Vec<MonitorShot> = shots.to_vec();
+    let cfg = app.try_state::<ConfigState>()
+        .map(|s| s.0.lock().unwrap().shot.clone())
+        .unwrap_or_default();
+    if !cfg.history_enabled || shots.is_empty() { return; }
+    let Some(dir) = hist_dir(&app) else { return };
+    let ts = chrono::Utc::now().timestamp_millis();
+    let max_count = cfg.history_max_count.max(1) as usize;
+    let max_days = cfg.history_max_days.max(1) as i64;
+    std::thread::spawn(move || {
+        // 延迟落盘：呼出后的头一两秒是「亮窗+选区+贴图输出」的黄金路径，
+        // PNG 编码是秒级 CPU 大户，抢核会让贴图/复制明显变慢（实测 ~0.6s）。
+        // 历史档晚 1.5s 无感知——用户最早也要呼出几秒后才会按 < 翻历史
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        let shots = &shots_owned;
+        // ---- 清理：超天数整组删；组数超上限从最旧开始删 ----
+        let mut groups: std::collections::HashMap<i64, Vec<std::path::PathBuf>> = std::collections::HashMap::new();
+        if let Ok(rd) = std::fs::read_dir(&dir) {
+            for e in rd.flatten() {
+                let name = e.file_name().to_string_lossy().to_string();
+                if let Some((ts, _)) = parse_hist_name(&name) {
+                    groups.entry(ts).or_default().push(e.path());
+                }
+            }
+        }
+        let mut kept: Vec<(i64, Vec<std::path::PathBuf>)> = groups.into_iter().collect();
+        kept.sort_by_key(|(ts, _)| *ts);
+        let cutoff = chrono::Utc::now().timestamp_millis() - max_days * 24 * 3600 * 1000;
+        kept.retain(|(ts, files)| {
+            if *ts < cutoff {
+                for f in files { let _ = std::fs::remove_file(f); }
+                false
+            } else { true }
+        });
+        while kept.len() >= max_count {
+            let (_, files) = kept.remove(0);
+            for f in files { let _ = std::fs::remove_file(f); }
+        }
+        // ---- 落盘当前各屏（BGRA→PNG；重活全在本线程）----
+        for s in shots {
+            let name = format!("{ts}_{}.png", s.geom.index);
+            let path = dir.join(&name);
+            if path.exists() { continue; }
+            let w = s.geom.width as u32;
+            let h = s.geom.height as u32;
+            if (s.bgra.len()) < (w as usize) * (h as usize) * 4 { continue; }
+            let mut rgba = vec![0u8; s.bgra.len()];
+            for (d, src) in rgba.chunks_exact_mut(4).zip(s.bgra.chunks_exact(4)) {
+                d[0] = src[2]; d[1] = src[1]; d[2] = src[0]; d[3] = 0xFF;
+            }
+            if let Some(img) = image::RgbaImage::from_raw(w, h, rgba) {
+                // Fast 压缩级别：PNG 编码 CPU 降到 ~1/3，磁盘占用略增——
+                // 历史档是临时缓存，速度远比体积重要
+                save_png_fast(&img, &path);
+                // 缩略图（宽 320）：列表 UI 秒开
+                let thumb = image::imageops::thumbnail(&img, 320, 320);
+                let _ = image::DynamicImage::ImageRgba8(thumb).save(dir.join(format!("{ts}_{}.thumb.png", s.geom.index)));
+            }
+        }
+    });
+}
+
+/// PNG 快速编码（CompressionType::Fast + 无滤镜）：历史档专用
+fn save_png_fast(img: &image::RgbaImage, path: &std::path::Path) {
+    use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+    use image::{ExtendedColorType, ImageEncoder};
+    let Ok(file) = std::fs::File::create(path) else { return };
+    let enc = PngEncoder::new_with_quality(file, CompressionType::Fast, FilterType::NoFilter);
+    let _ = enc.write_image(
+        img.as_raw(), img.width(), img.height(), ExtendedColorType::Rgba8,
+    );
+}
+
+/// 当前会话各屏的【原始实时帧】缓存：< > 翻回"实时"时还原（历史加载会覆盖 shots）
+static HIST_LIVE: Mutex<Option<Vec<MonitorShot>>> = Mutex::new(None);
+
+#[tauri::command]
+pub fn shot_history_list(window: WebviewWindow) -> Result<Vec<HistItem>, String> {
+    let idx = overlay_index(window.label()).ok_or("not overlay")?;
+    let state = window.try_state::<ShotState>().ok_or("no state")?;
+    let (w, h) = {
+        let shots = state.shots.lock().unwrap();
+        shots.iter().find(|s| s.geom.index == idx)
+            .map(|s| (s.geom.width, s.geom.height))
+            .ok_or("no frame")?
+    };
+    let dir = hist_dir(window.app_handle()).ok_or("no dir")?;
+    Ok(hist_list(&dir, idx, Some((w, h))))
+}
+
+/// 历史翻页位置：-1 = 实时，0..len-1 = 历史（0 最新）。全局共享（同一时刻
+/// 只有一个遮罩在交互），会话开始时复位
+static HIST_POS: Mutex<isize> = Mutex::new(-1);
+
+/// 翻历史：dir=-1 更旧 / +1 更新；或直接跳到 index（-1=实时，0=最新…）。
+/// 加载即替换本屏冻结帧并通知前端重载（选区/标注清空，重新框选）。
+#[tauri::command]
+pub fn shot_history_step(app: AppHandle, window: WebviewWindow, dir: i32, index: Option<isize>) -> Result<String, String> {
+    let idx = overlay_index(window.label()).ok_or("not overlay")?;
+    let state = app.try_state::<ShotState>().ok_or("no state")?;
+    let geom = {
+        let shots = state.shots.lock().unwrap();
+        shots.iter().find(|s| s.geom.index == idx).ok_or("no frame")?.geom.clone()
+    };
+    let dir_path = hist_dir(&app).ok_or("no dir")?;
+    let items = hist_list(&dir_path, idx, Some((geom.width, geom.height)));
+    if items.is_empty() { return Err("无历史截屏".into()); }
+
+    let pos = *HIST_POS.lock().unwrap();
+    let np = match index {
+        Some(i) => i.clamp(-1, items.len() as isize - 1),
+        None => if dir < 0 {
+            if pos + 1 < items.len() as isize { pos + 1 } else { -1 }
+        } else {
+            if pos > -1 { pos - 1 } else { 0 }
+        },
+    };
+
+    let label = format!("{OVERLAY_PREFIX}-{idx}");
+    if np < 0 {
+        // 回到实时：还原原始帧
+        let live_lock = HIST_LIVE.lock().unwrap();
+        if let Some(live) = live_lock.as_ref() {
+            if let Some(orig) = live.iter().find(|s| s.geom.index == idx) {
+                {
+                    let mut shots = state.shots.lock().unwrap();
+                    if let Some(slot) = shots.iter_mut().find(|s| s.geom.index == idx) {
+                        slot.bgra = orig.bgra.clone();
+                    }
+                }
+                let g = orig.geom.clone();
+                let bgra = orig.bgra.clone();
+                crate::defer_to_main_loop(app.clone(), move || {
+                    update_freeze_frame(g.index, g.width as i32, g.height as i32, &bgra);
+                });
+            }
+        }
+        drop(live_lock);
+        *HIST_POS.lock().unwrap() = -1;
+        // 【轻量刷新】只通知前端换帧，不走 shot-refresh 整页重载——
+        // 整页重载会清空遮罩/选区 UI 再重画，表现为"切换历史闪一下"
+        let _ = app.emit_to(label, "shot://history-changed", ());
+        return Ok("live".into());
+    }
+
+    let item = &items[np as usize];
+    // 列表本就只含当前显示器的档，直接读
+    let file = dir_path.join(&item.file);
+    if !file.exists() { return Err("历史文件缺失".into()); }
+    let bytes = std::fs::read(&file).map_err(|e| format!("read: {e}"))?;
+    let img = image::load_from_memory(&bytes).map_err(|e| format!("decode: {e}"))?.to_rgba8();
+    let (iw, ih) = (img.width(), img.height());
+    if iw != geom.width || ih != geom.height { return Err("尺寸不符".into()); }
+    let mut bgra = img.into_raw();
+    for px in bgra.chunks_exact_mut(4) { px.swap(0, 2); } // RGBA→BGRA
+
+    // 首次进历史前缓存实时帧
+    {
+        let mut live = HIST_LIVE.lock().unwrap();
+        if live.is_none() {
+            *live = Some(state.shots.lock().unwrap().clone());
+        }
+    }
+    {
+        let mut shots = state.shots.lock().unwrap();
+        if let Some(slot) = shots.iter_mut().find(|s| s.geom.index == idx) {
+            slot.bgra = std::sync::Arc::new(bgra.clone());
+        }
+    }
+    let g = geom.clone();
+    crate::defer_to_main_loop(app.clone(), move || {
+        update_freeze_frame(g.index, g.width as i32, g.height as i32, &bgra);
+    });
+    *HIST_POS.lock().unwrap() = np;
+        let _ = app.emit_to(label, "shot://history-changed", ());
+    Ok(item.file.clone())
+}
+
+/// 会话开始时复位历史翻页状态与实时帧缓存
+fn history_reset() {
+    *HIST_POS.lock().unwrap() = -1;
+    *HIST_LIVE.lock().unwrap() = None;
+}
 
 pub(crate) fn begin_impl<R: Runtime>(app: AppHandle<R>, picker: bool) -> Result<(), String> {
     if SHOOTING.swap(true, Ordering::SeqCst) { return Ok(()); }
@@ -918,7 +1181,15 @@ pub(crate) fn begin_impl<R: Runtime>(app: AppHandle<R>, picker: bool) -> Result<
     let smart_detect = cfg.smart_detect && !picker;
     let remember_region = cfg.remember_region && !picker;
     std::thread::spawn(move || {
+        let t0 = std::time::Instant::now();
         if delay > 0 { std::thread::sleep(std::time::Duration::from_millis(delay as u64)); }
+        // 窗口 Z 序快照与屏幕采集【并行】：EnumWindows+GetRect 不依赖帧数据，
+        // 串行执行白白给"呼出到高亮出现"加一段延迟。子线程结果 join 回收，
+        // 异常（极少）时退化为空列表=无智能识别，绝不阻塞主流程
+        let snap_thread = if smart_detect {
+            let app2 = app.clone();
+            Some(std::thread::spawn(move || snapshot_windows(&app2)))
+        } else { None };
         match capture_all(&app, capture_cursor) {
             Ok(shots) => {
                 // find cursor monitor
@@ -931,9 +1202,11 @@ pub(crate) fn begin_impl<R: Runtime>(app: AppHandle<R>, picker: bool) -> Result<
                     { cursor_mon = g.index; break; }
                 }
                 CURSOR_MON.store(cursor_mon, Ordering::SeqCst);
-                // 窗口 Z 序快照：此刻本会话遮罩窗还不存在，列表天然干净。
+                // 快照此刻本会话遮罩窗还不存在，列表天然干净。
                 // 初始高亮与后续悬停识别统一查这份表
-                let cands = if smart_detect { snapshot_windows(&app) } else { Vec::new() };
+                let cands = snap_thread
+                    .map(|t| t.join().unwrap_or_default())
+                    .unwrap_or_default();
                 // 智能识别在截图瞬间完成：光标处命中的第一个（最顶层）窗口
                 let snap = if smart_detect {
                     candidate_at(&cands, cursor.x as i32, cursor.y as i32)
@@ -968,38 +1241,50 @@ pub(crate) fn begin_impl<R: Runtime>(app: AppHandle<R>, picker: bool) -> Result<
                         g0.index, g0.x, g0.y, g0.width, g0.height,
                     ));
                 }
+                // 截图历史：复位翻页状态 + 后台落盘各屏帧（重活不占会话路径）
+                if !picker {
+                    history_reset();
+                    history_persist(app.clone(), &shots);
+                }
                 // 先确保遮罩窗就位（复用或调度重建），随后才把帧写入冻结层——
                 // 顺序绝不能反：重建路径（显示器数量变化/预热未完成）下，若写帧
                 // 闭包先于新窗口创建执行，get_webview_window 落空 → 冻结层永远
                 // 无帧 → shot_ready 等 300ms 超时后照样亮窗 → 整屏漆黑一整场
                 ensure_overlays(&app, &shots);
                 {
+                    let t_freeze = std::time::Instant::now();
+                    // 每屏独立排队「挂冻结层+写帧」：多屏时某屏的大 memcpy 不再
+                    // 拖住其他屏的亮窗；写完立即触发该屏重绘
+                    for s in &shots {
+                        let app2 = app.clone();
+                        let g = s.geom.clone();
+                        let bgra = s.bgra.clone();
+                        crate::defer_to_main_loop(app.clone(), move || {
+                            let Some(win) = app2.get_webview_window(&format!("{OVERLAY_PREFIX}-{}", g.index)) else { return };
+                            let Some(parent) = hwnd_of_webview(&win) else { return };
+                            attach_freeze_layer(g.index, parent, g.width as i32, g.height as i32);
+                            update_freeze_frame(g.index, g.width as i32, g.height as i32, &bgra);
+                        });
+                    }
+                    diag_write(&format!("[shot] freeze writes queued in {} ms", t_freeze.elapsed().as_millis()));
                     let app3 = app.clone();
                     let shots2 = shots.clone();
-                    crate::defer_to_main_loop(app.clone(), move || {
-                        for s in &shots2 {
-                            let g = &s.geom;
-                            let Some(win) = app3.get_webview_window(&format!("{OVERLAY_PREFIX}-{}", g.index)) else { continue };
-                            let Some(parent) = hwnd_of_webview(&win) else { continue };
-                            attach_freeze_layer(g.index, parent, g.width as i32, g.height as i32);
-                            update_freeze_frame(g.index, g.width as i32, g.height as i32, &s.bgra);
+                    // 原生即时亮窗：帧已贴出即显示。给前端留 ~24ms 宽限
+                    // （复用窗口时它要先收到 shot-refresh 清掉上一会话的
+                    // 选区/工具栏残留 DOM，再画本会话压暗层）——期间若前端
+                    // 先调了 shot_ready（OVERLAY_READY 置位）则立即交还，
+                    // 走的还是"前端就绪才亮"的老次序，绝不闪旧内容。
+                    // 预热建窗路径 SHOOTING=false 时 native_show_overlay 直接入空。
+                    std::thread::spawn(move || {
+                        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(24);
+                        while std::time::Instant::now() < deadline {
+                            if OVERLAY_READY.load(Ordering::SeqCst) { return; }
+                            std::thread::sleep(std::time::Duration::from_millis(3));
                         }
-                        // 原生即时亮窗：帧已贴出即显示。给前端留 ~24ms 宽限
-                        // （复用窗口时它要先收到 shot-refresh 清掉上一会话的
-                        // 选区/工具栏残留 DOM，再画本会话压暗层）——期间若前端
-                        // 先调了 shot_ready（OVERLAY_READY 置位）则立即交还，
-                        // 走的还是"前端就绪才亮"的老次序，绝不闪旧内容。
-                        // 预热建窗路径 SHOOTING=false 时 native_show_overlay 直接入空。
-                        std::thread::spawn(move || {
-                            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(24);
-                            while std::time::Instant::now() < deadline {
-                                if OVERLAY_READY.load(Ordering::SeqCst) { return; }
-                                std::thread::sleep(std::time::Duration::from_millis(3));
-                            }
-                            for s in &shots2 {
-                                native_show_overlay(&app3, s.geom.index);
-                            }
-                        });
+                        for s in &shots2 {
+                            native_show_overlay(&app3, s.geom.index);
+                        }
+                        diag_write(&format!("[shot] overlays shown {} ms after capture start", t0.elapsed().as_millis()));
                     });
                 }
                 diag_write(&format!("[shot] begin ok, {} monitors", shots.len()));
@@ -1147,6 +1432,31 @@ pub fn frame_protocol<R: Runtime>(
         return serve_pin_file(ctx.app_handle(), id);
     }
 
+    // GET /history/{name}：截图历史文件（缩略图/原图）直出。
+    // 文件名白名单：数字/下划线/点/连字符，杜绝路径拼接
+    if let Some(name) = path.strip_prefix("/history/") {
+        let name = name.split('?').next().unwrap_or("");
+        let ok = !name.is_empty() && name.len() <= 80
+            && name.bytes().all(|b| b.is_ascii_digit() || b == b'_' || b == b'.' || b == b'-')
+            && !name.contains("..");
+        if !ok { return not_found(); }
+        use tauri::Manager;
+        let dir = ctx.app_handle().try_state::<crate::storage::AppPaths>()
+            .map(|p| p.data_dir.join("shot_history"));
+        let Some(dir) = dir else { return not_found(); };
+        match std::fs::read(dir.join(name)) {
+            Ok(bytes) => {
+                return tauri::http::Response::builder()
+                    .header("Content-Type", "image/png")
+                    .header("Access-Control-Allow-Origin", "*")
+                    .header("Cache-Control", "no-store")
+                    .body(std::borrow::Cow::Owned(bytes))
+                    .map_err(Into::into);
+            }
+            Err(_) => return not_found(),
+        }
+    }
+
     // GET /frame/{idx}：当前冻结帧 BMP
     let idx: usize = path
         .strip_prefix("/frame/")
@@ -1193,10 +1503,11 @@ fn serve_pin_file<R: Runtime>(
             None => return not_found(),
         }
     };
-    let mime = if file.extension().and_then(|e| e.to_str()) == Some("gif") {
-        "image/gif"
-    } else {
-        "image/png"
+    let mime = match file.extension().and_then(|e| e.to_str()) {
+        Some("gif") => "image/gif",
+        Some("html") => "text/html",
+        Some("bmp") => "image/bmp",
+        _ => "image/png",
     };
     let bytes = std::fs::read(&file).map_err(|_| -> Box<dyn std::error::Error> { "pin file gone".into() })?;
     tauri::http::Response::builder()
@@ -1309,8 +1620,23 @@ pub fn ui_element_rect_at(app: &AppHandle, x: f64, y: f64) -> Option<ShotRect> {
     // 已初始化（含模式不符）的错误直接忽略，CoCreateInstance 仍可成功
     unsafe { let _ = windows::Win32::System::Com::CoInitializeEx(
         None, windows::Win32::System::Com::COINIT_MULTITHREADED); }
-    let auto: windows::Win32::UI::Accessibility::IUIAutomation =
-        unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()? };
+
+    // UIA 实例线程内缓存：悬停识别每次查询都 CoCreateInstance 一次纯属浪费，
+    // thread_local 缓存后同线程的后续查询直接复用（COM 接口非 Send，不能放全局）
+    thread_local! {
+        static UIA: std::cell::RefCell<Option<windows::Win32::UI::Accessibility::IUIAutomation>> =
+            const { std::cell::RefCell::new(None) };
+    }
+    let auto: windows::Win32::UI::Accessibility::IUIAutomation = UIA.with(|c| {
+        let mut slot = c.borrow_mut();
+        if let Some(a) = &*slot {
+            return Some(a.clone());
+        }
+        let created: windows::Win32::UI::Accessibility::IUIAutomation =
+            unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()? };
+        *slot = Some(created.clone());
+        Some(created)
+    })?;
 
     let area = |r: &windows::Win32::Foundation::RECT| (r.right - r.left) * (r.bottom - r.top);
     let contains = |r: &windows::Win32::Foundation::RECT| x >= r.left && x < r.right && y >= r.top && y < r.bottom;
@@ -1535,7 +1861,23 @@ pub async fn shot_output(app: AppHandle, request: tauri::ipc::Request<'_>) -> Re
         "pin" => {
             let x: i32 = hdr("x-shot-x").and_then(|v| v.parse().ok()).unwrap_or(0);
             let y: i32 = hdr("x-shot-y").and_then(|v| v.parse().ok()).unwrap_or(0);
-            let pin = crate::pin::create_store_entry(&app, &body, "image/png", x, y)?;
+            // 【最快路径】前端直传选区原始 BGRA 像素（头带 x-shot-w/h）：
+            // 包成零压缩 BMP 落盘——省掉 PNG 编码/解码两大耗时。
+            // 字节数不匹配时回退旧 PNG 路径（兼容）
+            let (w, h) = (
+                hdr("x-shot-w").and_then(|v| v.parse::<u32>().ok()),
+                hdr("x-shot-h").and_then(|v| v.parse::<u32>().ok()),
+            );
+            let (bytes, mime): (std::borrow::Cow<'_, [u8]>, &str) = match (w, h) {
+                // 【最快路径】前端 cropSelectionRaw 已交付 BMP 字节序（BGRA、不透明）：
+                // 此处零拷贝零循环直接包 BMP 头落盘——此前这里又逐像素 swap 一次，
+                // 与前端的交换叠加导致红蓝颠倒（"贴图颜色不对"的根源）
+                (Some(w), Some(h)) if w > 0 && h > 0 && body.len() == (w as usize) * (h as usize) * 4 => {
+                    (std::borrow::Cow::Owned(wrap_bmp(&body, w, h)), "image/bmp")
+                }
+                _ => (std::borrow::Cow::Borrowed(&body), "image/png"),
+            };
+            let pin = crate::pin::create_store_entry(&app, &bytes, mime, x, y)?;
             // 装进预建的隐藏复用窗：图片就绪后先显贴图、再由 pin_ready 收遮罩
             // （此处绝不提前 hide_all——那会先露出裸桌面，正是"贴图闪一下"的根源）
             crate::pin::attach_to_staging(&app, pin);
@@ -1565,6 +1907,22 @@ pub async fn shot_output(app: AppHandle, request: tauri::ipc::Request<'_>) -> Re
 pub(crate) fn cancel_impl<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     hide_all(app);
     Ok(())
+}
+
+/// 选定区域文字识别：前端把选区 PNG 经原生二进制通道直传，
+/// Rust 调 Windows.Media.Ocr 系统引擎逐行识别（文本 + 行/词矩形）。
+/// 重活放阻塞线程池（RoInitialize 线程级，spawn_blocking 线程池足够）。
+#[tauri::command]
+pub async fn shot_ocr(request: tauri::ipc::Request<'_>) -> Result<Vec<crate::ocr::OcrLineResp>, String> {
+    let body = match request.body() {
+        tauri::ipc::InvokeBody::Raw(b) => b,
+        tauri::ipc::InvokeBody::Json(_) => return Err("期望二进制请求体".into()),
+    };
+    if body.is_empty() { return Err("图像为空".into()); }
+    let png = body.to_vec();
+    tauri::async_runtime::spawn_blocking(move || crate::ocr::recognize_png(&png))
+        .await
+        .map_err(|e| format!("join: {e}"))?
 }
 
 /// 遮罩窗被非命令途径（Alt+F4 等）销毁时重置"截图进行中"标志，
@@ -1622,6 +1980,7 @@ pub fn shot_drag_begin(
             accent: a, scale,
         });
         *DIM_CACHE.lock().unwrap() = None; // 新一场拖拽重建压暗缓存
+        DRAG_FIRST_PAINT.store(false, Ordering::SeqCst);
         DRAG_ACTIVE.store(true, Ordering::SeqCst);
         if !DRAG_UPDATER_RUNNING.swap(true, Ordering::SeqCst) {
             let app2 = app.clone();

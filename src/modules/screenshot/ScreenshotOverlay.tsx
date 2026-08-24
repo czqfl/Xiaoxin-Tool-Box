@@ -5,7 +5,10 @@ import { save } from "@tauri-apps/plugin-dialog";
 import {
   shotGeometry, shotImageDataRaw, shotWindowRectAt, shotUiRectAt, shotReady, shotFrameUrl,
   shotOutputPost, shotCancel, shotSaveRegion, diagLog, copyText, shotDragBegin, shotDragEnd,
+  shotHistoryList, shotHistoryStep, shotHistoryUrl, ShotHistItem,
+  shotOcrPost, ShotOcrLine, shotPinPost,
 } from "../../core/tauri";
+import { translateText } from "../../core/tauri";
 import { useConfigStore } from "../../stores/configStore";
 import { Square, Circle, ArrowUpRight, TrendingUp, Pencil, Type, Undo2, Redo2, X, Pin, Save, Copy } from "lucide-react";
 import "./screenshot.css";
@@ -78,8 +81,17 @@ const IcoNumber = () => (
     <path d="M12.5 8.2V16"/><path d="M12.5 8.2L10.3 9.8"/>
   </svg>
 );
-const IcoUndo = () => <Undo2 {...IC} />;
-const IcoRedo = () => <Redo2 {...IC} />;
+// OCR 文字识别：四角取景框 + 文本行（自绘描线风格，Lucide 无对应）
+const IcoOcr = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 8V5.5A2.5 2.5 0 0 1 5.5 3H8" />
+    <path d="M16 3h2.5A2.5 2.5 0 0 1 21 5.5V8" />
+    <path d="M21 16v2.5A2.5 2.5 0 0 1 18.5 21H16" />
+    <path d="M8 21H5.5A2.5 2.5 0 0 1 3 18.5V16" />
+    <path d="M7 9h4M13 9h4M7 12.5h2.5M14.5 12.5H17M7 16h4M13 16h4" />
+  </svg>
+);
+const IcoUndo = () => <Undo2 {...IC} />;const IcoRedo = () => <Redo2 {...IC} />;
 const IcoClose = () => <X {...IC} />;
 const IcoPin = () => <Pin {...IC} />;
 const IcoSaveAs = () => <Save {...IC} />;
@@ -102,9 +114,6 @@ const TOOL_BUTTONS: { items: [Tool, () => JSX.Element, string, string][]; groupI
 /** 按钮的悬停提示文案：「矩形、椭圆 (Ctrl+1)」；单工具为「画笔 (Ctrl+3)」 */
 const btnTip = (b: { items: [Tool, () => JSX.Element, string, string][]; hotkey: string }) =>
   `${b.items.map(([, , n]) => n).join("、")} (${b.hotkey})`;
-
-/** 这些工具激活时在工具条下方弹出颜色/粗细配置面板 */
-const NEEDS_CONFIG: Tool[] = ["rect","ellipse","arrow","line","brush","mosaic","text","number"];
 
 function drawShape(
   ctx: CanvasRenderingContext2D,
@@ -194,10 +203,14 @@ function drawShape(
             const hit = mosaicCache?.get(k);
             if (hit) { fillCell(k, hit); return; }
             const [cx, cy] = k.split(",").map(Number);
+            // 单格读取范围钳制在包围盒内：贴着画布右/下缘的格子会部分越界，
+            // 越界读出 undefined → 均值算出 rgb(NaN,...) 非法色串，
+            // fillStyle 保持不变就会用【当前标注色】整格填上去（"马赛克变红"）
             const x0 = cx * bs - minX, y0 = cy * bs - minY;
+            const x1 = Math.min(x0 + bs, bw), y1 = Math.min(y0 + bs, bh);
             let r = 0, g = 0, b = 0, n = 0;
-            for (let y = y0; y < y0 + bs; y++) {
-              for (let x = x0; x < x0 + bs; x++) {
+            for (let y = y0; y < y1; y++) {
+              for (let x = x0; x < x1; x++) {
                 const i = (y * bw + x) * 4;
                 r += data[i]; g += data[i + 1]; b += data[i + 2]; n++;
               }
@@ -416,6 +429,11 @@ export function ScreenshotOverlay() {
     if (nativeDragRef.current) { nativeDragRef.current = false; void shotDragEnd().catch(() => {}); }
     rootRef.current?.setAttribute("data-resetting", "1");
     setAnnos([]); setUndos([]); setTextEdit(null); setNumCnt(1); setShowMag(false);
+    // OCR 状态复位：新会话不保留上一场的识别结果
+    resetOcr();
+    // 历史浏览状态复位：新会话永远从实时画面开始
+    // （历史切换走 shot://history-changed 轻量路径，不经过 loadSession）
+    histOpenRef.current = false; setHistOpen(false); setHistViewing(false);
     setRegion({x:0,y:0,w:0,h:0}); regRef.current = {x:0,y:0,w:0,h:0};
     setPhase("idle"); setSnap(null); setDragging(false); phaseRef.current = "idle";
     lastRectRef.current = null; snapRef.current = null; pngCacheRef.current = null;
@@ -519,6 +537,47 @@ export function ScreenshotOverlay() {
   };
 
   useEffect(() => { loadSession(); }, []);
+  // 历史截屏切换（< >）：【轻量换帧】——只清标注/缓存并重拉冻结帧，
+  // 绝不走 shot-refresh 整页重载（那会摘 data-resetting 隐藏全部 UI、
+  // 清空遮罩再重画，表现为"切换历史时整屏一闪一闪"）
+  useEffect(() => {
+    const un = listen("shot://history-changed", () => { void reloadFrameOnly(); });
+    return () => { un.then((f) => f()); };
+  }, []);
+  const reloadFrameOnly = async () => {
+    // 帧已换：标注/马赛克缓存/预编码缓存全部作废
+    setAnnos([]); setUndos([]);
+    mosaicCacheRef.current.clear();
+    prevAnnoLenRef.current = 0;
+    compRef.current = null;
+    pngCacheRef.current = null;
+    const a = annoRef.current;
+    if (a) a.getContext("2d")?.clearRect(0, 0, a.width, a.height);
+    const g = geomRef.current;
+    if (!g) return;
+    try {
+      const ac = new AbortController();
+      const ft = window.setTimeout(() => ac.abort(), 8000);
+      const resp = await fetch(shotFrameUrl(g.index), { signal: ac.signal }).catch(() => null);
+      window.clearTimeout(ft);
+      if (!resp || !resp.ok) return;
+      const bmp = await createImageBitmap(await resp.blob());
+      const c = bgRef.current;
+      if (c && bmp.width === g.width && bmp.height === g.height) {
+        c.width = g.width; c.height = g.height;
+        c.getContext("2d", { willReadFrequently: true })!.drawImage(bmp, 0, 0);
+        setBgReady(true);
+      }
+      bmp.close();
+    } catch {}
+  };
+  // 原生拖拽层首帧握手事件：保留监听但【不再清空 webview 选区画布】——
+  // 之前的"让位"清屏会把拖拽中的实时细边框一并清掉（只剩原生粗边框，
+  // 用户反馈"拖动选区时实时边框没有了"）；webview 持续自绘即恢复
+  useEffect(() => {
+    const un = listen("shot://drag-first-paint", () => {});
+    return () => { un.then((f) => f()); };
+  }, []);
   // 遮罩窗被 Rust 复用时收到刷新事件 → 重载新画面（窗口不销毁，免去重建开销）
   useEffect(() => {
     const un = listen("shot-refresh", () => { loadSession(); });
@@ -559,7 +618,15 @@ export function ScreenshotOverlay() {
     const h = (e: KeyboardEvent) => {
       // 文字标注输入中：不触发截图快捷键（Enter/Escape 由输入框自行处理）
       if (e.target instanceof HTMLInputElement) return;
-      if (e.key === "Escape") { e.preventDefault(); void shotCancel().catch(() => {}); }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        // 历史列表开着：先关列表，不退出会话
+        if (histOpenRef.current) { histOpenRef.current = false; setHistOpen(false); return; }
+        // OCR 模式：先清除拖选文字 → 再关 OCR 面板 → 最后才是退出截图
+        // OCR 面板开着：先退出 OCR（面板内文本可直接划选复制），再按才是退出截图
+        if (ocrActiveRef.current) { resetOcr(); return; }
+        void shotCancel().catch(() => {});
+      }
       // 独立取色模式键位：C 复制颜色（保持取色）、Enter 复制并退出、Shift 切 RGB/HEX
       else if (pickerModeRef.current) {
         if (e.code === "KeyC" && !e.ctrlKey && !e.altKey && !e.metaKey) {
@@ -572,6 +639,8 @@ export function ScreenshotOverlay() {
       }
       else if (e.key === "Enter" && phase === "selected") { e.preventDefault(); if (!e.repeat) void doOutput("copy"); }
       // 字母键用 e.code 判定：中文输入法激活时 e.key 可能是 "Process"，e.code 始终是物理键
+      // OCR 框选了文字时 Ctrl+C = 复制所选文字（优先于复制整张截图）
+      // OCR 面板内划选的文字由浏览器原生 Ctrl+C 复制（面板文本可选中）
       else if (e.code === "KeyC" && e.ctrlKey && phase === "selected") { e.preventDefault(); if (!e.repeat) void doOutput("copy"); }
       // 贴图不再用内置 Ctrl+T/F8：全局「显示/隐藏贴图」热键（用户可在快捷键页
       // 自定义，如 F8）在截图会话中由 Rust 转发 shot://pin-hotkey 事件触发贴图
@@ -579,7 +648,10 @@ export function ScreenshotOverlay() {
       // 其余工具各占一键、按一下即选中；组按钮的子选择 popover 由右侧下拉箭头触发）
       else if (e.ctrlKey && e.code.startsWith("Digit") && phase === "selected") {
         const n = Number(e.code.slice(5));
-        if (n >= 1 && n <= TOOL_BUTTONS.length) { e.preventDefault(); if (!e.repeat) applyToolButton(TOOL_BUTTONS[n - 1]); }
+        if (n >= 1 && n <= TOOL_BUTTONS.length) {
+          e.preventDefault();
+          if (!e.repeat) { applyToolButton(TOOL_BUTTONS[n - 1]); setSubmenuOpen(null); }
+        }
       }
       // 截图选区阶段取色：C 复制光标处颜色、Shift 切换 RGB/HEX（Snipaste 同款）
       else if (phase === "idle" && e.code === "KeyC" && !e.ctrlKey && !e.altKey && !e.metaKey) {
@@ -587,6 +659,20 @@ export function ScreenshotOverlay() {
       }
       else if (phase === "idle" && e.key === "Shift" && !e.repeat) {
         toggleColorFmt();
+      }
+      // 截图历史：< / , 更旧、> / . 更新（在历史帧上重新框选，Snipaste 同款）；
+      // H 打开/关闭缩略图列表。拖拽/取色中不响应
+      else if (phase === "idle" && cfg.shot.history_enabled !== false
+        && !e.ctrlKey && !e.altKey && !e.metaKey && (e.key === "<" || e.key === ",")) {
+        e.preventDefault(); if (!e.repeat) void stepHistory(-1);
+      }
+      else if (phase === "idle" && cfg.shot.history_enabled !== false
+        && !e.ctrlKey && !e.altKey && !e.metaKey && (e.key === ">" || e.key === ".")) {
+        e.preventDefault(); if (!e.repeat) void stepHistory(1);
+      }
+      else if (phase === "idle" && cfg.shot.history_enabled !== false
+        && !e.ctrlKey && !e.altKey && !e.metaKey && (e.code === "KeyH")) {
+        e.preventDefault(); if (!e.repeat) void toggleHistPanel();
       }
       else if (e.key.startsWith("Arrow")) {
         e.preventDefault(); const d = e.shiftKey ? 10 : 1;
@@ -704,6 +790,112 @@ export function ScreenshotOverlay() {
   // 但点击确认选区仍需它——松手时按此判定"点击采纳窗口"（Snipaste 行为）
   const snapRef = useRef<Rect|null>(null);
 
+  // ---- 截图历史（< > 翻页重截 / H 缩略图列表）----
+  const [histOpen, setHistOpen] = useState(false);
+  // 开关走 ref：keydown effect 依赖少、闭包易过期，ref 永远最新
+  const histOpenRef = useRef(false);
+  const [histItems, setHistItems] = useState<ShotHistItem[] | null>(null);
+  // 正在浏览历史帧（true 时左下角提示区显示"返回实时"引导）
+  const [histViewing, setHistViewing] = useState(false);
+  const histBusyRef = useRef(false);
+  /** 翻历史核心：Rust 替换冻结帧后推 shot://history-changed → 轻量换帧 */
+  const stepHistoryCore = async (dir: number, index?: number) => {
+    if (histBusyRef.current || dragRef.current || resizeRef.current || pickerModeRef.current) return;
+    histBusyRef.current = true;
+    try {
+      const r = await shotHistoryStep(dir, index);
+      setHistViewing(r !== "live");
+      return r;
+    } catch { return undefined; }
+    finally { histBusyRef.current = false; }
+  };
+  /** 翻历史：Rust 替换冻结帧后推 shot://history-changed → 轻量换帧 */
+  const stepHistory = (dir: number) => void stepHistoryCore(dir);
+  /** 直接跳到某条历史（-1=实时） */
+  const jumpHistory = async (index: number) => {
+    const r = await stepHistoryCore(0, index);
+    if (r !== undefined) {
+      histOpenRef.current = false;
+      setHistOpen(false);
+    }
+  };
+  /** 打开/关闭历史列表（每次打开都重新拉取，缩略图经协议直出） */
+  const toggleHistPanel = async () => {
+    const next = !histOpenRef.current;
+    histOpenRef.current = next;
+    setHistOpen(next);
+    if (next) {
+      try { setHistItems(await shotHistoryList()); }
+      catch { setHistItems([]); }
+    }
+  };
+
+  // ---- OCR 文字识别 ----
+  // 点击工具栏「文字识别」→ 整个选区送 Windows.Media.Ocr；
+  // 结果面板出现在选区右侧，可整段复制/逐行复制；
+  // 在选区内按住左键拖动可框选部分行，松手弹出 复制/翻译 按钮，Ctrl+C 亦可复制
+  type OcrPhase = "idle" | "loading" | "done" | "error";
+  const [ocrPhase, setOcrPhase] = useState<OcrPhase>("idle");
+  const [ocrLines, setOcrLines] = useState<ShotOcrLine[]>([]);
+  const [ocrError, setOcrError] = useState("");
+  const ocrBusyRef = useRef(false);
+  const [ocrTranslating, setOcrTranslating] = useState(false);
+  const [ocrTrans, setOcrTrans] = useState<{ src: string; out: string } | null>(null);
+  // keydown effect 闭包不依赖 ocrPhase：经此 ref 读「OCR 是否激活」
+  const ocrActiveRef = useRef(false);
+  useEffect(() => { ocrActiveRef.current = ocrPhase !== "idle"; }, [ocrPhase]);
+
+  const resetOcr = () => {
+    setOcrPhase("idle"); setOcrLines([]); setOcrError("");
+    setOcrTrans(null); setOcrTranslating(false);
+  };
+
+  /** 识别整个选定区域：裁剪原始冻结帧（不含标注）→ PNG → 系统引擎 */
+  const runOcr = async () => {
+    if (ocrBusyRef.current) return;
+    const bg = bgRef.current;
+    const r = regRef.current;
+    if (!bg || !geom || bg.width <= 0) return;
+    const sc = cssScale();
+    const rp = { x: Math.round(r.x * sc), y: Math.round(r.y * sc), w: Math.round(r.w * sc), h: Math.round(r.h * sc) };
+    if (rp.w < 2 || rp.h < 2) return;
+    const c = document.createElement("canvas");
+    c.width = rp.w; c.height = rp.h;
+    c.getContext("2d")!.drawImage(bg, rp.x, rp.y, rp.w, rp.h, 0, 0, rp.w, rp.h);
+    ocrBusyRef.current = true;
+    setOcrPhase("loading");
+    try {
+      const blob = await new Promise<Blob | null>((res) => c.toBlob((b) => res(b), "image/png"));
+      if (!blob) throw new Error("图像编码失败");
+      const lines = await shotOcrPost(blob);
+      setOcrLines(lines);
+      setOcrPhase("done");
+    } catch (e) {
+      setOcrError(e instanceof Error ? e.message : "识别失败");
+      setOcrPhase("error");
+    } finally { ocrBusyRef.current = false; }
+  };
+
+  /** 翻译当前框选的文字（结果展示在 OCR 面板内） */
+  const doTranslate = async () => {
+    const sel = window.getSelection?.()?.toString().trim() || "";
+    const t = sel || ocrLines.map((l) => l.text).join("\n");
+    if (!t) return;
+    setOcrTranslating(true);
+    try {
+      const res = await translateText(t);
+      setOcrTrans({ src: res.text ?? t, out: res.translation });
+    } catch (err) {
+      setOcrTrans({ src: t, out: "翻译失败：" + (err instanceof Error ? err.message : "") });
+    } finally { setOcrTranslating(false); }
+  };
+
+  /** 复制全部识别文本 */
+  const copyAllOcr = () => {
+    const all = ocrLines.map((l) => l.text).join("\n");
+    if (all) void copyText(all);
+  };
+
   const querySmartRect = async () => {
     if (detectBusyRef.current) { detectPendingRef.current = true; return; }
     detectBusyRef.current = true;
@@ -712,53 +904,51 @@ export function ScreenshotOverlay() {
       const g = geom;
       const mg = mouseGlobalRef.current;
       if (!g) return;
-      // 窗口级 + 元素级（UIA）并行查询，择优取【更精细】的命中：
-      // 元素矩形显著小于窗口矩形（<98%）时采用——悬停浏览器页面时能直接
-      // 框选按钮组/输入框等组件；元素缺失/异常自动回退窗口级。
-      // 元素级限时 250ms：Chromium 系应用首次被 UIA 查询会触发无障碍树
-      // 激活、可达数秒，无限等它会让最大化窗口迟迟不出高亮（像没识别）。
-      // 超时先按窗口级画，树预热完成后后续悬停自然拿到元素级细框
+      // 窗口级 + 元素级（UIA）两段式：窗口级查表零开销、【先到先画】；
+      // 元素级随后择优细化（取更精细的命中）。
+      // 【不能】用 Promise.all 等两者齐才画——元素级限时 250ms（Chromium 系
+      // 应用首次被 UIA 查询会触发无障碍树激活、可达数秒），旧版悬停高亮
+      // 总要陪它等满 250ms 才出现，表现为"智能选区出来慢"
       const wantElem = cfg.shot.smart_element !== false;
       type WRect = { x: number; y: number; width: number; height: number } | null;
-      const erTimeout = new Promise<null>((res) => setTimeout(() => res(null), 250));
-      const [wr, er] = await Promise.all([
-        shotWindowRectAt(mg.x, mg.y).catch(() => null),
-        wantElem
-          ? Promise.race([shotUiRectAt(mg.x, mg.y).catch(() => null), erTimeout])
-          : Promise.resolve<WRect>(null),
-      ]);
-      // 响应到达时已开始拖拽/缩放（或进入取色）：丢弃这份迟到的识别结果——
-      // 否则刚被拖拽清掉的智能高亮会在此"复活"，与手动选区边框同屏（两个框）
-      if (dragRef.current || resizeRef.current || pickerModeRef.current) { return; }
-      // 上一会话的在途响应：绝不画进本会话——否则呼出瞬间会闪现旧窗口高亮框
-      if (mySession !== sessionRef.current) { return; }
-      let best = wr;
-      if (er && er.width > 0 && er.height > 0) {
-        const ea = er.width * er.height;
-        const wa = wr ? wr.width * wr.height : Infinity;
-        const screenArea = g.width * g.height;
-        // 元素更小才更优；全屏级元素矩形（≥90% 屏幕）无意义，剔除
-        if (ea < wa * 0.98 && ea < screenArea * 0.9) best = er;
-      }
-      // 诊断：识别结果变化才记一条（定位"悬停识别失效"：mg 坐标错/双通道全空等）
-      const lastDiag = lastDiagRef.current;
-      const bestSig = best ? `${best.x},${best.y},${best.width},${best.height}` : "null";
-      if (lastDiag !== bestSig) {
-        lastDiagRef.current = bestSig;
-        void diagLog(`[shot-fe] hover mg=(${Math.round(mg.x)},${Math.round(mg.y)}) wr=${wr ? `${wr.x},${wr.y},${wr.width},${wr.height}` : "null"} er=${er ? `${er.width}x${er.height}` : "null"} best=${bestSig} session=${mySession}`);
-      }
-      lastRectRef.current = best ? { x: best.x, y: best.y, w: best.width, h: best.height } : null;
       // best 是【全局物理像素】；高亮/选区层用本地 CSS 像素——减显示器原点再 ÷scale，
       // 否则 150% 下悬停高亮框比实际窗口大 1.5 倍、点击采纳的选区整体错位
       const sc = cssScale();
-      const local = best ? { x: (best.x - g.x) / sc, y: (best.y - g.y) / sc, w: best.width / sc, h: best.height / sc } : null;
-      // 与当前高亮完全一致时不再 setState：悬停中的重复识别不触发重绘
-      // （每次 setSnap 都会让选区层重绘一遍，重复绘制表现为高亮框"闪"）
-      const cur = snapRef.current;
-      const same = (cur === null && local === null) ||
-        (cur !== null && local !== null && cur.x === local.x && cur.y === local.y && cur.w === local.w && cur.h === local.h);
-      snapRef.current = local;
-      if (!same) setSnap(local);
+      let locked = false; // 元素级细化后锁定：迟到的窗口级结果不得回退覆盖
+      const commit = (best: WRect) => {
+        // 响应到达时已开始拖拽/缩放（或进入取色）：丢弃这份迟到的识别结果——
+        // 否则刚被拖拽清掉的智能高亮会在此"复活"，与手动选区边框同屏（两个框）
+        if (dragRef.current || resizeRef.current || pickerModeRef.current) return;
+        // 上一会话的在途响应：绝不画进本会话——否则呼出瞬间会闪现旧窗口高亮框
+        if (mySession !== sessionRef.current) return;
+        lastRectRef.current = best ? { x: best.x, y: best.y, w: best.width, h: best.height } : null;
+        const local = best ? { x: (best.x - g.x) / sc, y: (best.y - g.y) / sc, w: best.width / sc, h: best.height / sc } : null;
+        // 与当前高亮完全一致时不再 setState：悬停中的重复识别不触发重绘
+        // （每次 setSnap 都会让选区层重绘一遍，重复绘制表现为高亮框"闪"）
+        const cur = snapRef.current;
+        const same = (cur === null && local === null) ||
+          (cur !== null && local !== null && cur.x === local.x && cur.y === local.y && cur.w === local.w && cur.h === local.h);
+        snapRef.current = local;
+        if (!same) setSnap(local);
+      };
+      const wrPromise = shotWindowRectAt(mg.x, mg.y).catch(() => null);
+      void wrPromise.then((wr) => { if (!locked) commit(wr); });
+      const erTimeout = new Promise<null>((res) => setTimeout(() => res(null), 250));
+      const er: WRect = wantElem
+        ? await Promise.race([shotUiRectAt(mg.x, mg.y).catch(() => null), erTimeout])
+        : null;
+      if (!er || !(er.width > 0 && er.height > 0)) return;
+      const wr = await wrPromise;
+      // 择优取【更精细】的命中：元素矩形显著小于窗口矩形（<98%）时采用——
+      // 悬停浏览器页面时能直接框选按钮组/输入框等组件；全屏级（≥90% 屏幕）
+      // 无意义剔除。元素缺失/异常自动保持窗口级
+      let best: WRect = wr;
+      const ea = er.width * er.height;
+      const wa = wr ? wr.width * wr.height : Infinity;
+      const screenArea = g.width * g.height;
+      if (ea < wa * 0.98 && ea < screenArea * 0.9) best = er;
+      locked = true;
+      commit(best);
     } catch {} finally {
       // 先释放锁、再补查：查询期间光标又动了 → 立即补查最新位置。
       // 【绝不能在 try 里递归调用】——递归入口会看到 busy 仍为 true 而只把
@@ -858,12 +1048,18 @@ export function ScreenshotOverlay() {
     }).catch(() => {});
   };
   /** 松手交还：先解除让位标志让 webview 能重画最终矩形，画完再通知 Rust
-   *  还原冻结层——两个提交落在同一刷新周期，无缝衔接无闪烁 */
+   *  还原冻结层——两个提交落在同一刷新周期，无缝衔接无闪烁。
+   *  shotDragEnd 延后双 rAF：等本帧 webview 画面真正合成上屏后再还原原生
+   *  压暗，否则会出现「原生先撤、webview 未合成上来」的一帧全亮闪屏 */
   const handoverNativeDrag = (paint: () => void) => {
     const wasNative = nativeDragRef.current;
     nativeDragRef.current = false;
     paint();
-    if (wasNative) void shotDragEnd().catch(() => {});
+    if (wasNative) {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        void shotDragEnd().catch(() => {});
+      }));
+    }
   };
 
   // 放大镜逐帧绘制（在 applyMoveVisual 的 rAF 里调用）：
@@ -1186,8 +1382,38 @@ export function ScreenshotOverlay() {
     ].join("#");
   };
 
-  /** 合成选区画布（冻结帧裁剪 + 标注叠加）并异步编码为 PNG Blob。
-   *  旧版 toDataURL 是同步编码：大区域点"贴图"会冻住遮罩页数秒 */
+  /** 选区原始像素（BGRA，物理分辨率）：贴图最快路径专用。
+   *  与 encodeSelection 同样的合成逻辑（背景+标注），但不做 PNG 编码，
+   *  getImageData 一次回读后 R/B 交换成 BMP 字节序 */
+  const cropSelectionRaw = (): { data: Uint8Array; w: number; h: number } | null => {
+    const r = regRef.current;
+    const bg = bgRef.current;
+    if (!bg || !geom || bg.width <= 0) return null;
+    const sc = cssScale();
+    const rp = { x: Math.round(r.x * sc), y: Math.round(r.y * sc), w: Math.round(r.w * sc), h: Math.round(r.h * sc) };
+    if (rp.w <= 0 || rp.h <= 0) return null;
+    let src: HTMLCanvasElement = bg;
+    if (annos.length > 0) {
+      const comp = document.createElement("canvas");
+      comp.width = bg.width; comp.height = bg.height;
+      const cctx = comp.getContext("2d")!;
+      cctx.drawImage(bg, 0, 0);
+      annos.forEach((s) => drawShape(cctx, s, bg, mosaicCacheRef.current, sc));
+      src = comp;
+    }
+    const c = document.createElement("canvas");
+    c.width = rp.w; c.height = rp.h;
+    const ctx = c.getContext("2d")!;
+    ctx.drawImage(src, rp.x, rp.y, rp.w, rp.h, 0, 0, rp.w, rp.h);
+    const img = ctx.getImageData(0, 0, rp.w, rp.h);
+    const d = img.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const rr = d[i]; d[i] = d[i + 2]; d[i + 2] = rr; d[i + 3] = 255;
+    }
+    return { data: new Uint8Array(d.buffer.slice(0)), w: rp.w, h: rp.h };
+  };
+
+
   const encodeSelection = async (): Promise<Blob> => {
     const r = regRef.current;
     const bg = bgRef.current!;
@@ -1266,7 +1492,16 @@ export function ScreenshotOverlay() {
       let sent = false;
       try {
         if (action === "pin") {
-          await shotOutputPost("pin", blob, { x: gx, y: gy }); sent = true;
+          // 【最快路径】贴图不再走 PNG：直接取选区原始像素（getImageData 一次
+          // GPU 回读），Rust 包成 BMP（零压缩）落盘/直出——省掉前端 PNG 编码
+          // 与 WebView2 PNG 解码两大耗时（合计 ~200-400ms，"贴图慢"的主因）
+          const raw = cropSelectionRaw();
+          if (raw) {
+            await shotPinPost(raw.data, raw.w, raw.h, gx, gy);
+            sent = true;
+          } else {
+            await shotOutputPost("pin", blob, { x: gx, y: gy }); sent = true;
+          }
         } else if (action === "copy") {
           await shotOutputPost("copy", blob); sent = true;
         } else {
@@ -1441,22 +1676,23 @@ export function ScreenshotOverlay() {
 
       {/* toolbar：Snipaste 式单行扁平图标条，贴在选区右下角外侧；下方空间
           不足时放进选区内右下角。同类形状合并一键（再点循环切换），悬停
-          按钮在条下方显示「名称 (快捷键)」提示；激活绘图工具时色板/粗细
-          面板与主条无缝拼接。右缘锚定不依赖实测宽度——首帧即最终位置 */}
+          按钮在条下方显示「名称 (快捷键)」提示；所有工具的二次选项（子图形/
+          颜色/粗细）统一平铺在一级图标正下方。右缘锚定不依赖实测宽度——
+          首帧即最终位置 */}
       {phase === "selected" && (() => {
         const vw = window.innerWidth, vh = window.innerHeight;
         // region 已是 CSS 像素，工具栏用 position:fixed 定位（CSS 像素）直接算，
         // 不再 ×scale（旧版 ×rc.width/geom.width 把 CSS 又缩了一次、工具栏偏移）
         const rightEdge = region.x + region.w;
         const rightPx = Math.min(Math.max(vw - rightEdge, 8), Math.max(8, vw - 60));
-        // 枚举展开时主面板不重复显示（枚举面板里已带颜色/粗细）
-        const panelOpen = NEEDS_CONFIG.includes(tool) && submenuOpen === null;
-        // 「主条+配置面板」作为整体定位：主条约 40px，色板/粗细面板约 52px。
-        // 面板显隐随工具切换实时变化，这里按当前状态动态算，保证整组不越界——
-        // 旧版只算主条位置、面板盲排在条下方，选区太靠下时面板被顶出屏幕外/
-        // 与主条重叠（"画笔/马赛克/文字/序号的二次选项被一级选项盖住"）
+        // 枚举展开时主面板不重复显示（枚举面板里已带颜色/粗细）——
+        // 所有工具统一：二次选项一律挂在【一级图标正下方】，不再单独
+        // 在主条下方拼接配置面板（旧版单工具与形状/线组行为不一致）
+        const menuOpen = submenuOpen !== null;
+        // 「主条+枚举面板」作为整体定位：主条约 40px，色板/粗细面板约 52px。
+        // 面板显隐随工具切换实时变化，这里按当前状态动态算，保证整组不越界
         const barH = 40, panelH = 52;
-        const asmH = panelOpen ? barH + panelH : barH;
+        const asmH = menuOpen ? barH + panelH : barH;
         const bottomEdge = region.y + region.h;
         let ty = bottomEdge + 8;   // 默认：整组放选区下方
         let tipsAbove = false;
@@ -1516,7 +1752,7 @@ export function ScreenshotOverlay() {
           </div>
         );
         return (
-          <div className={`shot-toolbar-float${panelOpen ? " has-panel" : ""}${tipsAbove ? " tips-above" : ""}${panelAbove ? " panel-above" : ""}`} style={{ right: rightPx, top: ty }}>
+          <div className={`shot-toolbar-float${tipsAbove ? " tips-above" : ""}${panelAbove ? " panel-above" : ""}`} style={{ right: rightPx, top: ty }}>
             <div className="shot-toolbar">
               {TOOL_BUTTONS.map((b, i) => {
                 const active = b.items.some(([t]) => t === tool);
@@ -1528,37 +1764,33 @@ export function ScreenshotOverlay() {
                   <div key={i} className={`shot-toolbtn${active ? " active" : ""}${isGroup ? " has-submenu" : ""}`}>
                     <button className={"shot-toolbtn-main" + (active ? " active" : "")} data-tip={btnTip(b)}
                       onClick={() => {
-                        // 组工具：展开枚举并选中默认工具（形状=矩形、线=箭头）；
-                        // 已展开时再点仅收起。当前工具已在该组则保持不切换。
-                        if (isGroup) {
-                          if (submenuOpen === i) {
-                            setSubmenuOpen(null);
-                          } else {
-                            setSubmenuOpen(i);
-                            if (!b.items.some(([t]) => t === toolRef.current)) {
-                              setTool(b.items[0][0]);
-                            }
-                          }
-                        } else {
-                          // 单工具：激活并收起其他组残留的枚举
+                        // 所有工具统一交互：点一级图标 = 选中默认工具 + 在图标
+                        // 正下方展开二次选项（子图形+颜色/粗细）；已展开再点收起。
+                        // 当前工具已在该组则保持不切换（与形状/线组行为一致）
+                        if (submenuOpen === i) {
                           setSubmenuOpen(null);
-                          applyToolButton(b);
+                        } else {
+                          setSubmenuOpen(i);
+                          if (!b.items.some(([t]) => t === toolRef.current)) {
+                            setTool(b.items[0][0]);
+                          }
                         }
                       }}>
                       {/* Snipaste 式单色白图标：激活反白，不按功能染色 */}
                       <span style={{ color: active ? "#fff" : "rgba(255,255,255,0.92)", display: "inline-flex" }}><MainIcon /></span>
                     </button>
-                    {/* 子图形枚举：平铺在一级图标正下方，子图形 + 颜色/粗细同行展示。
-                        选图形后面板保持展开；收起靠再点一级图标或 Esc */}
-                    {isGroup && submenuOpen === i && (
+                    {/* 二次选项枚举：平铺在一级图标正下方，子图形 + 颜色/粗细
+                        同行展示。所有工具统一此逻辑；单工具无子图形、只显示
+                        颜色/粗细。选完后面板保持展开；收起靠再点一级图标或 Esc */}
+                    {submenuOpen === i && (
                       <div className={`shot-toolbtn-submenu${panelAbove ? " above" : ""}`} onClick={(ev) => ev.stopPropagation()}>
-                        {b.items.map(([t, Ic, name]) => (
+                        {isGroup && b.items.map(([t, Ic, name]) => (
                           <button key={t} className={tool === t ? "active" : ""} data-tip={name}
                             onClick={() => setTool(t)}>
                             <span style={{ color: tool === t ? "#fff" : "rgba(255,255,255,0.92)", display: "inline-flex" }}><Ic /></span>
                           </button>
                         ))}
-                        <span className="shot-submenu-divider" />
+                        {isGroup && <span className="shot-submenu-divider" />}
                         {renderConfigPanel}
                       </div>
                     )}
@@ -1572,6 +1804,9 @@ export function ScreenshotOverlay() {
                 onClick={()=>{if(undos.length>0){setAnnos(undos[undos.length-1]);setUndos(u=>u.slice(0,-1));}}}><IcoRedo/></button>
               <div className="shot-toolbar-sep" />
               <div className="shot-toolbar-group shot-toolbar-actions">
+                <button data-tip="文字识别 (OCR)" className={ocrPhase !== "idle" ? "active" : ""}
+                  onClick={() => { if (ocrPhase === "idle" || ocrPhase === "error") void runOcr(); else resetOcr(); }}>
+                  <span style={{ color: "rgba(255,255,255,0.92)", display: "inline-flex" }}><IcoOcr /></span></button>
                 <button data-tip="取消 (Esc)" onClick={()=>void shotCancel().catch(()=>{})}>
                   <span style={{ color: "rgba(255,255,255,0.92)", display: "inline-flex" }}><IcoClose/></span></button>
                 <button data-tip="另存为..." onClick={()=>doOutput("save")}>
@@ -1582,7 +1817,6 @@ export function ScreenshotOverlay() {
                   <span style={{ color: "rgba(255,255,255,0.92)", display: "inline-flex" }}><IcoPin/></span></button>
               </div>
             </div>
-            {panelOpen && renderConfigPanel}
           </div>
         );
       })()}
@@ -1608,14 +1842,95 @@ export function ScreenshotOverlay() {
             </>
           ) : (
             <>
+              {histViewing && (
+                <div className="shot-hint-row shot-hint-viewing"><kbd>&gt;</kbd><span>正在查看历史截屏，按 &gt; 返回实时画面</span></div>
+              )}
               {cfg.shot.smart_detect && <div className="shot-hint-row"><kbd>左键点击</kbd><span>采纳识别的窗口</span></div>}
               <div className="shot-hint-row"><kbd>左键拖拽</kbd><span>自定义框选区域</span></div>
+              {cfg.shot.history_enabled !== false && (
+                <>
+                  <div className="shot-hint-row"><kbd>&lt;</kbd><kbd>&gt;</kbd><span>翻看历史截屏，可重新框选</span></div>
+                  <div className="shot-hint-row"><kbd>H</kbd><span>历史截屏列表</span></div>
+                </>
+              )}
+              <div className="shot-hint-row"><kbd>C</kbd><span>取色</span></div>
               <div className="shot-hint-row"><kbd>{cfg.shortcuts.pins}</kbd><span>快速贴图</span></div>
               <div className="shot-hint-row"><kbd>Esc</kbd><span>退出截图</span></div>
             </>
           )}
         </div>
       )}
+
+      {/* 截图历史缩略图列表（H 开关）：横排缩略图 + 时间标注，
+          点击直接跳到该帧重新框选；首项「实时画面」回到当前屏幕 */}
+      {histOpen && (
+        <div className="shot-hist-panel" onMouseDown={(e) => e.stopPropagation()}>
+          <div className={`shot-hist-item${!histViewing ? " active" : ""}`}
+            onClick={() => void jumpHistory(-1)}>
+            <div className="shot-hist-thumb shot-hist-live">实时</div>
+            <span>当前画面</span>
+          </div>
+          {(histItems ?? []).map((it) => (
+            <div key={it.file} className="shot-hist-item"
+              onClick={() => void jumpHistory((histItems ?? []).indexOf(it))}>
+              <img src={shotHistoryUrl(it.file.replace(".png", ".thumb.png"))} draggable={false} />
+              <span>{new Date(it.ts).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+            </div>
+          ))}
+          {histItems !== null && histItems.length === 0 && (
+            <div className="shot-hist-empty">暂无历史截屏</div>
+          )}
+        </div>
+      )}
+
+      {/* OCR 结果面板：贴在选区右侧；放不下翻到左侧。
+          识别文本【可直接划选】（像普通文本一样拖动选中 → Ctrl+C 复制），
+          头部提供 复制全部 / 翻译；翻译结果就地展示 */}
+      {ocrPhase !== "idle" && (() => {
+        const vw = window.innerWidth, vh = window.innerHeight;
+        const pw = 320, phMax = Math.min(380, vh - 16);
+        let px2 = region.x + region.w + 10;
+        if (px2 + pw > vw - 8) px2 = Math.max(8, region.x - pw - 10);
+        const py2 = Math.max(8, Math.min(region.y, vh - phMax - 8));
+        return (
+          <div className="shot-ocr-panel" style={{ left: px2, top: py2, width: pw, maxHeight: phMax }}
+            onMouseDown={(ev) => ev.stopPropagation()} onMouseUp={(ev) => ev.stopPropagation()}>
+            <div className="shot-ocr-head">
+              <b>文字识别</b>
+              <span style={{ flex: 1 }} />
+              {ocrPhase === "done" && ocrLines.length > 0 && (
+                <>
+                  <button onClick={copyAllOcr}>复制全部</button>
+                  <button onClick={() => void doTranslate()}>翻译</button>
+                </>
+              )}
+              <button onClick={resetOcr}>关闭</button>
+            </div>
+            {ocrPhase === "loading" && <div className="shot-ocr-body shot-ocr-muted">识别中…</div>}
+            {ocrPhase === "error" && <div className="shot-ocr-body shot-ocr-err">{ocrError}</div>}
+            {ocrPhase === "done" && (
+              ocrTranslating ? <div className="shot-ocr-body shot-ocr-muted">翻译中…</div> :
+              ocrTrans ? (
+                <div className="shot-ocr-body">
+                  <div className="shot-ocr-src">{ocrTrans.src}</div>
+                  <div className="shot-ocr-out">{ocrTrans.out}</div>
+                  <button className="shot-ocr-back" onClick={() => setOcrTrans(null)}>返回识别结果</button>
+                </div>
+              ) : (
+                <div className="shot-ocr-lines">
+                  {ocrLines.length === 0 && <div className="shot-ocr-body shot-ocr-muted">未识别到文字（可调整选区后重新点击识别）</div>}
+                  {ocrLines.map((l, i) => (
+                    <div key={i} className="shot-ocr-line">{l.text}</div>
+                  ))}
+                </div>
+              )
+            )}
+            {ocrPhase === "done" && ocrLines.length > 0 && (
+              <div className="shot-ocr-selbar">划选文字后 Ctrl+C 复制，或点上方「复制全部」</div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }

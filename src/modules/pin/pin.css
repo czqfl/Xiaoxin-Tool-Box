@@ -3,16 +3,35 @@
    其 :root[data-theme] 选择器特异性更高且加载更晚） */
 html[data-window="pin"], html[data-window="pin"] body { background: transparent !important; }
 
-.pin-window { position: relative; width: 100%; height: 100%; cursor: move; overflow: hidden; }
+/* --pin-m：四周透明外边距（CSS 像素，由 TSX 按 12/devicePixelRatio 注入）。
+   窗口比图片四周各大一圈：图片缩进边距内，边框贴着【图片边缘】画，
+   向外泛光落在透明边距里——旧版窗口=图片尺寸时 box-shadow 整个落在
+   客户区外被裁掉；高 DPI 下逻辑视口舍入还会裁掉最右/最下一行像素
+   （"放大缩小贴图后部分边框消失"的根因） */
+.pin-window {
+  position: relative; width: 100%; height: 100%; cursor: move; overflow: hidden;
+  padding: var(--pin-m, 0px); box-sizing: border-box;
+}
 .pin-window img { display: block; pointer-events: none; }
 .pin-shadow { filter: drop-shadow(0 4px 14px rgba(0,0,0,0.45)) drop-shadow(0 1px 3px rgba(0,0,0,0.35)); }
 
+/* HTML 贴图（剪贴板富文本/纯文本）：
+   wrap 占满窗口内容区并随窗口缩放；inner 以自然尺寸渲染（max-content
+   不受父宽约束，保证量出真实尺寸），经 transform:scale 整体跟随边框 */
+.pin-html-wrap { width: 100%; overflow: hidden; }
+.pin-html {
+  width: max-content;
+  min-height: 20px;
+  overflow-wrap: break-word; user-select: none;
+}
+
 /* ---- Snipaste 式贴图边框（细边 + 仅外侧柔光）----
    边框颜色用 currentColor，动画只驱动 color 一个属性，边框与光晕同步变色。
-   光晕用 box-shadow（只向外部扩散，不像 drop-shadow 会沿环形内侧也发光）。
+   光晕用 box-shadow（只向外部扩散，不像 drop-shadow 会沿环形内侧也发光）；
+   外扩距离控制在透明边距内，保证完整渲染不被窗口边界裁切。
    闲置白色微光，悬停/拖动/彩闪时主题色辉光；~1s 闪完定格 --pin-accent */
 .pin-border {
-  position: absolute; inset: 0; z-index: 10; pointer-events: none;
+  position: absolute; inset: var(--pin-m, 0px); z-index: 10; pointer-events: none;
   border: 1px solid currentColor;
   color: rgba(255,255,255,0.85);
   box-shadow: 0 0 4px -1px currentColor;
@@ -35,9 +54,9 @@ html[data-window="pin"], html[data-window="pin"] body { background: transparent 
   100% { color: var(--pin-accent); }
 }
 
-/* 左上角缩放比例角标：滚轮缩放时实时显示，停止后淡出 */
+/* 左上角缩放比例角标：滚轮缩放时实时显示，停止后淡出（位置避开透明边距） */
 .pin-zoom-badge {
-  position: absolute; left: 6px; top: 6px; z-index: 20;
+  position: absolute; left: calc(var(--pin-m, 0px) + 6px); top: calc(var(--pin-m, 0px) + 6px); z-index: 20;
   background: rgba(0,0,0,0.68); color: #fff; font-size: 12px; line-height: 1;
   padding: 5px 9px; border-radius: 3px; pointer-events: none;
   font-family: Consolas, "Courier New", monospace;

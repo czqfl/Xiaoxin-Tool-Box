@@ -1,5 +1,7 @@
 #[cfg(windows)]
 mod acrylic;
+mod dupl;
+mod ocr;
 mod screenshot;
 mod pin;
 mod clipboard;
@@ -71,7 +73,7 @@ pub(crate) fn window_theme_is_light<R: tauri::Runtime>(window: &tauri::WebviewWi
     use crate::config::{ConfigState, ThemeMode};
     if let Some(cfg) = window.app_handle().try_state::<ConfigState>() {
         match cfg.0.lock().unwrap().general.theme {
-            ThemeMode::Light | ThemeMode::Mint | ThemeMode::Skyblue | ThemeMode::Red => return true,
+            ThemeMode::Light | ThemeMode::Mint | ThemeMode::Skyblue | ThemeMode::Red | ThemeMode::Orange => return true,
             ThemeMode::Dark => return false,
             ThemeMode::System => {}
         }
@@ -348,6 +350,11 @@ pub fn run() {
             // 元素级智能识别（UIA）：与窗口级并行，前端择优取更精细矩形
             screenshot::shot_ui_rect_at,
             screenshot::shot_last_region,
+            // 选区文字识别（Windows.Media.Ocr）
+            screenshot::shot_ocr,
+            // 截图历史：列表 / 翻页重截
+            screenshot::shot_history_list,
+            screenshot::shot_history_step,
             // 截图输出（复制/另存为/贴图）：原生二进制 IPC 直传 PNG 字节
             screenshot::shot_output,
             screenshot::shot_cancel,
@@ -365,6 +372,12 @@ pub fn run() {
             pin::pin_show_all,
             pin::pin_clear_all,
             pin::pin_set_click_through,
+            // Esc 隐藏单个贴图（热键可整批唤回）
+            pin::pin_hide_one,
+            // HTML 贴图尺寸回填（前端渲染测量后调用）
+            pin::pin_resize,
+            // 贴图内容类型（image/html，前端渲染分支用）
+            pin::pin_kind,
             pin::pin_file_path,
             // 贴图图片展示走协议 GET /pin/{id} 直出文件字节，pin_image_data 已删
             pin::pin_copy_image,

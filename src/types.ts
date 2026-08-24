@@ -54,7 +54,7 @@ export type FolderLayout = "grid" | "list" | "tree";
 export type TerminalShell = "wt" | "cmd" | "powershell";
 /** 面板分区排布：左右分栏 / 上下分栏 */
 export type FolderSplit = "columns" | "rows";
-export type ThemeMode = "system" | "light" | "dark" | "mint" | "skyblue" | "red";
+export type ThemeMode = "system" | "light" | "dark" | "mint" | "skyblue" | "red" | "orange";
 
 export interface ClipboardConfig {
     /** 是否启用剪贴板功能（关闭：快捷键不注册、入口隐藏） */
@@ -292,6 +292,12 @@ export interface ShotConfig {
   save_format: string;
   jpg_quality: number;
   save_dir?: string | null;
+  /** 截图历史：< > 翻页重截、H 列表（呼出时冻结的全屏画面落盘） */
+  history_enabled: boolean;
+  /** 历史最多保留多少次截屏 */
+  history_max_count: number;
+  /** 历史最多保留多少天 */
+  history_max_days: number;
 }
 
 /** 贴图配置 */

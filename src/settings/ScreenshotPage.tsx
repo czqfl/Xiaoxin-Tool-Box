@@ -94,6 +94,21 @@ export function ScreenshotPage() {
             <SettingRow title="记住上次截取区域" desc="呼出截图时若光标下未识别到窗口，预填上一次的选区">
               <Switch checked={config.shot.remember_region} onChange={(v) => updateShot({ remember_region: v })} />
             </SettingRow>
+            <SettingRow title="截图历史" desc="每次呼出自动保存全屏画面；截图时可按 < > 翻看历史并重新框选，H 打开列表">
+              <Switch checked={config.shot.history_enabled !== false} onChange={(v) => updateShot({ history_enabled: v })} />
+            </SettingRow>
+            {config.shot.history_enabled !== false && (
+              <>
+                <SettingRow title="历史保留条数" desc={`最多保留 ${config.shot.history_max_count ?? 20} 次截屏（多屏一次计一条）`}>
+                  <Slider min={5} max={100} value={config.shot.history_max_count ?? 20}
+                    onChange={(v) => updateShot({ history_max_count: v })} />
+                </SettingRow>
+                <SettingRow title="历史保留天数" desc={`超过 ${config.shot.history_max_days ?? 7} 天的自动清理`}>
+                  <Slider min={1} max={30} value={config.shot.history_max_days ?? 7}
+                    onChange={(v) => updateShot({ history_max_days: v })} />
+                </SettingRow>
+              </>
+            )}
           </SettingGroup>
           <SettingGroup>
             <SettingRow title="保存格式">
