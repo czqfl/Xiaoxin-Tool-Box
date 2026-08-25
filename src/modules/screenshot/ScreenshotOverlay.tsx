@@ -1,6 +1,7 @@
 /** Fullscreen screenshot overlay: frozen screen + selection + magnifier + toolbar */
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
   shotGeometry, shotImageDataRaw, shotWindowRectAt, shotUiRectAt, shotReady, shotFrameUrl,
@@ -22,6 +23,8 @@ interface Rect { x: number; y: number; w: number; h: number; }
 interface Anno {
   kind: Tool; x1: number; y1: number; x2: number; y2: number;
   color: string; width: number; points?: Pt[]; text?: string; num?: number;
+  /** 马赛克笔画专属：落下顺序号，索引「当时画面」快照（时序马赛克） */
+  sid?: number;
 }
 
 const MAG = 140, MAG_Z = 8;
@@ -122,11 +125,31 @@ const ANNO_DEFAULT_COLORS = ["#e5484d","#ff8d1a","#ffd60a","#36b37e","#4c8dff","
 /** 自定义色上限：色板总长 = 内置 8 色 + 最多 6 个自定义（防色条无限变长） */
 const ANNO_MAX_CUSTOM = 6;
 
+// ---- 马赛克整图层缓存（模块级：drawShape 是模块函数，无组件状态） ----
+// key = 底图画布（WeakMap 自动随画布回收）；帧内容变化时 bump mosaicFrameStamp
+// 使旧层失效（换帧/新会话由 reloadFrameOnly / loadSession 递增）
+interface MosaicLayer { bs: number; w: number; h: number; stamp: number; pix: HTMLCanvasElement }
+const mosaicLayerCache = new WeakMap<HTMLCanvasElement, MosaicLayer>();
+const mosaicScratch: { mask?: HTMLCanvasElement; comp?: HTMLCanvasElement } = {};
+let mosaicFrameStamp = 0;
+/** 帧内容已更换：马赛克整图层作废（下一帧重绘时重建） */
+function invalidateMosaicLayer() { mosaicFrameStamp++; }
+
+// ---- 时序马赛克快照 ----
+// 每条马赛克笔画落下瞬间，把「当时的画面」（底图 + 先于它的全部标注）拍成
+// 快照；重绘/导出时用快照做采样源——只像素化当时存在的内容，之后新加的
+// 图形/文字不受影响、清晰盖在其上。key = 笔画的 sid（拖动中对象会被重建，
+// 对象身份不可靠，顺序号稳定）
+const mosaicSnapshots = new Map<number, HTMLCanvasElement>();
+let mosaicSid = 0;
+/** 换帧/新会话：旧快照全部作废（旧标注已清空，快照随之失效） */
+function clearMosaicSnapshots() { mosaicSnapshots.clear(); }
+
 function drawShape(
   ctx: CanvasRenderingContext2D,
   s: Anno,
   src?: HTMLCanvasElement | null,
-  mosaicCache?: Map<string, string>,
+  _mosaicCache?: Map<string, string>,
   scale = 1,
 ) {
   ctx.save();
@@ -163,92 +186,78 @@ function drawShape(
     ctx.beginPath(); ctx.moveTo(s.points[0].x * scale, s.points[0].y * scale);
     for (let i = 1; i < s.points.length; i++) ctx.lineTo(s.points[i].x * scale, s.points[i].y * scale);
     ctx.stroke();
-  } else if (s.kind === "mosaic" && s.points && s.points.length > 0) {
-    // 真马赛克（像素化）：每格取【底层画面】的平均色填充——不是灰色贴片。
-    // 【性能关键·增量采样】重绘（每次 mousemove 一帧、且此后任何标注变化
-    // 都会整层重画）只对【未缓存】的格子读像素——已缓存格子直接回填。
-    // 旧实现每帧都对整个笔迹包围盒 getImageData（大选区几十 MB × 每帧 ×
-    // 屏显/合成两层），表现为"用过马赛克后所有操作都卡"；增量后成本
-    // 只与新增格子数相关，重绘近乎免费。
-    // 格子边长 bs 与采样坐标都按 scale 换算到物理像素，与画线保持一致
-    const bs = 12 * scale;
-    const cells = new Set<string>();
-    // 【坐标必须钳进底图】拖动中 mousemove 可能落在本屏窗口之外（多显示器
-    // 甩到邻屏、快速甩出边缘）——越界格子采样会读出 undefined → 非法色串
-    const clampX = (v: number) => Math.max(0, Math.min(v, (src ? src.width : 1) - 0.01));
-    const clampY = (v: number) => Math.max(0, Math.min(v, (src ? src.height : 1) - 0.01));
-    // 单点标记：中心 + 上下左右各半个格子 → 约 2~3 格宽的笔迹（Snipaste 式粗马赛克）
-    const mark = (rawX: number, rawY: number) => {
-      const x = clampX(rawX), y = clampY(rawY);
-      const put = (px: number, py: number) => cells.add(Math.floor(px / bs) + "," + Math.floor(py / bs));
-      put(x, y);
-      put(clampX(x - bs / 2), y); put(clampX(x + bs / 2), y);
-      put(x, clampY(y - bs / 2)); put(x, clampY(y + bs / 2));
-    };
-    mark(s.points[0].x * scale, s.points[0].y * scale);
-    for (let i = 1; i < s.points.length; i++) {
-      const a = s.points[i - 1], b = s.points[i];
-      const steps = Math.max(1, Math.ceil(Math.hypot((b.x - a.x) * scale, (b.y - a.y) * scale) / (bs / 2)));
-      for (let t = 1; t <= steps; t++) mark((a.x + ((b.x - a.x) * t) / steps) * scale, (a.y + ((b.y - a.y) * t) / steps) * scale);
+    } else if (s.kind === "mosaic" && s.points && s.points.length > 0 && src && src.width > 0) {
+    // 真马赛克（像素化笔刷）——【整图层 + 蒙版合成】写法（tui.image-editor /
+    // fabric.js 等开源画板的标准做法）：
+    //   1) 整帧降采样成小图再关平滑放大回原尺寸 → 得到全图马赛克层
+    //      （降采样的双线性平均 = 每格取平均色，与逐格 getImageData 等价）；
+    //   2) 笔迹描成圆头粗线画进蒙版；
+    //   3) 马赛克层 destination-in 蒙版 → 只在笔迹内透出像素块。
+    // 全程 GPU 合成、无 getImageData、无逐格循环、无缓存失效问题——
+    // 旧"逐格采样"方案在笔画定稿后缓存被清，此后每帧重绘都要对整个
+    // 笔迹包围盒读像素（4K 下 30MB+ × 每帧 × 两层），越用越卡且偶发无效果。
+    // 【时序采样源】有快照（笔画落下时拍下的当时画面）就用快照——
+    // 先于它的图形/文字一并被像素化；无快照（拖动中）退化为底图
+    const sampleSrc = (s.sid !== undefined ? mosaicSnapshots.get(s.sid) : undefined) ?? src;
+    const bs = Math.max(4, 12 * scale);
+    const W = sampleSrc.width, H = sampleSrc.height;
+    // 1) 整图马赛克层（按 采样源+格子尺寸 缓存；快照内容不变故免失效戳）
+    let layer = mosaicLayerCache.get(sampleSrc);
+    if (!layer || layer.bs !== bs || layer.w !== W || layer.h !== H || (sampleSrc === src && layer.stamp !== mosaicFrameStamp)) {
+      const pw = Math.max(1, Math.ceil(W / bs)), ph = Math.max(1, Math.ceil(H / bs));
+      const pix = document.createElement("canvas");
+      pix.width = pw; pix.height = ph;
+      const pctx = pix.getContext("2d")!;
+      pctx.imageSmoothingEnabled = true; // 降采样平滑 = 区域平均色
+      pctx.drawImage(sampleSrc, 0, 0, pw, ph);
+      layer = { bs, w: W, h: H, stamp: mosaicFrameStamp, pix };
+      mosaicLayerCache.set(src, layer);
     }
-    const fillCell = (k: string, color: string) => {
-      const [cx, cy] = k.split(",").map(Number);
-      ctx.fillStyle = color;
-      ctx.fillRect(cx * bs, cy * bs, bs, bs);
-    };
-    let sampled = false;
-    if (src && src.width > 0 && src.height > 0 && mosaicCache) {
-      // 收集未缓存格子；全部已缓存则零像素读取直接回填
-      const uncached: string[] = [];
-      cells.forEach((k) => { if (!mosaicCache.has(k)) uncached.push(k); });
-      if (uncached.length === 0) {
-        cells.forEach((k) => { const c = mosaicCache.get(k); if (c) fillCell(k, c); });
-        sampled = true;
-      } else {
-        // 只对未缓存格子的包围盒做一次 getImageData（通常仅最新一小段）
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        uncached.forEach((k) => {
-          const [cx, cy] = k.split(",").map(Number);
-          minX = Math.min(minX, cx * bs); minY = Math.min(minY, cy * bs);
-          maxX = Math.max(maxX, (cx + 1) * bs); maxY = Math.max(maxY, (cy + 1) * bs);
-        });
-        minX = Math.max(0, Math.floor(minX)); minY = Math.max(0, Math.floor(minY));
-        maxX = Math.min(src.width, Math.ceil(maxX)); maxY = Math.min(src.height, Math.ceil(maxY));
-        const bw = maxX - minX, bh = maxY - minY;
-        if (bw > 0 && bh > 0) {
-          try {
-            const data = src.getContext("2d")!.getImageData(minX, minY, bw, bh).data;
-            cells.forEach((k) => {
-              const hit = mosaicCache.get(k);
-              if (hit) { fillCell(k, hit); return; }
-              const [cx, cy] = k.split(",").map(Number);
-              // 单格读取范围钳制在包围盒内（四缘都要钳）：越界读出 undefined
-              // → rgb(NaN,...) → fillStyle 赋值被忽略、沿用标注色（"马赛克变红"）
-              const x0 = Math.max(0, cx * bs - minX), y0 = Math.max(0, cy * bs - minY);
-              const x1 = Math.min(x0 + bs, bw), y1 = Math.min(y0 + bs, bh);
-              let r = 0, g = 0, b = 0, n = 0;
-              for (let y = y0; y < y1; y++) {
-                for (let x = x0; x < x1; x++) {
-                  const i = (y * bw + x) * 4;
-                  r += data[i]; g += data[i + 1]; b += data[i + 2]; n++;
-                }
-              }
-              // 兜底校验：均值非法时宁可留空也不落标注色
-              if (!n || !Number.isFinite(r / n) || !Number.isFinite(g / n) || !Number.isFinite(b / n)) return;
-              const color = `rgb(${Math.round(r / n)},${Math.round(g / n)},${Math.round(b / n)})`;
-              mosaicCache.set(k, color);
-              fillCell(k, color);
-            });
-            sampled = true;
-          } catch {}
-        }
-      }
+    // 2) 笔迹蒙版 + 合成【只在笔迹包围盒内进行】：整屏大小的 clear/合成
+    //    每帧 ×2 层在弱 GPU 上会拖垮整页（"一用马赛克就卡死"），包围盒
+    //    通常只有笔迹那么大，成本与之成正比
+    const pts = s.points!.map((p) => ({ x: p.x * scale, y: p.y * scale }));
+    const pad = bs * 2.2;
+    let bw2 = 0, bh2 = 0;
+    let bx = Infinity, by = Infinity, bx2 = -Infinity, by2 = -Infinity;
+    for (const p of pts) {
+      bx = Math.min(bx, p.x); by = Math.min(by, p.y);
+      bx2 = Math.max(bx2, p.x); by2 = Math.max(by2, p.y);
     }
-    // 底图不可用（帧未加载等）时才退化为灰色占位
-    if (!sampled) {
-      cells.forEach((k) => { if (!mosaicCache?.has(k)) fillCell(k, "rgba(180,180,180,0.85)"); });
+    bx = Math.max(0, Math.floor(bx - pad)); by = Math.max(0, Math.floor(by - pad));
+    bw2 = Math.min(W, Math.ceil(bx2 + pad)) - bx; bh2 = Math.min(H, Math.ceil(by2 + pad)) - by;
+    if (bw2 <= 0 || bh2 <= 0) return;
+    let mask = mosaicScratch.mask;
+    if (!mask) { mask = document.createElement("canvas"); mosaicScratch.mask = mask; }
+    if (mask.width !== bw2) mask.width = bw2;
+    if (mask.height !== bh2) mask.height = bh2;
+    const mctx = mask.getContext("2d")!;
+    mctx.clearRect(0, 0, bw2, bh2);
+    mctx.fillStyle = "#000"; mctx.strokeStyle = "#000";
+    mctx.lineCap = "round"; mctx.lineJoin = "round";
+    mctx.lineWidth = bs * 2.2;
+    if (pts.length === 1) {
+      mctx.beginPath(); mctx.arc(pts[0].x - bx, pts[0].y - by, bs * 1.1, 0, Math.PI * 2); mctx.fill();
+    } else {
+      mctx.beginPath();
+      mctx.moveTo(pts[0].x - bx, pts[0].y - by);
+      for (let i = 1; i < pts.length; i++) mctx.lineTo(pts[i].x - bx, pts[i].y - by);
+      mctx.stroke();
     }
-  } else if (s.kind === "text" && s.text) {
+    // 3) 合成：马赛克层区域 ∩ 笔迹蒙版 → 贴回目标画布对应位置
+    let comp = mosaicScratch.comp;
+    if (!comp) { comp = document.createElement("canvas"); mosaicScratch.comp = comp; }
+    if (comp.width !== bw2) comp.width = bw2;
+    if (comp.height !== bh2) comp.height = bh2;
+    const cc = comp.getContext("2d")!;
+    cc.globalCompositeOperation = "source-over";
+    cc.clearRect(0, 0, bw2, bh2);
+    cc.imageSmoothingEnabled = false; // 放大不平滑 = 硬边像素块
+    cc.drawImage(layer.pix, bx / bs, by / bs, bw2 / bs, bh2 / bs, 0, 0, bw2, bh2);
+    cc.globalCompositeOperation = "destination-in";
+    cc.drawImage(mask, 0, 0);
+    cc.globalCompositeOperation = "source-over";
+    ctx.drawImage(comp, bx, by);} else if (s.kind === "text" && s.text) {
     // 与编辑器输入框【完全一致】的字体/字号/行盒：16px 加粗、baseline=top
     // 对齐 DOM 行盒顶部；坐标取整避免亚像素渲染发虚
     ctx.font = `bold ${Math.round(16 * scale)}px sans-serif`;
@@ -466,6 +475,7 @@ export function ScreenshotOverlay() {
       setTool("select"); // 每次会话工具复位：避免残留标注模式导致误触绘制
     }
     mosaicCacheRef.current.clear();
+    clearMosaicSnapshots();
     // 合成源一并作废：下一轮重绘会按新背景帧重建，绝不残留上一会话画面
     compRef.current = null;
     prevAnnoLenRef.current = 0;
@@ -557,6 +567,7 @@ export function ScreenshotOverlay() {
               c.width = g.width; c.height = g.height;
               // willReadFrequently：取色需逐帧单像素 getImageData，走 CPU 快路径
               c.getContext("2d", { willReadFrequently: true })!.drawImage(bmp, 0, 0);
+              invalidateMosaicLayer();
               setBgReady(true);
             }
             bmp.close();
@@ -574,6 +585,7 @@ export function ScreenshotOverlay() {
                 if (c) {
                   c.width = g.width; c.height = g.height;
                   c.getContext("2d", { willReadFrequently: true })!.putImageData(new ImageData(bytes, g.width, g.height), 0, 0);
+                  invalidateMosaicLayer();
                   setBgReady(true);
                 }
               }
@@ -598,7 +610,9 @@ export function ScreenshotOverlay() {
     // 造成卡顿；可见画面的换帧由 Rust 原生层瞬时完成，这里的 bg 画布刷新
     // 延迟 60ms 合并、只取最后一帧即可
     let t = 0;
-    const un = listen("shot://history-changed", () => {
+    // 【窗口域 listen】history-changed 由 Rust emit_to 定向发给本屏遮罩；
+    // 全局 listen（EventTarget::Any）会收到其他显示器的换帧事件造成误重载
+    const un = getCurrentWindow().listen("shot://history-changed", () => {
       window.clearTimeout(t);
       t = window.setTimeout(() => { void reloadFrameOnly(); }, 60);
     });
@@ -608,6 +622,7 @@ export function ScreenshotOverlay() {
     // 帧已换：标注/马赛克缓存/预编码缓存全部作废
     setAnnos([]); setUndos([]);
     mosaicCacheRef.current.clear();
+    clearMosaicSnapshots();
     prevAnnoLenRef.current = 0;
     compRef.current = null;
     pngCacheRef.current = null;
@@ -626,6 +641,7 @@ export function ScreenshotOverlay() {
       if (c && bmp.width === g.width && bmp.height === g.height) {
         c.width = g.width; c.height = g.height;
         c.getContext("2d", { willReadFrequently: true })!.drawImage(bmp, 0, 0);
+        invalidateMosaicLayer();
         setBgReady(true);
       }
       bmp.close();
@@ -1452,6 +1468,20 @@ export function ScreenshotOverlay() {
     setTextEdit(null);
   };
 
+  /** 【时序马赛克】拍当前画面快照（底图 + 已存在的全部标注，物理分辨率）：
+   *  作为该条马赛克笔画终生的采样源 */
+  const captureMosaicUnderlay = (): HTMLCanvasElement | null => {
+    const bg = bgRef.current;
+    if (!bg || bg.width <= 0 || !geom) return null;
+    const snap = document.createElement("canvas");
+    snap.width = geom.width; snap.height = geom.height;
+    const sctx = snap.getContext("2d")!;
+    sctx.drawImage(bg, 0, 0);
+    const sc = cssScale();
+    for (const s of annos) drawShape(sctx, s, bg, undefined, sc);
+    return snap;
+  };
+
   const onDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
     // 取色模式：单击 = 复制当前颜色并退出（即点即得）
@@ -1469,6 +1499,13 @@ export function ScreenshotOverlay() {
         points: (tool==="brush"||tool==="mosaic") ? [pt] : undefined,
         num: tool==="number" ? numCnt : undefined };
       if (tool==="number") setNumCnt((n)=>n+1);
+      // 【时序马赛克】落下瞬间拍「当时画面」快照（底图 + 已存在的全部标注）：
+      // 之后这条马赛克永远像素化这一帧状态；后续新标注不受影响
+      if (tool==="mosaic") {
+        a.sid = ++mosaicSid;
+        const snap = captureMosaicUnderlay();
+        if (snap) mosaicSnapshots.set(a.sid, snap);
+      }
       setAnnos((arr)=>[...arr, a]);
       const onM = (ev: MouseEvent) => {
         const rc = bgRef.current?.getBoundingClientRect(); if (!rc||!geom) return;

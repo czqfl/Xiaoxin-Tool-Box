@@ -1,4 +1,4 @@
-﻿/** Pin window: always-on-top floating image with zoom/opacity/rotate.
+/** Pin window: always-on-top floating image with zoom/opacity/rotate.
  *  两种形态：常规窗(pin-{id}) 与 复用窗(pin-staging)。
  *  复用窗启动即预建、屏幕外隐藏待命；贴图时由 Rust 经 pin://assign 分配任务，
  *  图片就绪后才显示——免去临时建 WebView2 窗口的数百毫秒开销与闪烁 */
@@ -66,11 +66,15 @@ export function PinWindow() {
     }
   }, []);
 
-  // 复用窗：等待 Rust 分配贴图任务，领到后立即加载
+  // 复用窗：等待 Rust 分配贴图任务，领到后立即加载。
+  // 【必须用窗口域 listen】@tauri-apps/api/event 的全局 listen 注册的是
+  // EventTarget::Any——Tauri 的 emit_to 过滤器对 Any 永远放行，导致每个
+  // 贴图窗都收到发给别的待命窗的 assign，全部变成最新内容（"贴叠后所有
+  // 文本贴图都变成最后一个"的根因）。窗口域 listen 只收发给本窗的事件
   useEffect(() => {
     if (!isStaging) return;
     let un: (() => void) | undefined;
-    void listen<{ id: string }>("pin://assign", (e) => {
+    void getCurrentWindow().listen<{ id: string }>("pin://assign", (e) => {
       idRef.current = e.payload.id;
       replayIntro();
       tAssignRef.current = Date.now();
@@ -395,6 +399,14 @@ export function PinWindow() {
     const natW = Math.max(1, el.offsetWidth), natH = Math.max(1, el.offsetHeight);
     const dpr = window.devicePixelRatio || 1;
     const clone = el.cloneNode(true) as HTMLElement;
+    // 【内联关键样式】SVG data-URL 是独立文档，pin.css 不会生效——
+    // .pin-html 的 width:max-content 等布局规则缺失会导致换行/尺寸变化，
+    // 表现为"复制出的图片和贴图显示的不一样、内容被截断"。
+    // 宽度钉死为实测自然宽：与测量时布局完全一致
+    clone.style.width = `${natW}px`;
+    clone.style.maxWidth = "none";
+    clone.style.minHeight = "0";
+    clone.style.margin = "0";
     const holder = document.createElement("div");
     holder.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
     holder.appendChild(clone);
@@ -408,15 +420,24 @@ export function PinWindow() {
       img.onerror = () => rej(new Error("svg render failed"));
       img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
     });
+    // 【按贴图当前显示尺寸导出】贴图显示 = 自然尺寸 × transform:scale(k)，
+    // 导出同一比例才能与屏显观感一致；先铺底色再画内容——透明区域会被
+    // 不支持 alpha 的目标应用渲染成黑边
+    const dispW = Math.max(1, wrap.clientWidth);
+    const dispH = Math.max(1, Math.round(natH * (dispW / natW)));
+    const k = dispW / natW;
     const c = document.createElement("canvas");
-    c.width = Math.round(natW * dpr); c.height = Math.round(natH * dpr);
+    c.width = Math.round(dispW * dpr); c.height = Math.round(dispH * dpr);
     const ctx = c.getContext("2d")!;
-    ctx.scale(dpr, dpr);
+    ctx.scale(dpr * k, dpr * k);
+    const bg = getComputedStyle(el).backgroundColor;
+    ctx.fillStyle = bg && bg !== "transparent" ? bg : "#ffffff";
+    ctx.fillRect(0, 0, natW, natH);
     ctx.drawImage(img, 0, 0, natW, natH);
     const blob = await new Promise<Blob | null>((r) => c.toBlob(r, "image/png"));
     if (!blob) throw new Error("toBlob null");
     await pinCopyImageBytes(blob);
-  };
+  }
 
   const onContext = (e: React.MouseEvent) => {
     e.preventDefault();

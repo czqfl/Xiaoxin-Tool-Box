@@ -349,8 +349,13 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
         )}
         {renderRow(
           "pins",
-          "显示 / 隐藏全部贴图",
-          "点击快捷键后按下新组合，例如 Ctrl+Alt+P（一键显示或隐藏所有贴在桌面上的图片）"
+          "贴图（贴出内容）",
+          "点击快捷键后按下新组合，例如 Ctrl+Alt+P（把剪贴板最新内容贴到桌面；截图会话中则贴当前选区；无新内容时唤回最近一张）"
+        )}
+        {renderRow(
+          "pins_close",
+          "关闭全部贴图",
+          "点击快捷键后按下新组合，例如 Ctrl+Alt+K（一键隐藏所有贴在桌面上的贴图，可用贴图键唤回最近一张）"
         )}
       </SettingGroup>
 
