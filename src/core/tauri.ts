@@ -309,6 +309,9 @@ export interface ShotGeom {
   prefill: { x: number; y: number; width: number; height: number } | null;
   /** 本次会话是否为屏幕取色模式（前端据此渲染取色面板而非截图选区 UI） */
   picker: boolean;
+  /** 窗口 Z 序快照（全局物理坐标，顶→底）：悬停窗口级命中在前端本地扫描，
+   *  零 IPC 往返（Snipaste 级跟手）；UIA 元素级细化仍走服务端 */
+  cands?: { x: number; y: number; width: number; height: number }[];
 }
 /** 开始截图（冻结屏幕 + 创建遮罩窗口） */
 export const shotBegin = () => invoke<void>("shot_begin");
@@ -398,6 +401,30 @@ export const shotOutputPost = (
     ]).finally(() => timer && clearTimeout(timer));
   });
 };
+/** 【零像素传输】无标注输出：只发选区矩形头，Rust 从本屏冻结帧直接裁剪——
+ *  免前端 getImageData 回读 + 整块像素过桥 IPC + PNG 编解码（4K 选区省
+ *  100~400ms）。冻结帧即呼出瞬间原始桌面像素，结果与旧路径逐字节一致 */
+export const shotCropOutput = (
+  action: "pin" | "copy" | "save",
+  rect: { x: number; y: number; w: number; h: number },
+  path?: string,
+): Promise<void> => {
+  const headers = new Headers({
+    "x-shot-action": action,
+    "x-shot-crop": "1",
+    "x-shot-x": String(rect.x), "x-shot-y": String(rect.y),
+    "x-shot-w": String(rect.w), "x-shot-h": String(rect.h),
+    ...(path ? { "x-shot-path": path } : {}),
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, rej) => {
+    timer = setTimeout(() => rej(new Error("shot_output 超时")), 15000);
+  });
+  return Promise.race([
+    invoke<void>("shot_output", new ArrayBuffer(0), { headers }),
+    timeout,
+  ]).finally(() => timer && clearTimeout(timer));
+};
 /** 贴图最快路径：选区原始 BGRA 像素直传（免 PNG 编码/解码），
  *  Rust 端包成零压缩 BMP 落盘，WebView2 解码 BMP 近乎 memcpy */
 export const shotPinPost = (
@@ -435,20 +462,17 @@ export interface ShotOcrLine {
   x: number; y: number; w: number; h: number;
   words: ShotOcrWord[];
 }
-/** 选区 PNG 原始字节 → Windows.Media.Ocr 逐行识别结果。
- *  带 20s 超时兜底（首次识别可能要装语言包/初始化引擎） */
-export const shotOcrPost = (png: Blob): Promise<ShotOcrLine[]> => {
-  return png.arrayBuffer().then((buf) => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, rej) => {
-      timer = setTimeout(() => rej(new Error("OCR 超时")), 20000);
-    });
-    return Promise.race([
-      invoke<ShotOcrLine[]>("shot_ocr", buf),
-      timeout,
-    ]).finally(() => timer && clearTimeout(timer));
+/** OCR 调用统一超时兜底：首次识别可能要初始化引擎/装语言包，给足 20s */
+const ocrWithTimeout = <T>(p: Promise<T>): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, rej) => {
+    timer = setTimeout(() => rej(new Error("OCR 超时")), 20000);
   });
+  return Promise.race([p, timeout]).finally(() => timer && clearTimeout(timer));
 };
+/** 选区 PNG 原始字节 → Windows.Media.Ocr 逐行识别结果 */
+export const shotOcrPost = (png: Blob): Promise<ShotOcrLine[]> =>
+  png.arrayBuffer().then((buf) => ocrWithTimeout(invoke<ShotOcrLine[]>("shot_ocr", buf)));
 
 // ---- 贴图 ----
 /** 创建贴图（PNG data URL, 屏幕坐标） */
@@ -487,6 +511,10 @@ export const pinResize = (id: string, width: number, height: number) =>
   invoke<void>("pin_resize", { id, width, height });
 /** 贴图内容类型："image" | "html"（协议 URL 不带扩展名，渲染分支据此判断） */
 export const pinKind = (id: string) => invoke<"image" | "html">("pin_kind", { id });
+/** 贴图 OCR：Rust 直读 pins/{id} 图像文件识别（免前端 fetch 整图 + IPC 回传，
+ *  大截图省几十到上百 ms；HTML 贴图解码失败 reject，调用方静默降级） */
+export const pinOcr = (id: string): Promise<ShotOcrLine[]> =>
+  ocrWithTimeout(invoke<ShotOcrLine[]>("pin_ocr", { id }));
 /** 隐藏全部贴图 */
 export const pinHideAll = () => invoke<void>("pin_hide_all");
 /** 显示全部贴图 */

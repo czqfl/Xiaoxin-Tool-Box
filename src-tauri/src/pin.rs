@@ -24,6 +24,34 @@ pub const EVT_PIN_ASSIGN: &str = "pin://assign";
 /// 贴图窗口标签映射（staging 复用窗的 label 固定不变，此处存 label→贴图id）
 pub struct PinWinMap(pub Mutex<std::collections::HashMap<String, String>>);
 
+/// 新建贴图的【内存直通】缓存（容量上限 3，超出淘汰最旧）。
+/// 贴图创建后 staging 窗几乎总是立刻经 pin://{id} 协议取图——命中内存即可
+/// 完全跳过磁盘往返。此前大截图（4K 选区 ≈ 33MB BMP）要经历「IPC 收像素 →
+/// 同步写盘 → WebView2 再从盘读回解码」，贴图耗时随面积线性暴涨的主要来源
+/// 就是后两步的纯磁盘 IO。落盘改由后台线程负责（供重启恢复），协议读图
+/// 优先走这里；容量上限控制内存占用，关闭贴图时同步清除。
+static PIN_MEM_CACHE: Mutex<std::collections::VecDeque<(String, Vec<u8>, &'static str)>> =
+    Mutex::new(std::collections::VecDeque::new());
+const PIN_MEM_CAP: usize = 3;
+
+fn pin_mem_insert(id: String, bytes: Vec<u8>, mime: &'static str) {
+    let mut q = PIN_MEM_CACHE.lock().unwrap();
+    q.push_back((id, bytes, mime));
+    while q.len() > PIN_MEM_CAP { q.pop_front(); }
+}
+
+/// peek + 克隆：保留缓存供加载失败自愈重试再取。33MB 级 memcpy 仅几毫秒，
+/// 远低于一次磁盘读；由容量上限与 forget_pin 负责最终回收
+pub(crate) fn pin_mem_get(id: &str) -> Option<(Vec<u8>, &'static str)> {
+    let q = PIN_MEM_CACHE.lock().unwrap();
+    q.iter().rev().find(|(i, _, _)| i == id)
+        .map(|(_, b, m)| (b.clone(), *m))
+}
+
+fn pin_mem_remove(id: &str) {
+    PIN_MEM_CACHE.lock().unwrap().retain(|(i, _, _)| i != id);
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PinData {
     pub id: String,
@@ -493,7 +521,7 @@ pub(crate) fn toggle_all<R: Runtime>(app: &AppHandle<R>) {
         let is_new = sig.is_some() && sig != seen;
         diag_write(&format!(
             "[pin] toggle: clip={} sig_new={is_new}",
-            match &clip { Some(ClipContent::Image(_)) => "image", Some(ClipContent::Html(h)) =>
+            match &clip { Some(ClipContent::Image(..)) => "image", Some(ClipContent::Html(h)) =>
                 if h.starts_with("<div style=") { "text" } else { "html" }, None => "none" },
         ));
         if is_new {
@@ -541,7 +569,8 @@ fn text_to_html(t: &str) -> String {
 }
 
 enum ClipContent {
-    Image(Vec<u8>),
+    /// 图像字节 + MIME（决定落盘扩展名：截图路径包 BMP、图片文件保留原格式）
+    Image(Vec<u8>, &'static str),
     Html(String),
 }
 
@@ -573,7 +602,7 @@ impl ClipContent {
             h(&buf)
         }
         match self {
-            ClipContent::Image(b) => (b.len() as u64).rotate_left(32) ^ sample(b),
+            ClipContent::Image(b, _) => (b.len() as u64).rotate_left(32) ^ sample(b),
             ClipContent::Html(s) => h(s.as_bytes()),
         }
     }
@@ -605,7 +634,44 @@ fn try_read_clipboard_once() -> Option<ClipContent> {
             let mut bgra = img.bytes.into_owned();
             if bgra.len() == (w as usize) * (hh as usize) * 4 {
                 for px in bgra.chunks_exact_mut(4) { px.swap(0, 2); }
-                return Some(ClipContent::Image(crate::screenshot::wrap_bmp(&bgra, w, hh)));
+                return Some(ClipContent::Image(crate::screenshot::wrap_bmp(&bgra, w, hh), "image/bmp"));
+            }
+        }
+    }
+    // 【PNG 主格式兜底】Snipaste/部分工具复制图片只写 "PNG" 注册格式、
+    // 不写 CF_DIB——上面 arboard 读不到就会漏成 html/text（表现为"贴图键
+    // 无效"）。与剪贴板历史模块共用同一读取器
+    #[cfg(windows)]
+    if let Some(rgba) = crate::clipboard::read_png_from_clipboard() {
+        let (w, hh) = (rgba.width() as u32, rgba.height() as u32);
+        if w > 0 && hh > 0 {
+            let mut bgra = rgba.into_raw();
+            for px in bgra.chunks_exact_mut(4) { px.swap(0, 2); }
+            return Some(ClipContent::Image(crate::screenshot::wrap_bmp(&bgra, w, hh), "image/bmp"));
+        }
+    }
+    // 【图片文件兜底】资源管理器/微信等"复制图片文件"放进剪贴板的是
+    // CF_HDROP 文件列表而非位图——单张图片文件直接读原字节贴出
+    //（保留原始格式与画质，零重编码）。多文件/非图片不接管，照旧走文本
+    if let Ok(files) = cb.get().file_list() {
+        if files.len() == 1 {
+            let p = &files[0];
+            let mime = image_file_mime(p);
+            if mime.is_some() && crate::clipboard::is_image_ext(p) {
+                if let Ok(bytes) = std::fs::read(p) {
+                    // 【探头验证】只读文件头确认是可解析的图像（拿尺寸），
+                    // 完整解码留给后续按需进行——大图全量解码在热键路径上
+                    // 白费几百毫秒
+                    let decodable = image::ImageReader::new(std::io::Cursor::new(&bytes))
+                        .with_guessed_format()
+                        .ok()
+                        .and_then(|r| r.into_dimensions().ok())
+                        .map(|(w, hh)| w > 0 && hh > 0)
+                        .unwrap_or(false);
+                    if decodable {
+                        return Some(ClipContent::Image(bytes, mime.unwrap()));
+                    }
+                }
             }
         }
     }
@@ -620,11 +686,23 @@ fn try_read_clipboard_once() -> Option<ClipContent> {
     None
 }
 
+/// 图片文件扩展名 → MIME（决定落盘扩展名；非图片返回 None）
+fn image_file_mime(p: &std::path::Path) -> Option<&'static str> {
+    match p.extension()?.to_string_lossy().to_ascii_lowercase().as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        "bmp" => Some("image/bmp"),
+        _ => None,
+    }
+}
+
 fn pin_clip<R: Runtime>(app: &AppHandle<R>, clip: ClipContent) -> bool {
     let cursor = app.cursor_position().unwrap_or(PhysicalPosition::new(0.0, 0.0));
     let (px, py) = (cursor.x as i32 + 12, cursor.y as i32 + 12);
     let r = match clip {
-        ClipContent::Image(bytes) => create_store_entry(app, &bytes, "image/png", px, py),
+        ClipContent::Image(bytes, mime) => create_store_entry(app, &bytes, mime, px, py),
         ClipContent::Html(html) => create_html_pin(app, html, px, py),
     };
     match r {
@@ -802,6 +880,21 @@ pub fn pin_file_path(app: AppHandle, id: String) -> Option<String> {
     entries.iter().find(|p| p.id == id).map(|p| p.file.clone())
 }
 
+/// 贴图 OCR 文字识别：Rust 直读 pins/{id} 图像文件，前端不再 fetch 整图经
+/// IPC 回传——省掉一次协议请求、一份 JS ArrayBuffer 拷贝和整图 IPC 序列化，
+/// 大截图能省几十到上百毫秒。HTML 贴图的 file 是 .html，解码失败返回 Err，
+/// 前端静默降级（仅文字选择不可用，其余功能不受影响）
+#[tauri::command]
+pub async fn pin_ocr(app: AppHandle, id: String) -> Result<Vec<crate::ocr::OcrLineResp>, String> {
+    let file = pin_file_path(app, id).ok_or("not found")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let bytes = std::fs::read(&file).map_err(|e| format!("read: {e}"))?;
+        crate::ocr::recognize_png(&bytes)
+    })
+    .await
+    .map_err(|e| format!("join: {e}"))?
+}
+
 /// 把贴图原图写入剪贴板（右键菜单"复制到剪贴板"）。
 /// async：整图解码 + 剪贴板写入是重活，放 tokio 线程池，不占主线程。
 // （贴图图片展示改走自定义协议 GET /pin/{id} 直出文件字节，
@@ -962,6 +1055,8 @@ fn decode_entities(s: &str) -> String {
 /// 贴图窗口被非 pin_close 途径（Alt+F4 等）销毁时同步清理存储条目。
 /// 幂等：pin_close 正常路径先 retain 再触发 Destroyed，二次调用无副作用。
 pub fn forget_pin<R: Runtime>(app: &AppHandle<R>, id: &str) {
+    // 内存直通缓存同步清除：大截图条目几十 MB，贴图已关就不该再占内存
+    pin_mem_remove(id);
     // 清理 staging 复用映射中指向该贴图的条目（若有）
     if let Some(m) = app.try_state::<PinWinMap>() {
         m.0.lock().unwrap().retain(|_, v| v != id);
@@ -1006,10 +1101,31 @@ pub(crate) fn create_store_entry<R: Runtime>(app: &AppHandle<R>, bytes: &[u8], m
     let h = h.max(1);
 
     let id = uuid::Uuid::new_v4().to_string();
-    let ext = if mime.contains("gif") { "gif" } else if mime.contains("html") { "html" } else if mime.contains("bmp") { "bmp" } else { "png" };
+    let lower = mime.to_ascii_lowercase();
+    let (ext, static_mime): (&str, &'static str) = if lower.contains("gif") { ("gif", "image/gif") }
+        else if lower.contains("html") { ("html", "text/html") }
+        else if lower.contains("bmp") { ("bmp", "image/bmp") }
+        else if lower.contains("jpeg") || lower.contains("jpg") { ("jpg", "image/jpeg") }
+        else if lower.contains("webp") { ("webp", "image/webp") }
+        else { ("png", "image/png") };
     let dir = pins_dir(app);
     let file = dir.join(format!("{id}.{ext}"));
-    std::fs::write(&file, bytes).map_err(|e| format!("write file: {e}"))?;
+    // 【内存直通】协议取图优先命中内存：staging 窗几乎立刻来取刚建的图，
+    // 命中后「写盘→读回」的双倍磁盘 IO 从关键路径上整个消失
+    pin_mem_insert(id.clone(), bytes.to_vec(), static_mime);
+    // 【落盘后台化】同步 fs::write 曾按图片体积阻塞调用线程几十到上百毫秒；
+    // 协议取图已不依赖文件就绪（内存直通兜住首次加载），这里丢后台执行，
+    // 失败仅记日志——进程恰在此瞬间退出导致缺图属可接受极端场景
+    // （与 persist 的取舍一致）
+    {
+        let file2 = file.clone();
+        let bytes2 = bytes.to_vec();
+        std::thread::spawn(move || {
+            if let Err(e) = std::fs::write(&file2, &bytes2) {
+                crate::storage::diag_write(&format!("[pin] bg write {} failed: {e}", file2.display()));
+            }
+        });
+    }
 
     let cfg: PinConfig = app.try_state::<ConfigState>()
         .map(|s| s.0.lock().unwrap().pin.clone())

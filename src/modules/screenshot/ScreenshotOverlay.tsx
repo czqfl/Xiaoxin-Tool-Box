@@ -5,15 +5,15 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
   shotGeometry, shotImageDataRaw, shotWindowRectAt, shotUiRectAt, shotReady, shotFrameUrl,
-  shotOutputPost, shotCancel, shotSaveRegion, diagLog, copyText,
+  shotOutputPost, shotPinPost, shotCropOutput, shotCancel, shotSaveRegion, diagLog, copyText,
   shotDragBegin, shotDragEnd,
   shotHistoryList, shotHistoryStep, shotHistoryUrl, ShotHistItem, shotHistorySaveRegion,
   shotHistoryDelete, shotHistoryClear,
-  shotOcrPost, ShotOcrLine, shotPinPost,
+  shotOcrPost, ShotOcrLine,
 } from "../../core/tauri";
 import { translateText } from "../../core/tauri";
 import { useConfigStore } from "../../stores/configStore";
-import { Square, Circle, ArrowUpRight, TrendingUp, Pencil, Type, Undo2, Redo2, X, Pin, Save, Copy } from "lucide-react";
+import { Square, Circle, ArrowUpRight, Pencil, Type, Undo2, Redo2, X, Pin, Save, Copy } from "lucide-react";
 import "./screenshot.css";
 
 type Tool = "select"|"rect"|"ellipse"|"arrow"|"line"|"brush"|"mosaic"|"text"|"number";
@@ -60,7 +60,13 @@ const IcoShape = () => (
   </svg>
 );
 const IcoArrow = () => <ArrowUpRight {...IC} />;
-const IcoLine = () => <TrendingUp {...IC} />;
+// 直线：一条左下→右上的斜线（Lucide 无"纯直线"图标，TrendingUp 是折线+箭头，
+// 曾被误用作直线图标）。自绘与 Lucide 描线风格一致
+const IcoLine = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <line x1="4.5" y1="19.5" x2="19.5" y2="4.5" />
+  </svg>
+);
 // 线组图标：折线+箭头叠合（Snipaste 第二格趋势线）；同 IcoShape 放大到 26px
 const IcoLineGroup = () => (
   <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -479,6 +485,8 @@ export function ScreenshotOverlay() {
     // 合成源一并作废：下一轮重绘会按新背景帧重建，绝不残留上一会话画面
     compRef.current = null;
     prevAnnoLenRef.current = 0;
+    // 窗口快照缓存同步作废：新会话由 geometry 带回新表
+    candsRef.current = null;
     // 主题色缓存失效：两次会话之间用户可能改过主题
     accentRef.current = null;
     // 【一次性】会话 UI 状态复位：放在循环外——rerun（加载中又收到刷新事件）
@@ -519,6 +527,7 @@ export function ScreenshotOverlay() {
         const g = await shotGeometry();
         if (mySession !== sessionRef.current) break;
         setGeom(g);
+        candsRef.current = g.cands ?? null;
         if (!g) break;
         if (g.snap) {
           // snap 是 Rust 端【显示器局部物理像素】；选区/高亮层统一用 CSS 像素，
@@ -1114,20 +1123,34 @@ export function ScreenshotOverlay() {
         snapRef.current = local;
         if (!same) setSnap(local);
       };
-      const wrPromise = shotWindowRectAt(mg.x, mg.y).catch(() => null);
-      void wrPromise.then((wr) => { if (!locked) commit(wr); });
+      // 【本地窗口命中】cands 与 Rust candidate_at 同表同序（Z 序顶→底），
+      // 纯数组扫描零 IPC——高亮首帧延迟从一次 IPC 往返(~10-20ms)降到 <0.1ms，
+      // 与 Snipaste 同级跟手。快照缺失时回退服务端查表（保持并发，不阻塞 UIA）
+      let wr: WRect = null;
+      let wrDone: Promise<WRect | null> | null = null;
+      const cands = candsRef.current;
+      if (cands) {
+        for (const c of cands) {
+          if (mg.x >= c.x && mg.x < c.x + c.width && mg.y >= c.y && mg.y < c.y + c.height) { wr = c; break; }
+        }
+        commit(wr);
+      } else {
+        const wrPromise = shotWindowRectAt(mg.x, mg.y).catch(() => null);
+        void wrPromise.then((r) => { if (!locked) commit(r); });
+        wrDone = wrPromise;
+      }
       const erTimeout = new Promise<null>((res) => setTimeout(() => res(null), 250));
       const er: WRect = wantElem
         ? await Promise.race([shotUiRectAt(mg.x, mg.y).catch(() => null), erTimeout])
         : null;
       if (!er || !(er.width > 0 && er.height > 0)) return;
-      const wr = await wrPromise;
       // 择优取【更精细】的命中：元素矩形显著小于窗口矩形（<98%）时采用——
       // 悬停浏览器页面时能直接框选按钮组/输入框等组件；全屏级（≥90% 屏幕）
       // 无意义剔除。元素缺失/异常自动保持窗口级
-      let best: WRect = wr;
+      const wrFinal = wrDone ? await wrDone : wr;
+      let best: WRect = wrFinal;
       const ea = er.width * er.height;
-      const wa = wr ? wr.width * wr.height : Infinity;
+      const wa = wrFinal ? wrFinal.width * wrFinal.height : Infinity;
       const screenArea = g.width * g.height;
       if (ea < wa * 0.98 && ea < screenArea * 0.9) best = er;
       locked = true;
@@ -1189,12 +1212,21 @@ export function ScreenshotOverlay() {
   // geom 镜像：rAF 回调闭包里读最新几何（state 闭包会过期）
   const geomRef = useRef(geom);
   useEffect(() => { geomRef.current = geom; }, [geom]);
+  // 窗口 Z 序快照镜像（全局物理坐标，顶→底）：悬停窗口级命中本地扫描用
+  const candsRef = useRef<{ x: number; y: number; width: number; height: number }[] | null>(null);
   /** 画布位图（物理像素）与 CSS 像素的比例 = geom.width / innerWidth。
    *  所有 UI 坐标统一用【CSS 像素】存储与运算，只在「往画布画」或
-   *  「采样冻结帧」这两个边界乘以它——消除高 DPI（150%）下错位。 */
+   *  「采样冻结帧」这两个边界乘以它——消除高 DPI（150%）下错位。
+   *  【多屏混合 DPI 兜底】窗口跨缩放比不同的显示器移动/复用窗被 set_size
+   *  后，innerWidth 可能滞后一拍仍是旧屏的值——按它算出的 scale 会把智能
+   *  高亮框放大/缩小错位。devicePixelRatio 随所在屏幕即时更新，两者偏差
+   *  超过舍入误差时以 DPR 为准 */
   const cssScale = (): number => {
     const g = geomRef.current;
-    return g && window.innerWidth > 0 ? g.width / window.innerWidth : 1;
+    if (!g || window.innerWidth <= 0) return 1;
+    const byViewport = g.width / window.innerWidth;
+    const dpr = window.devicePixelRatio || 1;
+    return Math.abs(byViewport - dpr) > 0.02 ? dpr : byViewport;
   };
   // phase 镜像：rAF 回调里判断当前阶段（选区确认后放大镜立即退场，
   // 否则它叠在刚出现的按钮栏旁边会造成视觉闪动）
@@ -1676,14 +1708,22 @@ export function ScreenshotOverlay() {
     if (outputtingRef.current) return;
     outputtingRef.current = true;
     try {
-      try {
-        await Promise.race([
-          frameReadyRef.current,
-          new Promise<void>((r) => setTimeout(r, 5000)),
-        ]);
-      } catch {}
-      if (!bgRef.current || !geom) {
-        void diagLog(`[shot] output ${action} skipped: bgRef=${!!bgRef.current} geom=${!!geom}`);
+      // 【零像素传输】未画任何标注（文字编辑器也未打开）时，三种输出都让
+      // Rust 直接从本屏冻结帧裁剪——冻结帧就是呼出瞬间原始桌面像素，结果
+      // 与前端合成路径逐字节一致；省掉 getImageData 回读 + 整块像素过桥
+      // IPC + PNG 编解码，4K 选区可省 100~400ms。此路径不依赖 bg 画布，
+      // 也无需等 frameReady
+      const canCrop = annos.length === 0 && !textEdit;
+      if (!canCrop) {
+        try {
+          await Promise.race([
+            frameReadyRef.current,
+            new Promise<void>((r) => setTimeout(r, 5000)),
+          ]);
+        } catch {}
+      }
+      if ((!canCrop && !bgRef.current) || !geom) {
+        void diagLog(`[shot] output ${action} skipped: canCrop=${canCrop} bgRef=${!!bgRef.current} geom=${!!geom}`);
         return;
       }
       const r = regRef.current;
@@ -1712,21 +1752,30 @@ export function ScreenshotOverlay() {
       // 相对原选区向左上偏移 (scale-1)×选区坐标（"贴图和原图有偏移"根因）
       const sc = cssScale();
       const gx = Math.round(r.x * sc) + geom.x, gy = Math.round(r.y * sc) + geom.y;
+      const pw = Math.round(r.w * sc), ph = Math.round(r.h * sc);
       let sent = false;
       try {
         if (action === "pin") {
-          // 【最快路径】贴图不再走 PNG：直接取选区原始像素（getImageData 一次
-          // GPU 回读），Rust 包成 BMP（零压缩）落盘/直出——省掉前端 PNG 编码
-          // 与 WebView2 PNG 解码两大耗时（合计 ~200-400ms，"贴图慢"的主因）
-          const raw = cropSelectionRaw();
-          if (raw) {
-            await shotPinPost(raw.data, raw.w, raw.h, gx, gy);
-            sent = true;
+          if (canCrop) {
+            await shotCropOutput("pin", { x: gx, y: gy, w: pw, h: ph }); sent = true;
           } else {
-            await shotOutputPost("pin", await ensureBlob(), { x: gx, y: gy }); sent = true;
+            // 【最快路径】贴图不再走 PNG：直接取选区原始像素（getImageData 一次
+            // GPU 回读），Rust 包成 BMP（零压缩）落盘/直出——省掉前端 PNG 编码
+            // 与 WebView2 PNG 解码两大耗时
+            const raw = cropSelectionRaw();
+            if (raw) {
+              await shotPinPost(raw.data, raw.w, raw.h, gx, gy);
+              sent = true;
+            } else {
+              await shotOutputPost("pin", await ensureBlob(), { x: gx, y: gy }); sent = true;
+            }
           }
         } else if (action === "copy") {
-          await shotOutputPost("copy", await ensureBlob()); sent = true;
+          if (canCrop) {
+            await shotCropOutput("copy", { x: gx, y: gy, w: pw, h: ph }); sent = true;
+          } else {
+            await shotOutputPost("copy", await ensureBlob()); sent = true;
+          }
         } else {
           // 另存为：系统保存对话框选位置与文件名；取消则留在截图继续编辑
           const ts = new Date().toISOString().replace(/[:.]/g,"-").slice(0,19);
@@ -1736,7 +1785,11 @@ export function ScreenshotOverlay() {
             filters: [{ name: "PNG 图片", extensions: ["png"] }],
           });
           if (!picked) return;
-          await shotOutputPost("save", await ensureBlob(), { path: picked }); sent = true;
+          if (canCrop) {
+            await shotCropOutput("save", { x: gx, y: gy, w: pw, h: ph }, picked); sent = true;
+          } else {
+            await shotOutputPost("save", await ensureBlob(), { path: picked }); sent = true;
+          }
         }
       } finally {
         // 双保险收遮罩：复制/另存由 Rust 收过，这里幂等补收。

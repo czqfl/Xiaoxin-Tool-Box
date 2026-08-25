@@ -11,6 +11,7 @@ import {
   pinCopyOriginal, pinCopyImageBytes,
 } from "../../core/tauri";
 import { useConfigStore } from "../../stores/configStore";
+import { usePinOcrSelect } from "./usePinOcrSelect";
 import "./pin.css";
 
 /** 贴图边框随机定格色板（Snipaste 式：贴图瞬间彩闪几下，随后定格其中一色） */
@@ -37,8 +38,8 @@ export function PinWindow() {
   const [src, setSrc] = useState<string>("");
   const [opacity, setOpacity] = useState(1);
   const [rotation, setRotation] = useState(0);
-  const [flipH] = useState(false);
-  const [flipV] = useState(false);
+  // 翻转（flip_h/flip_v）：后端 pin_update 支持但前端暂无触发入口，
+  // 持久化恒写 false 占位——接入翻转 UI 时再恢复状态
   const [shadow, setShadow] = useState(true);
   const [clickThrough, setClickThrough] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -78,6 +79,7 @@ export function PinWindow() {
       idRef.current = e.payload.id;
       replayIntro();
       tAssignRef.current = Date.now();
+      setKindKnown(true);
       // 新贴图由 Rust 重设了窗口尺寸：作废旧缓存，下次滚轮重新拉取
       sizeRef.current = null;
       htmlSizedRef.current = false;
@@ -98,6 +100,9 @@ export function PinWindow() {
   // 现经 pin_kind 查询内容类型：html 拉取文本渲染（保留剪贴板内联样式），
   // 量完实际尺寸回填窗口再亮窗；image 走 <img> 原路
   const [kind, setKind] = useState<"image" | "html">("image");
+  // 内容类型是否已确认：常规窗要等 pinKind 查询返回（贴图 OCR 只对图片跑，
+  // 不知道类型就启动会对 HTML 贴图白跑一次识别）；复用窗在 assign 时就确定
+  const [kindKnown, setKindKnown] = useState(!isStaging);
   // kind 镜像：键盘 effect 只挂载一次，经此读最新类型
   const kindRef = useRef<"image" | "html">("image");
   kindRef.current = kind;
@@ -112,7 +117,11 @@ export function PinWindow() {
   useEffect(() => {
     if (!idRef.current || !src) return;
     let alive = true;
-    pinKind(idRef.current).then((k) => { if (alive) setKind(k); }).catch(() => {});
+    pinKind(idRef.current).then((k) => {
+      if (!alive) return;
+      setKind(k);
+      setKindKnown(true);
+    }).catch(() => { if (alive) setKindKnown(true); });
     return () => { alive = false; };
   }, [src]);
   useEffect(() => {
@@ -210,7 +219,7 @@ export function PinWindow() {
       await pinUpdate(id, {
         x: pos.x + m, y: pos.y + m,
         width: Math.max(1, size.width - m * 2), height: Math.max(1, size.height - m * 2),
-        opacity, rotation, flip_h: flipH, flip_v: flipV, shadow, click_through: clickThrough,
+        opacity, rotation, flip_h: false, flip_v: false, shadow, click_through: clickThrough,
       });
     } catch {}
   };
@@ -230,6 +239,22 @@ export function PinWindow() {
     window.clearTimeout(zoomHideTimer.current);
     zoomHideTimer.current = window.setTimeout(() => setZoomLabel(null), ms);
   };
+
+  // ---- OCR 划选（文字选择模式：单击 Alt 切换）----
+  // 贴图图片加载后后台自动识别；Alt 开启模式后划选高亮，Ctrl+C 手动复制。
+  // 仅图片贴图且未旋转/翻转时可用（旋转后坐标映射不成立）；识别失败静默降级。
+  // autoRun 双条件：内容类型已知且确为 image——HTML 贴图不白跑一次识别
+  // （否则每次都要等 Rust 读 .html 解码失败才作罢）。id/src 双依赖：
+  // staging 复用窗 assign 时两者同步更新，触发重跑 OCR
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const ocr = usePinOcrSelect({
+    autoRun: kindKnown && kind === "image",
+    interactive: kindKnown && kind === "image" && rotation === 0,
+    id: idRef.current,
+    src,
+    imgRef,
+    onFeedback: showBadge,
+  });
 
   // ---- 滚轮缩放的尺寸缓存与 rAF 合并 ----
   // 【为什么不能逐事件 outerSize()】每次滚轮都异步查窗口尺寸再 setSize，
@@ -313,6 +338,9 @@ export function PinWindow() {
         if (e.key === "Escape") { e.preventDefault(); closeMenu(); }
         return;
       }
+      // 选区相关按键（Esc=清高亮退模式 / Ctrl+C=复制选中文本）：消费则不往下走，
+      // 无选区的 Ctrl+C 照旧落到底部「复制为图片」
+      if (ocr.onKeyDown(e)) return;
       if (!idRef.current) return;
       // Esc/Delete=关闭此贴图（与右键菜单「关闭此贴图」同一接口 pinClose）。
       // 此前 Esc=仅隐藏，但隐藏走 window.hide() 且依赖焦点链路，实测不可靠；
@@ -339,10 +367,23 @@ export function PinWindow() {
 
   // drag
   const dragClearRef = useRef(0);
-  const clearDragState = () => { window.clearTimeout(dragClearRef.current); setDragging(false); };
+  // 根节点直改引用：startDragging 进入 OS 模态循环后 JS 冻结，React 的
+  // 批处理渲染要等拖拽结束才提交——拖拽态样式必须同步直改 DOM 才能生效
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const clearDragState = () => {
+    window.clearTimeout(dragClearRef.current);
+    rootRef.current?.classList.remove("pin-dragging");
+    setDragging(false);
+  };
   const onMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0 || !idRef.current) return;
+    // 文字模式开启：划选接管本次按下，绝不触发窗口拖拽
+    if (ocr.onMouseDown(e.nativeEvent)) return;
+    ocr.clearSelection();
     setDragging(true);
+    // 同步直改：transition:none + 主题色边框在模态循环冻结前就位，
+    // 不存在"过渡僵在半途"的视觉卡顿
+    rootRef.current?.classList.add("pin-dragging");
     // 原生拖放循环里 webview 收不到 mouseup（纯点击无移动时也没有 onMoved），
     // 拖拽态由「onMoved 停稳 180ms」或此超时兜底清除
     window.clearTimeout(dragClearRef.current);
@@ -359,6 +400,9 @@ export function PinWindow() {
     let un: (() => void) | undefined;
     void getCurrentWindow().onMoved(() => {
       debouncePersist();
+      // 每次 onMoved 都重置回 180ms：停稳（最后一次移动后 180ms）才算松手。
+      // 定时器清挂本身纳秒级，事件风暴下也非负担——不能省，省了会让
+      // mousedown 的 800ms 兜底在拖拽中途误触拖拽态复位
       window.clearTimeout(dragClearRef.current);
       dragClearRef.current = window.setTimeout(clearDragState, 180);
     }).then((f) => { un = f; });
@@ -534,12 +578,17 @@ export function PinWindow() {
   }, []);
 
   return (
-    <div className={`pin-window${shadow && hasContent ? " pin-shadow" : ""}${dragging ? " pin-dragging" : ""}${focused ? " pin-focused" : ""}`}
+    <div ref={rootRef}
+      className={`pin-window${shadow && hasContent ? " pin-shadow" : ""}${dragging ? " pin-dragging" : ""}${focused ? " pin-focused" : ""}${ocr.altActive ? " pin-textmode" : ""}`}
       style={{ opacity: hasContent ? opacity : 0, "--pin-accent": accent, "--pin-m": `${pinMarginCss()}px` } as React.CSSProperties}
       onMouseDown={onMouseDown} onContextMenu={onContext}
-      onDoubleClick={() => { if (idRef.current) pinClose(idRef.current).catch(() => {}); }}>
+      onDoubleClick={() => {
+        // 文字模式/有选区时双击是划选操作的一部分，绝不能关贴图
+        if (ocr.altActive || ocr.hasSelectionRef.current || !idRef.current) return;
+        pinClose(idRef.current).catch(() => {});
+      }}>
       {src && kind === "image" && (
-        <img src={src} draggable={false}
+        <img ref={imgRef} src={src} draggable={false}
           onLoad={(e) => {
             const el = e.target as HTMLImageElement;
             baseWRef.current = el.naturalWidth || 0;
@@ -556,7 +605,7 @@ export function PinWindow() {
             setSrc(base + (base.includes("?") ? "&" : "?") + "r=" + Date.now());
           }}
           style={{
-            transform: `rotate(${rotation}deg) scaleX(${flipH?-1:1}) scaleY(${flipV?-1:1})`,
+            transform: `rotate(${rotation}deg)`,
             width: "100%", height: "100%", objectFit: "contain",
           }} />
       )}
@@ -576,6 +625,16 @@ export function PinWindow() {
           className={`pin-border${introDone ? "" : " pin-border-flash"}`}
           onAnimationEnd={() => setIntroDone(true)} />
       )}
+      {/* OCR 选词覆盖层：fixed 定位直接用视口坐标（与 hook 的映射坐标系一致）。
+          Alt 待命提示底纹（极淡，暗示文字可选）+ 划选高亮（半透明系统选区蓝） */}
+      {ocr.hintRects.map((r, i) => (
+        <div key={`h${i}`} className="pin-ocr-hint"
+          style={{ left: r.x, top: r.y, width: r.w, height: r.h }} />
+      ))}
+      {ocr.selRects.map((r, i) => (
+        <div key={`s${i}`} className="pin-ocr-sel"
+          style={{ left: r.x, top: r.y, width: r.w, height: r.h }} />
+      ))}
       {zoomLabel && (
         <div className={`pin-zoom-badge${zoomLabel.cls ? " " + zoomLabel.cls : ""}`}>{zoomLabel.text}</div>
       )}

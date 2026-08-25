@@ -13,7 +13,11 @@ html[data-window="pin"], html[data-window="pin"] body { background: transparent 
   padding: var(--pin-m, 0px); box-sizing: border-box;
 }
 .pin-window img { display: block; pointer-events: none; }
-.pin-shadow { filter: drop-shadow(0 4px 14px rgba(0,0,0,0.45)) drop-shadow(0 1px 3px rgba(0,0,0,0.35)); }
+/* 【性能】暗色投影并入 .pin-border 的 box-shadow 组合，不再用根节点
+   drop-shadow filter——filter 是全表面像素级滤镜，任何重绘（如拖拽起步的
+   边框变色）都会整窗重光栅，是贴图拖动起步顿挫的来源；box-shadow 由合成器
+   直接绘制零重光栅。投影挂在 border 上（inset=图片区域），四周透明 margin
+   正好提供扩散空间（与设计初衷一致） */
 
 /* HTML 贴图（剪贴板富文本/纯文本）：
    wrap 占满窗口内容区并随窗口缩放；inner 以自然尺寸渲染（max-content
@@ -31,22 +35,34 @@ html[data-window="pin"], html[data-window="pin"] body { background: transparent 
    外扩距离控制在透明边距内，保证完整渲染不被窗口边界裁切。
    闲置白色微光，悬停/拖动/彩闪时主题色辉光；~1s 闪完定格 --pin-accent */
 .pin-border {
+  /* 暗色投影经变量注入：--pin-drop 默认为不可见层（box-shadow 不接受
+     单层 none，用零长度透明层占位），「关闭阴影」菜单切换 pin-shadow 类
+     时只改变量、三种状态变体无需成对维护 */
+  --pin-drop: 0 0 rgba(0,0,0,0);
   position: absolute; inset: var(--pin-m, 0px); z-index: 10; pointer-events: none;
   border: 1px solid currentColor;
   color: rgba(255,255,255,0.85);
-  box-shadow: 0 0 4px -1px currentColor;
+  box-shadow: 0 0 4px -1px currentColor, var(--pin-drop);
   transition: color 150ms ease, box-shadow 150ms ease;
+}
+/* 开启阴影：暗色投影走 box-shadow 合成直绘（旧版根节点 drop-shadow filter
+   是全表面像素滤镜，拖拽起步重光栅是顿挫来源） */
+.pin-window.pin-shadow .pin-border {
+  --pin-drop: 0 4px 14px rgba(0,0,0,0.45), 0 1px 3px rgba(0,0,0,0.35);
 }
 .pin-window:hover .pin-border, .pin-window.pin-dragging .pin-border {
   color: var(--pin-accent);
-  box-shadow: 0 0 7px 0 currentColor;
+  box-shadow: 0 0 7px 0 currentColor, var(--pin-drop);
 }
+/* 拖拽开始即定格主题色边框：模态拖放循环会冻结 JS 主线程，150ms 过渡
+   会僵在半途（视觉上就是"卡了一下"），直接关掉过场最利落 */
+.pin-window.pin-dragging .pin-border { transition: none; }
 /* 选中（窗口聚焦）态：主题色边框 + 深色衬圈 + 柔和辉光——与悬停态区分
    （悬停只是亮色描边，选中多一圈衬底与更明显的光晕），一眼可辨且优雅 */
 .pin-window.pin-focused .pin-border {
   color: var(--pin-accent);
   border-width: 1.5px;
-  box-shadow: 0 0 0 1px rgba(0,0,0,0.35), 0 0 11px 1px currentColor;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.35), 0 0 11px 1px currentColor, var(--pin-drop);
 }
 .pin-border-flash {
   animation: pin-border-intro 1s ease-out both;
@@ -60,6 +76,23 @@ html[data-window="pin"], html[data-window="pin"] body { background: transparent 
   66%  { color: #bf5af2; }
   83%  { color: #ff9f0a; }
   100% { color: var(--pin-accent); }
+}
+
+/* ---- OCR 划选（文字选择模式：单击 Alt 切换）----
+   覆盖层 fixed 定位、视口坐标系（由 usePinOcrSelect 按图片实际绘制区域
+   映射原图 OCR 矩形而来），pointer-events:none 不挡任何鼠标交互 */
+.pin-window.pin-textmode { cursor: text; }
+/* Alt 待命：已识别文字行铺淡蓝底色，暗示"文字可选"
+   （透明度要够高——0.08 在浅色截图上几乎看不见） */
+.pin-ocr-hint {
+  position: fixed; z-index: 4; pointer-events: none;
+  background: rgba(96, 165, 250, 0.28);
+  outline: 1px solid rgba(96, 165, 250, 0.55);
+}
+/* 划选高亮：半透明系统选区蓝，压过待命底纹一眼可辨 */
+.pin-ocr-sel {
+  position: fixed; z-index: 5; pointer-events: none;
+  background: rgba(0, 120, 215, 0.45);
 }
 
 /* 左上角缩放比例角标：滚轮缩放时实时显示，停止后淡出（位置避开透明边距） */

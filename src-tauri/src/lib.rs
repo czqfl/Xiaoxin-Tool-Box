@@ -166,6 +166,41 @@ fn make_webview_transparent<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>)
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 【多屏混合 DPI 的坐标根基】显式声明 Per-Monitor-V2 DPI 感知。
+    // 智能识框的整条链路——EnumWindows/DwmGetWindowAttribute 窗口快照、
+    // UIA 元素矩形、GetSystemMetrics 类指标——只有进程处于 PMv2 时才返回
+    // 「跨全部显示器的真实物理像素坐标」；若被系统降级为 System 感知
+    // （清单缺失/时序问题），副屏（缩放比≠主屏）上这些矩形会被 DPI 虚拟化
+    // 缩放，与捕获的真实像素错位，表现为"副屏上智能识别框偏移/大小不对"。
+    // tao 事件循环通常会自行设置，这里在【任何窗口创建之前】幂等地再保一次：
+    // 已是 PMv2 时此调用无害失败，未设置时补上。
+    #[cfg(windows)]
+    unsafe {
+        use windows::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
+        let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    }
+    // 【panic 可观测性】全项目 20+ 处 fire-and-forget 的 std::thread::spawn
+    // 均未跟踪 JoinHandle，子线程 panic 默认只在 stderr 消失——打包版
+    // （windows_subsystem）下 stderr 不可见，表现为"功能静默失效无从排查"。
+    // 全局钩子先落一行诊断日志再手动还原 stderr 输出，行为不变、覆盖所有线程。
+    // 重入保护：若 panic 恰好发生在日志写入路径上，跳过落盘只走 stderr，
+    // 防止钩子递归触发自身 abort
+    static IN_PANIC_HOOK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    std::panic::set_hook(Box::new(|info| {
+        let payload = info.payload();
+        let msg = payload.downcast_ref::<&str>().map(|s| (*s).to_string())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "unknown panic".to_string());
+        let loc = info.location()
+            .map(|l| format!("{}:{}", l.file(), l.line()))
+            .unwrap_or_else(|| "unknown".to_string());
+        use std::sync::atomic::Ordering;
+        if !IN_PANIC_HOOK.swap(true, Ordering::SeqCst) {
+            crate::storage::diag_write(&format!("[panic] {loc} {msg}"));
+            IN_PANIC_HOOK.store(false, Ordering::SeqCst);
+        }
+        eprintln!("[panic] {loc} {msg}");
+    }));
     // 在 Builder 构建（创建窗口）之前解析数据目录并加载持久化数据。
     // 配合下方 Builder::manage 把 state 注册提前到窗口创建之前——窗口创建时
     // webview 的 IPC 初始化会访问 state，若 manage 仍在 setup 回调里执行，
@@ -400,6 +435,8 @@ pub fn run() {
             // 贴图内容类型（image/html，前端渲染分支用）
             pin::pin_kind,
             pin::pin_file_path,
+            // 贴图 Alt 文字选择：Rust 直读贴图文件识别（免前端传图）
+            pin::pin_ocr,
             // 贴图图片展示走协议 GET /pin/{id} 直出文件字节，pin_image_data 已删
             pin::pin_copy_image,
             // 按原始格式复制（图片→位图，文本/富文本→HTML+纯文本）

@@ -71,7 +71,10 @@ html[data-window="shot"] body { background: transparent; }
 .shot-picker-hints { font-size: 10px; line-height: 1.8; color: rgba(255,255,255,0.72); border-top: 1px solid rgba(255,255,255,0.14); padding-top: 4px; }
 .shot-picker-hints b { color: #fff; }
 
-/* ---- 工具条：跟随主题玻璃、直角无边框、整条统一投影 ---- */
+/* ---- 工具条：跟随主题玻璃、直角无边框、整条统一投影 ----
+   【设计语言】条体永远是深色玻璃（浮在任意截图内容上，可读性优先），
+   主题感不靠切换文字色，而由三处 accent 表达：激活胶囊、悬停光晕、
+   浅色主题的整条微染——所有主题共用同一套规则，无割裂补丁 */
 /* 整条（工具条+展开面板）统一投影，避免两段各自描边 */
 .shot-toolbar-float { position: fixed; display: flex; flex-direction: column; align-items: flex-start; gap: 0; z-index: 200; max-width: calc(100vw - 16px); box-shadow: 0 6px 20px rgba(0,0,0,0.45); }
 /* 主题玻璃条：背景跟随主题令牌，毛玻璃模糊采样背后冻结画面；直角、无边框 */
@@ -81,21 +84,35 @@ html[data-window="shot"] body { background: transparent; }
    且不产生条级层叠上下文，tooltip 可正常浮到面板之上 */
 /* 工具栏贴近屏幕底缘时：把色板/粗细面板翻转到工具栏【上方】（旧版跑到屏幕外） */
 .shot-toolbar-float.panel-above { flex-direction: column-reverse; }
-.shot-toolbar { display: flex; align-items: center; gap: 1px; background: rgba(var(--bg-panel-rgb), var(--panel-opacity)); border-radius: 10px; padding: 3px 4px; flex-wrap: nowrap; white-space: nowrap; position: relative; }
+/* 条体：内侧发丝描边 + 家族圆角，与放大镜/取色/历史面板同一玻璃语言 */
+.shot-toolbar { display: flex; align-items: center; gap: 1px; background: rgba(var(--bg-panel-rgb), var(--panel-opacity)); border-radius: 10px; padding: 3px 4px; flex-wrap: nowrap; white-space: nowrap; position: relative; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.09); }
 .shot-toolbar::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
-.shot-toolbar-panel { display: flex; align-items: center; gap: 7px; background: rgba(var(--bg-panel-rgb), var(--panel-opacity)); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-radius: 8px; padding: 8px 10px; white-space: nowrap; align-self: stretch; }
-.shot-toolbar button { background: transparent; border: none; color: var(--text-primary); padding: 6px; border-radius: 2px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; min-width: 34px; min-height: 34px; position: relative; transition: background var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
+.shot-toolbar-panel { display: flex; align-items: center; gap: 7px; background: rgba(var(--bg-panel-rgb), var(--panel-opacity)); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-radius: 10px; padding: 8px 10px; white-space: nowrap; align-self: stretch; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08); }
+/* 按钮：圆角与全局 radius-sm 对齐；浅色图标（深玻璃上唯一可读解）；
+   transform 过渡承载按压回弹反馈 */
+.shot-toolbar button { background: transparent; border: none; color: #f2f4f7; padding: 6px; border-radius: 9px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; min-width: 34px; min-height: 34px; position: relative; transition: background var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out); }
 /* 图标：纯细线描边，【不发光】——drop-shadow 会让细线图标发糊、不利索。
    可读性靠图标自身颜色 + 悬停/激活时按钮背景反馈（几何已在组件内重校）。 */
-.shot-toolbar button:hover:not(:disabled) { background: var(--bg-item-hover); color: var(--text-primary); }
-.shot-toolbar button.active { background: rgba(var(--accent-rgb), 0.32); color: var(--accent-text); }
+.shot-toolbar button:hover:not(:disabled) { background: rgba(255,255,255,0.13); color: #fff; }
+.shot-toolbar button:not(:disabled):active { transform: scale(0.93); }
+.shot-toolbar button:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.75); outline-offset: 1px; }
 .shot-toolbar button:disabled { opacity: 0.3; cursor: default; }
+/* 激活胶囊：实心主题色渐变 + 顶部内高光 + 同色柔光——主条与子菜单枚举
+   一个视觉语言；写在 hover 之后且以 :hover 变体保特异性，悬停激活钮
+   不被通用 hover 的白底盖掉主题色 */
+.shot-toolbar button.active {
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.98), rgba(var(--accent-rgb), 0.82));
+  color: var(--accent-text);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), inset 0 0 0 1px rgba(255,255,255,0.14), 0 1px 6px rgba(var(--accent-rgb), 0.45);
+}
+.shot-toolbar button.active:hover:not(:disabled) {
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 1), rgba(var(--accent-rgb), 0.9));
+}
 
 /* ---- 两级选择器：一级类别图标恒定，点按后在其正下方平铺枚举子图形 ---- */
 /* .shot-toolbtn 是按钮组容器（一级图标 + 可选的子图形枚举） */
 .shot-toolbtn { position: relative; display: inline-flex; align-items: stretch; }
 .shot-toolbtn-main { /* 继承 .shot-toolbar button 的基样式 */ }
-.shot-toolbtn-main.active { background: rgba(var(--accent-rgb), 0.28); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.55); }
 /* 子图形枚举：点一级图标后直接平铺在正下方（非下拉框）。
    严格单行：子工具图标 + 小竖线 + 颜色/粗细面板，禁止任何折行 */
 .shot-toolbtn-submenu {
@@ -105,30 +122,32 @@ html[data-window="shot"] body { background: transparent; }
   align-items: center; justify-content: flex-start;
   background: rgba(var(--bg-panel-rgb), var(--panel-opacity));
   backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-  box-shadow: 0 4px 14px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.08);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.09);
   border-radius: 10px;
   animation: shot-submenu-in 100ms var(--ease-out) both;
 }
 .shot-toolbtn-submenu.above { top: auto; bottom: calc(100% + 4px); }
 .shot-toolbtn-submenu button { min-width: 27px; min-height: 27px; flex: none; }
-.shot-toolbtn-submenu button.active { background: rgba(var(--accent-rgb), 0.28); color: var(--accent-text); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.55); }
-/* 图形与颜色之间的小竖线分隔 */
-.shot-submenu-divider { width: 1px; height: 18px; flex: none; margin: 0 3px; background: rgba(255,255,255,0.22); }
+/* 图形与颜色之间的小竖线分隔（与主条分隔符同款渐隐竖线） */
+.shot-submenu-divider { width: 1px; height: 18px; flex: none; margin: 0 3px;
+  background: linear-gradient(180deg, transparent, rgba(255,255,255,0.26) 28% 72%, transparent); }
 /* 枚举内嵌的颜色/粗细面板：复用主面板内容，去掉自己的底（枚举已有玻璃底），
-   与子图形严格同行、不换行 */
+   与子图形严格同行、不换行；内发丝描边一并去掉（枚举容器已有） */
 .shot-toolbtn-submenu .shot-toolbar-panel {
   background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none;
   padding: 0; align-self: center; border-top: none; border-left: none;
-  flex-wrap: nowrap; white-space: nowrap; flex: none;
+  flex-wrap: nowrap; white-space: nowrap; flex: none; box-shadow: none;
 }
 @keyframes shot-submenu-in { from { opacity: 0; } to { opacity: 1; } }
-/* 悬停提示：条下方浮出「名称 (快捷键)」小标签 */
+/* 悬停提示：条下方浮出「名称 (快捷键)」小标签——圆角/描边与玻璃家族对齐，
+   字距微调提升精致度 */
 .shot-toolbar button[data-tip]:hover::after {
   content: attr(data-tip);
   position: absolute; top: calc(100% + 9px); left: 50%; transform: translateX(-50%);
-  background: rgba(38,38,40,0.98); color: #ececf0; font-size: 12px; line-height: 1;
-  padding: 7px 11px; border-radius: 2px; white-space: nowrap; pointer-events: none;
-  z-index: 320; box-shadow: 0 2px 10px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.09);
+  background: rgba(22,23,27,0.97); color: #eef0f4; font-size: 12px; line-height: 1;
+  letter-spacing: 0.2px;
+  padding: 7px 11px; border-radius: 6px; white-space: nowrap; pointer-events: none;
+  z-index: 320; box-shadow: 0 3px 12px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(255,255,255,0.12);
 }
 /* 工具栏位于选区内/贴近屏幕底缘（tips-above）时，tooltip 翻转到按钮上方——
    位置始终基于工具栏当前实际位置计算，绝不超出屏幕可视范围 */
@@ -137,11 +156,14 @@ html[data-window="shot"] body { background: transparent; }
 .shot-toolbar > .shot-toolbtn:first-child .shot-toolbtn-main[data-tip]:hover::after { left: 0; transform: none; }
 .shot-toolbar .shot-toolbar-actions button:last-child[data-tip]:hover::after { left: auto; right: 0; transform: none; }
 .shot-toolbar-group { display: flex; gap: 1px; align-items: center; }
-.shot-toolbar-sep { width: 1px; height: 16px; background: var(--border-strong); margin: 0 5px; flex-shrink: 0; }
+/* 分隔符：上下两端渐隐的竖线，深色玻璃上清晰又不生硬（纯色 var 在深玻璃
+   上几乎不可见）；两套主题共用此规则，无需再打浅色补丁 */
+.shot-toolbar-sep { width: 1px; height: 18px; margin: 0 5px; flex-shrink: 0; border-radius: 1px;
+  background: linear-gradient(180deg, transparent, rgba(255,255,255,0.28) 28% 72%, transparent); }
 .shot-toolbar-actions { gap: 2px; }
-/* 色板小方块，选中白圈描边 */
-.shot-color-btn { width: 15px !important; height: 15px !important; min-width: 15px !important; min-height: 15px !important; border-radius: 2px !important; border: 1.5px solid rgba(255,255,255,0.25) !important; cursor: pointer; padding: 0 !important; transition: transform 80ms ease; }
-.shot-color-btn.active { border-color: #fff !important; transform: scale(1.18); }
+/* 色板小方块，选中白圈描边 + 暗色外环（浅色色块在深玻璃上的分离度） */
+.shot-color-btn { width: 15px !important; height: 15px !important; min-width: 15px !important; min-height: 15px !important; border-radius: 3.5px !important; border: 1.5px solid rgba(255,255,255,0.28) !important; cursor: pointer; padding: 0 !important; transition: transform 80ms ease, box-shadow var(--dur-fast) var(--ease-out); }
+.shot-color-btn.active { border-color: #fff !important; transform: scale(1.18); box-shadow: 0 0 0 2px rgba(0,0,0,0.42); }
 /* 自定义颜色按钮：彩虹环，唤起原生系统取色器（Snipaste 同款交互） */
 .shot-color-custom {
   width: 16px !important; height: 16px !important; min-width: 16px !important; min-height: 16px !important;
@@ -175,7 +197,9 @@ html[data-window="shot"] body { background: transparent; }
    原因：浅色面板底色近白、毛玻璃仅 75% 不透明，叠在亮色截图上后工具栏发白发亮，
    细线图标被「亮底 + 杂乱内容」吃掉、看不清。截图工具栏是浮在任意画面上的工具层，
    可读性优先——用深色玻璃承载浅色图标，并以主题 accent 染色保持协调（非旧版纯黑条）。
-   深色主题保持原样（已是深色玻璃）。*/
+   深色主题保持原样（已是深色玻璃）。
+   【按钮文字/悬停/激活/分隔符不再分主题打补丁】基础规则已按"恒深玻璃恒浅字"
+   设计，浅浅色主题只需覆写背景微染即可 */
 :root[data-theme="light"] .shot-toolbar,
 :root[data-theme="mint"] .shot-toolbar,
 :root[data-theme="skyblue"] .shot-toolbar,
@@ -188,18 +212,6 @@ html[data-window="shot"] body { background: transparent; }
     linear-gradient(rgba(var(--accent-rgb), 0.18), rgba(var(--accent-rgb), 0.18)),
     rgba(24, 26, 30, 0.9);
 }
-:root[data-theme="light"] .shot-toolbar button,
-:root[data-theme="mint"] .shot-toolbar button,
-:root[data-theme="skyblue"] .shot-toolbar button,
-:root[data-theme="red"] .shot-toolbar button { color: #f2f4f7; }
-:root[data-theme="light"] .shot-toolbar button:hover:not(:disabled),
-:root[data-theme="mint"] .shot-toolbar button:hover:not(:disabled),
-:root[data-theme="skyblue"] .shot-toolbar button:hover:not(:disabled),
-:root[data-theme="red"] .shot-toolbar button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.14); color: #fff; }
-:root[data-theme="light"] .shot-toolbar button.active,
-:root[data-theme="mint"] .shot-toolbar button.active,
-:root[data-theme="skyblue"] .shot-toolbar button.active,
-:root[data-theme="red"] .shot-toolbar button.active { background: rgba(var(--accent-rgb), 0.92); color: #fff; }
 /* 子菜单 popover 在浅色主题下用同样的「深玻璃 + accent 微染」基色，与主条协调 */
 :root[data-theme="light"] .shot-toolbtn-submenu,
 :root[data-theme="mint"] .shot-toolbtn-submenu,
@@ -209,14 +221,6 @@ html[data-window="shot"] body { background: transparent; }
     linear-gradient(rgba(var(--accent-rgb), 0.18), rgba(var(--accent-rgb), 0.18)),
     rgba(24, 26, 30, 0.9);
 }
-:root[data-theme="light"] .shot-toolbtn-submenu button,
-:root[data-theme="mint"] .shot-toolbtn-submenu button,
-:root[data-theme="skyblue"] .shot-toolbtn-submenu button,
-:root[data-theme="red"] .shot-toolbtn-submenu button { color: #f2f4f7; }
-:root[data-theme="light"] .shot-toolbar-sep,
-:root[data-theme="mint"] .shot-toolbar-sep,
-:root[data-theme="skyblue"] .shot-toolbar-sep,
-:root[data-theme="red"] .shot-toolbar-sep { background: rgba(255, 255, 255, 0.2); }
 
 /* 文字标注编辑器 */
 .shot-text-editor { position: fixed; z-index: 300; display: inline-flex; align-items: center; gap: 5px; background: transparent; border: 1.5px solid rgba(255,255,255,0.95); outline: 1px solid rgba(0,0,0,0.35); border-radius: 2px; padding: 3px 6px; transform: translateY(-50%); }
@@ -329,62 +333,89 @@ html[data-window="shot"] body { background: transparent; }
 .shot-ocr-panel {
   position: fixed; z-index: 300;
   display: flex; flex-direction: column;
-  background: rgba(12,12,14,0.78); backdrop-filter: blur(10px);
-  border-radius: 10px; overflow: hidden;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 6px 20px rgba(0,0,0,0.45);
+  background: rgba(12,12,14,0.82); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border-radius: 12px; overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1), 0 10px 30px rgba(0,0,0,0.5);
   animation: shot-submenu-in 120ms var(--ease-out) both;
   user-select: text; cursor: auto;
 }
+/* 标题行：字重/字距强调 + 底部发丝分隔线；「复制全部」为主题色实心主按钮 */
 .shot-ocr-head {
   display: flex; align-items: center; gap: 8px; flex: none;
-  padding: 9px 12px; color: #fff; font-size: 14px;
+  padding: 9px 12px; color: #fff; font-size: 13px; font-weight: 600; letter-spacing: 0.3px;
   background: rgba(255,255,255,0.05);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
   user-select: none;
 }
 .shot-ocr-head button {
-  background: rgba(255,255,255,0.08); border: none; color: rgba(255,255,255,0.92);
-  font-size: 12px; padding: 4px 10px; border-radius: 5px; cursor: pointer;
+  background: rgba(var(--accent-rgb), 0.92); border: none; color: #fff;
+  font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: 6px; cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 1px 5px rgba(var(--accent-rgb), 0.4);
+  transition: filter var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
-.shot-ocr-head button:hover { background: rgba(var(--accent-rgb), 0.4); color: #fff; }
-.shot-ocr-body { padding: 8px 12px; font-size: 13px; overflow-y: auto; }
-.shot-ocr-muted { color: rgba(255,255,255,0.65); }
+.shot-ocr-head button:hover { filter: brightness(1.1); }
+.shot-ocr-head button:active { transform: scale(0.95); }
+.shot-ocr-body { padding: 6px 10px 10px; font-size: 13px; overflow-y: auto; }
+.shot-ocr-muted { color: rgba(255,255,255,0.66); }
 .shot-ocr-err { color: #ff8d8d; }
 .shot-ocr-lines { overflow-y: auto; padding: 4px 6px 8px; cursor: text; }
+/* 逐行卡片：悬停微亮 + 圆角，长文阅读节奏更清晰 */
 .shot-ocr-line {
-  padding: 5px 8px; border-radius: 4px;
-  color: rgba(255,255,255,0.92); font-size: 13px; line-height: 1.55;
+  padding: 7px 10px; margin: 2px 0; border-radius: 7px;
+  color: rgba(255,255,255,0.94); font-size: 13px; line-height: 1.6;
   white-space: pre-wrap; word-break: break-word;
+  transition: background var(--dur-fast) var(--ease-out);
 }
+.shot-ocr-line:hover { background: rgba(255,255,255,0.05); }
 .shot-ocr-line::selection,
-.shot-ocr-lines ::selection { background: rgba(var(--accent-rgb), 0.45); color: #fff; }
+.shot-ocr-lines ::selection { background: rgba(var(--accent-rgb), 0.5); color: #fff; }
+/* 面板内滚动条：细圆条不抢内容视线（原生粗滚动条在玻璃卡片上很突兀） */
+.shot-ocr-lines::-webkit-scrollbar,
+.shot-ocr-src::-webkit-scrollbar,
+.shot-ocr-body::-webkit-scrollbar { width: 7px; height: 7px; }
+.shot-ocr-lines::-webkit-scrollbar-thumb,
+.shot-ocr-src::-webkit-scrollbar-thumb,
+.shot-ocr-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 4px; }
+.shot-ocr-lines::-webkit-scrollbar-thumb:hover,
+.shot-ocr-src::-webkit-scrollbar-thumb:hover,
+.shot-ocr-body::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
+.shot-ocr-lines::-webkit-scrollbar-track,
+.shot-ocr-src::-webkit-scrollbar-track,
+.shot-ocr-body::-webkit-scrollbar-track { background: transparent; }
+/* 划选提示条：主题色微染底，与「已选中」语义呼应 */
 .shot-ocr-selbar {
   flex: none; padding: 7px 12px; font-size: 12px;
-  color: var(--accent-text, #9cc0ff); background: rgba(255,255,255,0.05);
+  color: var(--accent-text, #cfe2ff);
+  background: rgba(var(--accent-rgb), 0.14);
+  border-top: 1px solid rgba(255,255,255,0.07);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   user-select: none;
 }
 .shot-ocr-src {
-  color: rgba(255,255,255,0.6); font-size: 12px;
+  color: rgba(255,255,255,0.62); font-size: 12px;
   padding-bottom: 6px; margin-bottom: 6px;
-  border-bottom: 1px solid rgba(255,255,255,0.12);
+  border-bottom: 1px solid rgba(255,255,255,0.1);
   max-height: 90px; overflow-y: auto;
 }
-.shot-ocr-out { color: #fff; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
+.shot-ocr-out { color: #fff; font-size: 13px; line-height: 1.65; white-space: pre-wrap; }
 .shot-ocr-back {
-  margin-top: 8px; background: rgba(255,255,255,0.08); border: none;
-  color: rgba(255,255,255,0.92); font-size: 12px; padding: 4px 10px;
-  border-radius: 5px; cursor: pointer;
+  margin-top: 8px; background: rgba(255,255,255,0.08); border: 1px solid transparent;
+  color: rgba(255,255,255,0.92); font-size: 12px; padding: 4px 12px;
+  border-radius: 6px; cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
 }
 .shot-ocr-back:hover { background: rgba(var(--accent-rgb), 0.4); }
 /* 松手浮标：复制 / 翻译 */
 .shot-ocr-pop {
   position: fixed; z-index: 320; display: flex; gap: 2px; padding: 3px;
-  background: rgba(12,12,14,0.88); backdrop-filter: blur(8px); border-radius: 7px;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1), 0 4px 14px rgba(0,0,0,0.45);
+  background: rgba(12,12,14,0.9); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.11), 0 5px 16px rgba(0,0,0,0.5);
   animation: shot-submenu-in 100ms var(--ease-out) both;
 }
 .shot-ocr-pop button {
   background: transparent; border: none; color: rgba(255,255,255,0.92);
   font-size: 13px; padding: 5px 12px; border-radius: 5px; cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
 }
-.shot-ocr-pop button:hover { background: rgba(var(--accent-rgb), 0.4); }
+.shot-ocr-pop button:hover { background: rgba(var(--accent-rgb), 0.45); }

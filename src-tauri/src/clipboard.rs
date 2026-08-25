@@ -140,8 +140,10 @@ fn read_clipboard(watch_images: bool, watch_files: bool) -> Option<Snapshot> {
 
 /// Windows：枚举剪贴板自定义格式，读取名为 "PNG" 的格式字节并解码为 RGBA。
 /// Snipaste 等工具复制图片时常以 PNG 为主格式，arboard（仅 CF_DIB）读不到。
+/// 【pub(crate)】贴图热键路径（pin.rs）复用同一兜底，否则"Snipaste 里复制
+/// 图片 → 按贴图键无反应"（该场景 DIB 缺失，只有 PNG 格式可读）
 #[cfg(windows)]
-fn read_png_from_clipboard() -> Option<image::RgbaImage> {
+pub(crate) fn read_png_from_clipboard() -> Option<image::RgbaImage> {
     use windows::Win32::System::DataExchange::{
         CloseClipboard, EnumClipboardFormats, GetClipboardData, GetClipboardFormatNameW,
         OpenClipboard,
@@ -624,8 +626,9 @@ fn image_file_entry(
     })
 }
 
-/// 扩展名是否图片（实际能否解码由 image_file_entry 的 load 判定兜底）
-fn is_image_ext(path: &std::path::Path) -> bool {
+/// 扩展名是否图片（实际能否解码由调用方的 load 判定兜底）。
+/// 【pub(crate)】贴图热键路径识别"单个图片文件"时复用
+pub(crate) fn is_image_ext(path: &std::path::Path) -> bool {
     path.extension()
         .map(|e| {
             let e = e.to_string_lossy().to_ascii_lowercase();

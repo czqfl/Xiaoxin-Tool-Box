@@ -1378,13 +1378,19 @@ pub(crate) fn begin_impl<R: Runtime>(app: AppHandle<R>, picker: bool) -> Result<
                 // 悬停识别失效时对照：cands=0 → 快照失败；snap=None 且 cands>0 →
                 // 光标处无窗口（桌面）；后续 rect@ 查询全 None 而 cands>0 → 坐标系错位
                 {
-                    let g0 = &shots[cursor_mon].geom;
+                    // 多屏诊断：全部显示器原点/尺寸 + 候选窗口数。副屏智能识框
+                    // 错位类问题时，对照「窗口快照矩形」与这里的物理坐标系即可
+                    // 判断是否 DPI 虚拟化（坐标被缩放）或原点映射错误
+                    let mons = shots.iter().map(|s| {
+                        let g = &s.geom;
+                        format!("mon{}=({},{},{},{})", g.index, g.x, g.y, g.width, g.height)
+                    }).collect::<Vec<_>>().join(" ");
                     diag_write(&format!(
-                        "[shot] begin smart: cands={} snap={} cursor=({},{}) mon{}=({},{},{},{})",
+                        "[shot] begin smart: cands={} snap={} cursor=({},{}) {}",
                         if smart_detect { cands_count } else { 0 },
                         snap_diag,
                         cursor.x as i32, cursor.y as i32,
-                        g0.index, g0.x, g0.y, g0.width, g0.height,
+                        mons,
                     ));
                 }
                 // 截图历史：只复位翻页状态。【不再呼出即落盘】——
@@ -1416,14 +1422,17 @@ pub(crate) fn begin_impl<R: Runtime>(app: AppHandle<R>, picker: bool) -> Result<
                     diag_write(&format!("[shot] freeze writes queued in {} ms", t_freeze.elapsed().as_millis()));
                     let app3 = app.clone();
                     let shots2 = shots.clone();
-                    // 原生即时亮窗：帧已贴出即显示。给前端留 ~24ms 宽限
-                    // （复用窗口时它要先收到 shot-refresh 清掉上一会话的
-                    // 选区/工具栏残留 DOM，再画本会话压暗层）——期间若前端
-                    // 先调了 shot_ready（OVERLAY_READY 置位）则立即交还，
-                    // 走的还是"前端就绪才亮"的老次序，绝不闪旧内容。
-                    // 预热建窗路径 SHOOTING=false 时 native_show_overlay 直接入空。
+                    // 原生即时亮窗：帧已贴出即显示。【宽限期 24ms→160ms】
+                    // 复用遮罩窗时页面仍显示着【上一会话的旧压暗层/旧选区 DOM】，
+                    // 前端要经历「收 shot-refresh → IPC 拉几何 → 双 rAF 重画压暗层」
+                    // 才能盖掉旧画面——实测整条链路 40~90ms，24ms 宽限几乎必然
+                    // 超时后强行亮窗：用户先看到旧黑遮罩闪现 → 画布清空变亮 →
+                    // 压暗层再淡入，正是"呼出时屏幕闪几下、黑色遮罩消失又出现"
+                    // 的根因。前端就绪（shot_ready 置 OVERLAY_READY）则立即交还
+                    // 亮窗权、一毫秒不多等；只有前端真的挂了才付满 160ms 兜底
+                    // （60s 看门狗另收极端场景）。预热首呼出页面是空白的，不受影响
                     std::thread::spawn(move || {
-                        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(24);
+                        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(160);
                         while std::time::Instant::now() < deadline {
                             if OVERLAY_READY.load(Ordering::SeqCst) { return; }
                             std::thread::sleep(std::time::Duration::from_millis(3));
@@ -1486,6 +1495,11 @@ pub struct ShotGeomResp {
     pub prefill: Option<ShotRect>,
     /// 本次会话是否为屏幕取色模式（前端据此渲染取色面板而非截图选区 UI）
     pub picker: bool,
+    /// 窗口 Z 序快照（全局物理坐标，顶→底）。随 geometry 一次性下发前端，
+    /// 悬停的窗口级命中改为前端本地扫描——零 IPC 往返，高亮首帧延迟从
+    /// ~10-20ms 降到 <0.1ms（Snipaste 级跟手）。UIA 元素级细化仍走服务端
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub cands: Vec<ShotRect>,
 }
 
 /// 全局矩形 → 本显示器局部坐标，并裁剪到显示器范围内（不相交/过小则 None）
@@ -1509,13 +1523,15 @@ pub fn shot_geometry(window: WebviewWindow) -> Result<ShotGeomResp, String> {
     let g = shot.geom.clone();
     drop(shots);
     let snap = state.initial_snap.lock().unwrap().clone().and_then(|r| clip_to_monitor(&r, &g));
+    // 窗口 Z 序快照随 geometry 下发（上限 512 条封顶 payload；正常桌面远少于此）
+    let cands = state.candidates.lock().unwrap().iter().take(512).map(|c| c.rect.clone()).collect();
     // 记忆区域：智能识别没有命中时才作为预填选区（Snipaste 优先级：智能识别 > 记忆区域）
     let prefill = if snap.is_none() {
         state.prefill.lock().unwrap().clone().and_then(|last| {
             clip_to_monitor(&ShotRect { x: last[0], y: last[1], width: last[2] as u32, height: last[3] as u32 }, &g)
         })
     } else { None };
-    Ok(ShotGeomResp { geom: g, snap, prefill, picker: PICKER.load(Ordering::SeqCst) })
+    Ok(ShotGeomResp { geom: g, snap, prefill, picker: PICKER.load(Ordering::SeqCst), cands })
 }
 
 /// 当前显示器的截屏原始 BGRA（二进制 IPC；宽高从 shot_geometry 取）。
@@ -1645,6 +1661,17 @@ fn serve_pin_file<R: Runtime>(
     if id.is_empty() || id.len() > 64 || !id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-') {
         return not_found();
     }
+    // 【内存直通】新建贴图的首次取图直接命中内存缓存——免去「刚写盘又立刻
+    // 读回」的双倍磁盘 IO（大截图几十 MB 时读写合计上百毫秒）。克隆一份返回、
+    // 缓存保留（加载失败自愈重试还能拿到），由容量上限与关闭贴图回收
+    if let Some((bytes, mime)) = crate::pin::pin_mem_get(id) {
+        return tauri::http::Response::builder()
+            .header("Content-Type", mime)
+            .header("Access-Control-Allow-Origin", "*")
+            .header("Cache-Control", "no-store")
+            .body(std::borrow::Cow::Owned(bytes))
+            .map_err(Into::into);
+    }
     let file = {
         let Some(store) = app.try_state::<crate::pin::PinStore>() else { return not_found(); };
         let entries = store.0.lock().unwrap();
@@ -1657,6 +1684,8 @@ fn serve_pin_file<R: Runtime>(
         Some("gif") => "image/gif",
         Some("html") => "text/html",
         Some("bmp") => "image/bmp",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("webp") => "image/webp",
         _ => "image/png",
     };
     let bytes = std::fs::read(&file).map_err(|_| -> Box<dyn std::error::Error> { "pin file gone".into() })?;
@@ -2013,6 +2042,42 @@ fn clipboard_set_image_windows(owner_hwnd: isize, rgba: &image::RgbaImage) -> Re
 ///   x-shot-action = pin | save | copy
 ///   x-shot-x / x-shot-y   （pin：屏幕全局物理坐标）
 ///   x-shot-path           （save：用户在另存为对话框选择的目标路径）
+/// 【零像素传输】无标注输出：前端只发选区矩形，直接从【本屏冻结帧】裁剪
+/// BGRA 行块返回。冻结帧就是呼出瞬间的原始桌面像素（遮罩/高亮都画在
+/// webview 层，从未污染它），裁剪结果与旧「前端 getImageData 回读 + IPC
+/// 传整块像素」逐字节一致；省掉像素回读 + 过桥传输，4K 选区可省
+/// 100~400ms。坐标为全局物理像素，行级 memcpy 裁剪
+fn crop_frame_region(
+    app: &AppHandle,
+    label: &str,
+    x: i32, y: i32, w: u32, h: u32,
+) -> Result<(Vec<u8>, u32, u32), String> {
+    let idx = overlay_index(label).ok_or("not overlay")?;
+    let state = app.try_state::<ShotState>().ok_or("no state")?;
+    let shots = state.shots.lock().unwrap();
+    let shot = shots.iter().find(|s| s.geom.index == idx).ok_or("frame gone")?;
+    let g = &shot.geom;
+    if w == 0 || h == 0 { return Err("empty region".into()); }
+    let lx = (x - g.x).clamp(0, g.width as i32) as usize;
+    let ly = (y - g.y).clamp(0, g.height as i32) as usize;
+    let cw = (w as usize).min(g.width as usize - lx);
+    let ch = (h as usize).min(g.height as usize - ly);
+    if cw == 0 || ch == 0 { return Err("region outside monitor".into()); }
+    let stride = g.width as usize * 4;
+    let src = shot.bgra.as_ref();
+    if src.len() < (ly + ch - 1) * stride + (lx + cw) * 4 {
+        return Err("frame truncated".into());
+    }
+    let mut out = Vec::with_capacity(cw * ch * 4);
+    for row in 0..ch {
+        let s = (ly + row) * stride + lx * 4;
+        out.extend_from_slice(&src[s..s + cw * 4]);
+    }
+    // 返回【钳制后】的实际尺寸——选区越出屏幕边缘时与入参不同，
+    // 调用方必须用这对尺寸包装/编码，否则缓冲区与头声明错配
+    Ok((out, cw as u32, ch as u32))
+}
+
 #[tauri::command]
 pub async fn shot_output(app: AppHandle, window: WebviewWindow, request: tauri::ipc::Request<'_>) -> Result<(), String> {
     use tauri::ipc::InvokeBody;
@@ -2020,50 +2085,92 @@ pub async fn shot_output(app: AppHandle, window: WebviewWindow, request: tauri::
         request.headers().get(k).and_then(|v| v.to_str().ok()).map(|s| s.to_string())
     };
     let action = hdr("x-shot-action").unwrap_or_default();
+    let crop = hdr("x-shot-crop").as_deref() == Some("1");
+    // 选区矩形（全局物理像素）+ 尺寸头：pin/crop 路径共用
+    let gx_hdr = hdr("x-shot-x").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let gy_hdr = hdr("x-shot-y").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let (gw_hdr, gh_hdr) = (
+        hdr("x-shot-w").and_then(|v| v.parse::<u32>().ok()),
+        hdr("x-shot-h").and_then(|v| v.parse::<u32>().ok()),
+    );
     let body = match request.body() {
         InvokeBody::Raw(b) => b,
         InvokeBody::Json(_) => return Err("期望二进制请求体".into()),
     };
     match action.as_str() {
         "pin" => {
-            let x: i32 = hdr("x-shot-x").and_then(|v| v.parse().ok()).unwrap_or(0);
-            let y: i32 = hdr("x-shot-y").and_then(|v| v.parse().ok()).unwrap_or(0);
-            // 【最快路径】前端直传选区原始 BGRA 像素（头带 x-shot-w/h）：
-            // 包成零压缩 BMP 落盘——省掉 PNG 编码/解码两大耗时。
-            // 字节数不匹配时回退旧 PNG 路径（兼容）
-            let (w, h) = (
-                hdr("x-shot-w").and_then(|v| v.parse::<u32>().ok()),
-                hdr("x-shot-h").and_then(|v| v.parse::<u32>().ok()),
-            );
-            let (bytes, mime): (std::borrow::Cow<'_, [u8]>, &str) = match (w, h) {
-                // 【最快路径】前端 cropSelectionRaw 已交付 BMP 字节序（BGRA、不透明）：
-                // 此处零拷贝零循环直接包 BMP 头落盘——此前这里又逐像素 swap 一次，
-                // 与前端的交换叠加导致红蓝颠倒（"贴图颜色不对"的根源）
-                (Some(w), Some(h)) if w > 0 && h > 0 && body.len() == (w as usize) * (h as usize) * 4 => {
-                    (std::borrow::Cow::Owned(wrap_bmp(&body, w, h)), "image/bmp")
-                }
-                _ => (std::borrow::Cow::Borrowed(&body), "image/png"),
-            };
-            let pin = crate::pin::create_store_entry(&app, &bytes, mime, x, y)?;
-            // 装进预建的隐藏复用窗：图片就绪后先显贴图、再由 pin_ready 收遮罩
-            // （此处绝不提前 hide_all——那会先露出裸桌面，正是"贴图闪一下"的根源）
-            crate::pin::attach_to_staging(&app, pin);
+            // 【零传输裁剪路径】无标注贴图：Rust 直接从本屏冻结帧裁剪，
+            // 前端零像素回读、零 IPC 体积
+            if crop {
+                let (Some(w), Some(h)) = (gw_hdr, gh_hdr)
+                    else { return Err("crop 需要 w/h 头".into()); };
+                let (bgra, cw, ch) = crop_frame_region(&app, window.label(), gx_hdr, gy_hdr, w, h)?;
+                let bmp = wrap_bmp(&bgra, cw, ch);
+                let pin = crate::pin::create_store_entry(&app, &bmp, "image/bmp", gx_hdr, gy_hdr)?;
+                crate::pin::attach_to_staging(&app, pin);
+            } else {
+                // 【最快路径】前端直传选区原始 BGRA 像素（头带 x-shot-w/h）：
+                // 包成零压缩 BMP 落盘——省掉 PNG 编码/解码两大耗时。
+                // 字节数不匹配时回退旧 PNG 路径（兼容）
+                let (bytes, mime): (std::borrow::Cow<'_, [u8]>, &str) = match (gw_hdr, gh_hdr) {
+                    // 【最快路径】前端 cropSelectionRaw 已交付 BMP 字节序（BGRA、不透明）：
+                    // 此处零拷贝零循环直接包 BMP 头落盘——此前这里又逐像素 swap 一次，
+                    // 与前端的交换叠加导致红蓝颠倒（"贴图颜色不对"的根源）
+                    (Some(w), Some(h)) if w > 0 && h > 0 && body.len() == (w as usize) * (h as usize) * 4 => {
+                        (std::borrow::Cow::Owned(wrap_bmp(&body, w, h)), "image/bmp")
+                    }
+                    _ => (std::borrow::Cow::Borrowed(&body), "image/png"),
+                };
+                let pin = crate::pin::create_store_entry(&app, &bytes, mime, gx_hdr, gy_hdr)?;
+                // 装进预建的隐藏复用窗：图片就绪后先显贴图、再由 pin_ready 收遮罩
+                // （此处绝不提前 hide_all——那会先露出裸桌面，正是"贴图闪一下"的根源）
+                crate::pin::attach_to_staging(&app, pin);
+            }
         }
         "save" => {
             let dest = hdr("x-shot-path").filter(|p| !p.is_empty()).ok_or("缺少保存路径")?;
-            std::fs::write(&dest, &body).map_err(|e| format!("write: {e}"))?;
+            if crop {
+                let (Some(w), Some(h)) = (gw_hdr, gh_hdr)
+                    else { return Err("crop 需要 w/h 头".into()); };
+                let (mut rgba, cw, ch) = crop_frame_region(&app, window.label(), gx_hdr, gy_hdr, w, h)?;
+                for px in rgba.chunks_exact_mut(4) { px.swap(0, 2); px[3] = 0xFF; }
+                // PNG 编码是重活：丢阻塞线程池；save_png_fast 用 Fast 压缩级
+                let img = image::RgbaImage::from_raw(cw, ch, rgba).ok_or("bad buf")?;
+                tauri::async_runtime::spawn_blocking(move || {
+                    save_png_fast(&img, std::path::Path::new(&dest));
+                })
+                .await
+                .map_err(|e| format!("join: {e}"))?;
+            } else {
+                std::fs::write(&dest, &body).map_err(|e| format!("write: {e}"))?;
+            }
             hide_all(&app);
         }
         "copy" => {
-            // 整图解码成 RGBA 是重活：丢到阻塞线程池，本命令立即继续。
-            // app 句柄一并带入：写剪贴板要用本应用窗口做属主（见 copy_rgba_to_clipboard）
-            let png = body.clone();
-            let app2 = app.clone();
-            tauri::async_runtime::spawn_blocking(move || {
-                if let Err(e) = copy_png_to_clipboard(&app2, &png) {
-                    diag_write(&format!("[shot] copy failed: {e}"));
-                }
-            });
+            if crop {
+                let (Some(w), Some(h)) = (gw_hdr, gh_hdr)
+                    else { return Err("crop 需要 w/h 头".into()); };
+                let (mut rgba, cw, ch) = crop_frame_region(&app, window.label(), gx_hdr, gy_hdr, w, h)?;
+                // 冻结帧 alpha 字节不可靠（GDI 路径常为 0），写剪贴板必须补不透明
+                for px in rgba.chunks_exact_mut(4) { px.swap(0, 2); px[3] = 0xFF; }
+                let img = image::RgbaImage::from_raw(cw, ch, rgba).ok_or("bad buf")?;
+                let app2 = app.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    if let Err(e) = copy_rgba_to_clipboard(&app2, &img) {
+                        diag_write(&format!("[shot] copy failed: {e}"));
+                    }
+                });
+            } else {
+                // 整图解码成 RGBA 是重活：丢到阻塞线程池，本命令立即继续。
+                // app 句柄一并带入：写剪贴板要用本应用窗口做属主（见 copy_rgba_to_clipboard）
+                let png = body.clone();
+                let app2 = app.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    if let Err(e) = copy_png_to_clipboard(&app2, &png) {
+                        diag_write(&format!("[shot] copy failed: {e}"));
+                    }
+                });
+            }
             hide_all(&app);
         }
         _ => return Err(format!("未知输出动作 {action}")),
