@@ -925,10 +925,14 @@ export function ScreenshotOverlay() {
     finally { histBusyRef.current = false; }
   };
   /** 翻历史：< / > 步进。首次步进自动展开缩略条——切换过程中能直接看到
-      列表随翻页滚动、当前帧高亮（Snipaste 式浏览体验） */
+      列表随翻页滚动、当前帧高亮（Snipaste 式浏览体验）。
+      与缩略图点击（jumpHistory）同语义：步进后还原【该帧自己记忆的框选范围】，
+      回到实时帧则保持现状不做还原 */
   const stepHistory = (dir: number) => void (async () => {
     const r = await stepHistoryCore(dir);
-    if (r !== undefined && !histOpenRef.current) {
+    if (r === undefined) return;
+    await applyHistRegion(r === "live" ? "" : r);
+    if (!histOpenRef.current) {
       histOpenRef.current = true;
       setHistOpen(true);
     }
