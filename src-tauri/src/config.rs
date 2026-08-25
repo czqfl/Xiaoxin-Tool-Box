@@ -137,6 +137,8 @@ pub struct ShortcutsConfig {
     pub screenshot: String,
     /// 显示 / 隐藏全部贴图
     pub pins: String,
+    /// 关闭全部贴图（与贴图热键分离：贴图键专职贴出内容，关闭键收摊）
+    pub pins_close: String,
     /// 屏幕取色（呼出十字取色模式，复用截图遮罩窗）
     pub picker: String,
 }
@@ -160,6 +162,8 @@ impl Default for ShortcutsConfig {
             screenshot: "Ctrl+Alt+A".into(),
             // 显示/隐藏全部贴图：Ctrl+Alt+P（Pin）
             pins: "Ctrl+Alt+P".into(),
+            // 关闭全部贴图：Ctrl+Alt+K——与贴图热键分离（贴图键专职贴出内容）
+            pins_close: "Ctrl+Alt+K".into(),
             // 屏幕取色：Alt+D（Dropper / 取色），纯 Alt 组合由键盘钩子主动吞键
             picker: "Alt+D".into(),
         }

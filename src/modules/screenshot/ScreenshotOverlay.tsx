@@ -117,6 +117,11 @@ const TOOL_BUTTONS: { items: [Tool, () => JSX.Element, string, string][]; groupI
 const btnTip = (b: { items: [Tool, () => JSX.Element, string, string][]; hotkey: string }) =>
   `${b.items.map(([, , n]) => n).join("、")} (${b.hotkey})`;
 
+/** 标注色板内置色（8 色）。自定义色在其后追加；自定义色上限 ANNO_MAX_CUSTOM */
+const ANNO_DEFAULT_COLORS = ["#e5484d","#ff8d1a","#ffd60a","#36b37e","#4c8dff","#b06fd6","#ffffff","#000000"];
+/** 自定义色上限：色板总长 = 内置 8 色 + 最多 6 个自定义（防色条无限变长） */
+const ANNO_MAX_CUSTOM = 6;
+
 function drawShape(
   ctx: CanvasRenderingContext2D,
   s: Anno,
@@ -160,28 +165,25 @@ function drawShape(
     ctx.stroke();
   } else if (s.kind === "mosaic" && s.points && s.points.length > 0) {
     // 真马赛克（像素化）：每格取【底层画面】的平均色填充——不是灰色贴片。
-    // 1) 插值收集路径覆盖的所有格子；相邻采样跨对角时补两个正交邻格，
-    //    保证块块相连——轨迹紧密程度与拖动速度完全无关
-    // 2) 包围盒一次 getImageData，逐格求平均 RGB（Set 去重避免重复计算）
-    // 格子边长 bs 与采样坐标都按 scale 换算到物理像素，与上面的画线保持一致
+    // 【性能关键·增量采样】重绘（每次 mousemove 一帧、且此后任何标注变化
+    // 都会整层重画）只对【未缓存】的格子读像素——已缓存格子直接回填。
+    // 旧实现每帧都对整个笔迹包围盒 getImageData（大选区几十 MB × 每帧 ×
+    // 屏显/合成两层），表现为"用过马赛克后所有操作都卡"；增量后成本
+    // 只与新增格子数相关，重绘近乎免费。
+    // 格子边长 bs 与采样坐标都按 scale 换算到物理像素，与画线保持一致
     const bs = 12 * scale;
     const cells = new Set<string>();
-    let prevFx: number | null = null, prevFy: number | null = null;
-    // 【坐标必须钳进底图】按住拖动时 mousemove 可能落在本屏窗口之外
-    // （多显示器把光标甩到邻屏、快速甩出边缘）——产生越界格子后，
-    // 采样读出 undefined → rgb(NaN,...) 非法色串 → fillStyle 赋值被忽略、
-    // 沿用当前标注色整格填充 = "马赛克变红"的根因
+    // 【坐标必须钳进底图】拖动中 mousemove 可能落在本屏窗口之外（多显示器
+    // 甩到邻屏、快速甩出边缘）——越界格子采样会读出 undefined → 非法色串
     const clampX = (v: number) => Math.max(0, Math.min(v, (src ? src.width : 1) - 0.01));
     const clampY = (v: number) => Math.max(0, Math.min(v, (src ? src.height : 1) - 0.01));
+    // 单点标记：中心 + 上下左右各半个格子 → 约 2~3 格宽的笔迹（Snipaste 式粗马赛克）
     const mark = (rawX: number, rawY: number) => {
       const x = clampX(rawX), y = clampY(rawY);
-      const fx = Math.floor(x / bs), fy = Math.floor(y / bs);
-      cells.add(fx + "," + fy);
-      if (prevFx !== null && prevFy !== null && fx !== prevFx && fy !== prevFy) {
-        cells.add(prevFx + "," + fy);
-        cells.add(fx + "," + prevFy);
-      }
-      prevFx = fx; prevFy = fy;
+      const put = (px: number, py: number) => cells.add(Math.floor(px / bs) + "," + Math.floor(py / bs));
+      put(x, y);
+      put(clampX(x - bs / 2), y); put(clampX(x + bs / 2), y);
+      put(x, clampY(y - bs / 2)); put(x, clampY(y + bs / 2));
     };
     mark(s.points[0].x * scale, s.points[0].y * scale);
     for (let i = 1; i < s.points.length; i++) {
@@ -195,49 +197,56 @@ function drawShape(
       ctx.fillRect(cx * bs, cy * bs, bs, bs);
     };
     let sampled = false;
-    if (src && src.width > 0 && src.height > 0) {
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      cells.forEach((k) => {
-        const [cx, cy] = k.split(",").map(Number);
-        minX = Math.min(minX, cx * bs); minY = Math.min(minY, cy * bs);
-        maxX = Math.max(maxX, (cx + 1) * bs); maxY = Math.max(maxY, (cy + 1) * bs);
-      });
-      minX = Math.max(0, Math.floor(minX)); minY = Math.max(0, Math.floor(minY));
-      maxX = Math.min(src.width, Math.ceil(maxX)); maxY = Math.min(src.height, Math.ceil(maxY));
-      const bw = maxX - minX, bh = maxY - minY;
-      if (bw > 0 && bh > 0) {
-        try {
-          const data = src.getContext("2d")!.getImageData(minX, minY, bw, bh).data;
-          cells.forEach((k) => {
-            const hit = mosaicCache?.get(k);
-            if (hit) { fillCell(k, hit); return; }
-            const [cx, cy] = k.split(",").map(Number);
-            // 单格读取范围钳制在包围盒内（左/上缘同样要钳）：任何越界读都会
-            // 产生 undefined → rgb(NaN,...) → fillStyle 赋值被忽略、沿用当前
-            // 标注色整格填上去（"马赛克变红"）
-            const x0 = Math.max(0, cx * bs - minX), y0 = Math.max(0, cy * bs - minY);
-            const x1 = Math.min(x0 + bs, bw), y1 = Math.min(y0 + bs, bh);
-            let r = 0, g = 0, b = 0, n = 0;
-            for (let y = y0; y < y1; y++) {
-              for (let x = x0; x < x1; x++) {
-                const i = (y * bw + x) * 4;
-                r += data[i]; g += data[i + 1]; b += data[i + 2]; n++;
+    if (src && src.width > 0 && src.height > 0 && mosaicCache) {
+      // 收集未缓存格子；全部已缓存则零像素读取直接回填
+      const uncached: string[] = [];
+      cells.forEach((k) => { if (!mosaicCache.has(k)) uncached.push(k); });
+      if (uncached.length === 0) {
+        cells.forEach((k) => { const c = mosaicCache.get(k); if (c) fillCell(k, c); });
+        sampled = true;
+      } else {
+        // 只对未缓存格子的包围盒做一次 getImageData（通常仅最新一小段）
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        uncached.forEach((k) => {
+          const [cx, cy] = k.split(",").map(Number);
+          minX = Math.min(minX, cx * bs); minY = Math.min(minY, cy * bs);
+          maxX = Math.max(maxX, (cx + 1) * bs); maxY = Math.max(maxY, (cy + 1) * bs);
+        });
+        minX = Math.max(0, Math.floor(minX)); minY = Math.max(0, Math.floor(minY));
+        maxX = Math.min(src.width, Math.ceil(maxX)); maxY = Math.min(src.height, Math.ceil(maxY));
+        const bw = maxX - minX, bh = maxY - minY;
+        if (bw > 0 && bh > 0) {
+          try {
+            const data = src.getContext("2d")!.getImageData(minX, minY, bw, bh).data;
+            cells.forEach((k) => {
+              const hit = mosaicCache.get(k);
+              if (hit) { fillCell(k, hit); return; }
+              const [cx, cy] = k.split(",").map(Number);
+              // 单格读取范围钳制在包围盒内（四缘都要钳）：越界读出 undefined
+              // → rgb(NaN,...) → fillStyle 赋值被忽略、沿用标注色（"马赛克变红"）
+              const x0 = Math.max(0, cx * bs - minX), y0 = Math.max(0, cy * bs - minY);
+              const x1 = Math.min(x0 + bs, bw), y1 = Math.min(y0 + bs, bh);
+              let r = 0, g = 0, b = 0, n = 0;
+              for (let y = y0; y < y1; y++) {
+                for (let x = x0; x < x1; x++) {
+                  const i = (y * bw + x) * 4;
+                  r += data[i]; g += data[i + 1]; b += data[i + 2]; n++;
+                }
               }
-            }
-            // 兜底校验：均值非法时宁可留空也不落标注色
-            if (!n || !Number.isFinite(r / n) || !Number.isFinite(g / n) || !Number.isFinite(b / n)) return;
-            const color = `rgb(${Math.round(r / n)},${Math.round(g / n)},${Math.round(b / n)})`;
-            mosaicCache?.set(k, color);
-            fillCell(k, color);
-          });
-          sampled = true;
-        } catch {}
+              // 兜底校验：均值非法时宁可留空也不落标注色
+              if (!n || !Number.isFinite(r / n) || !Number.isFinite(g / n) || !Number.isFinite(b / n)) return;
+              const color = `rgb(${Math.round(r / n)},${Math.round(g / n)},${Math.round(b / n)})`;
+              mosaicCache.set(k, color);
+              fillCell(k, color);
+            });
+            sampled = true;
+          } catch {}
+        }
       }
     }
     // 底图不可用（帧未加载等）时才退化为灰色占位
     if (!sampled) {
-      ctx.fillStyle = "rgba(180,180,180,0.85)";
-      cells.forEach((k) => fillCell(k, "rgba(180,180,180,0.85)"));
+      cells.forEach((k) => { if (!mosaicCache?.has(k)) fillCell(k, "rgba(180,180,180,0.85)"); });
     }
   } else if (s.kind === "text" && s.text) {
     // 与编辑器输入框【完全一致】的字体/字号/行盒：16px 加粗、baseline=top
@@ -293,6 +302,28 @@ export function ScreenshotOverlay() {
   const updateCfg = useConfigStore((s) => s.update);
   // 自定义颜色：隐藏的原生取色 input，由色板里的彩虹按钮触发（Snipaste 同款）
   const customColorRef = useRef<HTMLInputElement>(null);
+  // 取色确认入库：input 的【原生 change】事件在「确定」时触发一次（React 的
+  // onChange 对应原生 input 事件、拖动调色盘时连续触发——旧版把每个中间色都
+  // 存进色板，拖一下就刷出一大串）。仅在确认时把【一个】颜色追加进色板并
+  // 持久化；自定义色数量封顶 ANNO_MAX_CUSTOM，超出丢最旧的自定义色。
+  useEffect(() => {
+    const el = customColorRef.current;
+    if (!el) return;
+    const onCommit = (ev: Event) => {
+      const hex = (ev.target as HTMLInputElement).value;
+      setColor(hex);
+      const cur = cfg.annotate?.colors ?? ANNO_DEFAULT_COLORS;
+      if (cur.some((x) => x.toLowerCase() === hex)) return;
+      const next = [...cur, hex];
+      const trimmed =
+        next.length > ANNO_DEFAULT_COLORS.length + ANNO_MAX_CUSTOM
+          ? [...next.slice(0, ANNO_DEFAULT_COLORS.length), ...next.slice(-ANNO_MAX_CUSTOM)]
+          : next;
+      void updateCfg({ ...cfg, annotate: { ...cfg.annotate, colors: trimmed } });
+    };
+    el.addEventListener("change", onCommit);
+    return () => el.removeEventListener("change", onCommit);
+  }, [cfg.annotate?.colors]); // eslint-disable-line react-hooks/exhaustive-deps
   // 遮罩窗复用：加载中又收到 shot-refresh 时置位，当前轮结束后立刻再来一轮
   const loadingRef = useRef(false);
   const rerunRef = useRef(false);
@@ -340,6 +371,7 @@ export function ScreenshotOverlay() {
       if (magValRef.current) magValRef.current.textContent = fmtDisplay(col, nf);
       if (pickerValRef.current) pickerValRef.current.textContent = fmtDisplay(col, nf);
     }
+    syncFmtBadges(nf);
     return nf;
   });
   // 最近一次采样的光标下像素颜色（C 复制用）
@@ -681,11 +713,15 @@ export function ScreenshotOverlay() {
           if (!e.repeat) { applyToolButton(TOOL_BUTTONS[n - 1]); setSubmenuOpen(null); }
         }
       }
-      // 截图选区阶段取色：C 复制光标处颜色、Shift 切换 RGB/HEX（Snipaste 同款）
-      else if (phase === "idle" && e.code === "KeyC" && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      // 截图取色：C 复制光标处颜色、Shift 切换 RGB/HEX（Snipaste 同款）。
+      // 【idle 与 selected 都可用】确认选区后放大镜仍跟随光标，取色/切格式
+      // 不能失效；文字标注输入中除外（输入法打字母/Shift 切中英不能被劫持）
+      else if ((phase === "idle" || phase === "selected") && !textEditRef.current
+        && e.code === "KeyC" && !e.ctrlKey && !e.altKey && !e.metaKey) {
         e.preventDefault(); if (!e.repeat) copyPicked(false);
       }
-      else if (phase === "idle" && e.key === "Shift" && !e.repeat) {
+      else if ((phase === "idle" || phase === "selected") && !textEditRef.current
+        && e.key === "Shift" && !e.repeat) {
         toggleColorFmt();
       }
       // 截图历史：< 向左（更新一帧 / 回实时）、> 向右（更旧一帧）——
@@ -1113,9 +1149,10 @@ export function ScreenshotOverlay() {
   const magBoxRef = useRef<HTMLDivElement>(null);
   const magCanvasRef = useRef<HTMLCanvasElement>(null);
   const magCoordRef = useRef<HTMLSpanElement>(null);
-  // 放大镜取色：色块背景 / 颜色值文本 / 复制反馈行
+  // 放大镜取色：色块背景 / 颜色值文本 / 复制反馈行 / 当前格式徽标
   const magSwatchRef = useRef<HTMLSpanElement>(null);
   const magValRef = useRef<HTMLSpanElement>(null);
+  const magFmtRef = useRef<HTMLSpanElement>(null);
   const magCopiedRef = useRef<HTMLDivElement>(null);
   // 取色模式命令式节点：全屏十字线 / 中心点 / 信息面板（坐标、色块、颜色值、反馈）
   const pickerLineHRef = useRef<HTMLDivElement>(null);
@@ -1125,7 +1162,14 @@ export function ScreenshotOverlay() {
   const pickerCoordRef = useRef<HTMLSpanElement>(null);
   const pickerSwatchRef = useRef<HTMLSpanElement>(null);
   const pickerValRef = useRef<HTMLSpanElement>(null);
+  const pickerFmtRef = useRef<HTMLSpanElement>(null);
   const pickerCopiedRef = useRef<HTMLDivElement>(null);
+  /** 格式徽标直改（RGB/HEX）：让用户随时知道当前颜色格式 */
+  const syncFmtBadges = (f: ColorFmt) => {
+    const t = f.toUpperCase();
+    if (magFmtRef.current) magFmtRef.current.textContent = t;
+    if (pickerFmtRef.current) pickerFmtRef.current.textContent = t;
+  };
   // geom 镜像：rAF 回调闭包里读最新几何（state 闭包会过期）
   const geomRef = useRef(geom);
   useEffect(() => { geomRef.current = geom; }, [geom]);
@@ -1229,6 +1273,7 @@ export function ScreenshotOverlay() {
       pickedRef.current = col;
       if (magSwatchRef.current) magSwatchRef.current.style.background = `rgb(${col[0]},${col[1]},${col[2]})`;
       if (magValRef.current) magValRef.current.textContent = fmtDisplay(col, colorFmtRef.current);
+      syncFmtBadges(colorFmtRef.current);
     }
   };
 
@@ -1264,6 +1309,7 @@ export function ScreenshotOverlay() {
       pickedRef.current = col;
       if (pickerSwatchRef.current) pickerSwatchRef.current.style.background = `rgb(${col[0]},${col[1]},${col[2]})`;
       if (pickerValRef.current) pickerValRef.current.textContent = fmtDisplay(col, colorFmtRef.current);
+      syncFmtBadges(colorFmtRef.current);
     }
   };
 
@@ -1784,8 +1830,9 @@ export function ScreenshotOverlay() {
             <div className="shot-mag-row shot-mag-colorline">
               <span ref={magSwatchRef} className="shot-color-swatch shot-color-swatch-sm" />
               <span ref={magValRef} className="shot-color-val">--</span>
+              <span ref={magFmtRef} className="shot-mag-fmt">RGB</span>
             </div>
-            <div className="shot-mag-row shot-mag-hints"><b>C</b> 复制颜色 · <b>Shift</b> 切 RGB/HEX</div>
+            <div className="shot-mag-row shot-mag-hints"><b>C</b> 复制 <b>Shift</b> 换格式</div>
             <div ref={magCopiedRef} className="shot-copied shot-copied-center" style={{display:"none"}} />
           </div>
         </div>
@@ -1804,10 +1851,11 @@ export function ScreenshotOverlay() {
             <div className="shot-picker-color">
               <span ref={pickerSwatchRef} className="shot-color-swatch shot-color-swatch-md" />
               <span ref={pickerValRef} className="shot-color-val shot-color-val-md">--</span>
+              <span ref={pickerFmtRef} className="shot-mag-fmt">RGB</span>
             </div>
             <div className="shot-picker-hints">
               <div>按 <b>C</b> 复制颜色 · 单击复制并退出</div>
-              <div>按 <b>Shift</b> 切换 RGB / HEX</div>
+              <div>按 <b>Shift</b> 切换颜色格式</div>
             </div>
             <div ref={pickerCopiedRef} className="shot-copied shot-copied-center" style={{display:"none"}} />
           </div>
@@ -1829,25 +1877,30 @@ export function ScreenshotOverlay() {
         // 所有工具统一：二次选项一律挂在【一级图标正下方】，不再单独
         // 在主条下方拼接配置面板（旧版单工具与形状/线组行为不一致）
         const menuOpen = submenuOpen !== null;
-        // 「主条+枚举面板」作为整体定位：主条约 40px，色板/粗细面板约 52px。
-        // 面板显隐随工具切换实时变化，这里按当前状态动态算，保证整组不越界
+        // 主条 barH≈40px，二次选项面板 panelH≈52px。条的位置【只按条本身】能否
+        // 放下决定——开合二级选项时条不跳动；面板方向独立判定：条下方有空间就
+        // 向下展开，没有就翻到条上方（向上扩展）
         const barH = 40, panelH = 52;
-        const asmH = menuOpen ? barH + panelH : barH;
         const bottomEdge = region.y + region.h;
-        let ty = bottomEdge + 8;   // 默认：整组放选区下方
+        let ty = bottomEdge + 8;   // 默认：条放选区下方
         let tipsAbove = false;
-        if (ty + asmH > vh - 6) {
-          // 选区下方放不下 → 整组收进选区内（面板仍在条下方）
-          const insideTy = bottomEdge - asmH - 6;
-          if (insideTy >= Math.max(region.y, 8)) {
-            ty = insideTy;
-          } else {
-            // 选区本身太矮 → 面板翻到条上方（column-reverse），整组贴选区下缘
-            tipsAbove = true;
-            ty = Math.max(bottomEdge - asmH - 6, 8);
+        if (ty + barH > vh - 6) {
+          // 条在选区下方放不下 → 收进选区内并【贴选区下缘】。二级选项从条
+          // 上方向上展开（旧版把条+面板整组上移，条悬在选区中间、面板反而
+          // 在条下方——即"一级跑上方、二级在下方"；现改为条贴底、面板上翻）
+          tipsAbove = true;
+          ty = Math.max(bottomEdge - barH - 6, 8);
+        }
+        let panelAbove = false;
+        if (menuOpen) {
+          // 条底到屏底的剩余空间不足 → 面板向上翻（覆盖选区底部区域，无碍）
+          const belowRoom = vh - 6 - (ty + barH);
+          if (belowRoom < panelH + 8) {
+            panelAbove = true;
+            // 面板在条上方：整体顶 = ty - panelH - 4，越过屏幕顶则整体下移贴屏顶
+            if (ty - panelH - 4 < 8) ty = panelH + 12;
           }
         }
-        const panelAbove = tipsAbove;
         // 颜色/粗细面板：可复用片段——单工具激活时显示在主条下方；
         // 形状/线枚举展开时拼在子图形行下方，一步选完图形+颜色
         const renderConfigPanel = (
@@ -1856,21 +1909,16 @@ export function ScreenshotOverlay() {
                 否则与画笔混淆，色板纯属误导 */}
             {tool !== "mosaic" && (
               <>
-                {(cfg.annotate?.colors||["#e5484d","#ff8d1a","#ffd60a","#36b37e","#4c8dff","#b06fd6","#ffffff","#000000"]).map((c) => (
+                {(cfg.annotate?.colors ?? ANNO_DEFAULT_COLORS).map((c) => (
                   <button key={c} className={`shot-color-btn${color===c?" active":""}`}
                     style={{background:c}} onClick={()=>setColor(c)} />
                 ))}
-                {/* 自定义颜色：彩虹按钮唤起原生取色器；选中的颜色即用即存——
-                    追加进色板并持久化（下次截图仍在），Snipaste 同款交互 */}
+                {/* 自定义颜色：彩虹按钮唤起原生取色器。拖动调色盘只实时预览
+                    （onInput→setColor）；确认（原生 change 事件）才追加一个颜色
+                    进色板并持久化，且自定义色数量封顶（见 ANNO_MAX_CUSTOM）——
+                    避免拖一下刷出一大串 */}
                 <input ref={customColorRef} type="color" value={color} tabIndex={-1}
-                  onChange={(ev) => {
-                    const hex = ev.target.value;
-                    setColor(hex);
-                    const cur = cfg.annotate?.colors ?? ["#e5484d","#ff8d1a","#ffd60a","#36b37e","#4c8dff","#b06fd6","#ffffff","#000000"];
-                    if (!cur.some((x) => x.toLowerCase() === hex)) {
-                      void updateCfg({ ...cfg, annotate: { ...cfg.annotate, colors: [...cur, hex] } });
-                    }
-                  }}
+                  onInput={(ev) => setColor((ev.target as HTMLInputElement).value)}
                   style={{ position: "absolute", width: 0, height: 0, opacity: 0, pointerEvents: "none", border: 0, padding: 0 }} />
                 <button className="shot-color-custom" title="自定义颜色" aria-label="自定义颜色"
                   onClick={() => customColorRef.current?.click()} />

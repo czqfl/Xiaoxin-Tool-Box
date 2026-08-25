@@ -58,6 +58,8 @@ enum Action {
     PickerBegin,
     /// 显示/隐藏全部贴图
     TogglePins,
+    /// 关闭全部贴图（独立热键，与贴图热键分离）
+    PinsCloseAll,
     /// 关闭翻译弹窗（系统级兜底：弹窗无焦点时 webview 收不到 Esc）
     CloseTranslate,
     /// Esc 隐藏最上层可见贴图（系统级兜底：贴图窗无焦点时 webview 收不到 Esc）
@@ -104,6 +106,9 @@ static PICKER_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
 /// 贴图显示/隐藏热键（Win/Alt 组合）
 static PINS_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
 static PINS_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
+/// 关闭全部贴图热键（Win/Alt 组合）
+static PINS_CLOSE_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
+static PINS_CLOSE_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
 /// 翻译弹窗是否打开：打开时按 Esc 系统级关闭（弹窗 webview 可能无焦点收不到键）
 static TRANSLATE_POPUP_OPEN: AtomicBool = AtomicBool::new(false);
 static SENDER: OnceLock<Sender<Action>> = OnceLock::new();
@@ -161,6 +166,7 @@ pub fn set_panel_hotkey(target: &str, is_alt: bool, vk: u16) {
         ("snippets", false) => &SNIPPETS_HOTKEY_VK,
         ("screenshot", false) => &SCREENSHOT_HOTKEY_VK,
         ("pins", false) => &PINS_HOTKEY_VK,
+        ("pins_close", false) => &PINS_CLOSE_HOTKEY_VK,
         ("picker", false) => &PICKER_HOTKEY_VK,
         ("clipboard", true) => &CLIPBOARD_HOTKEY_ALT_VK,
         ("folder", true) => &FOLDER_HOTKEY_ALT_VK,
@@ -171,6 +177,7 @@ pub fn set_panel_hotkey(target: &str, is_alt: bool, vk: u16) {
         ("snippets", true) => &SNIPPETS_HOTKEY_ALT_VK,
         ("screenshot", true) => &SCREENSHOT_HOTKEY_ALT_VK,
         ("pins", true) => &PINS_HOTKEY_ALT_VK,
+        ("pins_close", true) => &PINS_CLOSE_HOTKEY_ALT_VK,
         ("picker", true) => &PICKER_HOTKEY_ALT_VK,
         _ => return,
     };
@@ -319,6 +326,10 @@ fn run_action<R: Runtime>(app: &AppHandle<R>, action: Action) {
             // toggle: 有可见贴图 → 全隐藏；否则全显示（统一走后台线程入口）
             crate::pin::toggle_all(app);
         }
+        Action::PinsCloseAll => {
+            crate::storage::diag_write("[keyhook] pins close-all triggered");
+            let _ = crate::pin::hide_all_impl(app);
+        }
         Action::CloseTranslate => {
             // 系统级关闭翻译弹窗（webview 无焦点时前端收不到 Esc 的兜底）
             set_translate_popup_open(false);
@@ -441,6 +452,8 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                 Some(Action::ShotBegin)
             } else if vk == PINS_HOTKEY_VK.load(Ordering::SeqCst) as u32 {
                 Some(Action::TogglePins)
+            } else if vk == PINS_CLOSE_HOTKEY_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::PinsCloseAll)
             } else if vk == PICKER_HOTKEY_VK.load(Ordering::SeqCst) as u32 {
                 Some(Action::PickerBegin)
             } else {
@@ -492,6 +505,8 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                 Some(Action::ShotBegin)
             } else if vk == PINS_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
                 Some(Action::TogglePins)
+            } else if vk == PINS_CLOSE_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::PinsCloseAll)
             } else if vk == PICKER_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
                 Some(Action::PickerBegin)
             } else {

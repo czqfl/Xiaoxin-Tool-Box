@@ -1935,8 +1935,14 @@ fn clipboard_set_image_windows(owner_hwnd: isize, rgba: &image::RgbaImage) -> Re
     dib_buf.extend_from_slice(&dib);
 
     let png_bytes: Vec<u8> = {
+        // Fast 压缩级别：默认级别下大图 PNG 编码要数百 ms~2s，是
+        // "Ctrl+C 之后要等好久才有反馈"的主因；PNG 只是给偏好该格式的
+        // 应用准备的附加格式（DIBV5 才是主格式），体积大点无所谓
+        use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+        use image::{ExtendedColorType, ImageEncoder};
         let mut out = std::io::Cursor::new(Vec::new());
-        rgba.write_to(&mut out, image::ImageFormat::Png)
+        let enc = PngEncoder::new_with_quality(&mut out, CompressionType::Fast, FilterType::NoFilter);
+        enc.write_image(rgba.as_raw(), rgba.width(), rgba.height(), ExtendedColorType::Rgba8)
             .map_err(|e| format!("png encode: {e}"))?;
         out.into_inner()
     };
@@ -1966,6 +1972,8 @@ fn clipboard_set_image_windows(owner_hwnd: isize, rgba: &image::RgbaImage) -> Re
         }
     }
 
+    // 分段耗时诊断：定位"复制慢"（encode=PNG 附加格式 / win=剪贴板打开重试）
+    let t = std::time::Instant::now();
     let hwnd = windows::Win32::Foundation::HWND(owner_hwnd as *mut _);
     let mut last = String::from("open failed");
     for attempt in 0..10 {
@@ -1982,7 +1990,16 @@ fn clipboard_set_image_windows(owner_hwnd: isize, rgba: &image::RgbaImage) -> Re
                 Ok(())
             })();
             let _ = CloseClipboard();
-            match r { Ok(()) => return Ok(()), Err(e) => last = e }
+            match r {
+                Ok(()) => {
+                    let ms = t.elapsed().as_millis();
+                    if ms > 150 {
+                        diag_write(&format!("[shot] clipboard set image slow: {ms}ms (attempts={})", attempt + 1));
+                    }
+                    return Ok(());
+                }
+                Err(e) => last = e,
+            }
         }
     }
     Err(last)

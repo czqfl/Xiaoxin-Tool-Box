@@ -38,7 +38,13 @@ pub struct PinData {
     pub flip_v: bool,
     pub shadow: bool,
     pub click_through: bool,
+    /// 退出时是否处于可见状态：启动恢复只重建【可见】的贴图——
+    /// 用户已 Esc/热键隐藏的不倾巢而出（true 为旧档缺省，兼容历史数据）
+    #[serde(default = "default_pin_visible")]
+    pub visible: bool,
 }
+
+fn default_pin_visible() -> bool { true }
 
 pub struct PinStore(pub Mutex<Vec<PinData>>);
 
@@ -87,17 +93,18 @@ pub fn restore_pins<R: Runtime>(app: &AppHandle<R>) {
     if !cfg.restore_on_start { return; }
     let entries = load_pins(app);
     if entries.is_empty() { return; }
-    // 【只恢复最近一张】此前逐条建窗会把所有历史贴图倾巢而出——
-    // 每张贴图都是一个完整 WebView2 窗口，启动瞬间连建 N 个既慢又扰人。
-    // 存储仍保留全部条目（清空/列表功能不受影响），只给最近一张建窗。
-    let latest = entries.last().cloned();
     if let Some(s) = app.try_state::<PinStore>() {
-        *s.0.lock().unwrap() = entries;
+        *s.0.lock().unwrap() = entries.clone();
     }
-    if let Some(pin) = latest {
-        create_window(app, &pin);
+    // 【只恢复退出时可见的贴图】托盘退出/关机时屏幕上还贴着的（可能不止一张）
+    // 全部原位恢复；已 Esc/热键隐藏的不出现。
+    // 每张都是一个完整 WebView2 窗口，逐张经 defer 排队创建，不阻塞启动
+    let mut restored = 0;
+    for pin in entries.iter().filter(|p| p.visible) {
+        create_window(app, pin);
+        restored += 1;
     }
-    diag_write("[pin] restored latest pin only");
+    diag_write(&format!("[pin] restored {restored} visible pin(s)"));
 }
 
 fn create_window<R: Runtime>(app: &AppHandle<R>, pin: &PinData) {
@@ -310,6 +317,10 @@ pub async fn pin_ready(app: AppHandle, window: WebviewWindow) -> Result<(), Stri
         if let Some(hwnd) = crate::screenshot::hwnd_of_webview(&w) {
             crate::acrylic::force_foreground_robust(hwnd);
         }
+        // 【确保键盘焦点】贴图窗必须真正持有焦点，前端才收得到 Esc/Delete/Ctrl+C。
+        // 待命复用窗以 SW_SHOWNOACTIVATE 创建、此后只做平移，从未走常规激活流程，
+        // force_foreground_robust 只保证"置前"，这里补一次 tauri 级 set_focus 兜底
+        let _ = w.set_focus();
         // 收遮罩延后 ~80ms（约 5 帧）：就绪信号来自隐藏窗里的 rAF，证明不了
         // 显示后首帧已 present。这期间即便贴图尚未合成完毕，底下仍是截图冻结
         // 画面而非裸桌面；遮罩揭开时贴图必已画好——彻底消除"闪一下"
@@ -394,6 +405,11 @@ pub fn pin_close(app: AppHandle, id: String) -> Result<(), String> {
     let store = app.try_state::<PinStore>().ok_or("no state")?;
     store.0.lock().unwrap().retain(|p| p.id != id);
     persist(&store, &app);
+    // 【清剪贴板签名】贴图被关闭 = 用户已处理完这段内容；若不清，
+    // 下次按贴图热键时同一段剪贴板内容会被判为"不是新内容"而走
+    // 「唤回最近一张」——最近一张刚被关掉，窗口不存在，什么都不会出现
+    // （"同一段文本只有第一次能贴出来"的根因）
+    *LAST_CLIP_SIG.lock().unwrap() = None;
     Ok(())
 }
 
@@ -403,6 +419,12 @@ pub(crate) fn hide_all_impl<R: Runtime>(app: &AppHandle<R>) -> Result<(), String
     for pin in &entries {
         if let Some(w) = window_of_pin(app, &pin.id) { let _ = w.hide(); }
     }
+    // 记住可见性：启动恢复时只重建退出时可见的贴图
+    {
+        let mut e = store.0.lock().unwrap();
+        for p in e.iter_mut() { p.visible = false; }
+    }
+    persist(&store, app);
     let _ = app.emit(EVT_PIN_VISIBILITY, false);
     Ok(())
 }
@@ -422,6 +444,12 @@ pub(crate) fn show_all_impl<R: Runtime>(app: &AppHandle<R>) -> Result<(), String
     if let Some(pin) = latest {
         if let Some(w) = window_of_pin(app, &pin.id) {
             let _ = w.show();
+            // 可见性落盘：退出时这张要被恢复
+            {
+                let mut e = store.0.lock().unwrap();
+                if let Some(p) = e.iter_mut().find(|p| p.id == pin.id) { p.visible = true; }
+            }
+            persist(&store, app);
         }
     }
     let _ = app.emit(EVT_PIN_VISIBILITY, true);
@@ -433,12 +461,10 @@ pub fn pin_show_all(app: AppHandle) -> Result<(), String> {
     show_all_impl(&app)
 }
 
-/// 贴图全部显示/隐藏切换（全局热键统一入口）。
-/// 【必须在后台线程执行】全局热键回调运行在主线程事件循环里，若在回调中
-/// 直接逐窗 show/hide/set_position/set_size，一旦被慢操作拖住（大尺寸透明
-/// 置顶窗的 DWM 合成、WebView2 控制器同步布局），整个应用所有窗口一起冻结
-/// ——表现为"按一下贴图热键整个界面卡死、只能 Tab 切焦点但页面不动"。
-/// 移出主线程后，即使个别窗口操作耗时也只是这个工作线程在等，UI 照常响应。
+/// 贴图热键统一入口：【专职贴出内容】——剪贴板有新内容（与上次热键操作
+/// 不同）→ 直接贴到鼠标处；内容没变或无内容 → 唤回最近一张贴图。
+/// 【不再兼任"全部隐藏"】隐藏由独立的「关闭全部贴图」热键承担
+/// （用户明确要求拆分：一个键贴内容、一个键全关）。
 pub(crate) fn toggle_all<R: Runtime>(app: &AppHandle<R>) {
     let app2 = app.clone();
     std::thread::spawn(move || {
@@ -448,34 +474,14 @@ pub(crate) fn toggle_all<R: Runtime>(app: &AppHandle<R>) {
             diag_write("[pin] toggle skipped: previous toggle still in flight");
             return;
         }
-        let any_visible = {
-            match app2.try_state::<PinStore>() {
-                Some(s) => {
-                    let entries = s.0.lock().unwrap().clone();
-                    entries.iter().any(|p| {
-                        window_of_pin(&app2, &p.id)
-                            .and_then(|w| w.is_visible().ok())
-                            .unwrap_or(false)
-                    })
-                }
-                None => false,
-            }
-        };
-        // 有可见贴图 → 全部隐藏（这是鼠标穿透贴图的唯一可靠出口之一）
-        if any_visible {
-            let _ = hide_all_impl(&app2);
-            if let Some(c) = read_clipboard() { *LAST_CLIP_SIG.lock().unwrap() = Some(c.sig()); }
-            TOGGLE_BUSY.store(false, Ordering::SeqCst);
-            return;
-        }
-        // 无可见贴图：剪贴板有【新】内容（与上次热键操作时不同）→ 直接贴出来；
+        // 剪贴板有【新】内容（与上次热键操作时不同）→ 直接贴出来；
         // 内容没变 → 只唤回最近一张（避免反复把同一段文字贴成新贴图）
         let clip = read_clipboard();
         let sig = clip.as_ref().map(|c| c.sig());
         let seen = *LAST_CLIP_SIG.lock().unwrap();
         let is_new = sig.is_some() && sig != seen;
         diag_write(&format!(
-            "[pin] toggle: any_visible={any_visible} clip={} sig_new={is_new}",
+            "[pin] toggle: clip={} sig_new={is_new}",
             match &clip { Some(ClipContent::Image(_)) => "image", Some(ClipContent::Html(h)) =>
                 if h.starts_with("<div style=") { "text" } else { "html" }, None => "none" },
         ));
@@ -639,6 +645,7 @@ pub(crate) fn create_html_pin<R: Runtime>(app: &AppHandle<R>, html: String, x: i
         flip_h: false, flip_v: false,
         shadow: cfg.border_shadow,
         click_through: false,
+        visible: true,
     };
     let store = app.try_state::<PinStore>().ok_or("no state")?;
     store.0.lock().unwrap().push(pin.clone());
@@ -700,42 +707,81 @@ pub fn pin_set_click_through(window: tauri::WebviewWindow, on: bool) -> Result<(
 }
 
 /// Esc 隐藏单个贴图（【不销毁】）：全局「显示/隐藏贴图」热键可整批唤回。
-/// 旧版 Esc=关闭删除，用户想再看只能重新截图——改为隐藏（Snipaste 行为）
+/// 旧版 Esc=关闭删除，用户想再看只能重新截图——改为隐藏（Snipaste 行为）。
+/// 可见性落盘：启动恢复时已隐藏的贴图不再重建
 #[tauri::command]
-pub fn pin_hide_one(window: tauri::WebviewWindow) -> Result<(), String> {
-    window.hide().map_err(|e| e.to_string())
+pub fn pin_hide_one(window: tauri::WebviewWindow, app: AppHandle) -> Result<(), String> {
+    window.hide().map_err(|e| e.to_string())?;
+    let label = window.label();
+    let id = label.strip_prefix(&format!("{PIN_PREFIX}-"))
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            // 待命复用窗：查分配表
+            app.try_state::<PinWinMap>()
+                .and_then(|m| m.0.lock().unwrap().get(label).cloned())
+                .unwrap_or_default()
+        });
+    if let Some(store) = app.try_state::<PinStore>() {
+        {
+            let mut e = store.0.lock().unwrap();
+            if let Some(p) = e.iter_mut().find(|p| p.id == id) { p.visible = false; }
+        }
+        persist(&store, &app);
+    }
+    Ok(())
 }
 
-/// Esc 全局兜底：隐藏最上层可见贴图（keyhook 系统级调用，不依赖贴图窗焦点）。
-/// - 前台是本应用【非贴图】窗口（设置/面板/工具栏）→ 不代劳，Esc 归它们自己
-///   （收起面板/关弹窗），避免"按 Esc 关面板把贴图也藏了"；
-/// - 前台是贴图窗自身 → 隐藏它（前端未就绪/加载失败时兜底；前端就绪时
-///   与 webview 自身的 Esc 处理幂等）；
-/// - 前台是其它应用 → 隐藏最近一张可见贴图（Snipaste 行为）。
+/// Esc 全局兜底：隐藏【前台贴图窗】（keyhook 系统级调用）。
+/// - 前台是贴图窗 → 隐藏它（前端未就绪/加载失败收不到 Esc 时兜底；
+///   前端就绪时与 webview 自身的 Esc 处理幂等）；
+/// - 前台是本应用【非贴图】窗口（设置/面板/工具栏/遮罩）→ 不代劳，
+///   Esc 归它们自己（收面板/退出截图）；
+/// - 前台是其它应用 → 【不代劳】——Esc 是那个应用的按键（关闭对话框、
+///   退出全屏等），系统级抢走会"莫名其妙藏掉贴图"。
 /// 返回是否有贴图被隐藏。
+///
+/// 【实现注记】前台判定用 GetForegroundWindow 的 HWND 与各窗口句柄直比——
+/// 不用 WebviewWindow::is_focused()（tao 内部焦点状态对「raw ShowWindow
+/// 显示的待命窗」等场景可能失真，逐窗 IPC 派发也慢）。
 pub(crate) fn hide_visible_pin<R: Runtime>(app: &AppHandle<R>) -> bool {
-    // 前台是本应用窗口：贴图窗代劳隐藏，其余窗口 Esc 自理
-    if let Some(w) = app.webview_windows().values().find(|w| w.is_focused().unwrap_or(false)) {
-        if w.label().starts_with(PIN_PREFIX) {
-            let _ = w.hide();
-            return true;
-        }
-        return false;
-    }
-    let store = match app.try_state::<PinStore>() {
-        Some(s) => s,
-        None => return false,
-    };
-    let entries = { store.0.lock().unwrap().clone() };
-    for pin in entries.iter().rev() {
-        if let Some(w) = window_of_pin(app, &pin.id) {
-            if w.is_visible().unwrap_or(false) {
+    #[cfg(windows)]
+    unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+        let fg = GetForegroundWindow();
+        if fg.is_invalid() { return false; }
+        for (label, w) in app.webview_windows() {
+            if crate::screenshot::hwnd_of_webview(&w).map(|h| h == fg).unwrap_or(false) {
+                if !label.starts_with(PIN_PREFIX) {
+                    // 前台是本应用其它窗口：Esc 归它自己
+                    return false;
+                }
                 let _ = w.hide();
+                let _ = mark_pin_visible(app, &label, false);
+                crate::storage::diag_write("[pin] esc hid foreground pin");
                 return true;
             }
         }
+        // 前台是其它应用：不代劳
     }
     false
+}
+
+/// 按【窗口 label】更新某张贴图的可见性标志并落盘
+fn mark_pin_visible<R: Runtime>(app: &AppHandle<R>, label: &str, visible: bool) -> Result<(), String> {
+    let id = label.strip_prefix(&format!("{PIN_PREFIX}-"))
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            app.try_state::<PinWinMap>()
+                .and_then(|m| m.0.lock().unwrap().get(label).cloned())
+                .unwrap_or_default()
+        });
+    let Some(store) = app.try_state::<PinStore>() else { return Err("no state".into()) };
+    {
+        let mut e = store.0.lock().unwrap();
+        if let Some(p) = e.iter_mut().find(|p| p.id == id) { p.visible = visible; }
+    }
+    persist(&store, app);
+    Ok(())
 }
 
 #[tauri::command]
@@ -764,6 +810,110 @@ pub async fn pin_copy_image(app: AppHandle, id: String) -> Result<(), String> {
     .map_err(|e| format!("join: {e}"))?
 }
 
+/// 把前端渲染好的 PNG 字节写入剪贴板（文本/富文本贴图「复制为图片」用）：
+/// 前端把贴图 DOM 经 SVG foreignObject 画进 canvas 导出 PNG，原生二进制直传。
+#[tauri::command]
+pub async fn pin_copy_image_bytes(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    let body = match request.body() {
+        tauri::ipc::InvokeBody::Raw(b) => b,
+        tauri::ipc::InvokeBody::Json(_) => return Err("期望二进制请求体".into()),
+    };
+    if body.is_empty() { return Err("empty png".into()); }
+    let png = body.to_vec();
+    let app2 = app.clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let img = image::load_from_memory(&png).map_err(|e| format!("decode: {e}"))?;
+        crate::screenshot::copy_rgba_to_clipboard(&app2, &img.to_rgba8())
+    })
+    .await
+    .map_err(|e| format!("join: {e}"))?
+}
+
+/// 按【贴图原始格式】复制：图片贴图→位图；文本/富文本贴图→HTML+纯文本备选
+/// （粘贴进 Word/企业微信等保留格式，粘贴进记事本得到纯文本）。
+/// 返回实际复制的格式（"image" | "html"），前端据此提示。
+#[tauri::command]
+pub async fn pin_copy_original(app: AppHandle, id: String) -> Result<String, String> {
+    let t = std::time::Instant::now();
+    let file = pin_file_path(app.clone(), id.clone()).ok_or("not found")?;
+    if !file.ends_with(".html") {
+        pin_copy_image(app, id).await?;
+        diag_write(&format!("[pin] copy image in {}ms", t.elapsed().as_millis()));
+        return Ok("image".into());
+    }
+    let kind = tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+        let html = std::fs::read_to_string(&file).map_err(|e| format!("read: {e}"))?;
+        let plain = html_to_plain(&html);
+        let mut cb = arboard::Clipboard::new().map_err(|e| format!("clipboard: {e}"))?;
+        cb.set()
+            .html(html, Some(plain))
+            .map_err(|e| format!("set html: {e}"))?;
+        Ok("html".into())
+    })
+    .await
+    .map_err(|e| format!("join: {e}"))??;
+    diag_write(&format!("[pin] copy html in {}ms", t.elapsed().as_millis()));
+    Ok(kind)
+}
+
+/// HTML → 纯文本（剥标签 + 实体解码），作 CF_HTML 的纯文本备选。
+/// 【必须解码数字实体】不少编辑器产出的 CF_HTML 会把空格写成 &#32;——
+/// 纯文本优先的目标（代码编辑器/记事本）拿到未解码文本就会满屏 &#32;
+fn html_to_plain(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut in_tag = false;
+    for ch in html.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            c if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    decode_entities(&out)
+}
+
+/// 解码 HTML 实体：命名实体（常用集）+ 十进制/十六进制数字实体
+fn decode_entities(s: &str) -> String {
+    if !s.contains('&') { return s.to_string(); }
+    let mut out = String::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < s.len() {
+        if bytes[i] == b'&' {
+            if let Some(semi) = s[i..].find(';') {
+                let ent = &s[i + 1..i + semi];
+                let decoded = match ent {
+                    "amp" => Some('&'.to_string()),
+                    "lt" => Some('<'.to_string()),
+                    "gt" => Some('>'.to_string()),
+                    "quot" => Some('"'.to_string()),
+                    "apos" => Some('\''.to_string()),
+                    "nbsp" => Some(' '.to_string()),
+                    _ if ent.starts_with("#x") || ent.starts_with("#X") => {
+                        u32::from_str_radix(&ent[2..], 16).ok()
+                            .and_then(char::from_u32).map(|c| c.to_string())
+                    }
+                    _ if ent.starts_with('#') => {
+                        ent[1..].parse::<u32>().ok()
+                            .and_then(char::from_u32).map(|c| c.to_string())
+                    }
+                    _ => None,
+                };
+                if let Some(d) = decoded {
+                    out.push_str(&d);
+                    i += semi + 1;
+                    continue;
+                }
+            }
+        }
+        let ch = s[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
 /// 贴图窗口被非 pin_close 途径（Alt+F4 等）销毁时同步清理存储条目。
 /// 幂等：pin_close 正常路径先 retain 再触发 Destroyed，二次调用无副作用。
 pub fn forget_pin<R: Runtime>(app: &AppHandle<R>, id: &str) {
@@ -780,6 +930,8 @@ pub fn forget_pin<R: Runtime>(app: &AppHandle<R>, id: &str) {
     };
     if removed {
         persist(&store, app);
+        // 同 pin_close：贴图没了就清剪贴板签名，下次热键允许重新贴同一段内容
+        *LAST_CLIP_SIG.lock().unwrap() = None;
     }
 }
 
@@ -828,6 +980,7 @@ pub(crate) fn create_store_entry<R: Runtime>(app: &AppHandle<R>, bytes: &[u8], m
         flip_h: false, flip_v: false,
         shadow: cfg.border_shadow,
         click_through: false,
+        visible: true,
     };
 
     let store = app.try_state::<PinStore>().ok_or("no state")?;

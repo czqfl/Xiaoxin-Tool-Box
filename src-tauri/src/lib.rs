@@ -402,6 +402,10 @@ pub fn run() {
             pin::pin_file_path,
             // 贴图图片展示走协议 GET /pin/{id} 直出文件字节，pin_image_data 已删
             pin::pin_copy_image,
+            // 按原始格式复制（图片→位图，文本/富文本→HTML+纯文本）
+            pin::pin_copy_original,
+            // 文本/富文本贴图「复制为图片」：前端渲染 PNG 字节直传
+            pin::pin_copy_image_bytes,
         ])
         .build(tauri::generate_context!())
         .expect("应用构建失败")

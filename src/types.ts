@@ -96,6 +96,8 @@ export interface ShortcutsConfig {
   snippets: string;
   screenshot: string;
   pins: string;
+  /** 关闭全部贴图（独立热键） */
+  pins_close: string;
   /** 屏幕取色（呼出十字取色模式） */
   picker: string;
 }

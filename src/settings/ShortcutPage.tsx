@@ -22,6 +22,7 @@ type Target =
   | "snippets"
   | "screenshot"
   | "pins"
+  | "pins_close"
   | "picker";
 
 /** 将键盘事件转换为 global-shortcut 可解析的组合键字符串，如 "Ctrl+Alt+C"。
@@ -174,6 +175,7 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
     snippets: idleRow,
     screenshot: idleRow,
     pins: idleRow,
+    pins_close: idleRow,
     picker: idleRow,
   });
   const [saving, setSaving] = useState<Target | null>(null);
@@ -214,6 +216,7 @@ export function ShortcutPage({ onResolved }: { onResolved: () => void }) {
         "snippets",
         "screenshot",
         "pins",
+        "pins_close",
         "picker",
       ] as Target[]
     ).filter((t) => t !== target);

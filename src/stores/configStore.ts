@@ -41,6 +41,7 @@ const defaultConfig: AppConfig = {
     snippets: "Alt+K",
     screenshot: "Ctrl+Alt+A",
     pins: "Ctrl+Alt+P",
+    pins_close: "Ctrl+Alt+K",
     picker: "Alt+D",
   },
   general: {

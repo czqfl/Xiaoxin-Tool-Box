@@ -5,10 +5,12 @@
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
-import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
+import { PhysicalSize } from "@tauri-apps/api/dpi";
 import {
-  pinImageUrl, pinUpdate, pinClose, pinSetClickThrough, pinCopyImage, pinReady, pinHideOne, pinResize, pinKind, diagLog,
+  pinImageUrl, pinUpdate, pinClose, pinSetClickThrough, pinReady, pinHideOne, pinResize, pinKind, diagLog,
+  pinCopyOriginal, pinCopyImageBytes,
 } from "../../core/tauri";
+import { useConfigStore } from "../../stores/configStore";
 import "./pin.css";
 
 /** 贴图边框随机定格色板（Snipaste 式：贴图瞬间彩闪几下，随后定格其中一色） */
@@ -40,12 +42,12 @@ export function PinWindow() {
   const [shadow, setShadow] = useState(true);
   const [clickThrough, setClickThrough] = useState(false);
   const [dragging, setDragging] = useState(false);
-  // 缩放比例角标（左上角）：滚轮缩放时出现，停止 ~1s 后淡出
-  const [zoomLabel, setZoomLabel] = useState<string | null>(null);
+  // 角标（左上角）：缩放比例/透明度/复制反馈，停止 ~1s 后淡出。
+  // cls 可选附加样式类（如 copied=绿色高亮，让复制反馈一眼可辨）
+  const [zoomLabel, setZoomLabel] = useState<{ text: string; cls?: string } | null>(null);
   const zoomHideTimer = useRef(0);
   // 图片原始宽度（naturalWidth）：缩放比例 = 当前窗宽 / 原始宽
   const baseWRef = useRef(0);
-  const dragStart = useRef<{x:number;y:number;wx:number;wy:number}|null>(null);
 
   const winLabel = getCurrentWindow().label;
   // 待命复用窗是池化的（pin-staging / pin-staging-2 / …），按前缀识别；
@@ -92,6 +94,9 @@ export function PinWindow() {
   // 现经 pin_kind 查询内容类型：html 拉取文本渲染（保留剪贴板内联样式），
   // 量完实际尺寸回填窗口再亮窗；image 走 <img> 原路
   const [kind, setKind] = useState<"image" | "html">("image");
+  // kind 镜像：键盘 effect 只挂载一次，经此读最新类型
+  const kindRef = useRef<"image" | "html">("image");
+  kindRef.current = kind;
   const [html, setHtml] = useState<string | null>(null);
   const htmlWrapRef = useRef<HTMLDivElement | null>(null);
   const htmlRef = useRef<HTMLDivElement | null>(null);
@@ -211,15 +216,13 @@ export function PinWindow() {
     zoomTimer.current = window.setTimeout(() => { void persistNowRef.current(); }, 400);
   };
 
-  // 左键按住状态：左键+滚轮 = 调透明度（Snipaste 同款交互）
-  const btnHeld = useRef(false);
   // opacity 镜像：滚轮 effect 只挂载一次，经此读取最新值
   const opacityRef = useRef(opacity);
   opacityRef.current = opacity;
 
   // 角标：缩放比例 / 透明度 / 操作提示（左上角），默认 ~1s 后自动隐藏
-  const showBadge = (text: string, ms = 1000) => {
-    setZoomLabel(text);
+  const showBadge = (text: string, ms = 1000, cls?: string) => {
+    setZoomLabel({ text, cls });
     window.clearTimeout(zoomHideTimer.current);
     zoomHideTimer.current = window.setTimeout(() => setZoomLabel(null), ms);
   };
@@ -232,16 +235,17 @@ export function PinWindow() {
   const pendingSizeRef = useRef<{ w: number; h: number } | null>(null);
   const zoomRafRef = useRef(0);
 
-  // mouse wheel: 普通滚动=缩放；左键按住滚动=透明度 ±5%（范围 5%~100%）
+  // mouse wheel: 普通滚动=缩放；Ctrl+滚轮=透明度 ±5%（范围 5%~100%）
+  // 【不能用"左键按住+滚轮"调透明度】原生拖放循环期间 webview 收不到
+  // mouseup，左键按住状态会卡在 true——之后滚轮全变成调透明度
+  // （"没按任何键滚轮却在调透明度"的根因）。Ctrl 修饰键由系统状态给出，
+  // 不存在卡住问题
   useEffect(() => {
-    const md = (e: MouseEvent) => { if (e.button === 0) btnHeld.current = true; };
-    const mu = () => { btnHeld.current = false; };
     const h = (e: WheelEvent) => {
       e.preventDefault();
       const win = getCurrentWindow();
-      // Ctrl+滚轮 或 左键按住+滚轮：调透明度 ±5%（范围 5%~100%，Snipaste 同款），
-      // 左上角角标实时提示当前透明度
-      if ((e.ctrlKey || btnHeld.current) && idRef.current) {
+      // Ctrl+滚轮：调透明度 ±5%，左上角角标实时提示当前透明度
+      if (e.ctrlKey && idRef.current) {
         const nv = Math.min(1, Math.max(0.05, +(opacityRef.current - Math.sign(e.deltaY) * 0.05).toFixed(2)));
         setOpacity(nv);
         showBadge(`透明度 ${Math.round(nv * 100)}%`);
@@ -275,12 +279,8 @@ export function PinWindow() {
       if (baseWRef.current > 0) showBadge(`${Math.round((nw / baseWRef.current) * 100)}%`);
       debouncePersist();
     };
-    window.addEventListener("mousedown", md);
-    window.addEventListener("mouseup", mu);
     window.addEventListener("wheel", h, { passive: false });
     return () => {
-      window.removeEventListener("mousedown", md);
-      window.removeEventListener("mouseup", mu);
       window.removeEventListener("wheel", h);
     };
   }, []);
@@ -304,17 +304,25 @@ export function PinWindow() {
   // keyboard
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
+      // 右键菜单开着：Esc 只关菜单，不关贴图
+      if (menuRef.current) {
+        if (e.key === "Escape") { e.preventDefault(); closeMenu(); }
+        return;
+      }
       if (!idRef.current) return;
-      // Delete=彻底删除；Esc=仅隐藏（贴图热键可整批唤回，Snipaste 行为）；
-      // Ctrl+C=复制这张贴图的原图到剪贴板
-      if (e.key === "Delete") {
+      // Esc/Delete=关闭此贴图（与右键菜单「关闭此贴图」同一接口 pinClose）。
+      // 此前 Esc=仅隐藏，但隐藏走 window.hide() 且依赖焦点链路，实测不可靠；
+      // 关闭接口验证正常，用户明确要求 Esc 与菜单行为一致
+      if (e.key === "Delete" || e.key === "Escape") {
         pinClose(idRef.current).catch(() => {});
-      } else if (e.key === "Escape") {
-        pinHideOne().catch(() => {});
       } else if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "c" || e.key === "C")) {
-        pinCopyImage(idRef.current)
-          .then(() => showBadge("已复制图片"))
-          .catch(() => showBadge("复制失败"));
+        // 【默认复制为图片（贴图视觉）】：文本/富文本贴图经 DOM 渲染导出 PNG；
+        // 复制原文本走右键菜单。仅失败时红标提示
+        showBadge("已复制图片", 1200, "copied");
+        const job = kindRef.current === "html"
+          ? copyPinAsImage()
+          : pinCopyOriginal(idRef.current).then(() => undefined);
+        job.catch(() => showBadge("复制失败", 1500, "failed"));
       } else if (e.key === "r" && e.ctrlKey) {
         setRotation((r) => (r + 90) % 360);
       }
@@ -324,31 +332,32 @@ export function PinWindow() {
   }, []);
 
   // drag
+  const dragClearRef = useRef(0);
+  const clearDragState = () => { window.clearTimeout(dragClearRef.current); setDragging(false); };
   const onMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0 || !idRef.current) return;
-    getCurrentWindow().outerPosition().then((pos) => {
-      dragStart.current = { x: e.screenX, y: e.screenY, wx: pos.x, wy: pos.y };
-      setDragging(true);
-    });
+    setDragging(true);
+    // 原生拖放循环里 webview 收不到 mouseup（纯点击无移动时也没有 onMoved），
+    // 拖拽态由「onMoved 停稳 180ms」或此超时兜底清除
+    window.clearTimeout(dragClearRef.current);
+    dragClearRef.current = window.setTimeout(clearDragState, 800);
+    // 【原生拖拽】交给 OS 模态拖放循环（WM_NCLBUTTONDOWN 语义）：拖动过程
+    // 由系统逐帧移动窗口，JS 零参与、零 IPC——此前 webview 里逐 mousemove
+    // 调 setPosition（一次 IPC 往返）无论怎么合并帧率都追不上原生丝滑度
+    getCurrentWindow().startDragging().catch(() => {});
   };
 
+  // 拖动中的位置持久化与拖拽态复位：onMoved 持续触发视为拖拽中，停稳
+  // ~180ms 视为松手；位置持久化沿用 400ms 防抖
   useEffect(() => {
-    if (!dragging) return;
-    const onMove = (e: MouseEvent) => {
-      if (!dragStart.current) return;
-      const d = dragStart.current;
-      const nx = d.wx + (e.screenX - d.x);
-      const ny = d.wy + (e.screenY - d.y);
-      getCurrentWindow().setPosition(new PhysicalPosition(nx, ny)).catch(() => {});
-    };
-    const onUp = () => {
-      setDragging(false);
-      dragStart.current = null;
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
-  }, [dragging]);
+    let un: (() => void) | undefined;
+    void getCurrentWindow().onMoved(() => {
+      debouncePersist();
+      window.clearTimeout(dragClearRef.current);
+      dragClearRef.current = window.setTimeout(clearDragState, 180);
+    }).then((f) => { un = f; });
+    return () => { un?.(); window.clearTimeout(dragClearRef.current); };
+  }, []);
 
   // persist position on move end
   useEffect(() => {
@@ -358,40 +367,116 @@ export function PinWindow() {
   }, []);
 
   // context menu
+  const config = useConfigStore((s) => s.config);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const closeMenu = () => {
+    menuRef.current?.remove();
+    menuRef.current = null;
+  };
+  // 左键点菜单外任意处 → 关闭菜单（mousedown 而非 click：点击空白处会触发
+  // 原生拖拽循环，click 事件在拖放循环里永远不会回到 webview）。
+  // 常驻监听 + menuRef 判空：避免闭包身份不一致导致监听器移除失效
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      const m = menuRef.current;
+      if (m && !m.contains(e.target as Node)) closeMenu();
+    };
+    document.addEventListener("mousedown", h, true);
+    return () => document.removeEventListener("mousedown", h, true);
+  }, []);
+  // ---- 文本/富文本贴图「复制为图片」----
+  // 把贴图 DOM 克隆进 SVG foreignObject → 画进 canvas（按 DPR 放大保清晰）
+  // → 导出 PNG → 原生二进制直传 Rust 写剪贴板位图
+  const copyPinAsImage = async (): Promise<void> => {
+    const el = htmlRef.current, wrap = htmlWrapRef.current;
+    if (!el || !wrap) throw new Error("no html");
+    const natW = Math.max(1, el.offsetWidth), natH = Math.max(1, el.offsetHeight);
+    const dpr = window.devicePixelRatio || 1;
+    const clone = el.cloneNode(true) as HTMLElement;
+    const holder = document.createElement("div");
+    holder.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+    holder.appendChild(clone);
+    const xml = new XMLSerializer().serializeToString(holder);
+    const svg =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${natW}" height="${natH}">` +
+      `<foreignObject width="100%" height="100%">${xml}</foreignObject></svg>`;
+    const img = new Image();
+    await new Promise<void>((res, rej) => {
+      img.onload = () => res();
+      img.onerror = () => rej(new Error("svg render failed"));
+      img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+    });
+    const c = document.createElement("canvas");
+    c.width = Math.round(natW * dpr); c.height = Math.round(natH * dpr);
+    const ctx = c.getContext("2d")!;
+    ctx.scale(dpr, dpr);
+    ctx.drawImage(img, 0, 0, natW, natH);
+    const blob = await new Promise<Blob | null>((r) => c.toBlob(r, "image/png"));
+    if (!blob) throw new Error("toBlob null");
+    await pinCopyImageBytes(blob);
+  };
+
   const onContext = (e: React.MouseEvent) => {
     e.preventDefault();
     const id = idRef.current;
     if (!id) return;
+    closeMenu();
+    // 文本/富文本贴图：原文本与图片两种复制都给（Ctrl+C 默认复制为图片）
+    const copyActions = kind === "html"
+      ? [
+          { label: "复制原文本", action: () => { showBadge("已复制文本", 1200, "copied"); pinCopyOriginal(id).catch(() => showBadge("复制失败", 1500, "failed")); } },
+          { label: "复制为图片", action: () => { showBadge("已复制图片", 1200, "copied"); copyPinAsImage().catch(() => showBadge("复制失败", 1500, "failed")); } },
+        ]
+      : [
+          { label: "复制", action: () => { showBadge("已复制图片", 1200, "copied"); pinCopyOriginal(id).catch(() => showBadge("复制失败", 1500, "failed")); } },
+        ];
     const actions = [
-      { label: "复制到剪贴板", action: () => pinCopyImage(id).catch(() => {}) },
+      ...copyActions,
       { label: shadow ? "关闭阴影" : "开启阴影", action: () => setShadow(!shadow) },
       // 鼠标穿透：点击/滚轮全部穿过贴图直达下面的窗口（Snipaste 同款）。
       // 穿透后贴图收不到任何鼠标事件——出口是贴图热键（隐藏后唤回自动解除）
-      { label: clickThrough ? "取消鼠标穿透" : "开启鼠标穿透（贴图热键唤回）",
+      { label: clickThrough ? "取消鼠标穿透" : "开启鼠标穿透",
         action: () => {
           const turningOn = !clickThrough;
           pinSetClickThrough(turningOn).then(() => {
             setClickThrough(turningOn);
-            if (turningOn) showBadge("已鼠标穿透 · 按贴图热键隐藏/唤回", 4000);
+            if (turningOn) showBadge("已鼠标穿透 · 按贴图热键唤回", 4000);
           }).catch(() => {});
         } },
-      { label: "隐藏此贴图（贴图热键唤回）", action: () => pinHideOne().catch(() => {}) },
-      { label: "关闭此贴图", action: () => pinClose(id).catch(() => {}) },
+      { label: "隐藏贴图", action: () => pinHideOne().catch(() => {}) },
+      { label: "关闭贴图", action: () => pinClose(id).catch(() => {}) },
     ];
     const menu = document.createElement("div");
     menu.className = "pin-ctx-menu";
-    menu.style.left = e.clientX + "px";
-    menu.style.top = e.clientY + "px";
+    menu.style.left = "0px";
+    menu.style.top = "0px";
+    menu.style.visibility = "hidden";
+    // 【跟随系统主题 + 通用设置】底色用主题面板色，透明度/毛玻璃由
+    // 通用设置的「亚克力 + 不透明度」统一管理（与各面板外壳同源）
+    const g = config?.general;
+    const acrylic = g?.acrylic_enabled !== false;
+    const op = Math.min(100, Math.max(0, g?.acrylic_opacity ?? 60)) / 100;
+    const rgb = getComputedStyle(document.documentElement)
+      .getPropertyValue("--bg-panel-rgb").trim() || "24, 24, 28";
+    menu.style.background = `rgba(${rgb}, ${acrylic ? op : 1})`;
+    menu.style.backdropFilter = acrylic ? "blur(18px)" : "none";
     for (const a of actions) {
       const btn = document.createElement("div");
       btn.className = "pin-ctx-item";
       btn.textContent = a.label;
-      btn.onclick = () => { a.action(); menu.remove(); };
+      btn.onclick = () => { closeMenu(); a.action(); };
       menu.appendChild(btn);
     }
     document.body.appendChild(menu);
-    const close = () => { menu.remove(); document.removeEventListener("click", close); };
-    setTimeout(() => document.addEventListener("click", close), 0);
+    menuRef.current = menu;
+    // 【钳回可视区】菜单渲染在贴图窗自己的 webview 里，贴图较小时点击点
+    // 附近放不下会整个溢出窗界被裁掉（表现为"菜单只显示一半/看不见"）。
+    // 先隐藏渲染量出实际尺寸，再钳进窗口可视范围内
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    menu.style.left = `${Math.max(2, Math.min(e.clientX, vw - mw - 2))}px`;
+    menu.style.top = `${Math.max(2, Math.min(e.clientY, vh - mh - 2))}px`;
+    menu.style.visibility = "visible";
   };
 
   // 图片就绪信号：decode() 在解码完成（可无闪烁呈现）时才 resolve，
@@ -411,8 +496,22 @@ export function PinWindow() {
   // 分配贴图后才有内容，才渲染边框与阴影
   const hasContent = (!!src && kind === "image") || (kind === "html" && html !== null);
 
+  // 选中（窗口聚焦）态：贴图获得键盘焦点时边框点亮为主题色 + 辉光，
+  // 点别处自动熄灭——一眼看出当前操作的是哪张贴图
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    const on = () => setFocused(true);
+    const off = () => setFocused(false);
+    window.addEventListener("focus", on);
+    window.addEventListener("blur", off);
+    return () => {
+      window.removeEventListener("focus", on);
+      window.removeEventListener("blur", off);
+    };
+  }, []);
+
   return (
-    <div className={`pin-window${shadow && hasContent ? " pin-shadow" : ""}${dragging ? " pin-dragging" : ""}`}
+    <div className={`pin-window${shadow && hasContent ? " pin-shadow" : ""}${dragging ? " pin-dragging" : ""}${focused ? " pin-focused" : ""}`}
       style={{ opacity: hasContent ? opacity : 0, "--pin-accent": accent, "--pin-m": `${pinMarginCss()}px` } as React.CSSProperties}
       onMouseDown={onMouseDown} onContextMenu={onContext}
       onDoubleClick={() => { if (idRef.current) pinClose(idRef.current).catch(() => {}); }}>
@@ -454,7 +553,9 @@ export function PinWindow() {
           className={`pin-border${introDone ? "" : " pin-border-flash"}`}
           onAnimationEnd={() => setIntroDone(true)} />
       )}
-      {zoomLabel && <div className="pin-zoom-badge">{zoomLabel}</div>}
+      {zoomLabel && (
+        <div className={`pin-zoom-badge${zoomLabel.cls ? " " + zoomLabel.cls : ""}`}>{zoomLabel.text}</div>
+      )}
     </div>
   );
 }

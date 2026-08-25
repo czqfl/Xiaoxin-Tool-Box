@@ -35,6 +35,8 @@ pub struct ShortcutBindingsInner {
     pub screenshot: Option<Shortcut>,
     /// 显示/隐藏全部贴图
     pub pins: Option<Shortcut>,
+    /// 关闭全部贴图（独立热键）
+    pub pins_close: Option<Shortcut>,
     /// 屏幕取色（呼出十字取色模式，复用截图遮罩窗）
     pub picker: Option<Shortcut>,
 }
@@ -46,7 +48,7 @@ pub fn parse(shortcut: &str) -> Result<Shortcut, String> {
 }
 
 /// 全部快捷键目标（顺序 = 注册顺序 = 绑定表字段顺序）
-const TARGETS: [&str; 10] = [
+const TARGETS: [&str; 11] = [
     "clipboard",
     "folder",
     "credentials",
@@ -56,6 +58,7 @@ const TARGETS: [&str; 10] = [
     "snippets",
     "screenshot",
     "pins",
+    "pins_close",
     "picker",
 ];
 
@@ -75,6 +78,7 @@ fn config_shortcut(config: &AppConfig, target: &str) -> String {
         "snippets" => config.shortcuts.snippets.clone(),
         "screenshot" => config.shortcuts.screenshot.clone(),
         "pins" => config.shortcuts.pins.clone(),
+        "pins_close" => config.shortcuts.pins_close.clone(),
         _ => config.shortcuts.picker.clone(),
     }
 }
@@ -91,6 +95,7 @@ fn set_config_shortcut(config: &mut AppConfig, target: &str, value: String) {
         "snippets" => config.shortcuts.snippets = value,
         "screenshot" => config.shortcuts.screenshot = value,
         "pins" => config.shortcuts.pins = value,
+        "pins_close" => config.shortcuts.pins_close = value,
         _ => config.shortcuts.picker = value,
     }
 }
@@ -107,6 +112,7 @@ fn set_binding(inner: &mut ShortcutBindingsInner, target: &str, v: Option<Shortc
         "snippets" => inner.snippets = v,
         "screenshot" => inner.screenshot = v,
         "pins" => inner.pins = v,
+        "pins_close" => inner.pins_close = v,
         _ => inner.picker = v,
     }
 }
@@ -182,6 +188,7 @@ pub fn shortcut_test(
             || inner.snippets == Some(parsed)
             || inner.screenshot == Some(parsed)
             || inner.pins == Some(parsed)
+            || inner.pins_close == Some(parsed)
             || inner.picker == Some(parsed)
         {
             return Ok(());
@@ -296,6 +303,7 @@ pub fn shortcut_runtime_bindings(bindings: State<'_, ShortcutBindings>) -> Vec<S
     push("snippets", &inner.snippets);
     push("screenshot", &inner.screenshot);
     push("pins", &inner.pins);
+    push("pins_close", &inner.pins_close);
     push("picker", &inner.picker);
     out
 }
@@ -345,7 +353,7 @@ pub fn unregister_all_runtime<R: Runtime>(app: &AppHandle<R>) {
 /// 功能停用时其快捷键一律不注册（resync 跳过），入口同步隐藏。
 fn feature_of_target(target: &str) -> &str {
     match target {
-        "screenshot" | "pins" | "picker" => "screenshot",
+        "screenshot" | "pins" | "pins_close" | "picker" => "screenshot",
         t => t,
     }
 }
@@ -493,6 +501,16 @@ pub fn handle_shortcut_pressed<R: Runtime>(app: &AppHandle<R>, shortcut: &Shortc
         // 窗口操作一旦卡住会冻结全部窗口
         crate::storage::diag_write("[shortcut] pins toggle triggered");
         crate::pin::toggle_all(app);
+        return;
+    }
+    // 关闭全部贴图（独立热键）
+    let is_pins_close = {
+        let inner = bindings.0.lock().unwrap();
+        inner.pins_close == Some(*shortcut)
+    };
+    if is_pins_close {
+        crate::storage::diag_write("[shortcut] pins close-all triggered");
+        let _ = crate::pin::hide_all_impl(app);
         return;
     }
     let label = {

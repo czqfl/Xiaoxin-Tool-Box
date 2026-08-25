@@ -282,6 +282,7 @@ export const applyShortcut = (
     | "snippets"
     | "screenshot"
     | "pins"
+    | "pins_close"
     | "picker",
   shortcut: string
 ) => invoke<import("../types").AppConfig>("shortcut_apply", { target, shortcut });
@@ -470,6 +471,12 @@ export const pinImageUrl = (id: string) =>
   `http://screenshot.localhost/pin/${id}?v=${Date.now()}`;
 /** 复制贴图原图到剪贴板 */
 export const pinCopyImage = (id: string) => invoke<void>("pin_copy_image", { id });
+/** 按贴图原始格式复制：图片→位图；文本/富文本→HTML+纯文本。返回 "image" | "html" */
+export const pinCopyOriginal = (id: string) =>
+  invoke<"image" | "html">("pin_copy_original", { id });
+/** 把前端渲染好的 PNG 写入剪贴板（文本/富文本贴图「复制为图片」） */
+export const pinCopyImageBytes = (png: Blob) =>
+  png.arrayBuffer().then((buf) => invoke<void>("pin_copy_image_bytes", buf));
 /** 切换贴图鼠标穿透 */
 export const pinSetClickThrough = (on: boolean) =>
   invoke<void>("pin_set_click_through", { on });
