@@ -1,9 +1,7 @@
 /** 功能开关页：集中控制各功能的启用/停用。
  *  停用即：全局快捷键注销、工具栏/托盘/设置侧栏入口隐藏、面板呼出守卫拦截。
  *  开关保存走整份配置（config_save 内部会推倒重来重注册快捷键，即时生效）。 */
-import { useCallback, useEffect, useState } from "react";
 import { useConfigStore } from "../stores/configStore";
-import { resyncShortcuts, shortcutRuntimeBindings } from "../core/tauri";
 import { Switch } from "./components";
 import type { Page } from "./SettingsApp";
 
@@ -44,13 +42,6 @@ export function featureEnabled(config: ReturnType<typeof useConfigStore.getState
 export function FeaturePage({ onNavigate }: { onNavigate: (p: Page) => void }) {
   const config = useConfigStore((s) => s.config);
   const update = useConfigStore((s) => s.update);
-  const [runtime, setRuntime] = useState<string[]>([]);
-  const [resyncing, setResyncing] = useState(false);
-
-  const refreshRuntime = useCallback(() => {
-    shortcutRuntimeBindings().then(setRuntime).catch(() => {});
-  }, []);
-  useEffect(() => { refreshRuntime(); }, [refreshRuntime, config.shortcuts]);
 
   const toggle = (key: string, on: boolean) => {
     const next = { ...config };
@@ -66,19 +57,6 @@ export function FeaturePage({ onNavigate }: { onNavigate: (p: Page) => void }) {
       case "toolbar": next.toolbar = { ...config.toolbar, enabled: on }; break;
     }
     void update(next);
-    // 快捷键注册状态由 config_save 内部重注册，稍后刷新运行时展示
-    window.setTimeout(refreshRuntime, 400);
-  };
-
-  const doResync = async () => {
-    setResyncing(true);
-    try {
-      const fresh = await resyncShortcuts();
-      if (fresh && typeof fresh === "object") useConfigStore.getState().sync(fresh as never);
-      refreshRuntime();
-    } finally {
-      setResyncing(false);
-    }
   };
 
   return (
@@ -116,22 +94,6 @@ export function FeaturePage({ onNavigate }: { onNavigate: (p: Page) => void }) {
             </div>
           );
         })}
-      </div>
-
-      <div className="shortcut-hint">
-        <b>运行时实际生效的快捷键：</b>
-        {runtime.length > 0 ? runtime.join("；") : "（无——全部功能已停用或读取中）"}
-      </div>
-
-      <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
-        <button
-          className="btn btn-sm"
-          disabled={resyncing}
-          onClick={() => void doResync()}
-          title="若出现旧快捷键还在触发、新快捷键不生效等脱节现象，点此全部注销后按当前配置重新注册"
-        >
-          {resyncing ? "重新注册中…" : "重置并重新注册全部快捷键"}
-        </button>
       </div>
     </div>
   );

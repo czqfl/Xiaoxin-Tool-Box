@@ -48,7 +48,9 @@ export function PinWindow() {
   const dragStart = useRef<{x:number;y:number;wx:number;wy:number}|null>(null);
 
   const winLabel = getCurrentWindow().label;
-  const isStaging = winLabel === "pin-staging";
+  // 待命复用窗是池化的（pin-staging / pin-staging-2 / …），按前缀识别；
+  // 贴图 id：常规窗取自 label；复用窗等 assign 事件分配
+  const isStaging = winLabel.startsWith("pin-staging");
   // 贴图 id：常规窗取自 label；复用窗等 assign 事件分配
   const idRef = useRef<string>(isStaging ? "" : winLabel.replace(/^pin-/, ""));
   // 图片加载失败自愈重试：只重试一次（协议偶发抖动），绝不反复刷
@@ -110,11 +112,43 @@ export function PinWindow() {
     fetch(src).then((r) => r.text()).then((t) => { if (alive) setHtml(t); }).catch(() => {});
     return () => { alive = false; };
   }, [kind, src]);
+  /** 富文本底色自适应：企业微信等深色主题应用复制的片段不带背景色，
+   *  贴图窗又是透明背景——文字直接叠在桌面上看不清（QQ 复制自带白底所以没事）。
+   *  采样子树里实际显示文字元素的前景色平均亮度：偏亮配深底、偏暗配白底；
+   *  片段自带的背景色样式照常覆盖，不受影响 */
+  const pickHtmlBackdrop = (el: HTMLElement): string => {
+    const lum = (c: string): number | null => {
+      const m = c.match(/rgba?\(([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/);
+      return m ? (0.2126 * +m[1] + 0.7152 * +m[2] + 0.0722 * +m[3]) / 255 : null;
+    };
+    let sum = 0, n = 0;
+    if (el.textContent?.trim()) {
+      const l = lum(getComputedStyle(el).color);
+      if (l !== null) { sum += l; n += 1; }
+    }
+    const walk = (node: HTMLElement, depth: number) => {
+      if (n >= 60 || depth > 12) return;
+      for (const child of Array.from(node.children) as HTMLElement[]) {
+        if (n < 60
+          && Array.from(child.childNodes).some((x) => x.nodeType === 3 && x.textContent?.trim())) {
+          const l = lum(getComputedStyle(child).color);
+          if (l !== null) { sum += l; n += 1; }
+        }
+        walk(child, depth + 1);
+      }
+    };
+    walk(el, 1);
+    if (n === 0) return "#ffffff";
+    return sum / n > 0.55 ? "#1e1f22" : "#ffffff";
+  };
+
   useEffect(() => {
     if (html === null || !idRef.current || htmlSizedRef.current) return;
     const el = htmlRef.current;
     if (!el) return;
     htmlSizedRef.current = true;
+    // 先补底色再量尺寸：背景不影响布局，但保证量到的就是最终呈现状态
+    el.style.background = pickHtmlBackdrop(el);
     const natW = el.offsetWidth, natH = el.offsetHeight;
     htmlNatRef.current = { w: natW, h: natH };
     const dpr = window.devicePixelRatio || 1;
@@ -122,7 +156,13 @@ export function PinWindow() {
     const h = Math.max(40, Math.min(6000, Math.round(natH * dpr)));
     void pinResize(idRef.current, w, h).then(() => {
       diagLog(`[pin] html sized ${w}x${h} +${Date.now() - tAssignRef.current}ms, ready`);
-      readyWhenPainted(null);
+      // 【绝不能等 rAF】staging 复用窗是隐藏窗，WebView2 会把隐藏页面的
+      // requestAnimationFrame 节流到近乎停摆——readyWhenPainted(null) 的双 rAF
+      // 迟迟不触发，最终只能靠 Rust 1.5s 兜底重建才显示出来，这正是
+      // "复制富文本后按贴图快捷键要等一两秒才弹出"的根因。
+      // 图片路径用 img.decode() 不依赖 rAF 所以没事；HTML 路径量完尺寸直接就绪
+      // （Rust 显窗前本就有 ~80ms 合成缓冲，不会闪空白）
+      void pinReady().catch(() => {});
       applyHtmlScale();
     }).catch(() => {});
   }, [html]);
@@ -265,11 +305,16 @@ export function PinWindow() {
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (!idRef.current) return;
-      // Delete=彻底删除；Esc=仅隐藏（贴图热键可整批唤回，Snipaste 行为）
+      // Delete=彻底删除；Esc=仅隐藏（贴图热键可整批唤回，Snipaste 行为）；
+      // Ctrl+C=复制这张贴图的原图到剪贴板
       if (e.key === "Delete") {
         pinClose(idRef.current).catch(() => {});
       } else if (e.key === "Escape") {
         pinHideOne().catch(() => {});
+      } else if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "c" || e.key === "C")) {
+        pinCopyImage(idRef.current)
+          .then(() => showBadge("已复制图片"))
+          .catch(() => showBadge("复制失败"));
       } else if (e.key === "r" && e.ctrlKey) {
         setRotation((r) => (r + 90) % 360);
       }
@@ -360,9 +405,15 @@ export function PinWindow() {
     }
   };
 
+  // 【空壳零渲染】待命复用窗在屏幕外可见待命（合成器预热），未分配贴图前
+  // 绝不能画出边框/阴影等任何可见元素——否则一旦窗口意外落在可视区
+  // （DPI 换算、窗口管理器调整等），用户就会看到一块"透明带框、Esc 无效"的幽灵矩形。
+  // 分配贴图后才有内容，才渲染边框与阴影
+  const hasContent = (!!src && kind === "image") || (kind === "html" && html !== null);
+
   return (
-    <div className={`pin-window${shadow ? " pin-shadow" : ""}${dragging ? " pin-dragging" : ""}`}
-      style={{ opacity, "--pin-accent": accent, "--pin-m": `${pinMarginCss()}px` } as React.CSSProperties}
+    <div className={`pin-window${shadow && hasContent ? " pin-shadow" : ""}${dragging ? " pin-dragging" : ""}`}
+      style={{ opacity: hasContent ? opacity : 0, "--pin-accent": accent, "--pin-m": `${pinMarginCss()}px` } as React.CSSProperties}
       onMouseDown={onMouseDown} onContextMenu={onContext}
       onDoubleClick={() => { if (idRef.current) pinClose(idRef.current).catch(() => {}); }}>
       {src && kind === "image" && (
@@ -396,10 +447,13 @@ export function PinWindow() {
         </div>
       )}
       {/* Snipaste 式边框：贴图瞬间彩闪几下定格随机主题色；此后悬停/拖动时
-          显示主题色、闲置时白色，让贴图边界在任何桌面都清晰可辨 */}
-      <div
-        className={`pin-border${introDone ? "" : " pin-border-flash"}`}
-        onAnimationEnd={() => setIntroDone(true)} />
+          显示主题色、闲置时白色，让贴图边界在任何桌面都清晰可辨。
+          【只在有内容后渲染】——空壳待命窗绝不画边框 */}
+      {hasContent && (
+        <div
+          className={`pin-border${introDone ? "" : " pin-border-flash"}`}
+          onAnimationEnd={() => setIntroDone(true)} />
+      )}
       {zoomLabel && <div className="pin-zoom-badge">{zoomLabel}</div>}
     </div>
   );

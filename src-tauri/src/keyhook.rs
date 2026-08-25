@@ -60,6 +60,8 @@ enum Action {
     TogglePins,
     /// 关闭翻译弹窗（系统级兜底：弹窗无焦点时 webview 收不到 Esc）
     CloseTranslate,
+    /// Esc 隐藏最上层可见贴图（系统级兜底：贴图窗无焦点时 webview 收不到 Esc）
+    HidePinOnEsc,
     /// 捕获模式：设置页录入 Win 组合键（payload 为虚拟键码）
     WinCaptured(u16),
 }
@@ -324,6 +326,13 @@ fn run_action<R: Runtime>(app: &AppHandle<R>, action: Action) {
                 let _ = w.hide();
             }
         }
+        Action::HidePinOnEsc => {
+            // 任一贴图可见时隐藏最上层一张（webview 无焦点收不到 Esc 的兜底；
+            // 贴图窗聚焦时其前端 Esc 也会隐藏同一张，hide 幂等无副作用）
+            if crate::pin::hide_visible_pin(app) {
+                crate::storage::diag_write("[keyhook] esc hid top pin");
+            }
+        }
         Action::WinCaptured(vk) => {
             // 回传组合串给设置页录入框（与前端 comboFromEvent 的格式一致）
             if let Some(name) = vk_to_combo_name(vk as u32) {
@@ -508,9 +517,16 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
             SWALLOWED_VK.store(vk as u16, Ordering::SeqCst);
             post(Action::SeqPaste);
             return LRESULT(1);
-        } else if vk == 0x1B && TRANSLATE_POPUP_OPEN.load(Ordering::SeqCst) {
-            // 翻译弹窗打开时按 Esc：系统级关闭（不吞键，避免弹窗已关后 Esc 失灵）
-            post(Action::CloseTranslate);
+        } else if vk == 0x1B {
+            // Esc 系统级兜底（不吞键，放行给焦点窗口正常处理）：
+            // 翻译弹窗打开 → 关闭翻译弹窗；否则 → 隐藏最上层可见贴图。
+            // 两个场景的 webview 都可能收不到按键（弹窗/贴图无焦点、贴图窗
+            // 前端未加载），Rust 侧代劳后 Esc 无论何时按都可靠
+            if TRANSLATE_POPUP_OPEN.load(Ordering::SeqCst) {
+                post(Action::CloseTranslate);
+            } else {
+                post(Action::HidePinOnEsc);
+            }
         }
     } else if is_up && SWALLOWED_VK.load(Ordering::SeqCst) == vk as u16 {
         SWALLOWED_VK.store(0, Ordering::SeqCst);

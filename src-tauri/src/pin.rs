@@ -7,12 +7,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Runtime,
-    WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    WebviewWindow, WebviewWindowBuilder,
 };
 
 pub const PIN_PREFIX: &str = "pin";
 pub const EVT_PIN_VISIBILITY: &str = "pin://visibility-changed";
-/// 复用贴图窗（预建隐藏窗）的固定标签：新贴图优先装进它，免建窗秒显
+/// 复用贴图窗标签前缀：待命窗池依次为 pin-staging、pin-staging-2、…
+/// 新贴图优先装进空闲待命窗，免建窗秒显
 pub const STAGING_LABEL: &str = "pin-staging";
 
 /// 贴图全显/全隐切换的在途标记：同一时刻只允许一个切换流程执行（防抖）
@@ -100,10 +101,7 @@ pub fn restore_pins<R: Runtime>(app: &AppHandle<R>) {
 }
 
 fn create_window<R: Runtime>(app: &AppHandle<R>, pin: &PinData) {
-    let url = match app.config().build.dev_url.clone() {
-        Some(u) => WebviewUrl::External(u),
-        None => WebviewUrl::App("index.html".into()),
-    };
+    let url = crate::frontend_url(app);
     let label = format!("{PIN_PREFIX}-{}", pin.id);
     let app2 = app.clone();
     let pin2 = pin.clone();
@@ -142,81 +140,135 @@ fn window_of_pin<R: Runtime>(app: &AppHandle<R>, id: &str) -> Option<WebviewWind
     app.get_webview_window(&label)
 }
 
-/// 确保存在一个隐藏的「复用贴图窗」（屏幕外待命）。新建贴图时直接把图片装进
+/// 确保存在一个「复用贴图窗」（屏幕外可见待命）。新建贴图时直接把图片装进
 /// 这个已就绪的窗——免去「临时创建 WebView2 窗口 + 加载整个前端应用」的
 /// 数百毫秒到数秒开销。这正是此前贴图卡顿、闪桌面、偶发失败的根源。
-pub(crate) fn ensure_staging<R: Runtime>(app: &AppHandle<R>) {
-    if app.get_webview_window(STAGING_LABEL).is_some() { return; }
-    let url = match app.config().build.dev_url.clone() {
-        Some(u) => WebviewUrl::External(u),
-        None => WebviewUrl::App("index.html".into()),
-    };
+
+/// 待命窗数量：消耗一张补一张，保证连续贴图/热键连按时始终有热窗可用，
+/// 不再掉进「临时建 WebView2 窗口」的慢速路径（旧版单张待命窗被第一张贴图
+/// 占用后，后续每张贴图都要完整加载前端应用，正是 ~0.5s 延迟的元凶之一）
+const STANDBY_COUNT: usize = 2;
+
+fn is_standby_label(label: &str) -> bool { label.starts_with(STAGING_LABEL) }
+
+/// 挑一个空闲待命窗（存在且尚未被分配贴图任务）
+fn free_standby<R: Runtime>(app: &AppHandle<R>) -> Option<WebviewWindow<R>> {
+    let assigned = |l: &str| app.try_state::<PinWinMap>()
+        .map(|m| m.0.lock().unwrap().contains_key(l))
+        .unwrap_or(false);
+    app.webview_windows()
+        .into_iter()
+        .filter(|(l, _)| is_standby_label(l) && !assigned(l))
+        .map(|(_, w)| w)
+        .next()
+}
+
+/// 下一个可用的待命窗标签：pin-staging、pin-staging-2、…
+fn next_standby_label<R: Runtime>(app: &AppHandle<R>) -> String {
+    for i in 1..64 {
+        let cand = if i == 1 { STAGING_LABEL.to_string() } else { format!("{STAGING_LABEL}-{i}") };
+        if app.get_webview_window(&cand).is_none() { return cand; }
+    }
+    format!("{STAGING_LABEL}-{}", chrono::Utc::now().timestamp_millis())
+}
+
+/// 在主循环建一张「屏幕外可见」的待命窗（合成器预热）
+fn build_standby<R: Runtime>(app: &AppHandle<R>) {
+    let url = crate::frontend_url(app);
     let app2 = app.clone();
     crate::defer_to_main_loop(app.clone(), move || {
-        if app2.get_webview_window(STAGING_LABEL).is_some() { return; }
-        let _ = WebviewWindowBuilder::new(&app2, STAGING_LABEL, url)
+        // 主循环内重算标签与需求量：多个补充请求排队时不会超建
+        let assigned = |l: &String| app2.try_state::<PinWinMap>()
+            .map(|m| m.0.lock().unwrap().contains_key(l.as_str()))
+            .unwrap_or(false);
+        let free = app2.webview_windows().iter()
+            .filter(|(l, _)| is_standby_label(l) && !assigned(l))
+            .count();
+        if free >= STANDBY_COUNT { return; }
+        let label = next_standby_label(&app2);
+        let Ok(w) = WebviewWindowBuilder::new(&app2, &label, url)
             .title("pin").decorations(false).transparent(true)
             .always_on_top(true).skip_taskbar(true).resizable(false)
             .shadow(false).visible(false).focused(false)
-            // 屏幕外待命：空壳窗永不可见、不参与布局
+            // 屏幕外待命：空壳窗不参与布局、鼠标不可达
             .position(-32000.0, -32000.0).inner_size(240.0, 160.0)
-            .build();
+            .build()
+        else { return };
+        // 【先钉死待命位再显示】builder 的 position 走逻辑像素换算，个别 DPI
+        // 组合下可能落在可视区——用物理坐标显式重钉一次，杜绝空壳窗出现在屏幕上
+        let _ = w.set_position(tauri::PhysicalPosition::new(-32000, -32000));
+        // 【合成器预热·贴图热键提速的关键】WebView2 对【隐藏】窗口会停摆
+        // 整条渲染管线，show() 后首帧合成是冷启动——数百毫秒起步，这正是
+        // "按贴图热键 ~0.5s 才弹出"的主因。改为【屏幕外可见】待命：合成器
+        // 常驻运行、页面持续渲染，贴图时把窗平移到位即显示，近乎零延迟。
+        // SW_SHOWNOACTIVATE 保证绝不抢用户当前焦点。
+        #[cfg(windows)]
+        if let Some(hwnd) = crate::screenshot::hwnd_of_webview(&w) {
+            use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNOACTIVATE};
+            unsafe { let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE); }
+            crate::screenshot::disable_show_animation(hwnd);
+        }
+        #[cfg(not(windows))]
+        { let _ = w.show(); }
     });
 }
 
-/// 把新贴图装进隐藏的 staging 复用窗：
+/// 确保待命复用窗数量充足；被消耗成正式贴图的窗由这里异步补建
+pub(crate) fn ensure_staging<R: Runtime>(app: &AppHandle<R>) {
+    build_standby(app);
+}
+
+/// attach 串行锁：多屏遮罩并发输出/热键连按可能同时进入，两个线程都判定
+/// "staging 空闲"就会把两张贴图装进同一个窗（第一张丢失）
+static ATTACH_SEQ: Mutex<()> = Mutex::new(());
+
+/// 把新贴图装进一张空闲待命复用窗：
 /// 1) 通知该窗前端加载指定贴图（文件已在盘、协议直出，毫秒级）
 /// 2) 前端渲染完成调 pin_ready → 先显示贴图【然后才】收起截图遮罩——
 ///    彻底消除「遮罩先消失露出裸桌面、贴图延迟才弹出」的闪烁
-/// 3) 立即补建下一个 staging 待命；1.5s 内没显示（页面异常）则回退旧建窗路径兜底
+/// 3) 异步补建待命池；1.5s 内没就绪（页面异常）则回退旧建窗路径兜底
 pub(crate) fn attach_to_staging<R: Runtime>(app: &AppHandle<R>, pin: PinData) {
-    // 可复用的前提：staging 窗存在、隐藏、且【尚未分配任务】——
-    // 连续快速贴两张时，第一张可能还在加载中（窗仍隐藏但已占用），
-    // 只看可见性会覆盖其分配关系导致第一张贴图丢失
-    let already_assigned = app.try_state::<PinWinMap>()
-        .map(|m| m.0.lock().unwrap().contains_key(STAGING_LABEL))
-        .unwrap_or(false);
-    let staged = !already_assigned
-        && app.get_webview_window(STAGING_LABEL)
-            .map(|w| !w.is_visible().unwrap_or(true))
-            .unwrap_or(false);
-    if !staged {
-        // 无可用 staging（已被上一张贴图占用等）：退回旧建窗路径。
+    let _seq = ATTACH_SEQ.lock().unwrap();
+    let Some(w) = free_standby(app) else {
+        // 无空闲待命窗（连贴多张全部在途）：退回旧建窗路径。
         // 注意旧路径同样由 pin_ready 先显窗后收遮罩，依旧无闪烁，只是慢一点
         create_window(app, &pin);
         return;
-    }
-    // 【先摆放再装图】staging 预建时是屏幕外 (-32000,-32000)、240×160 的空壳，
-    // 不先挪到目标位置与尺寸就显示的话，贴图会以小尺寸出现在屏幕左上角
-    if let Some(w) = app.get_webview_window(STAGING_LABEL) {
-        let _ = w.set_position(win_pos(pin.x, pin.y));
-        let _ = w.set_size(win_size(pin.width, pin.height));
-        let _ = w.set_always_on_top(true);
-        #[cfg(windows)]
-        if let Some(hwnd) = crate::screenshot::hwnd_of_webview(&w) {
-            crate::screenshot::disable_show_animation(hwnd);
-        }
+    };
+    let label = w.label().to_string();
+    // 【只调尺寸不挪位置】窗口仍停在屏幕外待命位——图片加载期间绝不出现
+    // 在屏幕上；就绪后由 pin_ready 一次性平移到位（窗口已可见 → 移动即显示，
+    // 没有 show() 之后首帧合成的冷启动）
+    let _ = w.set_size(win_size(pin.width, pin.height));
+    let _ = w.set_always_on_top(true);
+    #[cfg(windows)]
+    if let Some(hwnd) = crate::screenshot::hwnd_of_webview(&w) {
+        crate::screenshot::disable_show_animation(hwnd);
     }
     if let Some(m) = app.try_state::<PinWinMap>() {
-        m.0.lock().unwrap().insert(STAGING_LABEL.to_string(), pin.id.clone());
+        m.0.lock().unwrap().insert(label.clone(), pin.id.clone());
     }
-    let _ = app.emit_to(STAGING_LABEL, EVT_PIN_ASSIGN, serde_json::json!({ "id": pin.id }));
+    let _ = app.emit_to(&label, EVT_PIN_ASSIGN, serde_json::json!({ "id": pin.id }));
+    // 看门狗 + 补充待命池
     let app2 = app.clone();
     let pid = pin.id.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(1500));
-        let shown = app2.get_webview_window(STAGING_LABEL)
-            .map(|w| w.is_visible().ok() == Some(true))
+        // 待命窗是"屏幕外可见"态，不能拿 is_visible 当就绪判据——
+        // 以是否已离开待命位（-32000）为准：被 pin_ready 平移走 = 已消费
+        let moved = app2.get_webview_window(&label)
+            .and_then(|w| w.outer_position().ok())
+            .map(|p| p.x > -16000)
             .unwrap_or(false);
-        if !shown {
-            // staging 页面无响应：回退旧建窗路径，并强制收遮罩保底
+        if !moved {
+            // 待命页面无响应：回退旧建窗路径，并强制收遮罩保底
             if let Some(s) = app2.try_state::<PinStore>() {
                 let p = { let e = s.0.lock().unwrap(); e.iter().find(|p| p.id == pid).cloned() };
                 if let Some(p) = p { create_window(&app2, &p); }
             }
             crate::screenshot::hide_all(&app2);
             if let Some(m) = app2.try_state::<PinWinMap>() {
-                m.0.lock().unwrap().remove(STAGING_LABEL);
+                m.0.lock().unwrap().remove(&label);
             }
         }
         ensure_staging(&app2);
@@ -230,14 +282,30 @@ pub(crate) fn attach_to_staging<R: Runtime>(app: &AppHandle<R>, pin: PinData) {
 #[tauri::command]
 pub async fn pin_ready(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
     let label = window.label().to_string();
+    let is_staging = is_standby_label(&label);
+    // 贴图 id：常规窗取自 label；复用窗查分配表。
     // 未分配贴图的 staging 空壳窗：忽略，绝不显示
-    if label == STAGING_LABEL {
-        let assigned = app.try_state::<PinWinMap>()
-            .and_then(|m| m.0.lock().unwrap().get(&label).cloned());
-        if assigned.is_none() { return Ok(()); }
-    }
+    let pin_id = if is_staging {
+        app.try_state::<PinWinMap>()
+            .and_then(|m| m.0.lock().unwrap().get(&label).cloned())
+    } else {
+        Some(label.trim_start_matches(&format!("{PIN_PREFIX}-")).to_string())
+    };
+    let Some(pin_id) = pin_id else { return Ok(()); };
     if let Some(w) = app.get_webview_window(&label) {
-        let _ = w.show();
+        if is_staging {
+            // 【移动即显示】staging 待命窗本就"屏幕外可见"（合成器常驻预热），
+            // 平移到目标位置 = 瞬间上屏——没有 show() 后首帧合成的冷启动
+            // （隐藏窗口的首帧合成要数百毫秒，正是贴图热键延迟的主因）
+            let xy = app.try_state::<PinStore>().and_then(|s| {
+                let e = s.0.lock().unwrap();
+                e.iter().find(|p| p.id == pin_id).map(|p| (p.x, p.y))
+            });
+            if let Some((x, y)) = xy { let _ = w.set_position(win_pos(x, y)); }
+        } else {
+            // 常规窗（启动恢复/兜底建窗路径）仍是隐藏态，照常 show
+            let _ = w.show();
+        }
         #[cfg(windows)]
         if let Some(hwnd) = crate::screenshot::hwnd_of_webview(&w) {
             crate::acrylic::force_foreground_robust(hwnd);
@@ -245,13 +313,16 @@ pub async fn pin_ready(app: AppHandle, window: WebviewWindow) -> Result<(), Stri
         // 收遮罩延后 ~80ms（约 5 帧）：就绪信号来自隐藏窗里的 rAF，证明不了
         // 显示后首帧已 present。这期间即便贴图尚未合成完毕，底下仍是截图冻结
         // 画面而非裸桌面；遮罩揭开时贴图必已画好——彻底消除"闪一下"
+        // 【仅截图会话需要】热键贴图路径没有遮罩可收，等它纯属白加 80ms 延迟
         let app2 = app.clone();
         std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(80));
+            if crate::screenshot::shooting() {
+                std::thread::sleep(std::time::Duration::from_millis(80));
+            }
             crate::screenshot::hide_all(&app2);
         });
         // 本次 staging 已消耗：立刻补一个待命
-        if label == STAGING_LABEL {
+        if is_staging {
             ensure_staging(&app);
         }
     }
@@ -269,14 +340,17 @@ pub fn pin_from_clipboard(app: AppHandle) -> Result<PinData, String> {
     if let Ok(img) = cb.get_image() {
         let w = img.width as u32;
         let h = img.height as u32;
-        let rgba = img.bytes.into_owned();
-        let img_buf = image::RgbaImage::from_raw(w, h, rgba).ok_or("build image")?;
-        let mut buf = std::io::Cursor::new(Vec::new());
-        img_buf.write_to(&mut buf, image::ImageFormat::Png).map_err(|e| e.to_string())?;
-        let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, buf.into_inner());
+        // 【贴图提速】与热键路径同款：免 PNG 编码/解码，RGBA→BGRA 线性交换
+        // 后直接包零压缩 BMP（大图省数百毫秒到数秒）
+        let mut bgra = img.bytes.into_owned();
+        if bgra.len() != (w as usize) * (h as usize) * 4 {
+            return Err("build image".into());
+        }
+        for px in bgra.chunks_exact_mut(4) { px.swap(0, 2); }
+        let bmp = crate::screenshot::wrap_bmp(&bgra, w, h);
         let cursor = app.cursor_position().unwrap_or(PhysicalPosition::new(0.0, 0.0));
         let (px, py) = (cursor.x as i32, cursor.y as i32);
-        return create_from_b64(&app, &b64, px, py);
+        return create_from_bytes(&app, &bmp, "image/bmp", px, py);
     }
     Err("clipboard has no image".into())
 }
@@ -507,12 +581,14 @@ fn try_read_clipboard_once() -> Option<ClipContent> {
         let w = img.width as u32;
         let hh = img.height as u32;
         if w > 0 && hh > 0 {
-            let rgba = img.bytes.into_owned();
-            if let Some(buf) = image::RgbaImage::from_raw(w, hh, rgba) {
-                let mut png = std::io::Cursor::new(Vec::new());
-                if buf.write_to(&mut png, image::ImageFormat::Png).is_ok() {
-                    return Some(ClipContent::Image(png.into_inner()));
-                }
+            // 【贴图提速·主路径】剪贴板图片不再编码 PNG——大图 PNG 编码要
+            // 数百毫秒到数秒，是"复制后按贴图热键迟迟不弹出"的最大头。
+            // RGBA→BGRA 一次线性交换（毫秒级）后直接包零压缩 BMP 落盘，
+            // WebView2 解码 BMP 近乎 memcpy，与截图选区贴图同款最快路径
+            let mut bgra = img.bytes.into_owned();
+            if bgra.len() == (w as usize) * (hh as usize) * 4 {
+                for px in bgra.chunks_exact_mut(4) { px.swap(0, 2); }
+                return Some(ClipContent::Image(crate::screenshot::wrap_bmp(&bgra, w, hh)));
             }
         }
     }
@@ -566,7 +642,13 @@ pub(crate) fn create_html_pin<R: Runtime>(app: &AppHandle<R>, html: String, x: i
     };
     let store = app.try_state::<PinStore>().ok_or("no state")?;
     store.0.lock().unwrap().push(pin.clone());
-    persist(&store, app);
+    // 【热路径不落盘】同 create_store_entry：持久化丢后台线程
+    {
+        let app2 = app.clone();
+        std::thread::spawn(move || {
+            if let Some(s) = app2.try_state::<PinStore>() { persist(&s, &app2); }
+        });
+    }
     Ok(pin)
 }
 
@@ -622,6 +704,38 @@ pub fn pin_set_click_through(window: tauri::WebviewWindow, on: bool) -> Result<(
 #[tauri::command]
 pub fn pin_hide_one(window: tauri::WebviewWindow) -> Result<(), String> {
     window.hide().map_err(|e| e.to_string())
+}
+
+/// Esc 全局兜底：隐藏最上层可见贴图（keyhook 系统级调用，不依赖贴图窗焦点）。
+/// - 前台是本应用【非贴图】窗口（设置/面板/工具栏）→ 不代劳，Esc 归它们自己
+///   （收起面板/关弹窗），避免"按 Esc 关面板把贴图也藏了"；
+/// - 前台是贴图窗自身 → 隐藏它（前端未就绪/加载失败时兜底；前端就绪时
+///   与 webview 自身的 Esc 处理幂等）；
+/// - 前台是其它应用 → 隐藏最近一张可见贴图（Snipaste 行为）。
+/// 返回是否有贴图被隐藏。
+pub(crate) fn hide_visible_pin<R: Runtime>(app: &AppHandle<R>) -> bool {
+    // 前台是本应用窗口：贴图窗代劳隐藏，其余窗口 Esc 自理
+    if let Some(w) = app.webview_windows().values().find(|w| w.is_focused().unwrap_or(false)) {
+        if w.label().starts_with(PIN_PREFIX) {
+            let _ = w.hide();
+            return true;
+        }
+        return false;
+    }
+    let store = match app.try_state::<PinStore>() {
+        Some(s) => s,
+        None => return false,
+    };
+    let entries = { store.0.lock().unwrap().clone() };
+    for pin in entries.iter().rev() {
+        if let Some(w) = window_of_pin(app, &pin.id) {
+            if w.is_visible().unwrap_or(false) {
+                let _ = w.hide();
+                return true;
+            }
+        }
+    }
+    false
 }
 
 #[tauri::command]
@@ -718,7 +832,14 @@ pub(crate) fn create_store_entry<R: Runtime>(app: &AppHandle<R>, bytes: &[u8], m
 
     let store = app.try_state::<PinStore>().ok_or("no state")?;
     store.0.lock().unwrap().push(pin.clone());
-    persist(&store, app);
+    // 【热路径不落盘】建贴图的路径上省掉同步 JSON 序列化+写盘（贴图越多越慢），
+    // 持久化丢后台线程；进程若在此瞬间退出最多丢一条记录，可接受
+    {
+        let app2 = app.clone();
+        std::thread::spawn(move || {
+            if let Some(s) = app2.try_state::<PinStore>() { persist(&s, &app2); }
+        });
+    }
 
     diag_write(&format!("[pin] created {}", pin.id));
     Ok(pin)

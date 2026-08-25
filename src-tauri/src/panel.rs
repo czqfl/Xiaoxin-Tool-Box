@@ -434,10 +434,7 @@ fn ensure_panel_window<R: Runtime>(
         return Some(w);
     }
     crate::storage::diag_write(&format!("panel window {label} missing, rebuilding"));
-    let url = match app.config().build.dev_url.clone() {
-        Some(u) => tauri::WebviewUrl::External(u),
-        None => tauri::WebviewUrl::App("index.html".into()),
-    };
+    let url = crate::frontend_url(app);
     let app2 = app.clone();
     let label2 = label.to_string();
     crate::defer_to_main_loop(app2.clone(), move || {

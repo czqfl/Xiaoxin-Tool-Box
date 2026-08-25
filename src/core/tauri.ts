@@ -336,8 +336,9 @@ export const shotUiRectAt = (x: number, y: number) =>
 /** 获取上次记住的选区 */
 export const shotLastRegion = () =>
   invoke<number[] | null>("shot_last_region");
-/** 截图历史条目（新→旧，仅与当前屏同分辨率的） */
-export interface ShotHistItem { file: string; ts: number; width: number; height: number }
+/** 截图历史条目（新→旧，仅与当前屏同分辨率的）。
+ *  region = 该帧被确认过的框选范围（本显示器局部物理像素 [x,y,w,h]），无则缺省 */
+export interface ShotHistItem { file: string; ts: number; width: number; height: number; region?: number[] }
 /** 列出截图历史 */
 export const shotHistoryList = () =>
   invoke<ShotHistItem[]>("shot_history_list");
@@ -345,6 +346,16 @@ export const shotHistoryList = () =>
  *  加载后 Rust 会推 shot-refresh 重载遮罩页。返回当前文件名，"live" = 实时画面 */
 export const shotHistoryStep = (dir: number, index?: number) =>
   invoke<string>("shot_history_step", { dir, index: index ?? null });
+/** 记录当前查看帧的框选范围（本显示器局部物理像素 [x,y,w,h]）：
+ *  写进对应历史档的 sidecar，跳回该帧时还原「当时的选区」 */
+export const shotHistorySaveRegion = (region: number[]) =>
+  invoke<void>("shot_history_save_region", { region });
+/** 删除单条历史截屏（帧 + 缩略图 + 选区记录） */
+export const shotHistoryDelete = (file: string) =>
+  invoke<void>("shot_history_delete", { file });
+/** 清空全部历史截屏 */
+export const shotHistoryClear = () =>
+  invoke<void>("shot_history_clear");
 /** 历史缩略图/原图协议地址（文件名白名单校验由 Rust 端负责） */
 export const shotHistoryUrl = (file: string) =>
   `http://screenshot.localhost/history/${file}?v=${Date.now()}`;
@@ -392,6 +403,9 @@ export const shotPinPost = (
   bgra: Uint8Array, w: number, h: number, x: number, y: number,
 ): Promise<void> => {
   const headers = new Headers({
+    // 必须带动作头：shot_output 靠 x-shot-action 分发（缺失会被当成未知动作拒绝，
+    // 表现为"贴图无任何反应"，此前漏带导致贴图整条链路失效）
+    "x-shot-action": "pin",
     "x-shot-w": String(w), "x-shot-h": String(h),
     "x-shot-x": String(x), "x-shot-y": String(y),
   });

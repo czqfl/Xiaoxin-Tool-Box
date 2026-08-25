@@ -1,10 +1,32 @@
 /** Screenshot & Pin settings page with sub-tabs */
 import { useState } from "react";
 import { useConfigStore } from "../stores/configStore";
+import { shotHistoryClear } from "../core/tauri";
 import { Segmented, SettingGroup, SettingRow, Slider, Switch } from "./components";
 import { ShortcutRow } from "./ShortcutRow";
 
 type Tab = "shot" | "pin" | "annotate";
+
+/** 清空全部历史截屏（带二次确认的行内按钮） */
+function ClearHistoryRow() {
+  const [confirming, setConfirming] = useState(false);
+  const [done, setDone] = useState(false);
+  return (
+    <SettingRow title="清空历史截屏" desc={done ? "已清空" : confirming ? "再点一次确认清空，此操作不可恢复" : "删除磁盘上的全部历史档与选区记录"}>
+      <button
+        className="btn btn-sm"
+        style={confirming ? { background: "#e5484d", color: "#fff", borderColor: "#e5484d" } : undefined}
+        onClick={() => {
+          if (!confirming) { setConfirming(true); window.setTimeout(() => setConfirming(false), 3000); return; }
+          setConfirming(false);
+          void shotHistoryClear().then(() => { setDone(true); window.setTimeout(() => setDone(false), 2500); }).catch(() => {});
+        }}
+      >
+        {confirming ? "确认清空" : done ? "已清空" : "清空"}
+      </button>
+    </SettingRow>
+  );
+}
 
 export function ScreenshotPage() {
   const config = useConfigStore((s) => s.config);
@@ -94,7 +116,7 @@ export function ScreenshotPage() {
             <SettingRow title="记住上次截取区域" desc="呼出截图时若光标下未识别到窗口，预填上一次的选区">
               <Switch checked={config.shot.remember_region} onChange={(v) => updateShot({ remember_region: v })} />
             </SettingRow>
-            <SettingRow title="截图历史" desc="每次呼出自动保存全屏画面；截图时可按 < > 翻看历史并重新框选，H 打开列表">
+            <SettingRow title="截图历史" desc="输出（复制/另存/贴图）过的截图才计入历史；截图时可按 < > 翻看并重新框选，H 打开列表">
               <Switch checked={config.shot.history_enabled !== false} onChange={(v) => updateShot({ history_enabled: v })} />
             </SettingRow>
             {config.shot.history_enabled !== false && (
@@ -107,6 +129,7 @@ export function ScreenshotPage() {
                   <Slider min={1} max={30} value={config.shot.history_max_days ?? 7}
                     onChange={(v) => updateShot({ history_max_days: v })} />
                 </SettingRow>
+                <ClearHistoryRow />
               </>
             )}
           </SettingGroup>

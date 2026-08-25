@@ -10,22 +10,33 @@ html[data-window="shot"] body { background: transparent; }
 .shot-dim-fade { animation: shot-dim-in 180ms ease-out both; }
 
 /* ---- 放大镜：镜头区固定正方形，信息区在镜头下方分三行（坐标/颜色/提示） ---- */
-/* z-index 260 > 工具栏 200：鼠标移到工具栏附近时坐标/颜色信息不被盖住 */
+/* z-index 260 > 工具栏 200：鼠标移到工具栏附近时坐标/颜色信息不被盖住。
+   整体走玻璃卡片风：圆角 + 毛玻璃 + 内描边，与取色面板观感统一 */
 .shot-mag {
-  position: fixed; z-index: 260; background: #000;
-  border: 1px solid rgba(255,255,255,0.9); outline: 1px solid rgba(0,0,0,0.55);
-  box-shadow: 0 3px 14px rgba(0,0,0,0.6); overflow: hidden;
+  position: fixed; z-index: 260;
+  background: rgba(12,12,14,0.86); backdrop-filter: blur(14px);
+  border-radius: 10px; overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12), 0 8px 26px rgba(0,0,0,0.55);
 }
-.shot-mag-lens { width: 140px; height: 140px; margin: 0 auto; }
+.shot-mag-lens { width: 140px; height: 140px; margin: 6px auto 0; border-radius: 7px; overflow: hidden; }
 .shot-mag-lens canvas { display: block; width: 140px; height: 140px; }
-.shot-mag-info { background: rgba(0,0,0,0.72); border-top: 1px solid rgba(255,255,255,0.28); padding: 4px 0 5px; }
+.shot-mag-info { padding: 8px 10px 9px; display: flex; flex-direction: column; gap: 4px; }
 .shot-mag-row {
-  text-align: center; font-size: 12px; line-height: 1.55; color: #fff;
+  text-align: center; font-size: 12.5px; line-height: 1.5; color: #fff;
   font-family: Consolas, "Courier New", monospace; white-space: nowrap;
 }
-.shot-mag-colorline { display: flex; align-items: center; justify-content: center; gap: 7px; }
-.shot-mag-hints { font-size: 10px; color: rgba(255,255,255,0.78); font-family: "Microsoft YaHei", sans-serif; }
-.shot-mag-hints b { color: #fff; }
+.shot-mag-colorline { display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 3px 0 2px; }
+.shot-mag-hints { font-size: 10px; line-height: 1.9; color: rgba(255,255,255,0.68);
+  font-family: "Microsoft YaHei", sans-serif;
+  border-top: 1px solid rgba(255,255,255,0.1); margin-top: 2px; padding-top: 5px; }
+/* 键帽式提示：C / Shift 做成小键帽，精致不糊字 */
+.shot-mag-hints b {
+  display: inline-block; min-width: 15px; margin: 0 3px; padding: 1px 5px;
+  border-radius: 4px; border: 1px solid rgba(255,255,255,0.32);
+  background: rgba(255,255,255,0.09);
+  color: #fff; font: 600 10px/1.5 Consolas, "Courier New", monospace; text-align: center;
+}
 
 /* ---- 取色共用元素（放大镜信息行 / 独立取色面板） ---- */
 .shot-color-swatch { display: inline-block; flex: none; border-radius: 2px; border: 1px solid rgba(255,255,255,0.9); outline: 1px solid rgba(0,0,0,0.55); background: #000; }
@@ -244,11 +255,34 @@ html[data-window="shot"] body { background: transparent; }
   animation: shot-submenu-in 120ms var(--ease-out) both;
 }
 .shot-hist-item { cursor: pointer; text-align: center; flex: none; }
+.shot-hist-thumbwrap { position: relative; }
+/* 悬停缩略图浮现的单条删除按钮 */
+.shot-hist-del {
+  display: none; position: absolute; top: 4px; right: 4px;
+  width: 20px; height: 20px; line-height: 18px; padding: 0;
+  border-radius: 50%; border: 1px solid rgba(255,255,255,0.35);
+  background: rgba(0,0,0,0.65); color: #fff; font-size: 14px; cursor: pointer;
+}
+.shot-hist-del:hover { background: #e5484d; border-color: #ff8d8d; }
+.shot-hist-item:hover .shot-hist-del { display: block; }
+/* 面板尾部「清空历史」入口 */
+.shot-hist-clear {
+  align-self: center; flex: none; cursor: pointer; user-select: none;
+  color: rgba(255,255,255,0.65); font-size: 12px; padding: 6px 10px;
+  border-radius: 6px; border: 1px dashed rgba(255,255,255,0.22);
+}
+.shot-hist-clear:hover { color: #ff8d8d; border-color: rgba(229,72,77,0.6); background: rgba(229,72,77,0.12); }
 .shot-hist-item img {
   display: block; height: 96px; width: auto; border-radius: 6px;
   border: 2px solid transparent; transition: border-color var(--dur-fast) var(--ease-out);
 }
-.shot-hist-item:hover img, .shot-hist-item.active img { border-color: var(--accent, #4c8dff); }
+/* 悬停 = 弱白描边（跟随鼠标的临时反馈）；当前所在帧 = 主题色 + 光晕，
+   两种视觉严格区分，杜绝"悬停邻居时误以为它也被选中" */
+.shot-hist-item:hover img { border-color: rgba(255,255,255,0.5); }
+.shot-hist-item.active img {
+  border-color: var(--accent, #4c8dff);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.45), 0 0 12px rgba(var(--accent-rgb, 76,141,255), 0.55);
+}
 .shot-hist-item span {
   display: block; margin-top: 5px; color: rgba(255,255,255,0.85); font-size: 12px;
 }
@@ -259,7 +293,11 @@ html[data-window="shot"] body { background: transparent; }
     repeating-conic-gradient(rgba(255,255,255,0.14) 0% 25%, transparent 0% 50%) 50%/22px 22px,
     linear-gradient(135deg, rgba(76,141,255,0.35), rgba(160,110,220,0.35));
 }
-.shot-hist-item:hover .shot-hist-live, .shot-hist-item.active .shot-hist-live { border-color: var(--accent, #4c8dff); }
+.shot-hist-item:hover .shot-hist-live { border-color: rgba(255,255,255,0.5); }
+.shot-hist-item.active .shot-hist-live {
+  border-color: var(--accent, #4c8dff);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.45), 0 0 12px rgba(var(--accent-rgb, 76,141,255), 0.55);
+}
 .shot-hist-empty { color: rgba(255,255,255,0.75); font-size: 14px; align-self: center; padding: 30px 20px; }
 /* 选区提示条已并入左下角 .shot-hint-panel（选区操作提示 + 覆盖隐藏） */
 /* ---- 原生即时亮窗竞态保护 ----

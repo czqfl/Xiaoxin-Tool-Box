@@ -4,8 +4,10 @@ import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
   shotGeometry, shotImageDataRaw, shotWindowRectAt, shotUiRectAt, shotReady, shotFrameUrl,
-  shotOutputPost, shotCancel, shotSaveRegion, diagLog, copyText, shotDragBegin, shotDragEnd,
-  shotHistoryList, shotHistoryStep, shotHistoryUrl, ShotHistItem,
+  shotOutputPost, shotCancel, shotSaveRegion, diagLog, copyText,
+  shotDragBegin, shotDragEnd,
+  shotHistoryList, shotHistoryStep, shotHistoryUrl, ShotHistItem, shotHistorySaveRegion,
+  shotHistoryDelete, shotHistoryClear,
   shotOcrPost, ShotOcrLine, shotPinPost,
 } from "../../core/tauri";
 import { translateText } from "../../core/tauri";
@@ -165,7 +167,14 @@ function drawShape(
     const bs = 12 * scale;
     const cells = new Set<string>();
     let prevFx: number | null = null, prevFy: number | null = null;
-    const mark = (x: number, y: number) => {
+    // 【坐标必须钳进底图】按住拖动时 mousemove 可能落在本屏窗口之外
+    // （多显示器把光标甩到邻屏、快速甩出边缘）——产生越界格子后，
+    // 采样读出 undefined → rgb(NaN,...) 非法色串 → fillStyle 赋值被忽略、
+    // 沿用当前标注色整格填充 = "马赛克变红"的根因
+    const clampX = (v: number) => Math.max(0, Math.min(v, (src ? src.width : 1) - 0.01));
+    const clampY = (v: number) => Math.max(0, Math.min(v, (src ? src.height : 1) - 0.01));
+    const mark = (rawX: number, rawY: number) => {
+      const x = clampX(rawX), y = clampY(rawY);
       const fx = Math.floor(x / bs), fy = Math.floor(y / bs);
       cells.add(fx + "," + fy);
       if (prevFx !== null && prevFy !== null && fx !== prevFx && fy !== prevFy) {
@@ -203,10 +212,10 @@ function drawShape(
             const hit = mosaicCache?.get(k);
             if (hit) { fillCell(k, hit); return; }
             const [cx, cy] = k.split(",").map(Number);
-            // 单格读取范围钳制在包围盒内：贴着画布右/下缘的格子会部分越界，
-            // 越界读出 undefined → 均值算出 rgb(NaN,...) 非法色串，
-            // fillStyle 保持不变就会用【当前标注色】整格填上去（"马赛克变红"）
-            const x0 = cx * bs - minX, y0 = cy * bs - minY;
+            // 单格读取范围钳制在包围盒内（左/上缘同样要钳）：任何越界读都会
+            // 产生 undefined → rgb(NaN,...) → fillStyle 赋值被忽略、沿用当前
+            // 标注色整格填上去（"马赛克变红"）
+            const x0 = Math.max(0, cx * bs - minX), y0 = Math.max(0, cy * bs - minY);
             const x1 = Math.min(x0 + bs, bw), y1 = Math.min(y0 + bs, bh);
             let r = 0, g = 0, b = 0, n = 0;
             for (let y = y0; y < y1; y++) {
@@ -215,7 +224,8 @@ function drawShape(
                 r += data[i]; g += data[i + 1]; b += data[i + 2]; n++;
               }
             }
-            if (!n) return;
+            // 兜底校验：均值非法时宁可留空也不落标注色
+            if (!n || !Number.isFinite(r / n) || !Number.isFinite(g / n) || !Number.isFinite(b / n)) return;
             const color = `rgb(${Math.round(r / n)},${Math.round(g / n)},${Math.round(b / n)})`;
             mosaicCache?.set(k, color);
             fillCell(k, color);
@@ -321,7 +331,17 @@ export function ScreenshotOverlay() {
   const [colorFmt, setColorFmt] = useState<ColorFmt>("rgb");
   const colorFmtRef = useRef<ColorFmt>("rgb");
   useEffect(() => { colorFmtRef.current = colorFmt; }, [colorFmt]);
-  const toggleColorFmt = () => setColorFmt((f) => (f === "rgb" ? "hex" : "rgb"));
+  const toggleColorFmt = () => setColorFmt((f) => {
+    const nf: ColorFmt = f === "rgb" ? "hex" : "rgb";
+    // 【立即刷新】面板文本只在鼠标移动时由 rAF 路径重写，切格式若不主动
+    // 刷一次，显示会一直停留在旧格式直到下次移动鼠标
+    const col = pickedRef.current;
+    if (col) {
+      if (magValRef.current) magValRef.current.textContent = fmtDisplay(col, nf);
+      if (pickerValRef.current) pickerValRef.current.textContent = fmtDisplay(col, nf);
+    }
+    return nf;
+  });
   // 最近一次采样的光标下像素颜色（C 复制用）
   const pickedRef = useRef<[number, number, number] | null>(null);
   // bgReady / picker 模式镜像：rAF 回调闭包里读，避免过期 state
@@ -350,7 +370,7 @@ export function ScreenshotOverlay() {
     void copyText(text).catch(() => {});
     const el = (pickerModeRef.current ? pickerCopiedRef.current : magCopiedRef.current);
     if (el) {
-      el.textContent = `? 已复制 ${text}`;
+      el.textContent = `✓ 已复制 ${text}`;
       el.style.display = "block";
       window.clearTimeout(copyTimerRef.current);
       copyTimerRef.current = window.setTimeout(() => { el.style.display = "none"; }, 1400);
@@ -434,6 +454,7 @@ export function ScreenshotOverlay() {
     // 历史浏览状态复位：新会话永远从实时画面开始
     // （历史切换走 shot://history-changed 轻量路径，不经过 loadSession）
     histOpenRef.current = false; setHistOpen(false); setHistViewing(false);
+    histItemsRef.current = null; setHistItems(null); setHistPos(-1);
     setRegion({x:0,y:0,w:0,h:0}); regRef.current = {x:0,y:0,w:0,h:0};
     setPhase("idle"); setSnap(null); setDragging(false); phaseRef.current = "idle";
     lastRectRef.current = null; snapRef.current = null; pngCacheRef.current = null;
@@ -541,8 +562,15 @@ export function ScreenshotOverlay() {
   // 绝不走 shot-refresh 整页重载（那会摘 data-resetting 隐藏全部 UI、
   // 清空遮罩再重画，表现为"切换历史时整屏一闪一闪"）
   useEffect(() => {
-    const un = listen("shot://history-changed", () => { void reloadFrameOnly(); });
-    return () => { un.then((f) => f()); };
+    // 【尾沿去抖】快速连按 < / > 时每步都全量拉一帧 BMP（十几 MB）会互相排队
+    // 造成卡顿；可见画面的换帧由 Rust 原生层瞬时完成，这里的 bg 画布刷新
+    // 延迟 60ms 合并、只取最后一帧即可
+    let t = 0;
+    const un = listen("shot://history-changed", () => {
+      window.clearTimeout(t);
+      t = window.setTimeout(() => { void reloadFrameOnly(); }, 60);
+    });
+    return () => { un.then((f) => f()); window.clearTimeout(t); };
   }, []);
   const reloadFrameOnly = async () => {
     // 帧已换：标注/马赛克缓存/预编码缓存全部作废
@@ -660,15 +688,16 @@ export function ScreenshotOverlay() {
       else if (phase === "idle" && e.key === "Shift" && !e.repeat) {
         toggleColorFmt();
       }
-      // 截图历史：< / , 更旧、> / . 更新（在历史帧上重新框选，Snipaste 同款）；
-      // H 打开/关闭缩略图列表。拖拽/取色中不响应
-      else if (phase === "idle" && cfg.shot.history_enabled !== false
+      // 截图历史：< 向左（更新一帧 / 回实时）、> 向右（更旧一帧）——
+      // 缩略条从左到右就是「实时→新→旧」，键位与列表滚动方向一致。
+      // 点击缩略图跳转后处于选中态也允许继续翻页（选区保留可重新框选）
+      else if ((phase === "idle" || phase === "selected") && cfg.shot.history_enabled !== false
         && !e.ctrlKey && !e.altKey && !e.metaKey && (e.key === "<" || e.key === ",")) {
-        e.preventDefault(); if (!e.repeat) void stepHistory(-1);
-      }
-      else if (phase === "idle" && cfg.shot.history_enabled !== false
-        && !e.ctrlKey && !e.altKey && !e.metaKey && (e.key === ">" || e.key === ".")) {
         e.preventDefault(); if (!e.repeat) void stepHistory(1);
+      }
+      else if ((phase === "idle" || phase === "selected") && cfg.shot.history_enabled !== false
+        && !e.ctrlKey && !e.altKey && !e.metaKey && (e.key === ">" || e.key === ".")) {
+        e.preventDefault(); if (!e.repeat) void stepHistory(-1);
       }
       else if (phase === "idle" && cfg.shot.history_enabled !== false
         && !e.ctrlKey && !e.altKey && !e.metaKey && (e.code === "KeyH")) {
@@ -734,18 +763,25 @@ export function ScreenshotOverlay() {
     ctx.fillStyle = "rgba(0,0,0,0.5)";
     ctx.fillRect(0, 0, geom.width, geom.height);
     if (selected || draggingNow) {
-      // 选定/拖拽中：区域镂空 + 主题色边框。reg 为 CSS 像素，画布是物理像素，
-      // 必须 ×scale 映射到物理位图（否则 150% 下选区框整体偏小、右下角不跟手）
+      // 选定/拖拽中：区域镂空 + 双层描边。reg 为 CSS 像素，画布是物理像素，
+      // 必须 ×scale 映射到物理位图（否则 150% 下选区框整体偏小、右下角不跟手）。
+      // 【双层描边】深色衬底 + 亮色主线——全屏/浅色桌面上单层主题色细线
+      // 与背景融为一体的"看不出在截图"问题就此解决
       const rx = reg.x * scale, ry = reg.y * scale, rw = reg.w * scale, rh = reg.h * scale;
       ctx.clearRect(rx, ry, rw, rh);
-      ctx.strokeStyle = accent; ctx.lineWidth = 1.5 * scale;
+      ctx.strokeStyle = "rgba(0,0,0,0.85)"; ctx.lineWidth = 4.5 * scale;
+      ctx.strokeRect(rx, ry, rw, rh);
+      ctx.strokeStyle = accent; ctx.lineWidth = 2 * scale;
       ctx.strokeRect(rx, ry, rw, rh);
     } else if (snap) {
-      // 智能高亮：窗口镂空 + 主题色边框。snap 已归一为【CSS 像素】（与 reg 同系），
+      // 智能高亮：窗口镂空 + 同款双层描边。snap 已归一为【CSS 像素】（与 reg 同系），
       // 画布是物理像素，同样 ×scale 映射
-      ctx.clearRect(snap.x * scale, snap.y * scale, snap.w * scale, snap.h * scale);
-      ctx.strokeStyle = accent; ctx.lineWidth = 2 * scale;
-      ctx.strokeRect(snap.x * scale, snap.y * scale, snap.w * scale, snap.h * scale);
+      const sx = snap.x * scale, sy = snap.y * scale, sw2 = snap.w * scale, sh2 = snap.h * scale;
+      ctx.clearRect(sx, sy, sw2, sh2);
+      ctx.strokeStyle = "rgba(0,0,0,0.85)"; ctx.lineWidth = 5 * scale;
+      ctx.strokeRect(sx, sy, sw2, sh2);
+      ctx.strokeStyle = accent; ctx.lineWidth = 2.5 * scale;
+      ctx.strokeRect(sx, sy, sw2, sh2);
     }
     if (selected) {
       const hs = 8 * scale;
@@ -795,40 +831,135 @@ export function ScreenshotOverlay() {
   // 开关走 ref：keydown effect 依赖少、闭包易过期，ref 永远最新
   const histOpenRef = useRef(false);
   const [histItems, setHistItems] = useState<ShotHistItem[] | null>(null);
+  const histItemsRef = useRef<ShotHistItem[] | null>(null);
+  // 当前翻页位置（-1=实时，0=最新…）：驱动缩略条活动项高亮与滚动跟随
+  const [histPos, setHistPos] = useState(-1);
+  const histPanelRef = useRef<HTMLDivElement | null>(null);
   // 正在浏览历史帧（true 时左下角提示区显示"返回实时"引导）
   const [histViewing, setHistViewing] = useState(false);
   const histBusyRef = useRef(false);
+  /** 拉取历史列表（带 ref 缓存：会话内只拉一次，步进时同步可读） */
+  const ensureHistItems = async (): Promise<ShotHistItem[]> => {
+    if (histItemsRef.current) return histItemsRef.current;
+    try {
+      const l = await shotHistoryList();
+      histItemsRef.current = l;
+      setHistItems(l);
+    } catch { /* 拉取失败不缓存，下次再试 */ }
+    return histItemsRef.current ?? [];
+  };
   /** 翻历史核心：Rust 替换冻结帧后推 shot://history-changed → 轻量换帧 */
   const stepHistoryCore = async (dir: number, index?: number) => {
     if (histBusyRef.current || dragRef.current || resizeRef.current || pickerModeRef.current) return;
     histBusyRef.current = true;
     try {
       const r = await shotHistoryStep(dir, index);
+      if (r === undefined) return undefined;
       setHistViewing(r !== "live");
+      // 同步拉列表并计算当前位置：缩略条据此高亮/滚动到当前帧
+      const items = await ensureHistItems();
+      setHistPos(r === "live" ? -1 : items.findIndex((i) => i.file === r));
       return r;
     } catch { return undefined; }
     finally { histBusyRef.current = false; }
   };
-  /** 翻历史：Rust 替换冻结帧后推 shot://history-changed → 轻量换帧 */
-  const stepHistory = (dir: number) => void stepHistoryCore(dir);
-  /** 直接跳到某条历史（-1=实时） */
-  const jumpHistory = async (index: number) => {
-    const r = await stepHistoryCore(0, index);
-    if (r !== undefined) {
-      histOpenRef.current = false;
-      setHistOpen(false);
+  /** 翻历史：< / > 步进。首次步进自动展开缩略条——切换过程中能直接看到
+      列表随翻页滚动、当前帧高亮（Snipaste 式浏览体验） */
+  const stepHistory = (dir: number) => void (async () => {
+    const r = await stepHistoryCore(dir);
+    if (r !== undefined && !histOpenRef.current) {
+      histOpenRef.current = true;
+      setHistOpen(true);
     }
+  })();
+  // 跳转还原选区时置位：防止「还原」本身被当成一次新确认又写回 sidecar
+  const histRestoreRef = useRef(false);
+  // 选区确认后把范围写进当前查看帧的历史档（sidecar）：
+  // 之后从缩略图列表点回这一帧即可还原「当时的框选范围」。
+  // 防抖 250ms：方向键微调选区时只落最终值
+  const histSaveTimer = useRef(0);
+  useEffect(() => {
+    if (phase !== "selected" || dragging || textEdit || !geom) return;
+    if (histRestoreRef.current) { histRestoreRef.current = false; return; }
+    window.clearTimeout(histSaveTimer.current);
+    histSaveTimer.current = window.setTimeout(() => {
+      const r = regRef.current;
+      if (r.w <= 0 || r.h <= 0) return;
+      const sc = cssScale();
+      void shotHistorySaveRegion([
+        Math.round(r.x * sc), Math.round(r.y * sc),
+        Math.round(r.w * sc), Math.round(r.h * sc),
+      ]).catch(() => {});
+    }, 250);
+    return () => { window.clearTimeout(histSaveTimer.current); };
+  }, [phase, dragging, region, textEdit, geom]);
+  /** 跳转成功后还原「那一帧自己的框选范围」（局部物理像素 → 本屏 CSS 像素），
+      而不是套用全局最后选区 */
+  const applyHistRegion = async (file: string) => {
+    const g = geomRef.current;
+    if (!g) return;
+    const it = histItemsRef.current?.find((i) => i.file === file);
+    if (!it?.region || it.region.length !== 4) return;
+    const sc = cssScale();
+    const vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight;
+    const w = Math.max(8, Math.min(it.region[2] / sc, vw));
+    const h = Math.max(8, Math.min(it.region[3] / sc, vh));
+    const x = Math.max(0, Math.min(it.region[0] / sc, vw - w));
+    const y = Math.max(0, Math.min(it.region[1] / sc, vh - h));
+    const reg = { x, y, w, h };
+    histRestoreRef.current = true;
+    setRegion(reg); regRef.current = reg;
+    setPhase("selected"); phaseRef.current = "selected";
   };
+  /** 直接跳到某条历史（-1=实时）；缩略条保持展开便于继续浏览，
+      跳转成功后顺带还原该帧自己记忆的框选范围 */
+  const jumpHistory = (index: number) => void (async () => {
+    const r = await stepHistoryCore(0, index);
+    if (r === undefined) return;
+    await applyHistRegion(r === "live" ? "" : r);
+  })();
+  /** 删除单条历史记录；若删的是当前正在查看的帧，先回到实时画面 */
+  const deleteHist = (file: string) => void (async () => {
+    const old = histItemsRef.current ?? [];
+    const delIdx = old.findIndex((i) => i.file === file);
+    const wasCurrent = delIdx >= 0 && histPos === delIdx;
+    try { await shotHistoryDelete(file); } catch { return; }
+    if (wasCurrent) await stepHistoryCore(0, -1);
+    try {
+      const l = await shotHistoryList();
+      histItemsRef.current = l; setHistItems(l);
+      setHistPos((p) => (wasCurrent ? -1 : p > delIdx ? p - 1 : p));
+    } catch {}
+  })();
+  /** 清空全部历史记录并回到实时画面 */
+  const clearHist = () => void (async () => {
+    await shotHistoryClear().catch(() => {});
+    await stepHistoryCore(0, -1).catch(() => {});
+    histItemsRef.current = []; setHistItems([]); setHistPos(-1); setHistViewing(false);
+  })();
+
   /** 打开/关闭历史列表（每次打开都重新拉取，缩略图经协议直出） */
   const toggleHistPanel = async () => {
     const next = !histOpenRef.current;
     histOpenRef.current = next;
     setHistOpen(next);
     if (next) {
-      try { setHistItems(await shotHistoryList()); }
-      catch { setHistItems([]); }
+      try { const l = await shotHistoryList(); histItemsRef.current = l; setHistItems(l); }
+      catch { histItemsRef.current = []; setHistItems([]); }
     }
   };
+  // 当前位置变化时让活动缩略图滚入可视区。【只在不可见时才滚】：点击已可见
+  // 的项若也触发平滑滚动，会把悬停高亮带到相邻项上，看起来"两个都选中了"
+  useEffect(() => {
+    const panel = histPanelRef.current;
+    if (!histOpen || !panel) return;
+    const el = panel.querySelector<HTMLElement>(".shot-hist-item.active");
+    if (!el) return;
+    const pr = panel.getBoundingClientRect(), er = el.getBoundingClientRect();
+    if (er.left < pr.left || er.right > pr.right) {
+      panel.scrollTo({ left: el.offsetLeft - (panel.clientWidth - el.offsetWidth) / 2, behavior: "smooth" });
+    }
+  }, [histPos, histOpen, histItems]);
 
   // ---- OCR 文字识别 ----
   // 点击工具栏「文字识别」→ 整个选区送 Windows.Media.Ocr；
@@ -1410,7 +1541,9 @@ export function ScreenshotOverlay() {
     for (let i = 0; i < d.length; i += 4) {
       const rr = d[i]; d[i] = d[i + 2]; d[i + 2] = rr; d[i + 3] = 255;
     }
-    return { data: new Uint8Array(d.buffer.slice(0)), w: rp.w, h: rp.h };
+    // 直接移交 ImageData 底层 buffer：shotPinPost 对整段 buffer 零拷贝直传，
+    // 不再 slice 复制一份（大选区十几 MB 的纯开销）
+    return { data: new Uint8Array(d.buffer), w: rp.w, h: rp.h };
   };
 
 
@@ -1475,15 +1608,22 @@ export function ScreenshotOverlay() {
         void diagLog(`[shot] output ${action} skipped: region ${r.w}x${r.h}`);
         return;
       }
-      // 命中预编码缓存则零等待；未命中才编码
+      // PNG 编码惰性化：贴图最快路径（原始像素直传）完全用不到 PNG，
+      // 绝不为它白编码一整张——大选区 toBlob 要 100~400ms，是贴图点下到
+      // 弹出的纯浪费。只有复制/另存/回退路径真正需要时才编码
       const key = selectionKey();
       let blob = pngCacheRef.current?.key === key ? pngCacheRef.current.blob : null;
-      if (!blob) {
-        try { blob = await encodeSelection(); } catch (encErr) {
+      const ensureBlob = async (): Promise<Blob> => {
+        if (blob) return blob;
+        try {
+          blob = await encodeSelection();
+          if (pngCacheRef.current?.key !== key) pngCacheRef.current = { key, blob };
+          return blob;
+        } catch (encErr) {
           void diagLog(`[shot] output ${action} encode failed: ${String(encErr)}`);
-          return;
+          throw encErr;
         }
-      }
+      };
       // 贴图目标位置：r 是【CSS 像素】，geom.x/y 是全局【物理像素】原点——
       // 必须 ×cssScale 归一到物理像素再相加，否则 125%/150% 缩放下贴图
       // 相对原选区向左上偏移 (scale-1)×选区坐标（"贴图和原图有偏移"根因）
@@ -1500,10 +1640,10 @@ export function ScreenshotOverlay() {
             await shotPinPost(raw.data, raw.w, raw.h, gx, gy);
             sent = true;
           } else {
-            await shotOutputPost("pin", blob, { x: gx, y: gy }); sent = true;
+            await shotOutputPost("pin", await ensureBlob(), { x: gx, y: gy }); sent = true;
           }
         } else if (action === "copy") {
-          await shotOutputPost("copy", blob); sent = true;
+          await shotOutputPost("copy", await ensureBlob()); sent = true;
         } else {
           // 另存为：系统保存对话框选位置与文件名；取消则留在截图继续编辑
           const ts = new Date().toISOString().replace(/[:.]/g,"-").slice(0,19);
@@ -1513,7 +1653,7 @@ export function ScreenshotOverlay() {
             filters: [{ name: "PNG 图片", extensions: ["png"] }],
           });
           if (!picked) return;
-          await shotOutputPost("save", blob, { path: picked }); sent = true;
+          await shotOutputPost("save", await ensureBlob(), { path: picked }); sent = true;
         }
       } finally {
         // 双保险收遮罩：复制/另存由 Rust 收过，这里幂等补收。
@@ -1843,7 +1983,7 @@ export function ScreenshotOverlay() {
           ) : (
             <>
               {histViewing && (
-                <div className="shot-hint-row shot-hint-viewing"><kbd>&gt;</kbd><span>正在查看历史截屏，按 &gt; 返回实时画面</span></div>
+                <div className="shot-hint-row shot-hint-viewing"><kbd>&lt;</kbd><span>正在查看历史截屏，按 &lt; 返回实时画面</span></div>
               )}
               {cfg.shot.smart_detect && <div className="shot-hint-row"><kbd>左键点击</kbd><span>采纳识别的窗口</span></div>}
               <div className="shot-hint-row"><kbd>左键拖拽</kbd><span>自定义框选区域</span></div>
@@ -1861,22 +2001,30 @@ export function ScreenshotOverlay() {
         </div>
       )}
 
-      {/* 截图历史缩略图列表（H 开关）：横排缩略图 + 时间标注，
-          点击直接跳到该帧重新框选；首项「实时画面」回到当前屏幕 */}
+      {/* 截图历史缩略图列表（H 开关；< > 步进时自动展开并跟随滚动）：
+          横排缩略图 + 时间标注，点击直接跳到该帧重新框选；
+          首项「实时画面」回到当前屏幕；当前帧高亮 */}
       {histOpen && (
-        <div className="shot-hist-panel" onMouseDown={(e) => e.stopPropagation()}>
-          <div className={`shot-hist-item${!histViewing ? " active" : ""}`}
+        <div className="shot-hist-panel" ref={histPanelRef} onMouseDown={(e) => e.stopPropagation()}>
+          <div className={`shot-hist-item${histPos === -1 ? " active" : ""}`}
             onClick={() => void jumpHistory(-1)}>
             <div className="shot-hist-thumb shot-hist-live">实时</div>
             <span>当前画面</span>
           </div>
-          {(histItems ?? []).map((it) => (
-            <div key={it.file} className="shot-hist-item"
-              onClick={() => void jumpHistory((histItems ?? []).indexOf(it))}>
-              <img src={shotHistoryUrl(it.file.replace(".png", ".thumb.png"))} draggable={false} />
+          {(histItems ?? []).map((it, i) => (
+            <div key={it.file} className={`shot-hist-item${histPos === i ? " active" : ""}`}
+              onClick={() => void jumpHistory(i)}>
+              <div className="shot-hist-thumbwrap">
+                <img src={shotHistoryUrl(it.file.replace(".png", ".thumb.png"))} draggable={false} />
+                <button className="shot-hist-del" title="删除此记录"
+                  onClick={(e) => { e.stopPropagation(); void deleteHist(it.file); }}>×</button>
+              </div>
               <span>{new Date(it.ts).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
             </div>
           ))}
+          {(histItems ?? []).length > 0 && (
+            <div className="shot-hist-clear" onClick={() => void clearHist()}>清空历史</div>
+          )}
           {histItems !== null && histItems.length === 0 && (
             <div className="shot-hist-empty">暂无历史截屏</div>
           )}

@@ -31,10 +31,7 @@ fn ensure_settings_window<R: Runtime>(app: &AppHandle<R>) -> Option<tauri::Webvi
     }
     crate::storage::diag_write("settings window missing, rebuilding");
     // URL 跟随运行模式：dev 用 devUrl（vite dev server），生产用打包资源
-    let url = match app.config().build.dev_url.clone() {
-        Some(u) => tauri::WebviewUrl::External(u),
-        None => tauri::WebviewUrl::App("index.html".into()),
-    };
+    let url = crate::frontend_url(app);
     let _ = WebviewWindowBuilder::new(app, "settings", url)
         .title("小心工具箱 - 设置")
         .inner_size(920.0, 640.0)
@@ -164,12 +161,16 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     }
     let open_item = MenuItem::with_id(app, "open_settings", "打开设置", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-    let refs: Vec<&dyn tauri::menu::IsMenuItem<R>> = items
+    // 分隔线：把「面板开关」与「打开设置/退出」分成两组，右键菜单一眼能看清
+    // 结构（尤其最底部的「退出」，避免与上方开关项挤在一起被忽略）
+    let sep = tauri::menu::PredefinedMenuItem::separator(app)?;
+    let mut refs: Vec<&dyn tauri::menu::IsMenuItem<R>> = items
         .iter()
         .map(|i| i as &dyn tauri::menu::IsMenuItem<R>)
-        .chain(std::iter::once(&open_item as &dyn tauri::menu::IsMenuItem<R>))
-        .chain(std::iter::once(&quit_item as &dyn tauri::menu::IsMenuItem<R>))
         .collect();
+    refs.push(&sep);
+    refs.push(&open_item);
+    refs.push(&quit_item);
     let menu = Menu::with_items(app, &refs)?;
     // 复用应用默认图标，双主题下均为中性彩色，无需切换
     let icon = app

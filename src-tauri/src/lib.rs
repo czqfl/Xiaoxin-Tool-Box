@@ -30,6 +30,24 @@ pub fn defer_to_main_loop<R: tauri::Runtime>(app: tauri::AppHandle<R>, f: impl F
         let _ = app.run_on_main_thread(f);
     });
 }
+
+/// 运行时窗口的前端入口 URL，跟随运行模式：
+/// - dev（tauri dev）：用 tauri.conf.json 的 devUrl（vite dev server，热更新）
+/// - 生产（tauri build / 打包）：一律用打包资源 index.html（经 Tauri 资产协议加载）
+///
+/// 【血泪坑】不能只判断 `app.config().build.dev_url.is_some()` —— tauri.conf.json
+/// 里的 devUrl 在打包后【依然存在】，直接用它会让生产环境运行时创建的窗口
+/// （截图遮罩 / 贴图 / 重建的面板与设置窗）去连 `http://localhost:1422`，
+/// 表现为 ERR_CONNECTION_REFUSED + 关不掉的空白错误页（dev 模式正常，打包必现）。
+/// 必须叠加 `tauri::is_dev()`（编译期 dev cfg）判定。
+pub(crate) fn frontend_url<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::WebviewUrl {
+    if tauri::is_dev() {
+        if let Some(u) = app.config().build.dev_url.clone() {
+            return tauri::WebviewUrl::External(u);
+        }
+    }
+    tauri::WebviewUrl::App("index.html".into())
+}
 use crate::credentials::CredentialStore;
 use crate::folder::FolderStore;
 use crate::shortcut::ShortcutBindings;
@@ -352,9 +370,12 @@ pub fn run() {
             screenshot::shot_last_region,
             // 选区文字识别（Windows.Media.Ocr）
             screenshot::shot_ocr,
-            // 截图历史：列表 / 翻页重截
+            // 截图历史：列表 / 翻页重截 / 记录某帧的框选范围 / 删除与清空
             screenshot::shot_history_list,
             screenshot::shot_history_step,
+            screenshot::shot_history_save_region,
+            screenshot::shot_history_delete,
+            screenshot::shot_history_clear,
             // 截图输出（复制/另存为/贴图）：原生二进制 IPC 直传 PNG 字节
             screenshot::shot_output,
             screenshot::shot_cancel,
@@ -394,9 +415,10 @@ pub fn run() {
             {
                 if label.starts_with(screenshot::OVERLAY_PREFIX) {
                     screenshot::on_overlay_destroyed(app_handle);
-                } else if label == pin::STAGING_LABEL {
-                    // 复用贴图窗被销毁（关闭其承载的贴图/Alt+F4 等）：
-                    // 清分配关系并补建新的待命窗，保证下次贴图仍走快路径
+                } else if label.starts_with(pin::STAGING_LABEL) {
+                    // 复用贴图窗（待命池，pin-staging / pin-staging-N）被销毁
+                    // （关闭其承载的贴图/Alt+F4 等）：清分配关系并补建待命窗，
+                    // 保证下次贴图仍走快路径
                     if let Some(m) = app_handle.try_state::<pin::PinWinMap>() {
                         m.0.lock().unwrap().remove(label.as_str());
                     }
