@@ -200,6 +200,22 @@ export const IconFiles = (p: IconProps) => (
   </svg>
 );
 
+/** 链接：断开的链环（文字内容为 URL 时用） */
+export const IconLink = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7" />
+    <path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" />
+  </svg>
+);
+
+/** 富文本：带格式的段落（加粗 T + 下划线，与纯文本 IconText 区分） */
+export const IconRichText = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M4 7V5h16v2M12 5v14M9 19h6" />
+    <path d="M4 16h5M4 12h3" strokeWidth="2.6" />
+  </svg>
+);
+
 export const IconArrowUp = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M12 19V5M5 12l7-7 7 7" />

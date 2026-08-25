@@ -1,6 +1,6 @@
 /** 与 Rust 侧 serde 结构一一对应的前端类型定义 */
 
-export type EntryKind = "text" | "image" | "files";
+export type EntryKind = "text" | "richtext" | "link" | "image" | "files";
 
 export interface ClipEntry {
   id: string;

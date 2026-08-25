@@ -318,13 +318,45 @@
   background: var(--bg-item-active);
 }
 
-/* ---- 类型图标 / 收藏徽标 / 来源 chip ----
-   类型图标统一中性灰：类型靠图标形状（T/图片/文件）区分，不再用多色——
-   列表高频区多色是视觉噪音；彩色只留给"收藏"这类有语义的徽标 */
+/* ---- 类型图标 / 类型徽标 / 收藏徽标 / 来源 chip ----
+   类型图标统一中性灰：类型靠图标形状（T/图片/文件/链接/富文本）区分，
+   彩色只留给"类型徽标/收藏"这类有语义的标识 */
 .clip-ic-text,
 .clip-ic-image,
-.clip-ic-files {
+.clip-ic-files,
+.clip-ic-link,
+.clip-ic-richtext {
   color: var(--text-tertiary);
+}
+/* 类型徽标：meta 行首个 chip，浅色调区分内容类型——图片=青 / 富文本=品牌蓝 /
+   链接=绿 / 文件=琥珀 / 文本=中性灰。克制用色，列表高频区不刺眼 */
+.clip-type {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.55;
+  flex-shrink: 0;
+  user-select: none;
+}
+.clip-type-text {
+  color: var(--text-tertiary);
+  background: var(--bg-badge);
+}
+.clip-type-image {
+  color: var(--c-cyan);
+  background: var(--c-cyan-soft);
+}
+.clip-type-richtext {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.clip-type-link {
+  color: var(--c-green);
+  background: var(--c-green-soft);
+}
+.clip-type-files {
+  color: var(--c-amber);
+  background: var(--c-amber-soft);
 }
 /* 收藏徽标：琥珀星（收藏=金色，语义色保留） */
 .clip-fav-badge {

@@ -29,7 +29,9 @@ import {
   IconClose,
   IconFiles,
   IconImage,
+  IconLink,
   IconPin,
+  IconRichText,
   IconSearch,
   IconStar,
   IconText,
@@ -592,6 +594,10 @@ export function ClipboardPanel() {
                   <IconImage size={18} />
                 ) : dragGhost.entry.kind === "files" ? (
                   <IconFiles size={18} />
+                ) : dragGhost.entry.kind === "link" ? (
+                  <IconLink size={18} />
+                ) : dragGhost.entry.kind === "richtext" ? (
+                  <IconRichText size={18} />
                 ) : (
                   <IconText size={18} />
                 )}

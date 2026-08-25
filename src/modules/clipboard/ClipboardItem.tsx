@@ -14,8 +14,10 @@ import {
   IconEdit,
   IconFiles,
   IconImage,
+  IconLink,
   IconPin,
   IconPlus,
+  IconRichText,
   IconStar,
   IconText,
   IconTrash,
@@ -116,8 +118,9 @@ export function ClipboardItem({
   /** 内联编辑状态：编辑框替换预览区，保存/取消退出 */
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
-  /** 仅文本类型可编辑 */
-  const editable = entry.kind === "text";
+  /** 仅文本类（普通文本/富文本/链接）可编辑 */
+  const editable =
+    entry.kind === "text" || entry.kind === "richtext" || entry.kind === "link";
 
   /** 保存编辑内容（后端持久化，乐观更新） */
   const saveEdit = async () => {
@@ -146,9 +149,23 @@ export function ClipboardItem({
       <IconImage size={15} className="clip-ic-image" />
     ) : entry.kind === "files" ? (
       <IconFiles size={15} className="clip-ic-files" />
+    ) : entry.kind === "link" ? (
+      <IconLink size={15} className="clip-ic-link" />
+    ) : entry.kind === "richtext" ? (
+      <IconRichText size={15} className="clip-ic-richtext" />
     ) : (
       <IconText size={15} className="clip-ic-text" />
     );
+
+  /** 类型徽标：图片 / 富文本 / 链接 / 文件 / 文本（meta 行首个 chip） */
+  const typeLabel: Record<string, { text: string; cls: string }> = {
+    image: { text: "图片", cls: "image" },
+    richtext: { text: "富文本", cls: "richtext" },
+    link: { text: "链接", cls: "link" },
+    files: { text: "文件", cls: "files" },
+    text: { text: "文本", cls: "text" },
+  };
+  const t = typeLabel[entry.kind] ?? typeLabel.text;
 
   return (
     <div
@@ -224,6 +241,9 @@ export function ClipboardItem({
           <>
             <div className="clip-preview">{entry.preview}</div>
             <div className="clip-meta">
+              <span className={`clip-type clip-type-${t.cls}`} title="内容类型">
+                {t.text}
+              </span>
               <span>{relativeTime(entry.created_at)}</span>
               {entry.source_app && <span className="clip-source">{entry.source_app}</span>}
               {entry.favorite && (

@@ -26,7 +26,12 @@ static LAST_CONSUMED: Mutex<Vec<ClipEntry>> = Mutex::new(Vec::new());
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EntryKind {
+    /// 普通文本
     Text,
+    /// 富文本（剪贴板带格式 HTML，如从浏览器/Word 复制的加粗/彩色文字）
+    RichText,
+    /// 链接（文本本身是 URL，如 http(s):// / www. 开头）
+    Link,
     Image,
     Files,
 }
@@ -400,6 +405,101 @@ fn sync_seq_availability(entries: &[ClipEntry]) {
     }
 }
 
+/// 文本类型细分：链接（URL）> 富文本（剪贴板带格式 HTML）> 普通文本。
+/// 优先级说明：从浏览器复制的链接通常同时带 CF_HTML，URL 语义优先于格式。
+fn classify_text_kind(t: &str) -> EntryKind {
+    if is_link(t.trim()) {
+        return EntryKind::Link;
+    }
+    #[cfg(windows)]
+    if clipboard_has_rich_html() {
+        return EntryKind::RichText;
+    }
+    EntryKind::Text
+}
+
+/// 文本是否为链接：http(s):// / ftp:// / www. 开头（URL 复制的主流形态）
+fn is_link(s: &str) -> bool {
+    let lower = s.to_ascii_lowercase();
+    lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("ftp://")
+        || lower.starts_with("www.")
+        || lower.starts_with("magnet:?")
+}
+
+/// Windows：剪贴板是否含【真正带格式】的 HTML（富文本）。
+/// 复制纯文本时浏览器/Office 也会附带 CF_HTML，但 body 通常只是裸文本；
+/// 仅当 body 含格式化标签（b/i/u/font/span/color 等）才判定为富文本，
+/// 避免把普通复制全标成"富文本"。
+#[cfg(windows)]
+fn clipboard_has_rich_html() -> bool {
+    use windows::Win32::System::DataExchange::{
+        CloseClipboard, EnumClipboardFormats, GetClipboardData, GetClipboardFormatNameW,
+        OpenClipboard,
+    };
+    use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
+    unsafe {
+        if OpenClipboard(None).is_err() {
+            return false;
+        }
+        let mut found = false;
+        let mut fmt = 0u32;
+        loop {
+            fmt = EnumClipboardFormats(fmt);
+            if fmt == 0 {
+                break;
+            }
+            let mut buf = [0u16; 64];
+            let len = GetClipboardFormatNameW(fmt, &mut buf);
+            if len <= 0 {
+                continue;
+            }
+            let name = String::from_utf16_lossy(&buf[..len as usize]);
+            if !name.eq_ignore_ascii_case("html format") {
+                continue;
+            }
+            let Ok(h) = GetClipboardData(fmt) else {
+                continue;
+            };
+            let hg = windows::Win32::Foundation::HGLOBAL(h.0);
+            let ptr = GlobalLock(hg);
+            if ptr.is_null() {
+                continue;
+            }
+            let size = GlobalSize(hg);
+            if size > 0 {
+                let bytes = std::slice::from_raw_parts(ptr as *const u8, size);
+                let text = String::from_utf8_lossy(bytes);
+                found = html_has_formatting(&text);
+            }
+            let _ = GlobalUnlock(hg);
+            break;
+        }
+        let _ = CloseClipboard();
+        found
+    }
+}
+
+/// 粗略判断 HTML 是否含格式化信息（不含则视为普通文本的 HTML 包装）
+fn html_has_formatting(html: &str) -> bool {
+    // 只扫 StartHTML 之后的实质内容（CF_HTML 头部是偏移声明，无关格式）
+    let body = html
+        .split("StartHTML:")
+        .nth(1)
+        .and_then(|s| s.split_once('\n'))
+        .map(|(_, rest)| rest)
+        .unwrap_or(html);
+    let lower = body.to_ascii_lowercase();
+    [
+        "<b>", "<i>", "<u>", "<s>", "<strike", "<font", "<span", "<h1", "<h2", "<h3",
+        "<li>", "<ul>", "<ol>", "<table", "<img", "color:", "background-color",
+        "font-weight", "font-family", "text-decoration", "text-align",
+    ]
+    .iter()
+    .any(|tag| lower.contains(tag))
+}
+
 fn build_entry(snap: &Snapshot, hash: u64, images_dir: &std::path::Path) -> Option<ClipEntry> {
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp_millis();
@@ -408,7 +508,8 @@ fn build_entry(snap: &Snapshot, hash: u64, images_dir: &std::path::Path) -> Opti
     let (kind, preview, text, image_path, image_thumb_path, files) = match snap {
         Snapshot::Text(t) => {
             let preview: String = t.chars().take(100).collect();
-            (EntryKind::Text, preview, Some(t.clone()), None, None, None)
+            // 文本类型细分：链接 > 富文本（剪贴板带格式 HTML）> 普通文本
+            (classify_text_kind(t), preview, Some(t.clone()), None, None, None)
         }
         Snapshot::Image(img) => {
             let rel = format!("{id}.png");
@@ -1044,10 +1145,19 @@ pub fn clipboard_update_text(
     let Some(entry) = entries.iter_mut().find(|e| e.id == id) else {
         return Err("记录不存在".into());
     };
-    if !matches!(entry.kind, EntryKind::Text) {
+    if !matches!(
+        entry.kind,
+        EntryKind::Text | EntryKind::RichText | EntryKind::Link
+    ) {
         return Err("仅文本记录可编辑".into());
     }
     let preview: String = text.chars().take(100).collect();
+    // 编辑后按新内容重分类（链接判定；富文本判定依赖剪贴板现场，编辑时不做）
+    entry.kind = if is_link(text.trim()) {
+        EntryKind::Link
+    } else {
+        EntryKind::Text
+    };
     entry.text = Some(text.clone());
     entry.preview = preview;
     // 重新计算内容哈希（与监听/手动插入路径的算法保持一致）
@@ -1156,7 +1266,7 @@ fn write_entry_to_clipboard(
     let mut cb = Clipboard::new().map_err(|e| format!("访问剪贴板失败：{e}"))?;
     SUPPRESS_WATCH.store(true, Ordering::SeqCst);
     let result = match &entry.kind {
-        EntryKind::Text => cb
+        EntryKind::Text | EntryKind::RichText | EntryKind::Link => cb
             .set_text(entry.text.clone().unwrap_or_default())
             .map_err(|e| format!("写入文本失败：{e}")),
         EntryKind::Image => {
