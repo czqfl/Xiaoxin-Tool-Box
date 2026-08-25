@@ -95,7 +95,6 @@ const defaultConfig: AppConfig = {
   },
   shot: {
     enabled: true,
-    delay_ms: 0,
     capture_cursor: false,
     smart_detect: true,
     smart_element: true,

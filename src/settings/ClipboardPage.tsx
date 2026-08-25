@@ -21,19 +21,11 @@ export function ClipboardPage() {
 
       <div className="setting-group-title">功能</div>
       <SettingGroup>
-        <SettingRow title="启用剪贴板功能" desc="关闭后快捷键注销，工具栏 / 托盘 / 侧栏入口一并隐藏">
-          <Switch
-            checked={config.clipboard.enabled}
-            onChange={(on) => patch({ enabled: on })}
-          />
-        </SettingRow>
-        {config.clipboard.enabled && (
-          <ShortcutRow
-            target="clipboard"
-            title="呼出剪贴板面板"
-            desc="点击快捷键后按下新组合，例如 Ctrl+Alt+C"
-          />
-        )}
+        <ShortcutRow
+          target="clipboard"
+          title="呼出剪贴板面板"
+          desc="点击快捷键后按下新组合，例如 Ctrl+Alt+C"
+        />
       </SettingGroup>
 
       <SettingGroup>

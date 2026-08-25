@@ -1323,14 +1323,12 @@ pub(crate) fn begin_impl<R: Runtime>(app: AppHandle<R>, picker: bool) -> Result<
         PICKER.store(false, Ordering::SeqCst);
         return Err("disabled".into());
     }
-    let delay = cfg.delay_ms;
     let capture_cursor = cfg.capture_cursor;
     // 取色模式不做智能识别/区域记忆：无选区概念，省掉窗口快照开销
     let smart_detect = cfg.smart_detect && !picker;
     let remember_region = cfg.remember_region && !picker;
     std::thread::spawn(move || {
         let t0 = std::time::Instant::now();
-        if delay > 0 { std::thread::sleep(std::time::Duration::from_millis(delay as u64)); }
         // 窗口 Z 序快照与屏幕采集【并行】：EnumWindows+GetRect 不依赖帧数据，
         // 串行执行白白给"呼出到高亮出现"加一段延迟。子线程结果 join 回收，
         // 异常（极少）时退化为空列表=无智能识别，绝不阻塞主流程

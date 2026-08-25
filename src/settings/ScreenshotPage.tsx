@@ -65,42 +65,23 @@ export function ScreenshotPage() {
       {tab === "shot" && (
         <>
           <SettingGroup>
-            <SettingRow title="启用截图功能" desc="关闭后快捷键（含取色/贴图）注销，工具栏入口一并隐藏">
-              <Switch checked={config.shot.enabled} onChange={(v) => updateShot({ enabled: v })} />
-            </SettingRow>
-            {config.shot.enabled && (
-              <>
-                <ShortcutRow
-                  target="screenshot"
-                  title="开始截图"
-                  desc="点击快捷键后按下新组合，例如 Ctrl+Alt+A（冻结屏幕 + 全屏遮罩选区）"
-                />
-                <ShortcutRow
-                  target="picker"
-                  title="屏幕取色"
-                  desc="点击快捷键后按下新组合，例如 Alt+D（十字线跟随鼠标显示坐标与颜色，C 复制颜色，Shift 切换 RGB/HEX）"
-                />
-                <ShortcutRow
-                  target="pins"
-                  title="显示 / 隐藏全部贴图"
-                  desc="点击快捷键后按下新组合，例如 Ctrl+Alt+P（一键显示或隐藏所有贴在桌面上的图片）"
-                />
-              </>
-            )}
+            <ShortcutRow
+              target="screenshot"
+              title="开始截图"
+              desc="点击快捷键后按下新组合，例如 Ctrl+Alt+A（冻结屏幕 + 全屏遮罩选区）"
+            />
+            <ShortcutRow
+              target="picker"
+              title="屏幕取色"
+              desc="点击快捷键后按下新组合，例如 Alt+D（十字线跟随鼠标显示坐标与颜色，C 复制颜色，Shift 切换 RGB/HEX）"
+            />
+            <ShortcutRow
+              target="pins"
+              title="显示 / 隐藏全部贴图"
+              desc="点击快捷键后按下新组合，例如 Ctrl+Alt+P（一键显示或隐藏所有贴在桌面上的图片）"
+            />
           </SettingGroup>
           <SettingGroup>
-            <SettingRow title="延时截图" desc="按下快捷键后等待的时间，0 为立即">
-              <Segmented
-                value={String(config.shot.delay_ms)}
-                options={[
-                  { value: "0", label: "立即" },
-                  { value: "1000", label: "1 秒" },
-                  { value: "3000", label: "3 秒" },
-                  { value: "5000", label: "5 秒" },
-                ]}
-                onChange={(v) => updateShot({ delay_ms: parseInt(v) })}
-              />
-            </SettingRow>
             <SettingRow title="包含鼠标指针" desc="截屏时是否绘制当前鼠标指针">
               <Switch checked={config.shot.capture_cursor} onChange={(v) => updateShot({ capture_cursor: v })} />
             </SettingRow>
@@ -121,13 +102,45 @@ export function ScreenshotPage() {
             </SettingRow>
             {config.shot.history_enabled !== false && (
               <>
-                <SettingRow title="历史保留条数" desc={`最多保留 ${config.shot.history_max_count ?? 20} 次截屏（多屏一次计一条）`}>
-                  <Slider min={5} max={100} value={config.shot.history_max_count ?? 20}
-                    onChange={(v) => updateShot({ history_max_count: v })} />
+                <SettingRow title="历史保留条数" desc="最多保留的截屏次数（一次呼出按一条计），超出自动清理最旧">
+                  <input
+                    className="number-input"
+                    type="number"
+                    min={5}
+                    max={100}
+                    step={1}
+                    value={config.shot.history_max_count ?? 20}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      if (raw === "") return;
+                      const v = Math.round(Number(raw));
+                      if (Number.isFinite(v)) updateShot({ history_max_count: v });
+                    }}
+                    onBlur={(e) => {
+                      const v = Math.round(Number(e.target.value));
+                      if (Number.isFinite(v)) updateShot({ history_max_count: Math.min(100, Math.max(5, v)) });
+                    }}
+                  />
                 </SettingRow>
-                <SettingRow title="历史保留天数" desc={`超过 ${config.shot.history_max_days ?? 7} 天的自动清理`}>
-                  <Slider min={1} max={30} value={config.shot.history_max_days ?? 7}
-                    onChange={(v) => updateShot({ history_max_days: v })} />
+                <SettingRow title="历史保留天数" desc="超过该天数的历史截屏自动清理">
+                  <input
+                    className="number-input"
+                    type="number"
+                    min={1}
+                    max={365}
+                    step={1}
+                    value={config.shot.history_max_days ?? 7}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      if (raw === "") return;
+                      const v = Math.round(Number(raw));
+                      if (Number.isFinite(v)) updateShot({ history_max_days: v });
+                    }}
+                    onBlur={(e) => {
+                      const v = Math.round(Number(e.target.value));
+                      if (Number.isFinite(v)) updateShot({ history_max_days: Math.min(365, Math.max(1, v)) });
+                    }}
+                  />
                 </SettingRow>
                 <ClearHistoryRow />
               </>

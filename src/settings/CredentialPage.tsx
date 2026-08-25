@@ -16,19 +16,11 @@ export function CredentialPage() {
 
       <div className="setting-group-title">功能</div>
       <SettingGroup>
-        <SettingRow title="启用账号密码功能" desc="关闭后快捷键注销，工具栏 / 托盘 / 侧栏入口一并隐藏">
-          <Switch
-            checked={c.enabled}
-            onChange={(on) => void update({ ...config, credentials: { ...c, enabled: on } })}
-          />
-        </SettingRow>
-        {c.enabled && (
-          <ShortcutRow
-            target="credentials"
-            title="呼出账号密码面板"
-            desc="点击快捷键后按下新组合，例如 Alt+A"
-          />
-        )}
+        <ShortcutRow
+          target="credentials"
+          title="呼出账号密码面板"
+          desc="点击快捷键后按下新组合，例如 Alt+A"
+        />
       </SettingGroup>
 
       <div className="setting-group-title">面板行为</div>

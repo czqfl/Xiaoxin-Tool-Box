@@ -336,8 +336,6 @@ impl Default for SnippetsConfig {
 pub struct ShotConfig {
     /// 是否启用截图功能（关闭时快捷键/入口不生效）
     pub enabled: bool,
-    /// 呼出截图后的延时毫秒数（延时截图；0 = 立即）
-    pub delay_ms: u32,
     /// 截图是否包含鼠标指针
     pub capture_cursor: bool,
     /// 智能识别窗口/控件边缘（鼠标悬停自动吸附选框）
@@ -366,7 +364,6 @@ impl Default for ShotConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            delay_ms: 0,
             capture_cursor: false,
             smart_detect: true,
             magnifier: true,
@@ -617,8 +614,14 @@ pub fn config_save(
     // 快照调用整份 config_save 时，一律以运行时当前快捷键覆盖回去——根除
     // 「旧配置把刚改好的快捷键悄悄改回、重启后旧键复活」的问题。
     config.shortcuts = state.0.lock().unwrap().shortcuts.clone();
+    let old_toolbar_enabled = state.0.lock().unwrap().toolbar.enabled;
     save_json(&paths.config_file, &config).map_err(|e| format!("保存配置失败：{e}"))?;
     *state.0.lock().unwrap() = config.clone();
+    // 工具栏启用开关变化时立即显隐（功能开关页切工具栏开关即时反馈；
+    // 原设置页开关的 setToolbarVisible 行为迁移至此）
+    if config.toolbar.enabled != old_toolbar_enabled {
+        let _ = crate::panel::toolbar_set_visible(app.clone(), config.toolbar.enabled);
+    }
     // 全量重注册快捷键：功能启用开关变化（停用的功能热键即时注销）、
     // 快捷键以外的配置调整都借此保证运行时与配置严格一致（推倒重来语义）
     crate::shortcut::resync_all(&app, &config);

@@ -16,19 +16,11 @@ export function SnippetsPage() {
 
       <div className="setting-group-title">功能</div>
       <SettingGroup>
-        <SettingRow title="启用语速贴功能" desc="关闭后快捷键注销，工具栏 / 托盘 / 侧栏入口一并隐藏">
-          <Switch
-            checked={c.enabled}
-            onChange={(on) => void update({ ...config, snippets: { ...c, enabled: on } })}
-          />
-        </SettingRow>
-        {c.enabled && (
-          <ShortcutRow
-            target="snippets"
-            title="呼出语速贴面板"
-            desc="点击快捷键后按下新组合，例如 Alt+K（快捷短语，一键粘贴到任意应用）"
-          />
-        )}
+        <ShortcutRow
+          target="snippets"
+          title="呼出语速贴面板"
+          desc="点击快捷键后按下新组合，例如 Alt+K（快捷短语，一键粘贴到任意应用）"
+        />
       </SettingGroup>
 
       <div className="setting-group-title">面板行为</div>

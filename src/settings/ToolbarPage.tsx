@@ -4,7 +4,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useConfigStore } from "../stores/configStore";
-import { setToolbarVisible } from "../core/tauri";
 import type { ToolKey, ToolbarConfig } from "../types";
 import { Segmented, SettingGroup, SettingRow, Switch } from "./components";
 import { TOOL_KEYS, TOOLS } from "../modules/toolbar/Toolbar";
@@ -27,11 +26,6 @@ export function ToolbarPage() {
   if (!config.toolbar) return null;
 
   const ordered = config.toolbar.tools;
-
-  const toggleEnabled = (on: boolean) => {
-    void update({ ...config, toolbar: { ...config.toolbar, enabled: on } });
-    void setToolbarVisible(on);
-  };
 
   /** 局部更新工具栏配置（排列方向/自动收起等） */
   const patchToolbar = (patch: Partial<ToolbarConfig>) => {
@@ -139,13 +133,6 @@ export function ToolbarPage() {
       </p>
 
       <SettingGroup>
-        <SettingRow
-          title="显示悬浮工具栏"
-          desc="开启后屏幕右侧显示常驻工具条（也可从托盘菜单随时切换显示）"
-        >
-          <Switch checked={config.toolbar.enabled} onChange={toggleEnabled} />
-        </SettingRow>
-
         <SettingRow title="排列方向" desc="水平横条或竖直竖条，切换后窗口自动调整尺寸">
           <Segmented
             value={config.toolbar.orientation}
@@ -258,7 +245,7 @@ export function ToolbarPage() {
       </SettingGroup>
 
       <div className="shortcut-hint">
-        工具栏显示/隐藏：托盘右键菜单 → 「悬浮工具栏」，或在本页开关。
+        工具栏启用/停用：功能开关页 → 「悬浮工具栏」（切换即时生效）。
         拖动：按住任意图标轻微移动即可拖动工具条，未移动松开则点击呼出。
       </div>
     </div>

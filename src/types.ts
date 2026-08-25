@@ -282,7 +282,6 @@ export interface TranslateResult {
 /** 截图功能配置 */
 export interface ShotConfig {
   enabled: boolean;
-  delay_ms: number;
   capture_cursor: boolean;
   smart_detect: boolean;
   smart_element: boolean;

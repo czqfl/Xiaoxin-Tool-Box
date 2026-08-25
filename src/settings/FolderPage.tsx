@@ -64,19 +64,11 @@ export function FolderPage() {
 
       <div className="setting-group-title">功能</div>
       <SettingGroup>
-        <SettingRow title="启用文件夹功能" desc="关闭后快捷键注销，工具栏 / 托盘 / 侧栏入口一并隐藏">
-          <Switch
-            checked={config.folder.enabled}
-            onChange={(on) => patch({ enabled: on })}
-          />
-        </SettingRow>
-        {config.folder.enabled && (
-          <ShortcutRow
-            target="folder"
-            title="呼出文件夹面板"
-            desc="点击快捷键后按下新组合，例如 Ctrl+Alt+F"
-          />
-        )}
+        <ShortcutRow
+          target="folder"
+          title="呼出文件夹面板"
+          desc="点击快捷键后按下新组合，例如 Ctrl+Alt+F"
+        />
       </SettingGroup>
 
       <SettingGroup>

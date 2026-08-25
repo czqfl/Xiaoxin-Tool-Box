@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useConfigStore } from "../stores/configStore";
 import type { TranslateProvider } from "../types";
 import { translateText } from "../core/tauri";
-import { SettingGroup, SettingRow, Segmented, Switch } from "./components";
+import { SettingGroup, SettingRow, Segmented } from "./components";
 import { ShortcutRow } from "./ShortcutRow";
 
 export function TranslationPage() {
@@ -40,19 +40,11 @@ export function TranslationPage() {
 
       <div className="setting-group-title">功能</div>
       <SettingGroup>
-        <SettingRow title="启用划词翻译功能" desc="关闭后快捷键注销，工具栏 / 侧栏入口一并隐藏">
-          <Switch
-            checked={t.enabled}
-            onChange={(on) => patch({ enabled: on })}
-          />
-        </SettingRow>
-        {t.enabled && (
-          <ShortcutRow
-            target="translation"
-            title="划词翻译"
-            desc="选中文本后按下快捷键，自动复制并翻译，例如 Alt+S（单个功能键+字母即可）"
-          />
-        )}
+        <ShortcutRow
+          target="translation"
+          title="划词翻译"
+          desc="选中文本后按下快捷键，自动复制并翻译，例如 Alt+S（单个功能键+字母即可）"
+        />
       </SettingGroup>
 
       <SettingGroup>
