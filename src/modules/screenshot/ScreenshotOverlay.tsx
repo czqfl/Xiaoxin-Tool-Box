@@ -312,7 +312,7 @@ export function ScreenshotOverlay() {
     const onCommit = (ev: Event) => {
       const hex = (ev.target as HTMLInputElement).value;
       setColor(hex);
-      const cur = cfg.annotate?.colors ?? ANNO_DEFAULT_COLORS;
+      const cur = cfg.annotate?.colors?.length ? cfg.annotate.colors : ANNO_DEFAULT_COLORS;
       if (cur.some((x) => x.toLowerCase() === hex)) return;
       const next = [...cur, hex];
       const trimmed =
@@ -1909,7 +1909,7 @@ export function ScreenshotOverlay() {
                 否则与画笔混淆，色板纯属误导 */}
             {tool !== "mosaic" && (
               <>
-                {(cfg.annotate?.colors ?? ANNO_DEFAULT_COLORS).map((c) => (
+                {(cfg.annotate?.colors?.length ? cfg.annotate.colors : ANNO_DEFAULT_COLORS).map((c) => (
                   <button key={c} className={`shot-color-btn${color===c?" active":""}`}
                     style={{background:c}} onClick={()=>setColor(c)} />
                 ))}
