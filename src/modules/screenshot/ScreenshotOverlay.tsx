@@ -1,7 +1,6 @@
 /** Fullscreen screenshot overlay: frozen screen + selection + magnifier + toolbar */
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
   shotGeometry, shotImageDataRaw, shotWindowRectAt, shotUiRectAt, shotReady, shotFrameUrl,
@@ -482,6 +481,9 @@ export function ScreenshotOverlay() {
     }
     mosaicCacheRef.current.clear();
     clearMosaicSnapshots();
+    // 历史位图缓存一并作废：close 释放位图显存，下一会话重新预热
+    for (const b of histBmpRef.current.values()) b.close();
+    histBmpRef.current.clear();
     // 合成源一并作废：下一轮重绘会按新背景帧重建，绝不残留上一会话画面
     compRef.current = null;
     prevAnnoLenRef.current = 0;
@@ -578,6 +580,8 @@ export function ScreenshotOverlay() {
               c.getContext("2d", { willReadFrequently: true })!.drawImage(bmp, 0, 0);
               invalidateMosaicLayer();
               setBgReady(true);
+              // 预热实时帧位图缓存：首次按 < 回实时零延迟（后台拉取，不阻塞）
+              void loadHistBmp("__live__", shotFrameUrl(g.index));
             }
             bmp.close();
           } catch {
@@ -611,24 +615,50 @@ export function ScreenshotOverlay() {
   };
 
   useEffect(() => { loadSession(); }, []);
-  // 历史截屏切换（< >）：【轻量换帧】——只清标注/缓存并重拉冻结帧，
-  // 绝不走 shot-refresh 整页重载（那会摘 data-resetting 隐藏全部 UI、
-  // 清空遮罩再重画，表现为"切换历史时整屏一闪一闪"）
-  useEffect(() => {
-    // 【尾沿去抖】快速连按 < / > 时每步都全量拉一帧 BMP（十几 MB）会互相排队
-    // 造成卡顿；可见画面的换帧由 Rust 原生层瞬时完成，这里的 bg 画布刷新
-    // 延迟 60ms 合并、只取最后一帧即可
-    let t = 0;
-    // 【窗口域 listen】history-changed 由 Rust emit_to 定向发给本屏遮罩；
-    // 全局 listen（EventTarget::Any）会收到其他显示器的换帧事件造成误重载
-    const un = getCurrentWindow().listen("shot://history-changed", () => {
-      window.clearTimeout(t);
-      t = window.setTimeout(() => { void reloadFrameOnly(); }, 60);
-    });
-    return () => { un.then((f) => f()); window.clearTimeout(t); };
-  }, []);
-  const reloadFrameOnly = async () => {
-    // 帧已换：标注/马赛克缓存/预编码缓存全部作废
+  // ---------- 历史帧位图缓存（前端侧） ----------
+  // 旧方案：Rust 发 history-changed → 尾沿去抖 60ms → 拉整屏 BMP → 解码 → 上画。
+  // 选区还原却在命令返回瞬间就落地，表现为"选区先跳、画面后到"，且每次
+  // 翻页都要付一次整屏传输+解码，手感迟钝。
+  // 新方案：位图按帧文件名缓存（实时="__live__"），命中时换帧 = 一次同步
+  // drawImage；stepHistoryCore 里 await 画完才还选区——两者严格同帧落地。
+  // 相邻帧后台预取后，连续按 < / > 全程缓存直绘，接近瞬时（Snipaste 手感）
+  const histBmpRef = useRef<Map<string, ImageBitmap>>(new Map());
+  // 缓存上限：当前帧+前后邻帧+实时 ≈ 4 张整屏位图（1440p 约 60MB），超 FIFO 淘汰
+  const HIST_BMP_MAX = 4;
+  /** 取一帧位图：命中直接返回；未命中经协议拉取解码并入缓存。失败返回 null */
+  const loadHistBmp = async (key: string, url: string): Promise<ImageBitmap | null> => {
+    const hit = histBmpRef.current.get(key);
+    if (hit) return hit;
+    try {
+      const ac = new AbortController();
+      const ft = window.setTimeout(() => ac.abort(), 8000);
+      const resp = await fetch(url, { signal: ac.signal }).catch(() => null);
+      window.clearTimeout(ft);
+      if (!resp || !resp.ok) return null;
+      const bmp = await createImageBitmap(await resp.blob());
+      histBmpRef.current.set(key, bmp);
+      while (histBmpRef.current.size > HIST_BMP_MAX) {
+        const oldest = histBmpRef.current.keys().next().value as string | undefined;
+        if (!oldest || oldest === key) break;
+        histBmpRef.current.get(oldest)?.close();
+        histBmpRef.current.delete(oldest);
+      }
+      return bmp;
+    } catch { return null; }
+  };
+  /** 把一帧画进背景画布（历史切换的可见路径；同步执行、当帧渲染） */
+  const drawHistFrame = (bmp: ImageBitmap): boolean => {
+    const g = geomRef.current;
+    const c = bgRef.current;
+    if (!g || !c || bmp.width !== g.width || bmp.height !== g.height) return false;
+    c.width = g.width; c.height = g.height;
+    c.getContext("2d", { willReadFrequently: true })!.drawImage(bmp, 0, 0);
+    invalidateMosaicLayer();
+    setBgReady(true);
+    return true;
+  };
+  /** 切换历史帧后的完整可见刷新：作废标注/合成缓存 → 画新帧 → 后台预取邻帧 */
+  const showHistFrame = async (file: string) => {
     setAnnos([]); setUndos([]);
     mosaicCacheRef.current.clear();
     clearMosaicSnapshots();
@@ -639,22 +669,23 @@ export function ScreenshotOverlay() {
     if (a) a.getContext("2d")?.clearRect(0, 0, a.width, a.height);
     const g = geomRef.current;
     if (!g) return;
-    try {
-      const ac = new AbortController();
-      const ft = window.setTimeout(() => ac.abort(), 8000);
-      const resp = await fetch(shotFrameUrl(g.index), { signal: ac.signal }).catch(() => null);
-      window.clearTimeout(ft);
-      if (!resp || !resp.ok) return;
-      const bmp = await createImageBitmap(await resp.blob());
-      const c = bgRef.current;
-      if (c && bmp.width === g.width && bmp.height === g.height) {
-        c.width = g.width; c.height = g.height;
-        c.getContext("2d", { willReadFrequently: true })!.drawImage(bmp, 0, 0);
-        invalidateMosaicLayer();
-        setBgReady(true);
+    const key = file || "__live__";
+    // 主源 /frame/{idx}：Rust 在命令返回前已把目标帧解码进 shots，直出 BMP
+    // （零压缩 + SIMD 解码最快路径）。失败回退 /history/{file} 原图 PNG
+    let bmp = await loadHistBmp(key, `${shotFrameUrl(g.index)}?v=${encodeURIComponent(key)}`);
+    if (!bmp && file) bmp = await loadHistBmp(key, shotHistoryUrl(file));
+    if (bmp) drawHistFrame(bmp);
+    // 相邻两帧预取。【必须走 /history/{file}】——浏览历史时 /frame 服务的是
+    // 当前历史帧，拿它预热 "__live__" 会把错误画面存进实时槽位；
+    // 实时帧只在身处实时时预热（loadSession 里做了一次）
+    void (async () => {
+      const items = histItemsRef.current ?? [];
+      const idx = items.findIndex((i) => i.file === file);
+      if (file && idx >= 0) {
+        if (idx + 1 < items.length) await loadHistBmp(items[idx + 1].file, shotHistoryUrl(items[idx + 1].file));
+        if (idx - 1 >= 0) await loadHistBmp(items[idx - 1].file, shotHistoryUrl(items[idx - 1].file));
       }
-      bmp.close();
-    } catch {}
+    })();
   };
   // 原生拖拽层首帧握手事件：保留监听但【不再清空 webview 选区画布】——
   // 之前的"让位"清屏会把拖拽中的实时细边框一并清掉（只剩原生粗边框，
@@ -909,13 +940,18 @@ export function ScreenshotOverlay() {
     } catch { /* 拉取失败不缓存，下次再试 */ }
     return histItemsRef.current ?? [];
   };
-  /** 翻历史核心：Rust 替换冻结帧后推 shot://history-changed → 轻量换帧 */
+  /** 翻历史核心：Rust 已替换冻结帧并返回帧标识 → 前端画帧（缓存直绘/拉取）
+      → 画完才返回，调用方随后还原该帧选区（画面与选区同帧落地） */
   const stepHistoryCore = async (dir: number, index?: number) => {
     if (histBusyRef.current || dragRef.current || resizeRef.current || pickerModeRef.current) return;
     histBusyRef.current = true;
     try {
       const r = await shotHistoryStep(dir, index);
       if (r === undefined) return undefined;
+      // 【先画帧、后还选区】await 保证可见画面与新选区同一时刻落地，
+      // 消除旧方案"选区先跳、画面后到"的错位感。位图缓存命中时此
+      // await ≈ 0ms；未命中付一次拉帧解码（随后被缓存+预取覆盖）
+      await showHistFrame(r === "live" ? "" : r);
       setHistViewing(r !== "live");
       // 同步拉列表并计算当前位置：缩略条据此高亮/滚动到当前帧
       const items = await ensureHistItems();
