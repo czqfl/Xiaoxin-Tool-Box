@@ -537,6 +537,15 @@ fn build_entry(snap: &Snapshot, hash: u64, images_dir: &std::path::Path) -> Opti
             )
         }
         Snapshot::Files(list) => {
+            // 单个图片文件（资源管理器 / 微信等按文件方式复制图片）：识别为
+            // "图片"类型——显示缩略图与图片徽标，与用户对"这是一张图"的认知
+            // 一致。files 字段保留原文件路径：粘贴时写回文件列表（资源管理器
+            // 粘贴=文件，与复制操作语义一致）。读取/解码失败则退回普通文件分类。
+            if list.len() == 1 {
+                if let Some(e) = image_file_entry(&list[0], &id, images_dir, hash) {
+                    return Some(e);
+                }
+            }
             let names: Vec<String> = list
                 .iter()
                 .map(|p| {
@@ -569,6 +578,63 @@ fn build_entry(snap: &Snapshot, hash: u64, images_dir: &std::path::Path) -> Opti
         consumed: false,
         content_hash: hash.to_string(),
     })
+}
+
+/// 单个图片文件 → "图片"类型条目：保存原图+缩略图（面板显示缩略图与图片
+/// 徽标），files 保留原路径供粘贴写回文件列表。非图片扩展名或读取/解码
+/// 失败返回 None，调用方退回普通文件分类。
+fn image_file_entry(
+    path: &std::path::Path,
+    id: &str,
+    images_dir: &std::path::Path,
+    hash: u64,
+) -> Option<ClipEntry> {
+    if !is_image_ext(path) {
+        return None;
+    }
+    let bytes = std::fs::read(path).ok()?;
+    let img = image::load_from_memory(&bytes).ok()?;
+    let (w, h) = (img.width(), img.height());
+    let rel = format!("{id}.png");
+    let thumb_rel = format!("{id}.thumb.png");
+    let dir = images_dir.to_path_buf();
+    // 与位图图片路径一致：缩略图与原图后台线程落盘，条目立即入库
+    {
+        let rel2 = rel.clone();
+        let thumb2 = thumb_rel.clone();
+        std::thread::spawn(move || {
+            let _ = save_thumbnail(&bytes, w, h, dir.join(&thumb2));
+            let _ = save_original(&bytes, w, h, dir.join(&rel2));
+        });
+    }
+    Some(ClipEntry {
+        id: id.to_string(),
+        kind: EntryKind::Image,
+        text: None,
+        preview: "图片".into(),
+        image_path: Some(rel),
+        image_thumb_path: Some(thumb_rel),
+        files: Some(vec![path.to_string_lossy().to_string()]),
+        source_app: source_app(),
+        created_at: chrono::Utc::now().timestamp_millis(),
+        favorite: false,
+        pinned: false,
+        consumed: false,
+        content_hash: hash.to_string(),
+    })
+}
+
+/// 扩展名是否图片（实际能否解码由 image_file_entry 的 load 判定兜底）
+fn is_image_ext(path: &std::path::Path) -> bool {
+    path.extension()
+        .map(|e| {
+            let e = e.to_string_lossy().to_ascii_lowercase();
+            matches!(
+                e.as_str(),
+                "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "tif" | "tiff" | "ico" | "avif"
+            )
+        })
+        .unwrap_or(false)
 }
 
 /// 保存完整分辨率原图（PNG 无损，快速压缩），写回剪贴板时保持清晰度
@@ -1270,6 +1336,18 @@ fn write_entry_to_clipboard(
             .set_text(entry.text.clone().unwrap_or_default())
             .map_err(|e| format!("写入文本失败：{e}")),
         EntryKind::Image => {
+            // 文件来源的图片（复制图片文件）：写回文件列表——粘贴进资源管理器
+            // 仍是文件操作，与"复制文件"的语义一致（arboard 的位图写入会先
+            // 清空剪贴板，两者不能共存，只能二选一）
+            if let Some(paths) = &entry.files {
+                if !paths.is_empty() {
+                    let pbs: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+                    return cb
+                        .set()
+                        .file_list(&pbs)
+                        .map_err(|e| format!("写入文件失败：{e}"));
+                }
+            }
             let rel = entry.image_path.as_deref().ok_or("图片路径缺失")?;
             let img =
                 image::open(images_dir.join(rel)).map_err(|e| format!("读取图片失败：{e}"))?;
