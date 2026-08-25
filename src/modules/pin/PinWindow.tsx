@@ -314,7 +314,9 @@ export function PinWindow() {
       // 此前 Esc=仅隐藏，但隐藏走 window.hide() 且依赖焦点链路，实测不可靠；
       // 关闭接口验证正常，用户明确要求 Esc 与菜单行为一致
       if (e.key === "Delete" || e.key === "Escape") {
-        pinClose(idRef.current).catch(() => {});
+        // 关闭失败（贴图已成幽灵条目：窗口与存储脱节）时回退为隐藏窗口——
+        // 保证 Esc 永远能退出贴图
+        pinClose(idRef.current).catch(() => { void pinHideOne().catch(() => {}); });
       } else if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "c" || e.key === "C")) {
         // 【默认复制为图片（贴图视觉）】：文本/富文本贴图经 DOM 渲染导出 PNG；
         // 复制原文本走右键菜单。仅失败时红标提示

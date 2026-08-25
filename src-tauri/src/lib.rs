@@ -422,9 +422,26 @@ pub fn run() {
                 } else if label.starts_with(pin::STAGING_LABEL) {
                     // 复用贴图窗（待命池，pin-staging / pin-staging-N）被销毁
                     // （关闭其承载的贴图/Alt+F4 等）：清分配关系并补建待命窗，
-                    // 保证下次贴图仍走快路径
-                    if let Some(m) = app_handle.try_state::<pin::PinWinMap>() {
-                        m.0.lock().unwrap().remove(label.as_str());
+                    // 保证下次贴图仍走快路径。
+                    // 【幽灵条目防护】若被销毁的窗仍映射着一张贴图（未走
+                    // pin_close、也没有兜底窗——如 Alt+F4 直接关窗），该贴图
+                    // 失去窗口后既无法关闭也无法复制原文本（pin_close/复制按
+                    // id 找不到窗口与存储条目）——从存储一并清除。正常
+                    // pin_close 路径已先清存储，这里是幂等兜底；若该贴图另有
+                    // 兜底窗（watchdog 回退建窗）则保留。
+                    let mapped = app_handle
+                        .try_state::<pin::PinWinMap>()
+                        .and_then(|m| m.0.lock().unwrap().remove(label.as_str()));
+                    if let Some(pid) = mapped {
+                        let still_served = app_handle
+                            .get_webview_window(&format!("{}-{pid}", pin::PIN_PREFIX))
+                            .is_some();
+                        if !still_served {
+                            pin::forget_pin(app_handle, &pid);
+                            crate::storage::diag_write(&format!(
+                                "[pin] staging {label} destroyed, cleaned orphan {pid}"
+                            ));
+                        }
                     }
                     pin::ensure_staging(app_handle);
                 } else if let Some(id) = label.strip_prefix("pin-") {

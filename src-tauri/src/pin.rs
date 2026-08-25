@@ -256,6 +256,7 @@ pub(crate) fn attach_to_staging<R: Runtime>(app: &AppHandle<R>, pin: PinData) {
         m.0.lock().unwrap().insert(label.clone(), pin.id.clone());
     }
     let _ = app.emit_to(&label, EVT_PIN_ASSIGN, serde_json::json!({ "id": pin.id }));
+    crate::storage::diag_write(&format!("[pin] attach {label} <- {}", pin.id));
     // 看门狗 + 补充待命池
     let app2 = app.clone();
     let pid = pin.id.clone();
@@ -276,6 +277,14 @@ pub(crate) fn attach_to_staging<R: Runtime>(app: &AppHandle<R>, pin: PinData) {
             crate::screenshot::hide_all(&app2);
             if let Some(m) = app2.try_state::<PinWinMap>() {
                 m.0.lock().unwrap().remove(&label);
+            }
+            // 【销毁该待命窗】不能把它留在自由池：它可能已收到迟到的 assign、
+            // 甚至已加载旧贴图内容——下一张贴图复用它时窗口还带着旧内容，
+            // 正是"旧贴图变成最后一次复制的内容"的隐患。销毁后由 Destroyed
+            // 处理器清映射并补建待命窗（兜底窗已建，贴图不丢）
+            if let Some(w) = app2.get_webview_window(&label) {
+                let _ = w.close();
+                crate::storage::diag_write(&format!("[pin] staging {label} unresponsive, closed"));
             }
         }
         ensure_staging(&app2);
@@ -299,6 +308,7 @@ pub async fn pin_ready(app: AppHandle, window: WebviewWindow) -> Result<(), Stri
         Some(label.trim_start_matches(&format!("{PIN_PREFIX}-")).to_string())
     };
     let Some(pin_id) = pin_id else { return Ok(()); };
+    crate::storage::diag_write(&format!("[pin] ready {label} pin={pin_id}"));
     if let Some(w) = app.get_webview_window(&label) {
         if is_staging {
             // 【移动即显示】staging 待命窗本就"屏幕外可见"（合成器常驻预热），
@@ -401,6 +411,7 @@ pub fn pin_update(app: AppHandle, id: String, x: i32, y: i32, width: u32, height
 
 #[tauri::command]
 pub fn pin_close(app: AppHandle, id: String) -> Result<(), String> {
+    crate::storage::diag_write(&format!("[pin] close {id}"));
     if let Some(w) = window_of_pin(&app, &id) { let _ = w.close(); }
     let store = app.try_state::<PinStore>().ok_or("no state")?;
     store.0.lock().unwrap().retain(|p| p.id != id);
@@ -856,21 +867,55 @@ pub async fn pin_copy_original(app: AppHandle, id: String) -> Result<String, Str
     Ok(kind)
 }
 
-/// HTML → 纯文本（剥标签 + 实体解码），作 CF_HTML 的纯文本备选。
-/// 【必须解码数字实体】不少编辑器产出的 CF_HTML 会把空格写成 &#32;——
-/// 纯文本优先的目标（代码编辑器/记事本）拿到未解码文本就会满屏 &#32;
+/// HTML → 纯文本（块级标签转换行 + 剥标签 + 实体解码），作 CF_HTML 的纯文本备选。
+/// 【必须转换行】IDEA/浏览器等产出的代码/富文本用 <br>、<div>、<p>、<pre>
+/// 分行——只剥标签会把整段拼成一行，换行缩进全丢（"贴图中转后换行没了"）；
+/// 缩进的空白（空格/&nbsp;）是文本节点，天然保留。
+/// 【必须解码数字实体】不少编辑器会把空格写成 &#32;——纯文本优先的目标
+/// （代码编辑器/记事本）拿到未解码文本就会满屏 &#32;
 fn html_to_plain(html: &str) -> String {
     let mut out = String::with_capacity(html.len());
+    let lower = html.to_ascii_lowercase();
+    let bytes = lower.as_bytes();
+    let mut i = 0;
     let mut in_tag = false;
-    for ch in html.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            c if !in_tag => out.push(c),
-            _ => {}
+    while i < html.len() {
+        if !in_tag {
+            if bytes[i] == b'<' {
+                if let Some(end) = lower[i..].find('>') {
+                    let t = lower[i + 1..i + end].trim();
+                    let name = t.strip_prefix('/').unwrap_or(t);
+                    let name = name.split_whitespace().next().unwrap_or("");
+                    let newline = match name {
+                        "br" => true,
+                        // 块级元素收尾 = 一行结束（开标签不换，避免 <p>x</p> 出空行）
+                        "div" | "p" | "li" | "tr" | "pre" | "h1" | "h2" | "h3" | "h4"
+                        | "h5" | "h6" | "blockquote" => t.starts_with('/'),
+                        _ => false,
+                    };
+                    if newline { out.push('\n'); }
+                    i += end + 1;
+                    in_tag = false;
+                    continue;
+                }
+            }
+            let ch = html[i..].chars().next().unwrap();
+            out.push(ch);
+            i += ch.len_utf8();
+        } else {
+            if bytes[i] == b'>' { in_tag = false; }
+            i += 1;
         }
     }
-    decode_entities(&out)
+    let plain = decode_entities(&out);
+    // 收敛 3+ 连续换行为 2 个（块级嵌套会产生连续空行），去掉首尾空行
+    let mut collapsed = String::with_capacity(plain.len());
+    let mut nl = 0;
+    for c in plain.chars() {
+        if c == '\n' { nl += 1; if nl <= 2 { collapsed.push(c); } }
+        else { nl = 0; collapsed.push(c); }
+    }
+    collapsed.trim_matches('\n').to_string()
 }
 
 /// 解码 HTML 实体：命名实体（常用集）+ 十进制/十六进制数字实体
