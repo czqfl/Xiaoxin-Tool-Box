@@ -158,9 +158,15 @@ export function SettingsApp() {
     if (!loaded) return;
     const apply = () => {
       try {
-        const raw = getComputedStyle(document.documentElement)
-          .getPropertyValue("--bg-sidebar")
-          .trim();
+        // 令牌值可能是 light-dark(...) 未解析流（主题单源化后），
+        // 直接 getPropertyValue 拿不到最终色；用隐藏探针元素借真实属性解析
+        const probe = document.createElement("span");
+        probe.style.position = "absolute";
+        probe.style.visibility = "hidden";
+        probe.style.backgroundColor = "var(--bg-sidebar)";
+        document.body.appendChild(probe);
+        const raw = getComputedStyle(probe).backgroundColor;
+        probe.remove();
         const rgb = cssColorToRgb(raw);
         if (rgb) void invoke("set_settings_caption_color", { rgb }).catch(() => {});
       } catch {

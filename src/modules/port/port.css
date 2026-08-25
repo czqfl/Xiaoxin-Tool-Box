@@ -307,6 +307,6 @@
 }
 /* 命令行等宽显示，路径一目了然（如 node C:\proj\hussar-front\...） */
 .port-detail-val.cmdline {
-  font-family: var(--font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
+  font-family: var(--font-mono);
   color: var(--text-primary);
 }

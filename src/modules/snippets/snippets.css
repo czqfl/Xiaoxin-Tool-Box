@@ -118,9 +118,9 @@
   background: var(--accent-soft);
 }
 .snip-confirm-del {
-  background: rgba(var(--danger-rgb, 220, 60, 60), 0.15) !important;
-  border-color: rgba(var(--danger-rgb, 220, 60, 60), 0.5) !important;
-  color: var(--text-danger, #dc3c3c) !important;
+  background: var(--danger-soft) !important;
+  border-color: color-mix(in srgb, var(--danger) 50%, transparent) !important;
+  color: var(--danger) !important;
 }
 
 /* 空状态 / 错误提示 */
@@ -139,7 +139,7 @@
   opacity: 0.6;
 }
 .snip-error {
-  color: var(--text-danger, #dc3c3c);
+  color: var(--danger);
   font-size: var(--font-sm);
 }
 
@@ -217,7 +217,7 @@
   box-shadow: var(--ring);
 }
 .snip-field textarea {
-  font-family: var(--font-mono, inherit);
+  font-family: var(--font-mono);
   line-height: 1.5;
 }
 .snip-modal-actions {

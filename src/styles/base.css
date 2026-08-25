@@ -28,11 +28,12 @@ body {
   /* 数字等宽（计数/快捷键/坐标对齐不跳动——列表类应用的隐形细节） */
   font-variant-numeric: tabular-nums;
   -webkit-tap-highlight-color: transparent;
-  /* 应用背景：品牌色径向微光（顶部）叠中性底——有层次但不抢内容 */
+  /* 应用背景：品牌色径向微光（顶部）叠中性底——有层次但不抢内容。
+     浅色用品牌蓝微光；深色换极淡中性白（去掉整体蓝调），light-dark 单规则双态 */
   background:
     radial-gradient(
       1100px 560px at 50% -8%,
-      rgba(var(--accent-rgb), 0.055),
+      light-dark(rgba(var(--accent-rgb), 0.055), rgba(255, 255, 255, 0.022)),
       transparent 62%
     ),
     var(--bg-app);

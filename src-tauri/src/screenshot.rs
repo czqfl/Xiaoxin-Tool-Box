@@ -110,6 +110,8 @@ pub fn is_overlay_label(label: &str) -> bool {
 pub(crate) fn hide_all<R: Runtime>(app: &AppHandle<R>) {
     SHOOTING.store(false, Ordering::SeqCst);
     PICKER.store(false, Ordering::SeqCst);
+    // UIA 元素识别缓存一并作废：会话期间缓存的命中结果可能指向已关闭的窗口
+    crate::uia_pick::clear_cache();
     // 拖拽进行中被收场（Esc/输出/贴图）：停更线程 + 还原冻结层原帧，
     // 避免下一会话亮窗瞬间残留上一场拖拽的压暗/边框
     drag_stop(app);
@@ -902,8 +904,13 @@ fn snapshot_windows<R: Runtime>(app: &AppHandle<R>) -> Vec<SnapWin> {
     use windows::Win32::Foundation::LPARAM;
     use windows::Win32::UI::WindowsAndMessaging::EnumWindows;
 
-    let own_roots: Vec<isize> = app.webview_windows().values()
-        .filter_map(|w| hwnd_of_webview(w))
+    let own_roots: Vec<isize> = app.webview_windows().iter()
+        // 【只排除截图遮罩自己】贴图/便签/面板等本应用其他可见窗口必须参与候选：
+        // 它们的像素就冻结在本会话画面里，盖住下层应用时理应选中它们——
+        // 此前把本应用窗口全部排除，悬停贴图时会"穿透"选中底下被盖住的
+        // 应用边框（正是"被覆盖的应用还能选到"的主因之一）
+        .filter(|(l, _)| l.starts_with(OVERLAY_PREFIX))
+        .filter_map(|(_, w)| hwnd_of_webview(w))
         .map(|h| h.0 as isize)
         .collect();
     let mut ctx = SnapCtx { own_roots, out: Vec::new() };
@@ -1767,120 +1774,45 @@ pub fn shot_window_rect_at(app: AppHandle, x: f64, y: f64) -> Option<ShotRect> {
 ///
 /// 【为什么不能用 ElementFromPoint】遮罩窗是全屏置顶且接收鼠标输入的窗口，
 /// UIA 的 ElementFromPoint 与 WindowFromPoint 一样只会命中遮罩自己——
-/// 返回的"元素"是遮罩/其 WebView2 宿主，矩形≈全屏，被前端过滤后什么都选不中。
+/// 返回的"元素"是遮罩/其 WebView2 宿主，矩形≈全屏，什么都选不中。
 ///
 /// 正确路径：从呼出瞬间的 Z 序快照里查到光标下目标窗口的 HWND，
-/// 用 ElementFromHandle 直达【目标窗口】的 UIA 元素树，再反复下钻到
-/// 「包含该点且面积最小」的子元素——从而能框选浏览器页面里的按钮组/
-/// 输入框/标签页等细粒度组件。过小（<10px，噪点）与异常返回 None，
-/// 前端自动回退窗口级识别。
+/// 用 ElementFromHandle 直达【目标窗口】的 UIA 元素树逐层下钻到
+/// 「包含该点且面积最小」的子元素——能框选浏览器页面里的导航栏/按钮组/
+/// 输入框等细粒度组件。
+///
+/// 实际查询在专用 UIA 工作线程完成（见 uia_pick 模块）：
+/// · CreateCacheRequest 批量缓存：每层下钻仅 1 次跨进程往返，Chromium
+///   数百节点网页树毫秒级完成（旧实现 N×2 次/层，动辄秒级）
+/// · 命中交互控件（按钮/链接/菜单项/输入框）即停——按"件"识别不钻文本碎片
+/// · 极小同型叶子组（≥3 兄弟）上浮父容器——工具条/列表按"组"可选
+/// · 160ms 层间自限 + latest-wins：慢 provider 不拖累后续悬停
+///
+/// 过小（<10px，噪点）与异常返回 None，前端自动回退窗口级识别。
 #[cfg(windows)]
-pub fn ui_element_rect_at(app: &AppHandle, x: f64, y: f64) -> Option<ShotRect> {
-    use windows::Win32::Foundation::HWND;
-    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
-    use windows::Win32::UI::Accessibility::{CUIAutomation, IUIAutomationElement, TreeScope_Children};
+#[tauri::command]
+pub async fn shot_ui_rect_at(app: AppHandle, x: f64, y: f64) -> Option<ShotRect> {
     let (x, y) = (x.round() as i32, y.round() as i32);
-
-    // 快照查表：光标下最顶层的目标窗口（含其 HWND）。
-    // 查到立即【释放锁】再做 UIA——Chromium 系应用首次查询会触发无障碍树
-    // 激活，ElementFromHandle/FindAll 可达数秒；锁被占住会把并行的
-    // shot_window_rect_at（窗口级识别）一并卡死，表现为悬停迟迟无高亮
-    let (hwnd, target) = {
+    // 快照查表拿到目标窗口 HWND+矩形后【立刻放锁】：UIA 查询可能阻塞数秒
+    // （Chromium 无障碍树首次激活），锁被占住会卡死并行的窗口级查表
+    let target = {
         let state = app.try_state::<ShotState>()?;
         let cands = state.candidates.lock().unwrap();
-        let t = cands.iter().find(|w| {
+        cands.iter().find(|w| {
             x >= w.rect.x && x < w.rect.x + w.rect.width as i32
                 && y >= w.rect.y && y < w.rect.y + w.rect.height as i32
-        })?.clone();
-        (HWND(t.hwnd as *mut _), t)
+        }).map(|w| (w.hwnd, w.rect.clone()))?
     };
-
-    // COM 线程初始化：命令跑在 tokio 线程池，各线程首次使用时初始化一次；
-    // 已初始化（含模式不符）的错误直接忽略，CoCreateInstance 仍可成功
-    unsafe { let _ = windows::Win32::System::Com::CoInitializeEx(
-        None, windows::Win32::System::Com::COINIT_MULTITHREADED); }
-
-    // UIA 实例线程内缓存：悬停识别每次查询都 CoCreateInstance 一次纯属浪费，
-    // thread_local 缓存后同线程的后续查询直接复用（COM 接口非 Send，不能放全局）
-    thread_local! {
-        static UIA: std::cell::RefCell<Option<windows::Win32::UI::Accessibility::IUIAutomation>> =
-            const { std::cell::RefCell::new(None) };
-    }
-    let auto: windows::Win32::UI::Accessibility::IUIAutomation = UIA.with(|c| {
-        let mut slot = c.borrow_mut();
-        if let Some(a) = &*slot {
-            return Some(a.clone());
-        }
-        let created: windows::Win32::UI::Accessibility::IUIAutomation =
-            unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()? };
-        *slot = Some(created.clone());
-        Some(created)
-    })?;
-
-    let area = |r: &windows::Win32::Foundation::RECT| (r.right - r.left) * (r.bottom - r.top);
-    let contains = |r: &windows::Win32::Foundation::RECT| x >= r.left && x < r.right && y >= r.top && y < r.bottom;
-
-    // 直达目标窗口的 UIA 元素（Chromium 系浏览器会在收到 UIA 查询时
-    // 自动激活无障碍树，首次查询可能略慢，属预期行为）
-    let mut cur: IUIAutomationElement = unsafe { auto.ElementFromHandle(hwnd).ok()? };
-    let mut cur_rect = unsafe { cur.CurrentBoundingRectangle() }.ok()?;
-
-    // 下钻：在子元素里找包含该点且面积最小的矩形，最多 8 层；子树过大（>800，
-    // 病态树）放弃下钻保响应性。UIA 调用全部失败安全——出错即返回当前结果
-    if let Ok(cond) = unsafe { auto.CreateTrueCondition() } {
-        for _ in 0..8 {
-            let Ok(children) = (unsafe { cur.FindAll(TreeScope_Children, &cond) }) else { break };
-            let Ok(n) = (unsafe { children.Length() }) else { break };
-            if n == 0 || n > 800 { break; }
-            let mut best: Option<(IUIAutomationElement, windows::Win32::Foundation::RECT)> = None;
-            for i in 0..n {
-                let Ok(c) = (unsafe { children.GetElement(i) }) else { continue };
-                let Ok(r) = (unsafe { c.CurrentBoundingRectangle() }) else { continue };
-                if contains(&r) {
-                    match &best {
-                        Some((_, br)) if area(br) <= area(&r) => {}
-                        _ => best = Some((c, r)),
-                    }
-                }
-            }
-            match best {
-                Some((c, r)) if area(&r) < area(&cur_rect) => {
-                    cur = c; cur_rect = r;
-                }
-                _ => break,
-            }
-        }
-    }
-
-    let w = cur_rect.right - cur_rect.left;
-    let h = cur_rect.bottom - cur_rect.top;
-    // 过小视为命中噪点（1px 分隔线等）；与目标窗口几乎等大的结果（下钻失败，
-    // 仍停留在窗口根元素）也返回 None，避免与窗口级识别重复
-    if w < 10 || h < 10 { return None; }
-    if w >= target.rect.width as i32 && h >= target.rect.height as i32 { return None; }
-    // 元素矩形必须落在目标窗口可见边界内（±1px 容忍 DWM 舍入）：UIA 树里
-    // 不少容器带不可见阴影/边框余量，最大化窗口的内容宿主甚至会越出屏幕
-    // （实测记事本最大化返回 (-2,99) 2564×1383）——采纳它高亮框就缺一截/
-    // 出屏，表现为"最大化窗口识别不到"。越界即放弃元素级，回退窗口级。
-    let tol = 1;
-    let wx = target.rect.x; let wy = target.rect.y;
-    let wr2 = wx + target.rect.width as i32;
-    let wb = wy + target.rect.height as i32;
-    if cur_rect.left < wx - tol || cur_rect.top < wy - tol
-        || cur_rect.right > wr2 + tol || cur_rect.bottom > wb + tol {
-        return None;
-    }
-    Some(ShotRect { x: cur_rect.left, y: cur_rect.top, width: w.max(0) as u32, height: h.max(0) as u32 })
+    let (hwnd, win) = target;
+    tauri::async_runtime::spawn_blocking(move || crate::uia_pick::pick(hwnd, win, x, y, 220))
+        .await
+        .ok()
+        .flatten()
 }
 
 #[cfg(not(windows))]
-pub fn ui_element_rect_at(_: &AppHandle, _x: f64, _y: f64) -> Option<ShotRect> { None }
-
-/// 元素级识别命令：与 shot_window_rect_at 并行调用，前端择优（取更精细者）
 #[tauri::command]
-pub fn shot_ui_rect_at(app: AppHandle, x: f64, y: f64) -> Option<ShotRect> {
-    ui_element_rect_at(&app, x, y)
-}
+pub async fn shot_ui_rect_at(_app: AppHandle, _x: f64, _y: f64) -> Option<ShotRect> { None }
 
 #[tauri::command]
 pub fn shot_last_region() -> Option<[i32; 4]> {

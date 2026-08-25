@@ -1,102 +1,113 @@
 /* ==========================================================================
    设计令牌：所有组件必须消费 CSS 变量，禁止硬编码色值。
-   主题策略：
-   - :root 为浅色令牌
-   - html[data-theme="dark"] 强制深色
-   - 未设置 data-theme 时跟随系统（prefers-color-scheme）
+   主题策略（单一来源）：
+   - 浅/深双值内联在同一令牌：light-dark(浅值, 深值)。每个令牌只写一处，
+     不再有「手动深色块 / 系统深色媒体查询块」两份拷贝——从结构上杜绝两份漂移
+   - 取哪一侧由 color-scheme 决定：
+     :root 声明 light dark（= 未手动选主题时跟随系统）；
+     data-theme="light"/彩色浅色主题强制 light；data-theme="dark" 强制 dark
+   - 唯二例外：--accent-rgb / --bg-panel-rgb 是 "r,g,b" 三元组（供
+     rgba(var(--x), α) 消费），无法写成 light-dark()，由文件末尾的
+     微型开关切换（共 ~6 行，改动这两个值时需同步那 3 处）
 
    视觉基调（v2）：清亮天蓝品牌色 + 纯净中性灰（无紫调）。
    浅色 = 通透冷白；深色 = 石墨黑。
+   light-dark() 需 Chromium 123+（Tauri WebView2 常青运行时满足）。
    ========================================================================== */
 
 :root {
-  /* 品牌色：清亮天蓝 */
-  --accent: #2f80ed;
-  --accent-hover: #2371dd;
-  --accent-active: #1a62c9;
-  --accent-soft: rgba(47, 128, 237, 0.12);
+  /* 品牌色：清亮天蓝（深色侧提亮保活力；蓝只出现在按钮/链接/焦点等小面积交互处） */
+  --accent: light-dark(#2f80ed, #4c9eff);
+  --accent-hover: light-dark(#2371dd, #3a8ef2);
+  --accent-active: light-dark(#1a62c9, #2c7de0);
+  --accent-soft: light-dark(rgba(47, 128, 237, 0.12), rgba(76, 158, 255, 0.16));
   --accent-text: #ffffff;
 
   /* 语义色 */
-  --danger: #e5484d;
-  --danger-soft: rgba(229, 72, 77, 0.12);
-  --success: #27a567;
-  --success-soft: rgba(39, 165, 103, 0.12);
-  --warning: #f5a524;
-  --warning-soft: rgba(245, 165, 36, 0.14);
+  --danger: light-dark(#e5484d, #f2555a);
+  --danger-soft: light-dark(rgba(229, 72, 77, 0.12), rgba(242, 85, 90, 0.16));
+  --success: light-dark(#27a567, #3dd68c);
+  --success-soft: light-dark(rgba(39, 165, 103, 0.12), rgba(61, 214, 140, 0.16));
+  --warning: light-dark(#f5a524, #f7b955);
+  --warning-soft: light-dark(rgba(245, 165, 36, 0.14), rgba(247, 185, 85, 0.17));
 
-  /* 水彩按钮色带（翻译按钮流动水彩用）：浅色主题鲜亮通透；
-     深色/系统深色有提亮变体。按钮文字/阴影随主题切换保证对比 */
-  --water-a: rgba(150, 122, 240, 0.78);
-  --water-b: rgba(64, 140, 244, 0.72);
-  --water-c: rgba(54, 182, 170, 0.66);
-  --water-d: rgba(232, 162, 62, 0.6);
-  --water-e: rgba(226, 112, 152, 0.7);
-  --btn-text: #171a21;
-  --btn-text-shadow: 0 1px 0 rgba(255, 255, 255, 0.55);
+  /* 水彩按钮色带（翻译按钮流动水彩用）：浅色鲜亮通透、深色提亮一档不闷 */
+  --water-a: light-dark(rgba(150, 122, 240, 0.78), rgba(183, 154, 224, 0.88));
+  --water-b: light-dark(rgba(64, 140, 244, 0.72), rgba(96, 160, 255, 0.84));
+  --water-c: light-dark(rgba(54, 182, 170, 0.66), rgba(86, 196, 184, 0.78));
+  --water-d: light-dark(rgba(232, 162, 62, 0.6), rgba(240, 184, 96, 0.74));
+  --water-e: light-dark(rgba(226, 112, 152, 0.7), rgba(232, 134, 168, 0.82));
+  /* 水彩按钮上的文字与投影随主题保证对比（几何统一 0 1px 2px） */
+  --btn-text: light-dark(#171a21, #ffffff);
+  --btn-text-shadow: 0 1px 2px light-dark(rgba(255, 255, 255, 0.55), rgba(0, 0, 0, 0.35));
 
   /* 内容类型色（低饱和，克制使用）：仅"内容类型图标"等有语义的元素用。
-     其余信息层级一律交给中性灰；色彩角色收敛为 品牌蓝/成功绿/警告琥珀/危险红。 */
-  --c-cyan: #3ea8c9;
-  --c-green: #4ca674;
-  --c-amber: #d99a2b;
-  --c-cyan-soft: rgba(62, 168, 201, 0.13);
-  --c-green-soft: rgba(76, 166, 116, 0.13);
-  --c-amber-soft: rgba(217, 154, 43, 0.14);
-  /* 工具栏图标辨识色（浅色用 600 级深一档：浅底上对比足、清晰可辨；
-     深色主题另有提亮变体） */
-  --tool-clipboard: #3b82f6;
-  --tool-folder: #f59e0b;
-  --tool-credentials: #10b981;
-  --tool-translation: #a855f7;
-  --tool-port: #f97316;
-  --tool-settings: #6366f1;
-  --tool-files: #0ea5e9;
-  --tool-snippets: #ec4899;
-  /* 品牌色 RGB（供轻渐变/半透明叠加使用） */
+     其余信息层级一律交给中性灰；色彩角色收敛为 品牌蓝/成功绿/警告琥珀/危险红 */
+  --c-cyan: light-dark(#3ea8c9, #55b6d8);
+  --c-green: light-dark(#4ca674, #6cd4a0);
+  --c-amber: light-dark(#d99a2b, #e8b558);
+  --c-cyan-soft: light-dark(rgba(62, 168, 201, 0.13), rgba(85, 182, 216, 0.16));
+  --c-green-soft: light-dark(rgba(76, 166, 116, 0.13), rgba(108, 212, 160, 0.16));
+  --c-amber-soft: light-dark(rgba(217, 154, 43, 0.14), rgba(232, 181, 88, 0.17));
+
+  /* 工具栏图标辨识色：浅色用 600 级深一档（浅底对比足）、深色提亮一档——
+     辨识靠颜色而非形状 */
+  --tool-clipboard: light-dark(#3b82f6, #6cb3ff);
+  --tool-folder: light-dark(#f59e0b, #f6c453);
+  --tool-credentials: light-dark(#10b981, #4ed9a8);
+  --tool-translation: light-dark(#a855f7, #cd96ff);
+  --tool-port: light-dark(#f97316, #ffab5e);
+  --tool-settings: light-dark(#6366f1, #97a1fb);
+  --tool-files: light-dark(#0ea5e9, #14b8a6);
+  --tool-snippets: light-dark(#ec4899, #f472b6);
+
+  /* 品牌 RGB 三元组（供轻渐变/半透明叠加使用）：深色侧由微开关切换 */
   --accent-rgb: 47, 128, 237;
 
-  /* 背景：中性冷灰（无蓝倾向——浅色主题收敛蓝色元素，
-     与浅蓝主题拉开区分；层次靠明度差） */
-  --bg-app: #f0f1f3;
-  --bg-panel: rgba(248, 249, 251, 0.82);
-  /* 面板底色 RGB（不含 alpha），透明度由 --panel-opacity 控制（配置可调 0-100%） */
+  /* 背景：中性冷灰（无蓝倾向）/ 深色纯中性石墨黑。层次靠明度差：
+     app 最暗、面板逐级提亮。面板透明度由 --panel-opacity 控制（配置可调 0-100%） */
+  --bg-app: light-dark(#f0f1f3, #141414);
+  --bg-panel: light-dark(rgba(248, 249, 251, 0.82), rgba(31, 31, 31, 0.82));
+  /* 面板底色 RGB 三元组（不含 alpha）：深色侧由微开关切换 */
   --bg-panel-rgb: 248, 249, 251;
   /* 设置界面侧栏（外部菜单）/ 自定义标题栏底色：比内容区(app)略深一档，
      形成两色层次；标题栏复用此色，保证「标题栏=侧栏」在任何主题下一致 */
-  --bg-sidebar: #eaecef;
+  --bg-sidebar: light-dark(#eaecef, #1f1f1f);
   /* 面板外壳底色不透明度：0 = 全透（纯玻璃），1 = 全不透明 */
   --panel-opacity: 0.75;
-  --bg-elevated: rgba(255, 255, 255, 0.96);
-  --bg-input: rgba(255, 255, 255, 0.92);
+  --bg-elevated: light-dark(rgba(255, 255, 255, 0.96), rgba(38, 38, 38, 0.95));
+  --bg-input: light-dark(rgba(255, 255, 255, 0.92), rgba(43, 43, 43, 0.92));
   /* 玻璃输入底：与面板底色同色调（非纯白）、透明度更低——悬浮在亚克力
      面板上的输入框/下拉框用，通透融入背景，不再突兀发白 */
-  --bg-input-glass: rgba(248, 249, 251, 0.36);
-  --bg-item-hover: rgba(22, 24, 28, 0.05);
-  --bg-item-active: rgba(22, 24, 28, 0.09);
-  --bg-badge: rgba(22, 24, 28, 0.06);
+  --bg-input-glass: light-dark(rgba(248, 249, 251, 0.36), rgba(31, 31, 31, 0.42));
+  --bg-item-hover: light-dark(rgba(22, 24, 28, 0.05), rgba(255, 255, 255, 0.05));
+  --bg-item-active: light-dark(rgba(22, 24, 28, 0.09), rgba(255, 255, 255, 0.09));
+  --bg-badge: light-dark(rgba(22, 24, 28, 0.06), rgba(255, 255, 255, 0.08));
 
-  /* 文本：中性墨灰 */
-  --text-primary: #171a21;
-  --text-secondary: #444a55;
-  --text-tertiary: #5d636b;
-  --text-inverse: #ffffff;
+  /* 文本：浅色中性墨灰 / 深色中性白灰（无蓝倾向） */
+  --text-primary: light-dark(#171a21, #ececec);
+  --text-secondary: light-dark(#444a55, #9b9b9b);
+  --text-tertiary: light-dark(#5d636b, #6b6b6b);
+  --text-inverse: light-dark(#ffffff, #161616);
 
   /* 边框与分割（中性，无蓝） */
-  --border-subtle: rgba(22, 24, 28, 0.06);
-  --border-strong: rgba(22, 24, 28, 0.13);
+  --border-subtle: light-dark(rgba(22, 24, 28, 0.06), rgba(255, 255, 255, 0.07));
+  --border-strong: light-dark(rgba(22, 24, 28, 0.13), rgba(255, 255, 255, 0.14));
 
-  /* 阴影：轻柔中性 */
-  --shadow-panel: 0 24px 64px rgba(22, 24, 28, 0.18), 0 4px 16px rgba(22, 24, 28, 0.08);
-  --shadow-item: 0 2px 8px rgba(22, 24, 28, 0.07);
-  --shadow-menu: 0 12px 32px rgba(22, 24, 28, 0.16);
-  --shadow-card: 0 1px 2px rgba(22, 24, 28, 0.05), 0 6px 20px rgba(22, 24, 28, 0.08);
+  /* 阴影：浅色轻柔中性 / 深色加重一档（暗壁纸上轮廓清晰） */
+  --shadow-panel: 0 24px 64px light-dark(rgba(22, 24, 28, 0.18), rgba(0, 0, 0, 0.5)),
+    0 4px 16px light-dark(rgba(22, 24, 28, 0.08), rgba(0, 0, 0, 0.32));
+  --shadow-item: 0 2px 8px light-dark(rgba(22, 24, 28, 0.07), rgba(0, 0, 0, 0.3));
+  --shadow-menu: 0 12px 32px light-dark(rgba(22, 24, 28, 0.16), rgba(0, 0, 0, 0.48));
+  --shadow-card: 0 1px 2px light-dark(rgba(22, 24, 28, 0.05), rgba(0, 0, 0, 0.4)),
+    0 6px 20px light-dark(rgba(22, 24, 28, 0.08), rgba(0, 0, 0, 0.32));
   /* 悬浮工具栏投影：比 shadow-item 明显一档——让常驻贴边的小工具条在
      任意壁纸上都能"浮起来"、一眼可辨 */
-  --shadow-toolbar: 0 4px 18px rgba(22, 24, 28, 0.2), 0 1px 3px rgba(22, 24, 28, 0.12);
+  --shadow-toolbar: 0 4px 18px light-dark(rgba(22, 24, 28, 0.2), rgba(0, 0, 0, 0.55)),
+    0 1px 3px light-dark(rgba(22, 24, 28, 0.12), rgba(0, 0, 0, 0.4));
 
   /* 控件 */
-  --switch-knob: #ffffff;
+  --switch-knob: light-dark(#ffffff, #e8eaef);
 
   /* 圆角：层级分明，8px 只留给面板外壳（与 DWM 窗口圆角一致）。
      控件统一 8px、卡片 12px、弹层 16px——同类元素同圆角，视觉语言一致 */
@@ -109,19 +120,21 @@
   --radius-sm: 6px;
 
   /* 焦点环：所有可聚焦控件的 focus 视觉统一。
-     单层渐变蓝光——半透明边框(0.5) → 紧贴 2px 环(0.28) → 柔光扩散(0.16)，
-     三者连续过渡，无"实线+独立光晕"造成的双层/缝隙感 */
+     单层渐变光——半透明边框(0.5) → 紧贴 2px 环(0.28) → 柔光扩散(0.16)，
+     连续过渡无双层感；颜色全部派生自 --accent-rgb（随品牌色自动适配） */
   --ring: 0 0 0 2px rgba(var(--accent-rgb), 0.28), 0 4px 18px rgba(var(--accent-rgb), 0.16);
 
   /* 面板外壳顶部高光线：玻璃质感的关键——1px 内高光让外壳与背景"分离" */
-  --panel-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.55);
-  --panel-highlight-strong: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  --panel-highlight: inset 0 1px 0 light-dark(rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.08));
+  --panel-highlight-strong: inset 0 1px 0 light-dark(rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0.14));
 
   /* 字号阶梯：全局统一语义字号，主次分明 */
   --font-xs: 11px;
   --font-sm: 12px;
   --font-base: 13px;
   --font-title: 15px;
+  /* 等宽字体：命令行路径/代码片段等场景统一消费，勿在各处自备字体栈 */
+  --font-mono: ui-monospace, "Cascadia Code", Consolas, monospace;
 
   /* 动效 */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
@@ -132,111 +145,39 @@
   /* 尺寸 */
   --header-height: 52px;
 
+  /* 双侧可用：未设置 data-theme 时跟随系统；手动模式由下方规则强制单侧 */
+  color-scheme: light dark;
+}
+
+/* ---- 主题强制开关（含 rgb 三元组微开关） ------------------------------- */
+
+/* 手动浅色：钉死 light 侧（否则系统深色会把令牌翻到深侧） */
+:root[data-theme="light"] {
   color-scheme: light;
 }
 
+/* 手动深色：钉死 dark 侧 + 切换两个 rgb 三元组 */
 :root[data-theme="dark"] {
-  /* 品牌色：暗底提亮的天蓝（保留活力；配合中性黑背景与白色微光，
-     整体不再"蓝"，蓝只出现在按钮/链接/焦点等小面积交互处） */
-  --accent: #4c9eff;
-  --accent-hover: #3a8ef2;
-  --accent-active: #2c7de0;
-  --accent-soft: rgba(76, 158, 255, 0.16);
-  --accent-text: #ffffff;
-
-  --danger: #f2555a;
-  --danger-soft: rgba(242, 85, 90, 0.16);
-  --success: #3dd68c;
-  --success-soft: rgba(61, 214, 140, 0.16);
-  --warning: #f7b955;
-  --warning-soft: rgba(247, 185, 85, 0.17);
-
-  /* 水彩按钮色带（深色提亮一档，通透不闷）+ 白字 */
-  --water-a: rgba(183, 154, 224, 0.88);
-  --water-b: rgba(96, 160, 255, 0.84);
-  --water-c: rgba(86, 196, 184, 0.78);
-  --water-d: rgba(240, 184, 96, 0.74);
-  --water-e: rgba(232, 134, 168, 0.82);
-  --btn-text: #ffffff;
-  --btn-text-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
-
-  /* 内容类型色（深色提亮一档，保持低饱和） */
-  --c-cyan: #55b6d8;
-  --c-green: #6cd4a0;
-  --c-amber: #e8b558;
-  --c-cyan-soft: rgba(85, 182, 216, 0.16);
-  --c-green-soft: rgba(108, 212, 160, 0.16);
-  --c-amber-soft: rgba(232, 181, 88, 0.17);
-  /* 工具栏图标辨识色（深色提亮一档，保留彩色——辨识靠颜色而非形状） */
-  --tool-clipboard: #6cb3ff;
-  --tool-folder: #f6c453;
-  --tool-credentials: #4ed9a8;
-  --tool-translation: #cd96ff;
-  --tool-port: #ffab5e;
-  --tool-settings: #97a1fb;
-  --tool-files: #14b8a6;
-  --tool-snippets: #f472b6;
-  --accent-rgb: 76, 158, 255;
-
-  /* 背景：纯中性石墨黑（R=G=B，无蓝偏——与 WorkBuddy 深色一致）。
-     层次靠明度差：app 最暗(20,20,20)、面板/卡片/输入框逐级提亮(31/38/43)。
-     蓝只保留在品牌色/图标/水彩等小面积交互处，背景一律中性灰，整体不再"偏蓝" */
-  --bg-app: #141414;
-  --bg-panel: rgba(31, 31, 31, 0.82);
-  --bg-panel-rgb: 31, 31, 31;
-  /* 设置界面侧栏/标题栏底色：纯中性 31,31,31（比内容区 20,20,20 略亮一档） */
-  --bg-sidebar: #1f1f1f;
-  --bg-elevated: rgba(38, 38, 38, 0.95);
-  --bg-input: rgba(43, 43, 43, 0.92);
-  --bg-input-glass: rgba(31, 31, 31, 0.42);
-  --bg-item-hover: rgba(255, 255, 255, 0.05);
-  --bg-item-active: rgba(255, 255, 255, 0.09);
-  --bg-badge: rgba(255, 255, 255, 0.08);
-
-  /* 文本：中性白 / 中性灰（无蓝倾向） */
-  --text-primary: #ececec;
-  --text-secondary: #9b9b9b;
-  --text-tertiary: #6b6b6b;
-  --text-inverse: #161616;
-
-  --border-subtle: rgba(255, 255, 255, 0.07);
-  --border-strong: rgba(255, 255, 255, 0.14);
-
-  --shadow-panel: 0 24px 64px rgba(0, 0, 0, 0.5), 0 4px 16px rgba(0, 0, 0, 0.32);
-  --shadow-item: 0 2px 8px rgba(0, 0, 0, 0.3);
-  --shadow-menu: 0 12px 32px rgba(0, 0, 0, 0.48);
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 20px rgba(0, 0, 0, 0.32);
-  /* 悬浮工具栏投影（深色：重一档，暗壁纸上轮廓清晰） */
-  --shadow-toolbar: 0 4px 18px rgba(0, 0, 0, 0.55), 0 1px 3px rgba(0, 0, 0, 0.4);
-
-  /* 控件 */
-  --switch-knob: #e8eaef;
-
-  /* 面板外壳顶部高光线（深色主题：微弱白线提亮玻璃边缘） */
-  --panel-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  --panel-highlight-strong: inset 0 1px 0 rgba(255, 255, 255, 0.14);
-
   color-scheme: dark;
+  --accent-rgb: 76, 158, 255;
+  --bg-panel-rgb: 31, 31, 31;
 }
 
-/* 深色主题：顶部微光由「品牌蓝」改为「极淡中性白」，去掉整体蓝调。
-   【关键】只作用于无 data-window 的普通内容窗口（设置页等）：panel 窗口
-   （html[data-window="panel"]）的 body 必须保持透明——透出窗口亚克力模糊
-   （panel.css）；若此处把 body 盖成不透明底色，悬浮栏/面板的「不透明+模糊」
-   玻璃质感会消失。 */
-:root[data-theme="dark"]:not([data-window]) body {
-  background:
-    radial-gradient(1100px 560px at 50% -8%, rgba(255, 255, 255, 0.022), transparent 62%),
-    var(--bg-app);
+/* 系统深色 × 未手动选择主题：仅切换 rgb 三元组，其余令牌由 light-dark 自动切深侧 */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --accent-rgb: 76, 158, 255;
+    --bg-panel-rgb: 31, 31, 31;
+  }
 }
 
 /* 浅青色主题（mint）：淡青背景 + 青绿品牌色，通透清爽 */
 :root[data-theme="mint"] {
-  /* 品牌色：青绿 */
+  /* 品牌色：青绿（ring/accent-soft 一律派生自 accent-rgb，改品牌色即全联动） */
   --accent: #0f9f8c;
   --accent-hover: #0d8a79;
   --accent-active: #0a7264;
-  --accent-soft: rgba(15, 159, 140, 0.12);
+  --accent-soft: rgba(var(--accent-rgb), 0.12);
   --accent-text: #ffffff;
 
   --danger: #e5484d;
@@ -305,22 +246,21 @@
   /* 控件 */
   --switch-knob: #ffffff;
 
-  /* 焦点环 / 面板高光（青绿系） */
-  --ring: 0 0 0 2px rgba(15, 159, 140, 0.28), 0 4px 18px rgba(15, 159, 140, 0.16);
+  /* 焦点环 / 面板高光（派生自 accent-rgb，与全局结构一致） */
+  --ring: 0 0 0 2px rgba(var(--accent-rgb), 0.28), 0 4px 18px rgba(var(--accent-rgb), 0.16);
   --panel-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.6);
   --panel-highlight-strong: inset 0 1px 0 rgba(255, 255, 255, 0.8);
 
   color-scheme: light;
 }
 
-/* 浅蓝色主题（skyblue）：淡蓝背景 + 天蓝品牌色，通透清爽（与浅青 mint 对应，
-   改动范围与浅青一致：完整令牌块，覆盖品牌/水彩/内容色/工具栏图标/背景/文本） */
+/* 浅蓝色主题（skyblue）：淡蓝背景 + 天蓝品牌色，通透清爽（与浅青 mint 同构） */
 :root[data-theme="skyblue"] {
   /* 品牌色：鲜明天蓝（与浅色的品牌蓝拉开浓度，蓝感更足） */
   --accent: #1677ff;
   --accent-hover: #0f6ce8;
   --accent-active: #0b5cc9;
-  --accent-soft: rgba(22, 119, 255, 0.14);
+  --accent-soft: rgba(var(--accent-rgb), 0.14);
   --accent-text: #ffffff;
 
   --danger: #e5484d;
@@ -353,7 +293,7 @@
   --tool-translation: #7c3aed;
   --tool-port: #ea580c;
   --tool-settings: #4f46e5;
-  --tool-files: #38bdf8;
+  --tool-files: #0284c7;
   --tool-snippets: #ec4899;
   --accent-rgb: 22, 119, 255;
 
@@ -389,8 +329,8 @@
   /* 控件 */
   --switch-knob: #ffffff;
 
-  /* 焦点环 / 面板高光（天蓝系） */
-  --ring: 0 0 0 2px rgba(22, 119, 255, 0.28), 0 4px 18px rgba(22, 119, 255, 0.16);
+  /* 焦点环 / 面板高光（派生自 accent-rgb，与全局结构一致） */
+  --ring: 0 0 0 2px rgba(var(--accent-rgb), 0.28), 0 4px 18px rgba(var(--accent-rgb), 0.16);
   --panel-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.6);
   --panel-highlight-strong: inset 0 1px 0 rgba(255, 255, 255, 0.8);
 
@@ -404,7 +344,7 @@
   --accent: #cf3a43;
   --accent-hover: #b9333c;
   --accent-active: #9c2932;
-  --accent-soft: rgba(207, 58, 67, 0.12);
+  --accent-soft: rgba(var(--accent-rgb), 0.12);
   --accent-text: #ffffff;
 
   --danger: #e5484d;
@@ -473,8 +413,8 @@
   /* 控件 */
   --switch-knob: #ffffff;
 
-  /* 焦点环 / 面板高光（红系） */
-  --ring: 0 0 0 2px rgba(207, 58, 67, 0.28), 0 4px 18px rgba(207, 58, 67, 0.16);
+  /* 焦点环 / 面板高光（派生自 accent-rgb，与全局结构一致） */
+  --ring: 0 0 0 2px rgba(var(--accent-rgb), 0.28), 0 4px 18px rgba(var(--accent-rgb), 0.16);
   --panel-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.6);
   --panel-highlight-strong: inset 0 1px 0 rgba(255, 255, 255, 0.8);
 
@@ -489,7 +429,7 @@
   --accent: #e0780a;
   --accent-hover: #cc6b06;
   --accent-active: #b25d05;
-  --accent-soft: rgba(224, 120, 10, 0.13);
+  --accent-soft: rgba(var(--accent-rgb), 0.13);
   --accent-text: #ffffff;
 
   --danger: #e5484d;
@@ -558,104 +498,10 @@
   /* 控件 */
   --switch-knob: #ffffff;
 
-  /* 焦点环 / 面板高光（橙系） */
-  --ring: 0 0 0 2px rgba(224, 120, 10, 0.28), 0 4px 18px rgba(224, 120, 10, 0.16);
+  /* 焦点环 / 面板高光（派生自 accent-rgb，与全局结构一致） */
+  --ring: 0 0 0 2px rgba(var(--accent-rgb), 0.28), 0 4px 18px rgba(var(--accent-rgb), 0.16);
   --panel-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.6);
   --panel-highlight-strong: inset 0 1px 0 rgba(255, 255, 255, 0.8);
 
   color-scheme: light;
-}
-
-/* 未手动指定主题时跟随系统 */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]):not([data-theme="dark"]):not([data-theme="mint"]):not([data-theme="skyblue"]):not([data-theme="red"]):not([data-theme="orange"]) {
-    /* 品牌色：与 data-theme="dark" 同步——暗底提亮天蓝 */
-    --accent: #4c9eff;
-    --accent-hover: #3a8ef2;
-    --accent-active: #2c7de0;
-    --accent-soft: rgba(76, 158, 255, 0.16);
-    --accent-text: #ffffff;
-
-    --danger: #f2555a;
-    --danger-soft: rgba(242, 85, 90, 0.16);
-    --success: #3dd68c;
-    --success-soft: rgba(61, 214, 140, 0.16);
-    --warning: #f7b955;
-    --warning-soft: rgba(247, 185, 85, 0.17);
-
-    /* 水彩按钮色带：与 data-theme="dark" 同步——提亮多彩 */
-    --water-a: rgba(183, 154, 224, 0.88);
-    --water-b: rgba(96, 160, 255, 0.84);
-    --water-c: rgba(86, 196, 184, 0.78);
-    --water-d: rgba(240, 184, 96, 0.74);
-    --water-e: rgba(232, 134, 168, 0.82);
-    --btn-text: #ffffff;
-    --btn-text-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
-
-    /* 内容类型色：与 data-theme="dark" 同步——提亮低饱和 */
-    --c-cyan: #55b6d8;
-    --c-green: #6cd4a0;
-    --c-amber: #e8b558;
-    --c-cyan-soft: rgba(85, 182, 216, 0.16);
-    --c-green-soft: rgba(108, 212, 160, 0.16);
-    --c-amber-soft: rgba(232, 181, 88, 0.17);
-    /* 工具栏图标：与 data-theme="dark" 同步——保留彩色辨识 */
-    --tool-clipboard: #6cb3ff;
-    --tool-folder: #f6c453;
-    --tool-credentials: #4ed9a8;
-    --tool-translation: #cd96ff;
-    --tool-port: #ffab5e;
-    --tool-settings: #97a1fb;
-    --tool-files: #14b8a6;
-    --tool-snippets: #f472b6;
-    --accent-rgb: 76, 158, 255;
-
-    /* 背景：纯中性石墨黑（与 data-theme="dark" 一致——R=G=B 无蓝偏，
-       层次靠明度差；悬浮栏 rgba(31,31,31)+panel-opacity 保留不透明与模糊质感） */
-    --bg-app: #141414;
-    --bg-panel: rgba(31, 31, 31, 0.82);
-    --bg-panel-rgb: 31, 31, 31;
-    /* 设置界面侧栏/标题栏底色：纯中性 31,31,31（与 data-theme="dark" 一致） */
-    --bg-sidebar: #1f1f1f;
-    --bg-elevated: rgba(38, 38, 38, 0.95);
-    --bg-input: rgba(43, 43, 43, 0.92);
-    --bg-input-glass: rgba(31, 31, 31, 0.42);
-    --bg-item-hover: rgba(255, 255, 255, 0.05);
-    --bg-item-active: rgba(255, 255, 255, 0.09);
-    --bg-badge: rgba(255, 255, 255, 0.08);
-
-    /* 文本：中性白 / 中性灰（无蓝倾向） */
-    --text-primary: #ececec;
-    --text-secondary: #9b9b9b;
-    --text-tertiary: #6b6b6b;
-    --text-inverse: #161616;
-
-    --border-subtle: rgba(255, 255, 255, 0.07);
-    --border-strong: rgba(255, 255, 255, 0.14);
-
-    --shadow-panel: 0 24px 64px rgba(0, 0, 0, 0.5), 0 4px 16px rgba(0, 0, 0, 0.32);
-    --shadow-item: 0 2px 8px rgba(0, 0, 0, 0.3);
-    --shadow-menu: 0 12px 32px rgba(0, 0, 0, 0.48);
-    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 20px rgba(0, 0, 0, 0.32);
-    /* 悬浮工具栏投影（深色：重一档，暗壁纸上轮廓清晰） */
-    --shadow-toolbar: 0 4px 18px rgba(0, 0, 0, 0.55), 0 1px 3px rgba(0, 0, 0, 0.4);
-
-    /* 控件 */
-    --switch-knob: #e8eaef;
-
-    /* 面板外壳顶部高光线（深色主题：微弱白线提亮玻璃边缘） */
-    --panel-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-    --panel-highlight-strong: inset 0 1px 0 rgba(255, 255, 255, 0.14);
-
-    color-scheme: dark;
-  }
-
-  /* 系统深色下的 body 顶部微光：与 data-theme="dark" 一致——
-     由 base.css 的「品牌色微光」改为「极淡中性白」，去掉整体蓝调。
-     同样只作用于无 data-window 的普通窗口（panel 窗口 body 保持透明） */
-  :root:not([data-theme="light"]):not([data-theme="dark"]):not([data-theme="mint"]):not([data-theme="skyblue"]):not([data-theme="red"]):not([data-theme="orange"]):not([data-window]) body {
-    background:
-      radial-gradient(1100px 560px at 50% -8%, rgba(255, 255, 255, 0.022), transparent 62%),
-      var(--bg-app);
-  }
 }

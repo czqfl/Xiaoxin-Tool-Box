@@ -222,8 +222,8 @@
   white-space: nowrap;
   font-size: 10px;
   padding: 1px 6px;
-  color: var(--git-ok, #3fb950);
-  background: color-mix(in srgb, var(--git-ok, #3fb950) 14%, transparent);
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 14%, transparent);
 }
 /* 网格卡片：分支 + 次数徽章同行居中（正常流，不压名称） */
 .folder-meta {

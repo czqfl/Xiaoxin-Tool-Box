@@ -2140,32 +2140,50 @@ export function ScreenshotOverlay() {
       )}
 
       {/* 截图历史缩略图列表（H 开关；< > 步进时自动展开并跟随滚动）：
-          横排缩略图 + 时间标注，点击直接跳到该帧重新框选；
-          首项「实时画面」回到当前屏幕；当前帧高亮 */}
+          底部居中横排缩略图 + 时间标注，点击直接跳到该帧重新框选；
+          首项「实时画面」回到当前屏幕；当前帧高亮；
+          缩略图上叠加当时框选范围的描边（整屏快照 → 小框标出真正圈住的区域） */}
       {histOpen && (
         <div className="shot-hist-panel" ref={histPanelRef} onMouseDown={(e) => e.stopPropagation()}>
-          <div className={`shot-hist-item${histPos === -1 ? " active" : ""}`}
-            onClick={() => void jumpHistory(-1)}>
-            <div className="shot-hist-thumb shot-hist-live">实时</div>
-            <span>当前画面</span>
+          <div className="shot-hist-head">
+            <span className="shot-hist-title">历史截屏</span>
+            {(histItems ?? []).length > 0 && (
+              <div className="shot-hist-clear" onClick={() => void clearHist()}>清空历史</div>
+            )}
           </div>
-          {(histItems ?? []).map((it, i) => (
-            <div key={it.file} className={`shot-hist-item${histPos === i ? " active" : ""}`}
-              onClick={() => void jumpHistory(i)}>
-              <div className="shot-hist-thumbwrap">
-                <img src={shotHistoryUrl(it.file.replace(".png", ".thumb.png"))} draggable={false} />
-                <button className="shot-hist-del" title="删除此记录"
-                  onClick={(e) => { e.stopPropagation(); void deleteHist(it.file); }}>×</button>
-              </div>
-              <span>{new Date(it.ts).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+          <div className="shot-hist-row">
+            <div className={`shot-hist-item${histPos === -1 ? " active" : ""}`}
+              onClick={() => void jumpHistory(-1)}>
+              <div className="shot-hist-thumb shot-hist-live">实时</div>
+              <span>当前画面</span>
             </div>
-          ))}
-          {(histItems ?? []).length > 0 && (
-            <div className="shot-hist-clear" onClick={() => void clearHist()}>清空历史</div>
-          )}
-          {histItems !== null && histItems.length === 0 && (
-            <div className="shot-hist-empty">暂无历史截屏</div>
-          )}
+            {(histItems ?? []).map((it, i) => {
+              const hasRegion = Array.isArray(it.region) && it.region.length === 4 &&
+                (it.width ?? 0) > 0 && (it.height ?? 0) > 0;
+              return (
+                <div key={it.file} className={`shot-hist-item${histPos === i ? " active" : ""}`}
+                  onClick={() => void jumpHistory(i)}>
+                  <div className="shot-hist-thumbwrap">
+                    <img src={shotHistoryUrl(it.file.replace(".png", ".thumb.png"))} draggable={false} />
+                    {hasRegion && (
+                      <div className="shot-hist-region" style={{
+                        left: `${(it.region![0] / it.width!) * 100}%`,
+                        top: `${(it.region![1] / it.height!) * 100}%`,
+                        width: `${(it.region![2] / it.width!) * 100}%`,
+                        height: `${(it.region![3] / it.height!) * 100}%`,
+                      }} />
+                    )}
+                    <button className="shot-hist-del" title="删除此记录"
+                      onClick={(e) => { e.stopPropagation(); void deleteHist(it.file); }}>×</button>
+                  </div>
+                  <span>{new Date(it.ts).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+                </div>
+              );
+            })}
+            {histItems !== null && histItems.length === 0 && (
+              <div className="shot-hist-empty">暂无历史截屏</div>
+            )}
+          </div>
         </div>
       )}
 

@@ -20,6 +20,7 @@ mod snippets;
 mod storage;
 mod translate;
 mod tray;
+mod uia_pick;
 
 use crate::clipboard::ClipboardStore;
 use crate::config::{AppConfig, ConfigState};

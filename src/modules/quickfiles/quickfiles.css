@@ -557,7 +557,7 @@
   align-items: center;
   justify-content: center;
   background: rgba(0, 0, 0, 0.35);
-  border-radius: var(--radius, 14px);
+  border-radius: var(--radius-panel);
   animation: qf-fade-in 0.14s var(--ease-out);
 }
 @keyframes qf-fade-in {
