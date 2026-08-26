@@ -12,12 +12,13 @@ html[data-window="shot"] body { background: transparent; }
 /* ---- 放大镜：镜头区固定正方形，信息区在镜头下方分三行（坐标/颜色/提示） ---- */
 /* z-index 260 > 工具栏 200：鼠标移到工具栏附近时坐标/颜色信息不被盖住。
    整体走轻量玻璃卡片：细描边 + 轻投影，不再用粗圆角+重投影显得边框厚重。
-   镜头框改为与选区边框同款：1.5px 主题色细边 + 轻辉光，贴近 Snipaste */
+   镜头框改为与选区边框同款：1.5px 主题色细边 + 轻辉光，贴近 Snipaste。
+   卡片背景降到 0.78 + 轻投影，避免之前 0.86 不透明深色导致的"死黑边框"观感 */
 .shot-mag {
   position: fixed; z-index: 260;
-  background: rgba(12,12,14,0.86); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  background: rgba(12,12,14,0.78); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
   border-radius: 8px; overflow: hidden;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1), 0 4px 14px rgba(0,0,0,0.45);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1), 0 4px 14px rgba(0,0,0,0.35);
 }
 /* 镜头框：与截图选区边框同款（1.5px 主题色细边 + 轻辉光），方角更干净。
    不加黑色外环——Snipaste 只有一圈主题色细边，黑环会显得像"黑色边框" */
@@ -56,13 +57,15 @@ html[data-window="shot"] body { background: transparent; }
 }
 
 /* ---- 取色共用元素（放大镜信息行 / 独立取色面板） ---- */
-.shot-color-swatch { display: inline-block; flex: none; border-radius: 2px; border: 1px solid rgba(255,255,255,0.9); outline: 1px solid rgba(0,0,0,0.55); background: #000; }
+/* 取消之前的黑色 outline：当取色结果本身接近黑色时，黑 outline 会和色块
+   融成一块"黑方块"，看起来像多了一圈黑色边框；改用更柔和的双层描边定义边缘 */
+.shot-color-swatch { display: inline-block; flex: none; border-radius: 2px; border: 1px solid rgba(255,255,255,0.9); background: #000; box-shadow: 0 0 0 1px rgba(0,0,0,0.25); }
 .shot-color-swatch-sm { width: 13px; height: 13px; }
 .shot-color-swatch-md { width: 16px; height: 16px; }
 /* 放大镜实时颜色块：放大到 20px 并加主题色辉光，明确标识「光标处实时取色」 */
 .shot-mag-liveswatch {
   width: 20px; height: 20px; flex: none; border-radius: 4px;
-  border: 1px solid rgba(255,255,255,0.9); outline: 1px solid rgba(0,0,0,0.55);
+  border: 1px solid rgba(255,255,255,0.9);
   background: #000; box-shadow: 0 0 6px rgba(var(--accent-rgb, 76,141,255), 0.4);
 }
 .shot-color-val { font-family: Consolas, "Courier New", monospace; font-size: 12px; color: #fff; min-width: 72px; text-align: left; }
