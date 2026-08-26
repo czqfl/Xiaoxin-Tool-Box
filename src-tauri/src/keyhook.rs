@@ -10,7 +10,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::OnceLock;
-use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tauri::{AppHandle, Emitter, Listener, Manager, Runtime};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
 use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
@@ -72,6 +72,12 @@ enum Action {
 static SEQ_ENABLED: AtomicBool = AtomicBool::new(false);
 /// 队列中是否有可粘贴条目：为空时放行 Ctrl+V，避免普通粘贴被误吞
 static SEQ_AVAILABLE: AtomicBool = AtomicBool::new(false);
+/// 剪贴板面板当前是否可见：顺序粘贴（Ctrl+V 拦截）仅在面板打开时生效，
+/// 面板关闭时放行 Ctrl+V 交给系统普通粘贴——避免"启动应用后全局 Ctrl+V 失效"
+/// （用户复制新内容后按 Ctrl+V 却贴出历史队列最旧一条 / 被吞键无反应）。
+/// 由 keyhook::start 注册的 panel://visibility-changed 监听器同步：
+/// 后端 toggle_panel 与前端 hideCurrentWindow（直接 window.hide）都广播同款事件。
+static SEQ_PANEL_VISIBLE: AtomicBool = AtomicBool::new(false);
 /// 捕获模式：设置页录入快捷键期间接管所有 Win 组合，防止系统功能抢先
 static CAPTURE_MODE: AtomicBool = AtomicBool::new(false);
 /// 钩子接管的 Win 组合面板热键虚拟键码；0 表示未启用
@@ -136,6 +142,12 @@ pub fn set_seq_paste_enabled(on: bool) {
 /// 同步队列可用性：队列为空时放行 Ctrl+V（交给系统普通粘贴）
 pub fn set_seq_queue_available(on: bool) {
     SEQ_AVAILABLE.store(on, Ordering::SeqCst);
+}
+
+/// 同步剪贴板面板可见性：面板打开才允许顺序粘贴拦截 Ctrl+V；
+/// 面板关闭时必须复位为 false，否则关闭后 Ctrl+V 仍被吞（"启动应用后粘贴失效"）。
+pub fn set_seq_panel_visible(on: bool) {
+    SEQ_PANEL_VISIBLE.store(on, Ordering::SeqCst);
 }
 
 /// 翻译弹窗打开状态：显示时置 true，Esc 系统级关闭时复位
@@ -249,6 +261,25 @@ pub fn start<R: Runtime + 'static>(app: AppHandle<R>) {
     let (tx, rx) = mpsc::channel::<Action>();
     if SENDER.set(tx).is_err() {
         return;
+    }
+    // 剪贴板面板显隐 → 同步顺序粘贴拦截开关。面板关闭时放行全局 Ctrl+V，
+    // 否则"启动应用后所有应用的粘贴都变顺序粘贴"（用户复制新内容按 Ctrl+V
+    // 却贴出队列最旧一条 / 被吞键无反应）。
+    // 后端 toggle_panel 走 broadcast_panel_visibility，前端 hideCurrentWindow
+    // （失焦自动隐藏 / Esc / 关闭按钮，直接 window.hide）也 emit 同款事件，
+    // 监听器同时覆盖两条路径，状态不漂移。
+    {
+        let _ = app.listen(crate::panel::EVT_PANEL_VISIBILITY, move |ev| {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(ev.payload()) {
+                if v.get("label").and_then(|l| l.as_str()) == Some(crate::panel::CLIPBOARD_PANEL) {
+                    let visible = v.get("visible").and_then(|b| b.as_bool()).unwrap_or(false);
+                    set_seq_panel_visible(visible);
+                    crate::storage::diag_write(&format!(
+                        "[keyhook] seq panel visible -> {visible}"
+                    ));
+                }
+            }
+        });
     }
     std::thread::Builder::new()
         .name("keyboard-hook".into())
@@ -521,14 +552,16 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                 return LRESULT(1);
             }
         }
+        // 顺序粘贴 Ctrl+V：仅剪贴板面板打开时拦截（吞掉物理按键，稍后发送
+        // 一次干净的模拟粘贴）。面板关闭时放行，普通粘贴不受影响。
+        // Ctrl 状态用钩子自维护的 CTRL_HELD（GetAsyncKeyState 会因陈旧
+        // 快照误判"Ctrl 已松开"，导致按住 Ctrl 连点 V 只有第一次生效）
         if SEQ_ENABLED.load(Ordering::SeqCst)
             && SEQ_AVAILABLE.load(Ordering::SeqCst)
+            && SEQ_PANEL_VISIBLE.load(Ordering::SeqCst)
             && vk == VK_V.0 as u32
             && CTRL_HELD.load(Ordering::SeqCst)
         {
-            // 顺序粘贴 Ctrl+V：吞掉物理按键，稍后发送一次干净的模拟粘贴。
-            // Ctrl 状态用钩子自维护的 CTRL_HELD（GetAsyncKeyState 会因陈旧
-            // 快照误判"Ctrl 已松开"，导致按住 Ctrl 连点 V 只有第一次生效）
             SWALLOWED_VK.store(vk as u16, Ordering::SeqCst);
             post(Action::SeqPaste);
             return LRESULT(1);

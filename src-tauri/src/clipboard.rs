@@ -397,10 +397,13 @@ fn trim_entries(entries: &mut Vec<ClipEntry>, max: usize) {
     }
 }
 
-/// 同步顺序粘贴队列可用性给键盘钩子：队列为空时放行全局 Ctrl+V
+/// 同步顺序粘贴队列可用性给键盘钩子：队列中【存在未消耗条目】时才允许
+/// 拦截全局 Ctrl+V。全部已消耗（consumed=true，数据保留但退出顺序队列）时
+/// 必须放行——此前用 !entries.is_empty() 判断，全消耗状态下 Ctrl+V 仍被吞，
+/// 钩子里 sequential_paste 又因队列为空直接 return，按键凭空消失（"粘贴失效"）。
 fn sync_seq_availability(entries: &[ClipEntry]) {
     #[cfg(windows)]
-    crate::keyhook::set_seq_queue_available(!entries.is_empty());
+    crate::keyhook::set_seq_queue_available(entries.iter().any(|e| !e.consumed));
     #[cfg(not(windows))]
     {
         let _ = entries;

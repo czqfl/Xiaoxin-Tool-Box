@@ -415,6 +415,11 @@ pub fn hide_focused_panel<R: Runtime>(app: &AppHandle<R>) {
         if let Some(w) = app.get_webview_window(label) {
             if w.is_focused().unwrap_or(false) {
                 let _ = w.hide();
+                // 剪贴板面板被自动隐藏（顺序粘贴让出焦点）→ 同步复位顺序粘贴
+                // 拦截开关：面板不可见时 Ctrl+V 必须放行给系统，不能继续劫持
+                if *label == CLIPBOARD_PANEL {
+                    crate::keyhook::set_seq_panel_visible(false);
+                }
             }
         }
     }
