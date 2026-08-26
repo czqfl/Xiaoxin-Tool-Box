@@ -1,0 +1,116 @@
+/* 滚动长截图进度条：与悬浮面板同一套玻璃语言（主题变量 + 亚克力 +
+   --panel-opacity 不透明度统一由通用设置控制），Rust 侧 apply_panel_effects_for
+   提供原生模糊与 DWM 圆角。紧凑两行布局：头部行（状态+操作）+ 提示行。 */
+.ssb-root {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  padding: 10px 14px;
+  box-sizing: border-box;
+  border-radius: var(--radius-panel);
+  border: 1px solid var(--border-subtle);
+  background:
+    linear-gradient(
+      180deg,
+      rgba(var(--accent-rgb), 0.045),
+      rgba(var(--accent-rgb), 0.012) 42%,
+      transparent 78%
+    ),
+    rgba(var(--bg-panel-rgb), var(--panel-opacity));
+  box-shadow: var(--panel-highlight);
+  color: var(--text-primary);
+  font-size: 12px;
+  user-select: none;
+  overflow: hidden;
+}
+
+/* 头部行：状态点 + 标题 + 状态 + （右侧）操作按钮 */
+.ssb-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ssb-flex { flex: 1; }
+
+.ssb-title {
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+
+.ssb-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgb(var(--accent-rgb));
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.9);
+  animation: ssb-pulse 1.2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+.ssb-dot.ok { background: #36b37e; box-shadow: 0 0 8px rgba(54, 179, 126, 0.9); animation: none; }
+.ssb-dot.err { background: var(--danger, #e5484d); box-shadow: none; animation: none; }
+
+@keyframes ssb-pulse {
+  50% { opacity: 0.35; }
+}
+
+.ssb-status {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ssb-status b {
+  color: rgb(var(--accent-rgb));
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.ssb-err { color: var(--danger, #e5484d); }
+
+/* 提示行：弱化的小字说明 */
+.ssb-tip {
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ssb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-input-glass);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.15s ease;
+}
+.ssb-btn:hover { background: rgba(var(--accent-rgb), 0.12); }
+
+.ssb-stop {
+  background: rgba(232, 76, 76, 0.88);
+  border-color: transparent;
+  color: #fff;
+}
+.ssb-stop:hover { background: rgba(232, 76, 76, 1); }
+
+.ssb-cancel:hover { background: var(--danger-soft); color: var(--danger); }
+
+.ssb-spin { animation: ssb-rotate 0.9s linear infinite; }
+@keyframes ssb-rotate { to { transform: rotate(360deg); } }

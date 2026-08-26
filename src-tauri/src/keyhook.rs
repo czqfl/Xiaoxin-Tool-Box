@@ -56,6 +56,8 @@ enum Action {
     ShotBegin,
     /// 触发屏幕取色
     PickerBegin,
+    /// 触发屏幕录制 GIF
+    RecorderBegin,
     /// 显示/隐藏全部贴图
     TogglePins,
     /// 关闭全部贴图（独立热键，与贴图热键分离）
@@ -109,6 +111,8 @@ static SCREENSHOT_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
 /// 屏幕取色热键（Win/Alt 组合）
 static PICKER_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
 static PICKER_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
+static RECORDER_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
+static RECORDER_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
 /// 贴图显示/隐藏热键（Win/Alt 组合）
 static PINS_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
 static PINS_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
@@ -180,6 +184,7 @@ pub fn set_panel_hotkey(target: &str, is_alt: bool, vk: u16) {
         ("pins", false) => &PINS_HOTKEY_VK,
         ("pins_close", false) => &PINS_CLOSE_HOTKEY_VK,
         ("picker", false) => &PICKER_HOTKEY_VK,
+        ("recorder", false) => &RECORDER_HOTKEY_VK,
         ("clipboard", true) => &CLIPBOARD_HOTKEY_ALT_VK,
         ("folder", true) => &FOLDER_HOTKEY_ALT_VK,
         ("credentials", true) => &CREDENTIAL_HOTKEY_ALT_VK,
@@ -191,6 +196,7 @@ pub fn set_panel_hotkey(target: &str, is_alt: bool, vk: u16) {
         ("pins", true) => &PINS_HOTKEY_ALT_VK,
         ("pins_close", true) => &PINS_CLOSE_HOTKEY_ALT_VK,
         ("picker", true) => &PICKER_HOTKEY_ALT_VK,
+        ("recorder", true) => &RECORDER_HOTKEY_ALT_VK,
         _ => return,
     };
     slot.store(vk, Ordering::SeqCst);
@@ -352,6 +358,10 @@ fn run_action<R: Runtime>(app: &AppHandle<R>, action: Action) {
             crate::storage::diag_write("[keyhook] picker hotkey pressed");
             let _ = crate::screenshot::begin_impl(app.clone(), true);
         }
+        Action::RecorderBegin => {
+            crate::storage::diag_write("[keyhook] recorder hotkey pressed");
+            crate::recorder::begin_select(app);
+        }
         Action::TogglePins => {
             // 截图会话进行中：贴图热键语义变为「把当前选区贴到桌面」，
             // 按键已被钩子吞掉，转发事件给遮罩页执行（与 RegisterHotKey 路径一致）
@@ -493,6 +503,8 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                 Some(Action::PinsCloseAll)
             } else if vk == PICKER_HOTKEY_VK.load(Ordering::SeqCst) as u32 {
                 Some(Action::PickerBegin)
+            } else if vk == RECORDER_HOTKEY_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::RecorderBegin)
             } else {
                 None
             };
@@ -546,6 +558,8 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                 Some(Action::PinsCloseAll)
             } else if vk == PICKER_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
                 Some(Action::PickerBegin)
+            } else if vk == RECORDER_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::RecorderBegin)
             } else {
                 None
             };

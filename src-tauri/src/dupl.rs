@@ -235,10 +235,80 @@ pub mod win {
     pub fn invalidate_all() {
         *OUTPUTS.lock().unwrap() = None;
     }
+
+    // ---------- 区域采集（滚动长截图 / 录屏共用） ----------
+
+    /// GDI 直取指定矩形（全局物理坐标）——DXGI 失败时的回退路径
+    pub fn gdi_region(rx: i32, ry: i32, rw: i32, rh: i32) -> Option<DuplFrame> {
+        use windows::Win32::Graphics::Gdi::{
+            BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject,
+            GetDC, GetDIBits, ReleaseDC, SelectObject,
+            BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, SRCCOPY,
+        };
+        if rw <= 0 || rh <= 0 { return None; }
+        unsafe {
+            let screen_dc = GetDC(None);
+            if screen_dc.0.is_null() { return None; }
+            let mem_dc = CreateCompatibleDC(Some(screen_dc));
+            if mem_dc.0.is_null() { ReleaseDC(None, screen_dc); return None; }
+            let hbmp = CreateCompatibleBitmap(screen_dc, rw, rh);
+            let old = SelectObject(mem_dc, hbmp.into());
+            let mut out = None;
+            if BitBlt(mem_dc, 0, 0, rw, rh, Some(screen_dc), rx, ry, SRCCOPY).is_ok() {
+                let mut bmi: BITMAPINFO = std::mem::zeroed();
+                bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+                bmi.bmiHeader.biWidth = rw;
+                bmi.bmiHeader.biHeight = -rh;
+                bmi.bmiHeader.biPlanes = 1;
+                bmi.bmiHeader.biBitCount = 32;
+                bmi.bmiHeader.biCompression = 0;
+                let mut buf = vec![0u8; (rw as usize) * (rh as usize) * 4];
+                if GetDIBits(mem_dc, hbmp, 0, rh as u32, Some(buf.as_mut_ptr() as _), &mut bmi, DIB_RGB_COLORS) != 0 {
+                    out = Some(DuplFrame { bgra: buf });
+                }
+            }
+            SelectObject(mem_dc, old);
+            let _ = DeleteObject(hbmp.into());
+            let _ = DeleteDC(mem_dc);
+            ReleaseDC(None, screen_dc);
+            out
+        }
+    }
+
+    /// 采集全局矩形（须落在 (mon_pos, mon_w, mon_h) 指定的显示器内）：
+    /// 首选 DXGI 整屏后行级裁剪（几毫秒），失败回退 GDI 直取矩形。
+    pub fn capture_region(
+        mon_pos: (i32, i32), mon_w: i32, mon_h: i32,
+        rx: i32, ry: i32, rw: i32, rh: i32,
+    ) -> Option<DuplFrame> {
+        if rw <= 0 || rh <= 0 { return None; }
+        let lx = (rx - mon_pos.0).max(0) as usize;
+        let ly = (ry - mon_pos.1).max(0) as usize;
+        let cw = rw.min(mon_w - lx as i32) as usize;
+        let ch = rh.min(mon_h - ly as i32) as usize;
+        if cw <= 0 || ch <= 0 { return None; }
+        if let Some(f) = capture(mon_pos, mon_w, mon_h) {
+            let stride = mon_w as usize * 4;
+            if f.bgra.len() >= (ly + ch - 1) * stride + (lx + cw) * 4 {
+                let mut out = Vec::with_capacity(cw * ch * 4);
+                for row in 0..ch {
+                    let s = (ly + row) * stride + lx * 4;
+                    out.extend_from_slice(&f.bgra[s..s + cw * 4]);
+                }
+                return Some(DuplFrame { bgra: out });
+            }
+        }
+        gdi_region(rx, ry, cw as i32, ch as i32)
+    }
 }
 
 #[cfg(not(windows))]
 pub mod win {
     pub struct DuplFrame { pub bgra: Vec<u8> }
     pub fn capture(_pos: (i32, i32), _w: i32, _h: i32) -> Option<DuplFrame> { None }
+    pub fn gdi_region(_rx: i32, _ry: i32, _rw: i32, _rh: i32) -> Option<DuplFrame> { None }
+    pub fn capture_region(
+        _mon_pos: (i32, i32), _mon_w: i32, _mon_h: i32,
+        _rx: i32, _ry: i32, _rw: i32, _rh: i32,
+    ) -> Option<DuplFrame> { None }
 }

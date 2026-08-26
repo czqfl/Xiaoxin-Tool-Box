@@ -141,6 +141,8 @@ pub struct ShortcutsConfig {
     pub pins_close: String,
     /// 屏幕取色（呼出十字取色模式，复用截图遮罩窗）
     pub picker: String,
+    /// 屏幕录制 GIF
+    pub recorder: String,
 }
 
 impl Default for ShortcutsConfig {
@@ -166,6 +168,37 @@ impl Default for ShortcutsConfig {
             pins_close: "Ctrl+Alt+K".into(),
             // 屏幕取色：Alt+D（Dropper / 取色），纯 Alt 组合由键盘钩子主动吞键
             picker: "Alt+D".into(),
+            // 屏幕录制：Ctrl+Alt+R（Record）
+            recorder: "Ctrl+Alt+R".into(),
+        }
+    }
+}
+
+/// 屏幕录制（GIF）配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RecorderConfig {
+    /// 是否启用屏幕录制功能（关闭：快捷键不注册、托盘/工具栏/侧栏入口隐藏）
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// 采集帧率（5-24）
+    pub fps: u32,
+    /// 编码质量："high" | "normal" | "fast"
+    pub quality: String,
+    /// 单次录制时长上限（秒，0 = 不限）
+    pub max_duration_secs: u32,
+    /// 录像保存目录；为空回退截图保存目录，再回退系统图片目录
+    pub save_dir: Option<String>,
+}
+
+impl Default for RecorderConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            fps: 12,
+            quality: "normal".into(),
+            max_duration_secs: 120,
+            save_dir: None,
         }
     }
 }
@@ -570,6 +603,9 @@ pub struct AppConfig {
     /// 截图功能配置
     #[serde(default)]
     pub shot: ShotConfig,
+    /// 屏幕录制（GIF）配置
+    #[serde(default)]
+    pub recorder: RecorderConfig,
     /// 贴图配置
     #[serde(default)]
     pub pin: PinConfig,
@@ -596,6 +632,7 @@ impl AppConfig {
             "files" => self.files.enabled,
             "snippets" => self.snippets.enabled,
             "screenshot" => self.shot.enabled,
+            "recorder" => self.recorder.enabled,
             "toolbar" => self.toolbar.enabled,
             _ => true,
         }

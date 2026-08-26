@@ -43,6 +43,7 @@ const defaultConfig: AppConfig = {
     pins: "Ctrl+Alt+P",
     pins_close: "Ctrl+Alt+K",
     picker: "Alt+D",
+    recorder: "Ctrl+Alt+R",
   },
   general: {
     theme: "system",
@@ -109,6 +110,13 @@ const defaultConfig: AppConfig = {
     history_enabled: true,
     history_max_count: 20,
     history_max_days: 7,
+  },
+  recorder: {
+    enabled: true,
+    fps: 12,
+    quality: "normal",
+    max_duration_secs: 120,
+    save_dir: null,
   },
   pin: {
     opacity: 100,

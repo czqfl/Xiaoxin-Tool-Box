@@ -283,7 +283,8 @@ export const applyShortcut = (
     | "screenshot"
     | "pins"
     | "pins_close"
-    | "picker",
+    | "picker"
+    | "recorder",
   shortcut: string
 ) => invoke<import("../types").AppConfig>("shortcut_apply", { target, shortcut });
 /** 运行时【真实生效】的绑定列表（["pins=Ctrl+N", ...]）——与配置声称值对照，
@@ -511,6 +512,12 @@ export const pinResize = (id: string, width: number, height: number) =>
   invoke<void>("pin_resize", { id, width, height });
 /** 贴图内容类型："image" | "html"（协议 URL 不带扩展名，渲染分支据此判断） */
 export const pinKind = (id: string) => invoke<"image" | "html">("pin_kind", { id });
+/** 贴图原图文件路径（另存为等需要真实文件的功能用） */
+export const pinFilePath = (id: string) =>
+  invoke<string | null>("pin_file_path", { id });
+/** 贴图另存为：把原图文件复制到用户指定位置 */
+export const pinSaveAs = (id: string, dest: string) =>
+  invoke<void>("pin_save_as", { id, dest });
 /** 贴图 OCR：Rust 直读 pins/{id} 图像文件识别（免前端 fetch 整图 + IPC 回传，
  *  大截图省几十到上百 ms；HTML 贴图解码失败 reject，调用方静默降级） */
 export const pinOcr = (id: string): Promise<ShotOcrLine[]> =>

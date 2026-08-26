@@ -17,6 +17,7 @@ import { TranslationPage } from "./TranslationPage";
 import { ToolbarPage } from "./ToolbarPage";
 import { FilesPage } from "./FilesPage";
 import { ScreenshotPage } from "./ScreenshotPage";
+import { RecorderPage } from "./RecorderPage";
 import { FeaturePage, featureEnabled } from "./FeaturePage";
 import { SettingsErrorBoundary } from "./ErrorBoundary";
 import {
@@ -32,6 +33,7 @@ import {
   IconLock,
   IconPort,
   IconSnippet,
+  IconRecord,
 } from "../components/icons";
 import "../styles/settings.css";
 
@@ -44,6 +46,7 @@ export type Page =
   | "files"
   | "snippets"
   | "screenshot"
+  | "recorder"
   | "features"
   | "general"
   | "toolbar"
@@ -59,6 +62,7 @@ const MODULE_ITEMS: Array<{ key: Page; label: string; feature: string; icon: Rea
   { key: "files", label: "快速文件", feature: "files", icon: <IconFiles size={15} /> },
   { key: "snippets", label: "常用语速贴", feature: "snippets", icon: <IconSnippet size={15} /> },
   { key: "screenshot", label: "截图贴图", feature: "screenshot", icon: <IconScreenshot size={15} /> },
+  { key: "recorder", label: "屏幕录制", feature: "recorder", icon: <IconRecord size={15} /> },
   { key: "toolbar", label: "悬浮工具栏", feature: "toolbar", icon: <IconGrid size={15} /> },
 ];
 
@@ -79,9 +83,10 @@ const FAILED_TARGET_PAGE: Record<string, Page> = {
   files: "files",
   snippets: "snippets",
   screenshot: "screenshot",
-  pins: "screenshot",
-  picker: "screenshot",
-};
+   pins: "screenshot",
+   picker: "screenshot",
+   recorder: "recorder",
+ };
 const FAILED_TARGET_NAME: Record<string, string> = {
   clipboard: "呼出剪贴板",
   folder: "呼出文件夹",
@@ -91,9 +96,10 @@ const FAILED_TARGET_NAME: Record<string, string> = {
   files: "呼出快速文件",
   snippets: "呼出语速贴",
   screenshot: "开始截图",
-  pins: "显示/隐藏全部贴图",
-  picker: "屏幕取色",
-};
+   pins: "显示/隐藏全部贴图",
+   picker: "屏幕取色",
+   recorder: "屏幕录制",
+ };
 
 /** 把 CSS 颜色（#rgb / #rrggbb / rgb()）解析成 "r,g,b" 字符串；失败返回 null */
 function cssColorToRgb(input: string): string | null {
@@ -259,6 +265,7 @@ export function SettingsApp() {
             {page === "files" && <FilesPage />}
             {page === "snippets" && <SnippetsPage />}
             {page === "screenshot" && <ScreenshotPage />}
+            {page === "recorder" && <RecorderPage />}
             {page === "features" && <FeaturePage onNavigate={setPage} />}
             {page === "general" && <GeneralPage />}
             {page === "toolbar" && <ToolbarPage />}

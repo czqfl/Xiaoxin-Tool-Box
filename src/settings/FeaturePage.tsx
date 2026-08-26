@@ -20,6 +20,7 @@ export const FEATURES: Array<{
   { key: "files", label: "快速文件", desc: "统一位置快速新建/管理常用文件", page: "files" },
   { key: "snippets", label: "常用语速贴", desc: "快捷短语一键粘贴", page: "snippets" },
   { key: "screenshot", label: "截图贴图", desc: "截图 / 标注 / 贴图钉屏 / 屏幕取色", page: "screenshot" },
+  { key: "recorder", label: "屏幕录制", desc: "框选区域录制 GIF 动图", page: "recorder" },
   { key: "toolbar", label: "悬浮工具栏", desc: "桌面常驻小工具条", page: "toolbar" },
 ];
 
@@ -34,6 +35,7 @@ export function featureEnabled(config: ReturnType<typeof useConfigStore.getState
     files: config.files?.enabled,
     snippets: config.snippets?.enabled,
     screenshot: config.shot?.enabled,
+    recorder: config.recorder?.enabled,
     toolbar: config.toolbar?.enabled,
   };
   return map[key] ?? true;
@@ -54,6 +56,7 @@ export function FeaturePage({ onNavigate }: { onNavigate: (p: Page) => void }) {
       case "files": next.files = { ...config.files, enabled: on }; break;
       case "snippets": next.snippets = { ...config.snippets, enabled: on }; break;
       case "screenshot": next.shot = { ...config.shot, enabled: on }; break;
+      case "recorder": next.recorder = { ...config.recorder, enabled: on }; break;
       case "toolbar": next.toolbar = { ...config.toolbar, enabled: on }; break;
     }
     void update(next);

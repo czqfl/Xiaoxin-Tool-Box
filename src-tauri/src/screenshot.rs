@@ -1320,6 +1320,9 @@ pub fn shot_history_save_region(window: WebviewWindow, region: Vec<i32>) -> Resu
 pub(crate) fn begin_impl<R: Runtime>(app: AppHandle<R>, picker: bool) -> Result<(), String> {
     if SHOOTING.swap(true, Ordering::SeqCst) { return Ok(()); }
     PICKER.store(picker, Ordering::SeqCst);
+    // 录屏选区窗若滞留（全屏置顶透明、吃整屏输入），先强制收掉，
+    // 避免它盖在截图遮罩上造成"屏幕像卡死"的互相阻塞
+    crate::recorder::dismiss_select_if_open(&app);
     let cfg: ShotConfig = app.try_state::<ConfigState>()
         .map(|s| s.0.lock().unwrap().shot.clone())
         .unwrap_or_default();

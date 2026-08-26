@@ -12,6 +12,7 @@ import {
 } from "../../core/tauri";
 import { translateText } from "../../core/tauri";
 import { useConfigStore } from "../../stores/configStore";
+import { scrollBegin } from "../scrollshot/api";
 import { Square, Circle, ArrowUpRight, Pencil, Type, Undo2, Redo2, X, Pin, Save, Copy } from "lucide-react";
 import "./screenshot.css";
 
@@ -109,6 +110,13 @@ const IcoClose = () => <X {...IC} />;
 const IcoPin = () => <Pin {...IC} />;
 const IcoSaveAs = () => <Save {...IC} />;
 const IcoCopy = () => <Copy {...IC} />;
+// 长截图：矩形 + 底部下滚箭头（滚动拼接语义）
+const IcoLongShot = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="4" y="3" width="16" height="11" rx="2"/>
+    <path d="M12 17v4"/><path d="m8.5 18 3.5 3.5L15.5 18"/>
+  </svg>
+);
 
 /** 工具条按钮（Snipaste 式）：同类形状合并为一键，重复点击在组内循环切换
  *  （矩形→椭圆→矩形…），悬停提示「名称、名称 (Ctrl+N)」，Ctrl+数字直达。
@@ -1876,6 +1884,23 @@ export function ScreenshotOverlay() {
     }
   };
 
+  // 长截图：把当前选区（换算全局物理像素）交给 scrollshot 模块，
+  // Rust 端收掉遮罩并接管后续流程（滚动+拼接+落盘），本页不再参与
+  const startLongShot = () => {
+    const r = regRef.current;
+    if (!geom || r.w <= 0 || r.h <= 0) return;
+    const sc = cssScale();
+    void scrollBegin({
+      x: Math.round(r.x * sc) + geom.x,
+      y: Math.round(r.y * sc) + geom.y,
+      w: Math.round(r.w * sc),
+      h: Math.round(r.h * sc),
+    }).catch(async (e) => {
+      void diagLog(`[shot] longshot begin failed: ${String(e)}`);
+      await shotCancel().catch(() => {});
+    });
+  };
+
   // doOutput 的 ref 镜像：下方事件监听只注册一次，经此始终调到最新闭包
   const doOutputRef = useRef<typeof doOutput | null>(null);
   useEffect(() => { doOutputRef.current = doOutput; });
@@ -2163,6 +2188,8 @@ export function ScreenshotOverlay() {
                 onClick={()=>{if(undos.length>0){setAnnos(undos[undos.length-1]);setUndos(u=>u.slice(0,-1));}}}><IcoRedo/></button>
               <div className="shot-toolbar-sep" />
               <div className="shot-toolbar-group shot-toolbar-actions">
+                <button data-tip="长截图（滚动拼接）" onClick={startLongShot}>
+                  <span style={{ color: "rgba(255,255,255,0.92)", display: "inline-flex" }}><IcoLongShot /></span></button>
                 <button data-tip="文字识别 (OCR)" className={ocrPhase !== "idle" ? "active" : ""}
                   onClick={() => { if (ocrPhase === "idle" || ocrPhase === "error") void runOcr(); else resetOcr(); }}>
                   <span style={{ color: "rgba(255,255,255,0.92)", display: "inline-flex" }}><IcoOcr /></span></button>

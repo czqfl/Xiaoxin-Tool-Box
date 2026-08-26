@@ -25,6 +25,8 @@ arboard = "3"
 enigo = "0.3"
 # png=截图/贴图主格式; bmp=贴图最快路径(零压缩直出); gif=剪贴板GIF贴图解码
 image = { version = "0.25", default-features = false, features = ["png", "bmp", "gif"] }
+# 录屏 GIF 增量编码（逐帧写入文件流，内存占用恒定）
+gif = "0.13"
 raw-window-handle = "0.6"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
