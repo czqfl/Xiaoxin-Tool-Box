@@ -136,9 +136,21 @@ html[data-window="shot"] body { background: transparent; }
 /* 工具栏贴近屏幕底缘时：把色板/粗细面板翻转到工具栏【上方】（旧版跑到屏幕外） */
 .shot-toolbar-float.panel-above { flex-direction: column-reverse; }
 /* 条体：内侧发丝描边 + 家族圆角，与放大镜/取色/历史面板同一玻璃语言 */
-.shot-toolbar { display: flex; align-items: center; gap: 1px; background: rgba(var(--bg-panel-rgb), var(--panel-opacity)); border-radius: 10px; padding: 3px 4px; flex-wrap: nowrap; white-space: nowrap; position: relative; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.09); }
+/* 工具栏恒深玻璃：截图工具栏是浮在任意画面上的工具层，必须保证图标在任何
+   截图内容上都清晰，因此无论浅/深主题一律深色玻璃 + 浅色图标（"恒深玻璃恒浅字"）。
+   基础规则直接给深玻璃，避免「跟随系统 + 浅色系统」下 data-theme 缺失导致退回浅玻璃 */
+.shot-toolbar { display: flex; align-items: center; gap: 1px;
+  background:
+    linear-gradient(rgba(var(--accent-rgb), 0.18), rgba(var(--accent-rgb), 0.18)),
+    rgba(24, 26, 30, 0.9);
+  border-radius: 10px; padding: 3px 4px; flex-wrap: nowrap; white-space: nowrap; position: relative; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.09); }
 .shot-toolbar::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
-.shot-toolbar-panel { display: flex; align-items: center; gap: 7px; background: rgba(var(--bg-panel-rgb), var(--panel-opacity)); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-radius: 10px; padding: 8px 10px; white-space: nowrap; align-self: stretch; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08); }
+/* 同主条：恒深玻璃（与 .shot-toolbar 一致），浅色主题下图标同样清晰 */
+.shot-toolbar-panel { display: flex; align-items: center; gap: 7px;
+  background:
+    linear-gradient(rgba(var(--accent-rgb), 0.18), rgba(var(--accent-rgb), 0.18)),
+    rgba(24, 26, 30, 0.9);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-radius: 10px; padding: 8px 10px; white-space: nowrap; align-self: stretch; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08); }
 /* 按钮：圆角与全局 radius-sm 对齐；浅色图标（深玻璃上唯一可读解）；
    transform 过渡承载按压回弹反馈 */
 .shot-toolbar button { background: transparent; border: none; color: #f2f4f7; padding: 6px; border-radius: 9px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; min-width: 34px; min-height: 34px; position: relative; transition: background var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out); }
@@ -171,7 +183,9 @@ html[data-window="shot"] body { background: transparent; }
   display: flex; flex-direction: row; flex-wrap: nowrap; white-space: nowrap;
   gap: 5px; padding: 5px 8px;
   align-items: center; justify-content: flex-start;
-  background: rgba(var(--bg-panel-rgb), var(--panel-opacity));
+  background:
+    linear-gradient(rgba(var(--accent-rgb), 0.18), rgba(var(--accent-rgb), 0.18)),
+    rgba(24, 26, 30, 0.9);
   backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
   box-shadow: 0 4px 14px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.09);
   border-radius: 10px;
@@ -244,34 +258,8 @@ html[data-window="shot"] body { background: transparent; }
 }
 .shot-sw-wheel:hover span { background: #fff; }
 
-/* 浅色主题（light / mint / skyblue / red）：截图工具栏改为「深色玻璃 + 主题强调色微染」。
-   原因：浅色面板底色近白、毛玻璃仅 75% 不透明，叠在亮色截图上后工具栏发白发亮，
-   细线图标被「亮底 + 杂乱内容」吃掉、看不清。截图工具栏是浮在任意画面上的工具层，
-   可读性优先——用深色玻璃承载浅色图标，并以主题 accent 染色保持协调（非旧版纯黑条）。
-   深色主题保持原样（已是深色玻璃）。
-   【按钮文字/悬停/激活/分隔符不再分主题打补丁】基础规则已按"恒深玻璃恒浅字"
-   设计，浅浅色主题只需覆写背景微染即可 */
-:root[data-theme="light"] .shot-toolbar,
-:root[data-theme="mint"] .shot-toolbar,
-:root[data-theme="skyblue"] .shot-toolbar,
-:root[data-theme="red"] .shot-toolbar,
-:root[data-theme="light"] .shot-toolbar-panel,
-:root[data-theme="mint"] .shot-toolbar-panel,
-:root[data-theme="skyblue"] .shot-toolbar-panel,
-:root[data-theme="red"] .shot-toolbar-panel {
-  background:
-    linear-gradient(rgba(var(--accent-rgb), 0.18), rgba(var(--accent-rgb), 0.18)),
-    rgba(24, 26, 30, 0.9);
-}
-/* 子菜单 popover 在浅色主题下用同样的「深玻璃 + accent 微染」基色，与主条协调 */
-:root[data-theme="light"] .shot-toolbtn-submenu,
-:root[data-theme="mint"] .shot-toolbtn-submenu,
-:root[data-theme="skyblue"] .shot-toolbtn-submenu,
-:root[data-theme="red"] .shot-toolbtn-submenu {
-  background:
-    linear-gradient(rgba(var(--accent-rgb), 0.18), rgba(var(--accent-rgb), 0.18)),
-    rgba(24, 26, 30, 0.9);
-}
+/* 截图工具栏恒深玻璃（见 .shot-toolbar 注释）：不再按主题打补丁——
+   基础规则已是深色玻璃，浅色/深色主题、system+浅色系统下图标均始终可读 */
 
 /* 文字标注编辑器 */
 .shot-text-editor { position: fixed; z-index: 300; display: inline-flex; align-items: center; gap: 5px; background: transparent; border: 1.5px solid rgba(255,255,255,0.95); outline: 1px solid rgba(0,0,0,0.35); border-radius: 2px; padding: 3px 6px; transform: translateY(-50%); }
