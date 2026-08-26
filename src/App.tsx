@@ -14,6 +14,7 @@ import { TranslatePopup } from "./modules/translate/TranslatePopup";
 import { Toolbar } from "./modules/toolbar/Toolbar";
 import { ScreenshotOverlay } from "./modules/screenshot/ScreenshotOverlay";
 import { PinWindow } from "./modules/pin/PinWindow";
+import PinMenu from "./modules/pin/PinMenu";
 import { SettingsApp } from "./settings/SettingsApp";
 import { diagLog } from "./core/tauri";
 
@@ -69,6 +70,9 @@ export default function App() {
   }
   if (label.startsWith("shot-overlay")) {
     return <ScreenshotOverlay />;
+  }
+  if (label.startsWith("pin-menu")) {
+    return <PinMenu />;
   }
   if (label.startsWith("pin-")) {
     return <PinWindow />;

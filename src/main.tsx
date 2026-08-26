@@ -27,6 +27,11 @@ async function bootstrap() {
   if (label.startsWith("pin-")) {
     document.documentElement.dataset.window = "pin";
   }
+  // 贴图右键菜单窗（pin-menu-*）：同一套透明上下文，玻璃底随主题；实际渲染由
+  // App 按 label 分流到 PinMenu 组件（startsWith 覆盖 pin-menu-<timestamp> 唯一标签）
+  if (label.startsWith("pin-menu")) {
+    document.documentElement.dataset.window = "pin";
+  }
 
   const [{ default: React }, { default: ReactDOM }, { default: App }] = await Promise.all([
     import("react"),

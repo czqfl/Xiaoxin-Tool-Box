@@ -1,7 +1,7 @@
 ﻿/* pin 窗 html/body 强制透明：show() 后 WebView2 首帧 present 之前的未绘制
    瞬间绝不能闪出主题底色矩形（!important 压过 theme.css 的不透明 body 底色，
    其 :root[data-theme] 选择器特异性更高且加载更晚） */
-html[data-window="pin"], html[data-window="pin"] body { background: transparent !important; }
+html[data-window="pin"], html[data-window="pin"] body { background: transparent !important; margin: 0; overflow: hidden; }
 
 /* --pin-m：四周透明外边距（CSS 像素，由 TSX 按 12/devicePixelRatio 注入）。
    窗口比图片四周各大一圈：图片缩进边距内，边框贴着【图片边缘】画，
@@ -126,12 +126,12 @@ html[data-window="pin"], html[data-window="pin"] body { background: transparent 
   to   { filter: hue-rotate(360deg); }
 }
 
-/* 贴图右键菜单：跟随系统主题（文字/底色/描边用主题变量），透明度与毛玻璃
-   由通用设置的「亚克力 + 不透明度」经 PinWindow 内联注入。
-   【注意】菜单渲染在贴图窗自己的 webview 里、受 OS 窗裁剪——贴图太小时
-   PinWindow 会实测菜单尺寸并临时扩窗容下（关闭时还原），贴图贴屏边时翻到光标左/上 */
+/* 贴图右键菜单：渲染在独立透明窗 pin-menu-* 里（由 PinMenu.tsx 承接），
+   彻底脱离贴图窗矩形约束——菜单可完整显示在任何位置、绝不改动贴图尺寸。
+   玻璃底用主题变量（--bg-panel-rgb + --panel-opacity），随浅/深主题自适应；
+   left/top:0 固定到菜单窗左上角，窗尺寸由 PinMenu 按实测内容设定，无偏移 */
 .pin-ctx-menu {
-  position: fixed; z-index: 9999; min-width: 168px; padding: 5px;
+  position: fixed; left: 0; top: 0; z-index: 9999; min-width: 168px; padding: 5px;
   border-radius: 10px; overflow: hidden;
   /* 主背景由 PinWindow 内联注入（rgba(var(--bg-panel-rgb), op)），此处仅作
      JS 未注入时的兜底——同样用主题面板变量，保证浅/深主题下都有可读对比 */

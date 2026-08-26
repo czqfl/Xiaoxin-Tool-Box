@@ -4,13 +4,13 @@
  *  图片就绪后才显示——免去临时建 WebView2 窗口的数百毫秒开销与闪烁 */
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
-import { PhysicalSize, LogicalSize } from "@tauri-apps/api/dpi";
+import { PhysicalSize } from "@tauri-apps/api/dpi";
 import {
   pinImageUrl, pinUpdate, pinClose, pinSetClickThrough, pinReady, pinHideOne, pinResize, pinKind, diagLog,
   pinCopyOriginal, pinCopyImageBytes,
 } from "../../core/tauri";
-import { useConfigStore } from "../../stores/configStore";
 import { usePinOcrSelect } from "./usePinOcrSelect";
 import "./pin.css";
 
@@ -333,11 +333,6 @@ export function PinWindow() {
   // keyboard
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      // 右键菜单开着：Esc 只关菜单，不关贴图
-      if (menuRef.current) {
-        if (e.key === "Escape") { e.preventDefault(); closeMenu(); }
-        return;
-      }
       // 选区相关按键（Esc=清高亮退模式 / Ctrl+C=复制选中文本）：消费则不往下走，
       // 无选区的 Ctrl+C 照旧落到底部「复制为图片」
       if (ocr.onKeyDown(e)) return;
@@ -416,31 +411,62 @@ export function PinWindow() {
     return () => window.removeEventListener("mouseup", h);
   }, []);
 
-  // context menu
-  const config = useConfigStore((s) => s.config);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-  // 菜单放不下时临时扩窗用的原尺寸；关闭菜单时还原，避免贴图窗被永久撑大
-  const menuGrowRef = useRef<{ w: number; h: number } | null>(null);
-  const closeMenu = () => {
-    menuRef.current?.remove();
-    menuRef.current = null;
-    if (menuGrowRef.current) {
-      const { w, h } = menuGrowRef.current;
-      menuGrowRef.current = null;
-      try { void getCurrentWindow().setSize(new LogicalSize(w, h)); } catch {}
+  // context menu（独立透明窗 pin-menu：不受贴图窗矩形裁剪、绝不改贴图尺寸）
+  const menuWinRef = useRef<WebviewWindow | null>(null);
+  const runMenuActionRef = useRef<(id: string) => void>(() => {});
+
+  // 接收菜单窗回传的指令：按贴图标签过滤，只响应本贴图发起的菜单
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    void getCurrentWindow()
+      .listen<{ id: string; pin: string }>("pin-menu-action", (e) => {
+        if (e.payload.pin === winLabel) runMenuActionRef.current(e.payload.id);
+      })
+      .then((f) => { un = f; });
+    return () => { un?.(); };
+  }, [winLabel]);
+
+  // 贴图窗销毁时，关掉可能还开着的菜单窗（避免幽灵菜单）
+  useEffect(() => {
+    return () => { menuWinRef.current?.close().catch(() => {}); };
+  }, []);
+
+  // 菜单项动作（id 驱动；切换类用函数式 setState 避开闭包陈旧值）
+  const runMenuAction = (id: string) => {
+    const pid = idRef.current;
+    switch (id) {
+      case "copy-text":
+        showBadge("已复制文本", 1200, "copied");
+        pinCopyOriginal(pid).catch(() => showBadge("复制失败", 1500, "failed"));
+        break;
+      case "copy-image":
+        showBadge("已复制图片", 1200, "copied");
+        copyPinAsImage().catch(() => showBadge("复制失败", 1500, "failed"));
+        break;
+      case "copy":
+        showBadge("已复制图片", 1200, "copied");
+        pinCopyOriginal(pid).catch(() => showBadge("复制失败", 1500, "failed"));
+        break;
+      case "toggle-shadow":
+        setShadow((s) => !s);
+        break;
+      case "toggle-clickthrough": {
+        const turningOn = !clickThrough;
+        pinSetClickThrough(turningOn).then(() => {
+          setClickThrough(turningOn);
+          if (turningOn) showBadge("已鼠标穿透 · 按贴图热键唤回", 4000);
+        }).catch(() => {});
+        break;
+      }
+      case "hide":
+        pinHideOne().catch(() => {});
+        break;
+      case "close":
+        pinClose(pid).catch(() => {});
+        break;
     }
   };
-  // 左键点菜单外任意处 → 关闭菜单（mousedown 而非 click：点击空白处会触发
-  // 原生拖拽循环，click 事件在拖放循环里永远不会回到 webview）。
-  // 常驻监听 + menuRef 判空：避免闭包身份不一致导致监听器移除失效
-  useEffect(() => {
-    const h = (e: MouseEvent) => {
-      const m = menuRef.current;
-      if (m && !m.contains(e.target as Node)) closeMenu();
-    };
-    document.addEventListener("mousedown", h, true);
-    return () => document.removeEventListener("mousedown", h, true);
-  }, []);
+  runMenuActionRef.current = runMenuAction;
   // ---- 文本/富文本贴图「复制为图片」----
   // 把贴图 DOM 克隆进 SVG foreignObject → 画进 canvas（按 DPR 放大保清晰）
   // → 导出 PNG → 原生二进制直传 Rust 写剪贴板位图
@@ -494,85 +520,53 @@ export function PinWindow() {
     e.preventDefault();
     const id = idRef.current;
     if (!id) return;
-    closeMenu();
-    // 文本/富文本贴图：原文本与图片两种复制都给（Ctrl+C 默认复制为图片）
+    // 关掉可能还开着的旧菜单窗（连续右键：新的覆盖旧的）
+    menuWinRef.current?.close().catch(() => {});
+    // 文本/富文本贴图：原文本与图片两种复制都给；图片贴图只有「复制」
+    // （Ctrl+C 默认复制为图片，复制原文本走菜单）
     const copyActions = kind === "html"
       ? [
-          { label: "复制原文本", action: () => { showBadge("已复制文本", 1200, "copied"); pinCopyOriginal(id).catch(() => showBadge("复制失败", 1500, "failed")); } },
-          { label: "复制为图片", action: () => { showBadge("已复制图片", 1200, "copied"); copyPinAsImage().catch(() => showBadge("复制失败", 1500, "failed")); } },
+          { id: "copy-text", label: "复制原文本" },
+          { id: "copy-image", label: "复制为图片" },
         ]
-      : [
-          { label: "复制", action: () => { showBadge("已复制图片", 1200, "copied"); pinCopyOriginal(id).catch(() => showBadge("复制失败", 1500, "failed")); } },
-        ];
-    const actions = [
+      : [{ id: "copy", label: "复制" }];
+    const items = [
       ...copyActions,
-      { label: shadow ? "关闭阴影" : "开启阴影", action: () => setShadow(!shadow) },
+      { id: "toggle-shadow", label: shadow ? "关闭阴影" : "开启阴影" },
       // 鼠标穿透：点击/滚轮全部穿过贴图直达下面的窗口（Snipaste 同款）。
       // 穿透后贴图收不到任何鼠标事件——出口是贴图热键（隐藏后唤回自动解除）
-      { label: clickThrough ? "取消鼠标穿透" : "开启鼠标穿透",
-        action: () => {
-          const turningOn = !clickThrough;
-          pinSetClickThrough(turningOn).then(() => {
-            setClickThrough(turningOn);
-            if (turningOn) showBadge("已鼠标穿透 · 按贴图热键唤回", 4000);
-          }).catch(() => {});
-        } },
-      { label: "隐藏贴图", action: () => pinHideOne().catch(() => {}) },
-      { label: "关闭贴图", action: () => pinClose(id).catch(() => {}) },
+      { id: "toggle-clickthrough", label: clickThrough ? "取消鼠标穿透" : "开启鼠标穿透" },
+      { id: "hide", label: "隐藏贴图" },
+      { id: "close", label: "关闭贴图" },
     ];
-    const menu = document.createElement("div");
-    menu.className = "pin-ctx-menu";
-    menu.style.left = "0px";
-    menu.style.top = "0px";
-    menu.style.visibility = "hidden";
-    // 【跟随系统主题 + 通用设置】底色用主题面板色，透明度/毛玻璃由
-    // 通用设置的「亚克力 + 不透明度」统一管理（与各面板外壳同源）
-    const g = config?.general;
-    const acrylic = g?.acrylic_enabled !== false;
-    const op = Math.min(100, Math.max(0, g?.acrylic_opacity ?? 60)) / 100;
-    const rgb = getComputedStyle(document.documentElement)
-      .getPropertyValue("--bg-panel-rgb").trim() || "24, 24, 28";
-    menu.style.background = `rgba(${rgb}, ${acrylic ? op : 1})`;
-    menu.style.backdropFilter = acrylic ? "blur(18px)" : "none";
-    for (const a of actions) {
-      const btn = document.createElement("div");
-      btn.className = "pin-ctx-item";
-      btn.textContent = a.label;
-      btn.onclick = () => { closeMenu(); a.action(); };
-      menu.appendChild(btn);
-    }
-    document.body.appendChild(menu);
-    menuRef.current = menu;
-    // 菜单渲染在贴图窗自己的 webview 里，OS 窗会裁掉窗界外的内容。
-    // 贴图太小时菜单放不下就被裁断（"只显示一半/看不见"）。
-    // 解法：菜单放不下时【临时扩窗】——仅向右/下延展（左上角不动→图片不位移），
-    // 关闭菜单时还原。贴图贴着屏幕边时若扩窗会越界，则把菜单翻到光标左/上。
-    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    // 光标绝对屏幕坐标（逻辑像素）：贴图窗外位置 + 窗内光标偏移，
+    // 菜单窗按此坐标独立定位，与贴图矩形无关、绝不改动贴图尺寸
     const dpr = window.devicePixelRatio || 1;
-    let x = e.clientX, y = e.clientY;            // 默认出现在光标右下方
-    const curW = window.innerWidth, curH = window.innerHeight;
-    // 屏幕可用边界：窗口左上角物理位置 + 新尺寸不得超出，否则把菜单翻到左/上
-    let maxW = Infinity, maxH = Infinity;
+    let lx = e.clientX, ly = e.clientY;
     try {
       const pos = await getCurrentWindow().outerPosition();   // 物理像素
-      maxW = window.screen.availWidth - pos.x / dpr;
-      maxH = window.screen.availHeight - pos.y / dpr;
-    } catch { /* 取不到屏幕信息则跳过边界保护 */ }
-    if (x + mw + 4 > maxW) x = Math.max(2, e.clientX - mw - 4);
-    if (y + mh + 4 > maxH) y = Math.max(2, e.clientY - mh - 4);
-    // 需要的窗尺寸：至少容下菜单；屏幕允许时（maxW>curW）再钳到屏幕边界，
-    // 否则（贴图已贴着屏边/屏幕信息缺失）自由扩到容下菜单，避免被裁断
-    const needW = maxW > curW ? Math.min(Math.max(curW, x + mw + 4), maxW) : Math.max(curW, x + mw + 4);
-    const needH = maxH > curH ? Math.min(Math.max(curH, y + mh + 4), maxH) : Math.max(curH, y + mh + 4);
-    if (needW > curW || needH > curH) {
-      menuGrowRef.current = { w: curW, h: curH };   // 记录原尺寸，关闭时还原
-      try { await getCurrentWindow().setSize(new LogicalSize(Math.round(needW), Math.round(needH))); }
-      catch { menuGrowRef.current = null; }
-    }
-    // 最终定位（钳进实际窗可视区，极小窗兜底时不裁断）
-    menu.style.left = `${Math.max(2, Math.min(x, window.innerWidth - mw - 2))}px`;
-    menu.style.top = `${Math.max(2, Math.min(y, window.innerHeight - mh - 2))}px`;
-    menu.style.visibility = "visible";
+      lx += pos.x / dpr; ly += pos.y / dpr;                    // → 逻辑屏幕坐标
+    } catch { /* 取不到窗位置则用窗内坐标兜底 */ }
+    const params = new URLSearchParams({
+      wm: "pin-menu",
+      items: JSON.stringify(items),
+      cx: String(Math.round(lx)),
+      cy: String(Math.round(ly)),
+      pin: winLabel,
+    });
+    // 独立透明窗 pin-menu-*：不受贴图窗裁剪，菜单可完整显示在任何位置。
+    // 唯一标签避免重复建窗竞态；命中 pin-* 权限通配。先隐藏，待定位后再显示，
+    // 避免初始尺寸/位置的闪烁
+    try {
+      const w = new WebviewWindow(`pin-menu-${Date.now()}`, {
+        url: `index.html?${params.toString()}`,
+        width: 180, height: 40,
+        decorations: false, transparent: true,
+        alwaysOnTop: true, focus: true, resizable: false, shadow: false,
+        visible: false, skipTaskbar: true,
+      });
+      menuWinRef.current = w;
+    } catch { /* 建窗失败静默：极少发生 */ }
   };
 
   // 图片就绪信号：decode() 在解码完成（可无闪烁呈现）时才 resolve，
