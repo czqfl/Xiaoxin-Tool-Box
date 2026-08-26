@@ -410,6 +410,33 @@ fn sync_seq_availability(entries: &[ClipEntry]) {
     }
 }
 
+/// 顺序粘贴模式（FIFO/LIFO）是"会话内临时模式"：剪贴板面板关闭或应用启动
+/// 时一律复位为普通粘贴并持久化——避免"上次设了 FIFO 忘了，下次打开面板
+/// 仍是顺序模式、Ctrl+V 仍被接管"的困惑。仅在当前为顺序模式时执行，
+/// 普通模式直接返回（不落盘、不广播）。
+pub fn reset_paste_mode_if_sequential<R: Runtime>(app: &AppHandle<R>) {
+    let normal;
+    {
+        let Some(state) = app.try_state::<ConfigState>() else {
+            return;
+        };
+        let mut guard = state.0.lock().unwrap();
+        if guard.clipboard.paste_mode == PasteMode::Normal {
+            return;
+        }
+        guard.clipboard.paste_mode = PasteMode::Normal;
+        normal = guard.clone();
+    }
+    // 持久化 + 同步全局 Ctrl+V 拦截 + 广播配置变更（面板下次打开显示普通模式；
+    // 启动期广播可能无监听者，面板加载时会从磁盘读回，效果等价）
+    if let Some(paths) = app.try_state::<AppPaths>() {
+        let _ = save_json(&paths.config_file, &normal);
+    }
+    crate::shortcut::sync_seq_shortcut(app, PasteMode::Normal);
+    let _ = app.emit(crate::config::EVT_CONFIG_CHANGED, &normal);
+    crate::storage::diag_write("[clipboard] paste_mode reset to normal (sequential is session-only)");
+}
+
 /// 文本类型细分：链接（URL）> 富文本（剪贴板带格式 HTML）> 普通文本。
 /// 优先级说明：从浏览器复制的链接通常同时带 CF_HTML，URL 语义优先于格式。
 fn classify_text_kind(t: &str) -> EntryKind {

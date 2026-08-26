@@ -284,6 +284,11 @@ pub fn run() {
             #[cfg(windows)]
             keyhook::start(handle.clone());
             shortcut::register_initial(&handle, &config);
+            // 顺序粘贴（FIFO/LIFO）是会话内临时模式：启动即复位为普通粘贴，
+            // 覆盖"上次退出时面板未关、配置残留 FIFO"的场景——下次打开面板
+            // 默认普通模式，Ctrl+V 不会被接管（register_initial 已按残留配置
+            // 同步过 SEQ_ENABLED，这里再统一归位为放行）
+            clipboard::reset_paste_mode_if_sequential(&handle);
             clipboard::start_watcher(handle.clone());
             #[cfg(windows)]
             explorer::start_explorer_watcher(handle.clone());

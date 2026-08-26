@@ -318,6 +318,43 @@
   background: var(--bg-item-active);
 }
 
+/* 顺序粘贴模式提示条：告知 Ctrl+V 行为、强制置顶与关闭后自动恢复普通。
+   主题色左边条 + 浅色底，落在面板 body 与 footer 之间，不干扰列表操作 */
+.seq-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 10px 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+}
+.seq-notice b {
+  color: var(--text-primary);
+  font-family: Consolas, "Courier New", monospace;
+  font-weight: 600;
+}
+.seq-notice-title {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-contrast, #fff);
+  background: var(--accent);
+}
+
+/* 顺序模式强制置顶的置顶按钮：保持激活态观感（不禁用透明），仅禁点 */
+.icon-btn.seq-locked:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
 /* ---- 类型图标 / 类型徽标 / 收藏徽标 / 来源 chip ----
    类型图标统一中性灰：类型靠图标形状（T/图片/文件/链接/富文本）区分，
    彩色只留给"类型徽标/收藏"这类有语义的标识 */

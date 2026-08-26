@@ -44,8 +44,6 @@ export function ClipboardPanel() {
   const { entries, loaded, refresh, clearAll } = useClipboardStore();
   const config = useConfigStore((s) => s.config);
   const updateConfig = useConfigStore((s) => s.update);
-  // 置顶开启时面板常驻：失焦不再自动隐藏
-  usePanelCommon(config.clipboard.always_on_top);
 
   const [query, setQuery] = useState("");
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -84,12 +82,18 @@ export function ClipboardPanel() {
 
   /** 粘贴模式持久化在配置，顺序模式下后端注册全局 Ctrl+V */
   const mode = config.clipboard.paste_mode;
+  /** 顺序粘贴（FIFO/LIFO）：Ctrl+V 接管 + 面板强制置顶常驻（顺序粘贴时
+   *  面板必须保持可见，否则切到目标应用一粘贴、面板失焦自动隐藏，
+   *  Ctrl+V 被放行、顺序粘贴流程就断了） */
+  const sequential = isSequentialMode(mode);
+  // 置顶开启时面板常驻：失焦不再自动隐藏；顺序模式下无条件常驻
+  usePanelCommon(config.clipboard.always_on_top || sequential);
 
-  // 面板置顶状态跟随配置生效（经后端命令切换，避免透明窗口黑屏）
+  /** 面板置顶状态跟随配置生效；顺序模式下强制置顶（经后端命令切换，避免透明窗口黑屏） */
   const alwaysOnTop = config.clipboard.always_on_top;
   useEffect(() => {
-    setPanelAlwaysOnTop(alwaysOnTop).catch(console.error);
-  }, [alwaysOnTop]);
+    setPanelAlwaysOnTop(alwaysOnTop || sequential).catch(console.error);
+  }, [alwaysOnTop, sequential]);
 
   // 初始加载 + 监听 Rust 侧剪贴板变化
   useEffect(() => {
@@ -146,7 +150,6 @@ export function ClipboardPanel() {
   // 顺序模式队列；队首即下一条待粘贴（全局 Ctrl+V 带出的内容）
   const queue = useMemo(() => buildQueue(filtered, mode), [filtered, mode]);
   queueRef.current = queue;
-  const sequential = isSequentialMode(mode);
   /** 展示列表：顺序模式下整体按队列顺序（下一条在最前），普通模式保持 置顶/历史 分区。
    *  拖拽中按视觉顺序渲染（实时让位预览），队列里新增的条目兜底排尾 */
   const displayList = useMemo(() => {
@@ -469,11 +472,18 @@ export function ClipboardPanel() {
             <IconStar size={15} filled={favOnly} />
           </button>
           <button
-            className={`icon-btn ${alwaysOnTop ? "active" : ""}`}
-            title={alwaysOnTop ? "取消面板置顶" : "面板置顶显示"}
-            onClick={toggleAlwaysOnTop}
+            className={`icon-btn ${alwaysOnTop || sequential ? "active" : ""}${sequential ? " seq-locked" : ""}`}
+            title={
+              sequential
+                ? "顺序粘贴模式下强制置顶（关闭面板后自动恢复普通粘贴）"
+                : alwaysOnTop
+                  ? "取消面板置顶"
+                  : "面板置顶显示"
+            }
+            onClick={sequential ? undefined : toggleAlwaysOnTop}
+            disabled={sequential}
           >
-            <IconPin size={15} filled={alwaysOnTop} />
+            <IconPin size={15} filled={alwaysOnTop || sequential} />
           </button>
           <button
             className="icon-btn icon-btn-danger"
@@ -628,6 +638,17 @@ export function ClipboardPanel() {
             </div>
           )}
         </div>
+
+        {/* 顺序粘贴模式提示条：告知用户 Ctrl+V 行为、强制置顶与关闭后自动恢复普通 */}
+        {sequential && (
+          <div className="seq-notice">
+            <span className="seq-notice-title">顺序粘贴</span>
+            <span>
+              <b>Ctrl+V</b> 按队列顺序粘贴，面板已强制置顶；
+              关闭面板后自动恢复普通粘贴
+            </span>
+          </div>
+        )}
 
         <div className="panel-footer">
           <div className="segmented">

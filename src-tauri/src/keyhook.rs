@@ -268,7 +268,10 @@ pub fn start<R: Runtime + 'static>(app: AppHandle<R>) {
     // 后端 toggle_panel 走 broadcast_panel_visibility，前端 hideCurrentWindow
     // （失焦自动隐藏 / Esc / 关闭按钮，直接 window.hide）也 emit 同款事件，
     // 监听器同时覆盖两条路径，状态不漂移。
+    // 面板关闭同时复位顺序粘贴模式为普通（会话内临时模式，见
+    // clipboard::reset_paste_mode_if_sequential）——下次打开默认普通。
     {
+        let app2 = app.clone();
         let _ = app.listen(crate::panel::EVT_PANEL_VISIBILITY, move |ev| {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(ev.payload()) {
                 if v.get("label").and_then(|l| l.as_str()) == Some(crate::panel::CLIPBOARD_PANEL) {
@@ -277,6 +280,9 @@ pub fn start<R: Runtime + 'static>(app: AppHandle<R>) {
                     crate::storage::diag_write(&format!(
                         "[keyhook] seq panel visible -> {visible}"
                     ));
+                    if !visible {
+                        crate::clipboard::reset_paste_mode_if_sequential(&app2);
+                    }
                 }
             }
         });
