@@ -13,16 +13,16 @@ html[data-window="shot"] body { background: transparent; }
 /* z-index 260 > 工具栏 200：鼠标移到工具栏附近时坐标/颜色信息不被盖住。
    整体走轻量玻璃卡片：细描边 + 轻投影，不再用粗圆角+重投影显得边框厚重。
    镜头框为与选区边框同款：1.5px 主题色细边 + 轻辉光，贴近 Snipaste。
-   【黑边根因】此前卡片背景是写死的近不透明深色 rgba(12,12,14,0.78)——
-   镜头 140px 嵌在 176px 卡片里，左右各 18px + 下方整条信息区全是深色块，
-   无论镜头边框多细，整张卡片都像"大黑边"。改为与截图工具条/左下角提示框
-   同源的玻璃背景（面板底色 + 全局透明度联动），深色块消失、镜头浮于画面上 */
+   【宽边根因】卡片宽 176px、镜头 140px，镜头左右各露 18px 卡片背景，
+   亚克力关闭（--panel-opacity=1）时是实心色条 → "左右很粗的边框"。
+   MAG_BOX_W 已改为 140（与镜头同宽），左右零边条；overflow 不再裁剪，
+   否则镜头外辉光会被卡片裁掉 */
 .shot-mag {
   position: fixed; z-index: 260;
   background: rgba(var(--bg-panel-rgb), var(--panel-opacity));
   backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-  border-radius: 4px; overflow: hidden;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 3px 10px rgba(0,0,0,0.22);
+  border-radius: 4px;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.22);
 }
 /* 镜头框：与截图选区边框同款（1.5px 主题色细边 + 轻辉光），方角更干净。
    不加黑色外环——Snipaste 只有一圈主题色细边，黑环会显得像"黑色边框" */
@@ -35,13 +35,18 @@ html[data-window="shot"] body { background: transparent; }
     inset 0 0 6px rgba(var(--accent-rgb, 76,141,255), 0.2);
 }
 .shot-mag-lens canvas { display: block; width: 100%; height: 100%; }
-.shot-mag-info { padding: 8px 10px 9px; display: flex; flex-direction: column; gap: 4px; }
+/* 信息区压缩进镜头正下方（卡片与镜头同宽 140px）：减小内边距与行距，
+   三行信息在 140px 内放下，不再撑宽卡片 */
+.shot-mag-info { padding: 5px 6px 6px; display: flex; flex-direction: column; gap: 2px; }
 .shot-mag-row {
-  text-align: center; font-size: 12.5px; line-height: 1.5; color: #fff;
+  text-align: center; font-size: 12px; line-height: 1.5; color: #fff;
   font-family: Consolas, "Courier New", monospace; white-space: nowrap;
 }
-.shot-mag-colorline { display: flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 3px 0 2px; }
+.shot-mag-colorline { display: flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 2px 0 1px; }
+/* 放大镜内 140px 窄幅：色值列弹性收缩，格式徽标收窄，保证不溢出 */
+.shot-mag .shot-color-val { min-width: 0; flex: 1 1 auto; font-size: 11.5px; }
+.shot-mag .shot-mag-fmt { padding: 0 4px; font-size: 8.5px; }
 /* 当前颜色格式徽标（RGB/HEX）：让用户随时知道 Shift 切到了哪种格式 */
 .shot-mag-fmt {
   flex: none; padding: 1px 5px; border-radius: 4px;
