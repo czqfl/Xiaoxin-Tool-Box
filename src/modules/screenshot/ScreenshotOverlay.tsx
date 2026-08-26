@@ -1376,7 +1376,13 @@ export function ScreenshotOverlay() {
     const scale = cssScale();
     const mx = m.x, my = m.y; // 定位用 CSS 像素，直接
     const vw = window.innerWidth, vh = window.innerHeight;
-    box.style.left = `${mx < vw - MAG_BOX_W - 20 ? mx + 20 : mx - MAG_BOX_W - 20}px`;
+    // 放大镜【水平居中】于光标（位于光标正下方），并做左右边缘钳制避免越屏；
+    // 旧版 left=mx+20 把整盒推到光标右侧，呈现"右下方"错位 → 改为居中
+    const halfW = MAG_BOX_W / 2;
+    let left = mx - halfW;
+    if (left < 4) left = 4;
+    else if (left + MAG_BOX_W > vw - 4) left = vw - MAG_BOX_W - 4;
+    box.style.left = `${left}px`;
     // 整体高约 镜头140 + 信息区~80：下缘预留不足时翻到光标上方
     box.style.top = `${my < vh - MAG - 130 ? my + 20 : my - MAG - 150}px`;
     c.width = MAG; c.height = MAG;
