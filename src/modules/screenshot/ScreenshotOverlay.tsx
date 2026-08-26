@@ -348,13 +348,13 @@ export function ScreenshotOverlay() {
   const sessionRef = useRef(0);
   // 帧数据加载完成（供放大镜/导出合成）；亮窗不等它，输出前 await 即可
   const frameReadyRef = useRef<Promise<void>>(Promise.resolve());
-  // 马赛克格子颜色缓存：同格采样结果复用，拖动重绘不再反复 getImageData
-  const mosaicCacheRef = useRef(new Map<string, string>());
-  // 合成源画布（背景帧 + 已绘标注）：马赛克从这里采样——否则马赛克只会
-  // 像素化原始背景，把先画上去的画笔/矩形等内容整个覆盖掉
-  const compRef = useRef<HTMLCanvasElement | null>(null);
-  // 上一轮标注数量：数量变化（新增/撤销）意味着合成源内容变了，采样缓存作废
-  const prevAnnoLenRef = useRef(0);
+   // 马赛克格子颜色缓存：同格采样结果复用，拖动重绘不再反复 getImageData
+   const mosaicCacheRef = useRef(new Map<string, string>());
+   // 【性能】屏显层只画 annoRef 一份；「背景帧+标注」的合成源由导出路径
+   // 按需构建（buildComposite 复用同一块暂存画布）——旧版在标注 effect 里
+   // 每次变化都全屏重建一份合成源，但导出路径各自重建、它从未被消费，
+   // 画笔拖动时等于每 move 白做一次整屏 clear+blit（4K 约 16MB 内存带宽）
+   const prevAnnoLenRef = useRef(0);
   // 输出单飞锁：Ctrl+T 按住自动重复/连点贴图不会并发创建多个贴图
   const outputtingRef = useRef(false);
   // 文字编辑镜像 ref：commitText 不依赖过期闭包（点击别处提交时不丢内容）
@@ -487,8 +487,6 @@ export function ScreenshotOverlay() {
     // 历史位图缓存一并作废：close 释放位图显存，下一会话重新预热
     for (const b of histBmpRef.current.values()) b.close();
     histBmpRef.current.clear();
-    // 合成源一并作废：下一轮重绘会按新背景帧重建，绝不残留上一会话画面
-    compRef.current = null;
     prevAnnoLenRef.current = 0;
     // 窗口快照缓存同步作废：新会话由 geometry 带回新表
     candsRef.current = null;
@@ -666,7 +664,6 @@ export function ScreenshotOverlay() {
     mosaicCacheRef.current.clear();
     clearMosaicSnapshots();
     prevAnnoLenRef.current = 0;
-    compRef.current = null;
     pngCacheRef.current = null;
     const a = annoRef.current;
     if (a) a.getContext("2d")?.clearRect(0, 0, a.width, a.height);
@@ -711,25 +708,13 @@ export function ScreenshotOverlay() {
     if (c.height !== geom.height) c.height = geom.height;
     const ctx = c.getContext("2d")!;
     ctx.clearRect(0, 0, geom.width, geom.height);
-    // 标注数量变化（新增标注/撤销）→ 合成源内容已变 → 马赛克采样缓存作废。
+    // 标注数量变化（新增标注/撤销）→ 马赛克采样缓存作废。
     // 同一标注拖拽中（长度不变）缓存依然有效
     if (annos.length !== prevAnnoLenRef.current) mosaicCacheRef.current.clear();
     prevAnnoLenRef.current = annos.length;
-    // 维护合成源 = 背景帧 + 已绘标注；导出时按物理选区裁剪合成源。
-    // 注意：马赛克的采样源是【原始冻结帧 bg】而非 comp——若从 comp 采样，
-    // 先画的红色笔迹会被马赛克整片像素化成红色块（"红主题下马赛克变红"）；
-    // 改采原图后，马赛克永远呈现屏幕原始像素，标注以清晰色叠在其上
-    let comp = compRef.current;
-    if (!comp) { comp = document.createElement("canvas"); compRef.current = comp; }
-    if (comp.width !== geom.width) comp.width = geom.width;
-    if (comp.height !== geom.height) comp.height = geom.height;
-    const cctx = comp.getContext("2d")!;
-    cctx.clearRect(0, 0, geom.width, geom.height);
-    if (bgRef.current && bgRef.current.width > 0) cctx.drawImage(bgRef.current, 0, 0);
     const scale = cssScale();
     annos.forEach((s) => {
       drawShape(ctx, s, bgRef.current, mosaicCacheRef.current, scale);   // 屏显层
-      drawShape(cctx, s, bgRef.current, mosaicCacheRef.current, scale);  // 叠进合成源，供导出裁剪
     });
   }, [annos, geom, bgReady]);
 
@@ -1707,6 +1692,25 @@ export function ScreenshotOverlay() {
     ].join("#");
   };
 
+  // 「背景帧 + 全部标注」合成源的复用暂存画布：跨多次输出/预编码共享一块
+  // 位图（4K 整屏约 16MB），避免每次分配触发 GC 卡顿
+  const compScratchRef = useRef<HTMLCanvasElement | null>(null);
+  /** 现场重建与屏显一致的合成源（物理分辨率）：导出/贴图裁剪的像素来源。
+   *  马赛克采样源同样是原始冻结帧 bg（与屏显层一致），导出与屏显完全一致 */
+  const buildComposite = (): HTMLCanvasElement | null => {
+    const bg = bgRef.current;
+    if (!bg || !geom || bg.width <= 0) return null;
+    let comp = compScratchRef.current;
+    if (!comp) { comp = document.createElement("canvas"); compScratchRef.current = comp; }
+    if (comp.width !== bg.width) comp.width = bg.width;
+    if (comp.height !== bg.height) comp.height = bg.height;
+    const cctx = comp.getContext("2d")!;
+    cctx.clearRect(0, 0, comp.width, comp.height);
+    cctx.drawImage(bg, 0, 0);
+    annos.forEach((s) => drawShape(cctx, s, bg, mosaicCacheRef.current, cssScale()));
+    return comp;
+  };
+
   /** 选区原始像素（BGRA，物理分辨率）：贴图最快路径专用。
    *  与 encodeSelection 同样的合成逻辑（背景+标注），但不做 PNG 编码，
    *  getImageData 一次回读后 R/B 交换成 BMP 字节序 */
@@ -1717,18 +1721,11 @@ export function ScreenshotOverlay() {
     const sc = cssScale();
     const rp = { x: Math.round(r.x * sc), y: Math.round(r.y * sc), w: Math.round(r.w * sc), h: Math.round(r.h * sc) };
     if (rp.w <= 0 || rp.h <= 0) return null;
-    let src: HTMLCanvasElement = bg;
-    if (annos.length > 0) {
-      const comp = document.createElement("canvas");
-      comp.width = bg.width; comp.height = bg.height;
-      const cctx = comp.getContext("2d")!;
-      cctx.drawImage(bg, 0, 0);
-      annos.forEach((s) => drawShape(cctx, s, bg, mosaicCacheRef.current, sc));
-      src = comp;
-    }
+    const src = annos.length > 0 ? buildComposite() : bg;
+    if (!src) return null;
     const c = document.createElement("canvas");
     c.width = rp.w; c.height = rp.h;
-    const ctx = c.getContext("2d")!;
+    const ctx = c.getContext("2d", { willReadFrequently: true })!;
     ctx.drawImage(src, rp.x, rp.y, rp.w, rp.h, 0, 0, rp.w, rp.h);
     const img = ctx.getImageData(0, 0, rp.w, rp.h);
     const d = img.data;
@@ -1752,18 +1749,11 @@ export function ScreenshotOverlay() {
     const c = document.createElement("canvas");
     c.width = rp.w; c.height = rp.h;
     const ctx = c.getContext("2d")!;
-    if (annos.length > 0 && bg.width > 0) {
-      // 现场重建与屏显一致的合成源（bg + 全部标注），再按物理选区裁剪。
-      // 马赛克采样源同样是原始冻结帧 bg（与屏显层一致），导出与屏显完全一致
-      const comp = document.createElement("canvas");
-      comp.width = bg.width; comp.height = bg.height;
-      const cctx = comp.getContext("2d")!;
-      cctx.drawImage(bg, 0, 0);
-      annos.forEach((s) => drawShape(cctx, s, bg, mosaicCacheRef.current, sc));
-      ctx.drawImage(comp, rp.x, rp.y, rp.w, rp.h, 0, 0, rp.w, rp.h);
-    } else {
-      ctx.drawImage(bg, rp.x, rp.y, rp.w, rp.h, 0, 0, rp.w, rp.h);
-    }
+    // 合成源按需构建（复用暂存画布）：有标注时是 bg+标注，无标注时直接用
+    // 冻结帧本身——省一次整屏 blit
+    const src = annos.length > 0 ? buildComposite() : bg;
+    if (!src) throw new Error("composite unavailable");
+    ctx.drawImage(src, rp.x, rp.y, rp.w, rp.h, 0, 0, rp.w, rp.h);
     return new Promise((res, rej) =>
       c.toBlob((b) => (b ? res(b) : rej(new Error("toBlob null"))), "image/png"));
   };
@@ -1933,7 +1923,15 @@ export function ScreenshotOverlay() {
         window.clearTimeout(swBadgeTimer.current);
         swBadgeTimer.current = window.setTimeout(() => setSwBadge(null), 800);
       }}>
-      <canvas ref={bgRef} style={{position:"absolute",top:0,left:0,width:displayW,height:displayH,imageRendering:"auto"}} />
+      {/* 底图画布：位图是物理分辨率、CSS 尺寸是逻辑视口，非整数 DPI（如
+          1.4997）下合成器会做带亚像素错位的双线性重采样导致预览发糊。
+          imageRendering:pixelated 强制最近邻采样——位图与设备像素本就一一
+          对应，最近邻即逐像素直出，文字边缘恢复锐利；只影响显示插值，
+          放大镜采样/导出合成读的是同一位图数据，不受影响。
+          【不能隐藏此画布让原生冻结层透出】WebView2 透明区域不会合成到
+          同窗的 GDI 子窗（冻结层）上，会直接渲染成黑色——拖拽选区镂空处
+          变黑的根源，故画布必须保持可见 */}
+      <canvas ref={bgRef} style={{position:"absolute",top:0,left:0,width:displayW,height:displayH,imageRendering:"pixelated"}} />
       <canvas ref={annoRef} style={{position:"absolute",top:0,left:0,width:displayW,height:displayH,pointerEvents:"none"}} />
 
       {/* 选区层：普通 2D 画布（非 desynchronized，避免 DPR≠1 合成偏移），
@@ -2168,14 +2166,14 @@ export function ScreenshotOverlay() {
                 <button data-tip="文字识别 (OCR)" className={ocrPhase !== "idle" ? "active" : ""}
                   onClick={() => { if (ocrPhase === "idle" || ocrPhase === "error") void runOcr(); else resetOcr(); }}>
                   <span style={{ color: "rgba(255,255,255,0.92)", display: "inline-flex" }}><IcoOcr /></span></button>
-                <button data-tip="取消 (Esc)" onClick={()=>void shotCancel().catch(()=>{})}>
-                  <span style={{ color: "rgba(255,255,255,0.92)", display: "inline-flex" }}><IcoClose/></span></button>
                 <button data-tip="另存为..." onClick={()=>doOutput("save")}>
                   <span style={{ color: "rgba(255,255,255,0.92)", display: "inline-flex" }}><IcoSaveAs/></span></button>
                 <button data-tip="复制 (Enter)" onClick={()=>doOutput("copy")}>
                   <span style={{ color: "rgba(255,255,255,0.92)", display: "inline-flex" }}><IcoCopy/></span></button>
                 <button data-tip={`贴图 (${cfg.shortcuts.pins})`} onClick={()=>doOutput("pin")}>
                   <span style={{ color: "rgba(255,255,255,0.92)", display: "inline-flex" }}><IcoPin/></span></button>
+                <button data-tip="取消 (Esc)" onClick={()=>void shotCancel().catch(()=>{})}>
+                  <span style={{ color: "rgba(255,255,255,0.92)", display: "inline-flex" }}><IcoClose/></span></button>
               </div>
             </div>
           </div>
