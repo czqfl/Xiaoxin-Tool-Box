@@ -425,12 +425,6 @@ export function PinWindow() {
     return () => { un?.(); };
   }, [winLabel]);
 
-  // 贴图窗销毁时，关掉可能还开着的菜单窗（避免幽灵菜单）。菜单窗为复用单例，
-  // 用 getByLabel 取当前句柄，不依赖本组件引用
-  useEffect(() => {
-    return () => { void WebviewWindow.getByLabel("pin-menu").then((w) => w?.close().catch(() => {})); };
-  }, []);
-
   // 菜单项动作（id 驱动；切换类用函数式 setState 避开闭包陈旧值）
   const runMenuAction = (id: string) => {
     const pid = idRef.current;

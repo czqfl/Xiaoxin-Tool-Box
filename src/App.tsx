@@ -1,6 +1,7 @@
 /** 按窗口 label 路由：各面板窗口 + 翻译弹窗 + 悬浮工具栏 + 设置窗口共用一个入口 */
 import { useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { AppConfig } from "./types";
 import { EVT_CONFIG_CHANGED, onEvent } from "./core/events";
 import { useConfigStore } from "./stores/configStore";
@@ -17,6 +18,26 @@ import { PinWindow } from "./modules/pin/PinWindow";
 import PinMenu from "./modules/pin/PinMenu";
 import { SettingsApp } from "./settings/SettingsApp";
 import { diagLog } from "./core/tauri";
+
+// 预热贴图右键菜单单例窗：应用启动（设置窗挂载即触发）预建 pin-menu（隐藏），
+// 之后任何右键直接复用，首弹也即时，不卡
+let pinMenuEnsured = false;
+function ensurePinMenu() {
+  if (pinMenuEnsured) return;
+  pinMenuEnsured = true;
+  void WebviewWindow.getByLabel("pin-menu").then((w) => {
+    if (w) return;
+    try {
+      new WebviewWindow("pin-menu", {
+        url: "index.html",
+        width: 180, height: 40,
+        decorations: false, transparent: true,
+        alwaysOnTop: true, focus: true, resizable: false, shadow: false,
+        visible: false, skipTaskbar: true,
+      });
+    } catch { /* 已存在则忽略 */ }
+  });
+}
 
 export default function App() {
   const label = getCurrentWindow().label;
@@ -43,6 +64,9 @@ export default function App() {
       cleanup?.();
     };
   }, [load, sync]);
+
+  // 启动即预热右键菜单窗（隐藏待命），保证首次右键也能瞬时弹出
+  useEffect(() => { ensurePinMenu(); }, []);
 
   if (label === "clipboard-panel") {
     return <ClipboardPanel />;
