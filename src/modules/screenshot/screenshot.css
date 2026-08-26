@@ -12,13 +12,17 @@ html[data-window="shot"] body { background: transparent; }
 /* ---- 放大镜：镜头区固定正方形，信息区在镜头下方分三行（坐标/颜色/提示） ---- */
 /* z-index 260 > 工具栏 200：鼠标移到工具栏附近时坐标/颜色信息不被盖住。
    整体走轻量玻璃卡片：细描边 + 轻投影，不再用粗圆角+重投影显得边框厚重。
-   镜头框改为与选区边框同款：1.5px 主题色细边 + 轻辉光，贴近 Snipaste。
-   卡片背景降到 0.78 + 轻投影，避免之前 0.86 不透明深色导致的"死黑边框"观感 */
+   镜头框为与选区边框同款：1.5px 主题色细边 + 轻辉光，贴近 Snipaste。
+   【黑边根因】此前卡片背景是写死的近不透明深色 rgba(12,12,14,0.78)——
+   镜头 140px 嵌在 176px 卡片里，左右各 18px + 下方整条信息区全是深色块，
+   无论镜头边框多细，整张卡片都像"大黑边"。改为与截图工具条/左下角提示框
+   同源的玻璃背景（面板底色 + 全局透明度联动），深色块消失、镜头浮于画面上 */
 .shot-mag {
   position: fixed; z-index: 260;
-  background: rgba(12,12,14,0.78); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-  border-radius: 8px; overflow: hidden;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1), 0 4px 14px rgba(0,0,0,0.35);
+  background: rgba(var(--bg-panel-rgb), var(--panel-opacity));
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border-radius: 4px; overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 3px 10px rgba(0,0,0,0.22);
 }
 /* 镜头框：与截图选区边框同款（1.5px 主题色细边 + 轻辉光），方角更干净。
    不加黑色外环——Snipaste 只有一圈主题色细边，黑环会显得像"黑色边框" */
