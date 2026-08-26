@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
-import { PhysicalSize } from "@tauri-apps/api/dpi";
+import { PhysicalSize, LogicalSize } from "@tauri-apps/api/dpi";
 import {
   pinImageUrl, pinUpdate, pinClose, pinSetClickThrough, pinReady, pinHideOne, pinResize, pinKind, diagLog,
   pinCopyOriginal, pinCopyImageBytes,
@@ -419,9 +419,16 @@ export function PinWindow() {
   // context menu
   const config = useConfigStore((s) => s.config);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  // 菜单放不下时临时扩窗用的原尺寸；关闭菜单时还原，避免贴图窗被永久撑大
+  const menuGrowRef = useRef<{ w: number; h: number } | null>(null);
   const closeMenu = () => {
     menuRef.current?.remove();
     menuRef.current = null;
+    if (menuGrowRef.current) {
+      const { w, h } = menuGrowRef.current;
+      menuGrowRef.current = null;
+      try { void getCurrentWindow().setSize(new LogicalSize(w, h)); } catch {}
+    }
   };
   // 左键点菜单外任意处 → 关闭菜单（mousedown 而非 click：点击空白处会触发
   // 原生拖拽循环，click 事件在拖放循环里永远不会回到 webview）。
@@ -483,7 +490,7 @@ export function PinWindow() {
     await pinCopyImageBytes(blob);
   }
 
-  const onContext = (e: React.MouseEvent) => {
+  const onContext = async (e: React.MouseEvent) => {
     e.preventDefault();
     const id = idRef.current;
     if (!id) return;
@@ -536,13 +543,35 @@ export function PinWindow() {
     }
     document.body.appendChild(menu);
     menuRef.current = menu;
-    // 【钳回可视区】菜单渲染在贴图窗自己的 webview 里，贴图较小时点击点
-    // 附近放不下会整个溢出窗界被裁掉（表现为"菜单只显示一半/看不见"）。
-    // 先隐藏渲染量出实际尺寸，再钳进窗口可视范围内
+    // 菜单渲染在贴图窗自己的 webview 里，OS 窗会裁掉窗界外的内容。
+    // 贴图太小时菜单放不下就被裁断（"只显示一半/看不见"）。
+    // 解法：菜单放不下时【临时扩窗】——仅向右/下延展（左上角不动→图片不位移），
+    // 关闭菜单时还原。贴图贴着屏幕边时若扩窗会越界，则把菜单翻到光标左/上。
     const mw = menu.offsetWidth, mh = menu.offsetHeight;
-    const vw = window.innerWidth, vh = window.innerHeight;
-    menu.style.left = `${Math.max(2, Math.min(e.clientX, vw - mw - 2))}px`;
-    menu.style.top = `${Math.max(2, Math.min(e.clientY, vh - mh - 2))}px`;
+    const dpr = window.devicePixelRatio || 1;
+    let x = e.clientX, y = e.clientY;            // 默认出现在光标右下方
+    const curW = window.innerWidth, curH = window.innerHeight;
+    // 屏幕可用边界：窗口左上角物理位置 + 新尺寸不得超出，否则把菜单翻到左/上
+    let maxW = Infinity, maxH = Infinity;
+    try {
+      const pos = await getCurrentWindow().outerPosition();   // 物理像素
+      maxW = window.screen.availWidth - pos.x / dpr;
+      maxH = window.screen.availHeight - pos.y / dpr;
+    } catch { /* 取不到屏幕信息则跳过边界保护 */ }
+    if (x + mw + 4 > maxW) x = Math.max(2, e.clientX - mw - 4);
+    if (y + mh + 4 > maxH) y = Math.max(2, e.clientY - mh - 4);
+    // 需要的窗尺寸：至少容下菜单；屏幕允许时（maxW>curW）再钳到屏幕边界，
+    // 否则（贴图已贴着屏边/屏幕信息缺失）自由扩到容下菜单，避免被裁断
+    const needW = maxW > curW ? Math.min(Math.max(curW, x + mw + 4), maxW) : Math.max(curW, x + mw + 4);
+    const needH = maxH > curH ? Math.min(Math.max(curH, y + mh + 4), maxH) : Math.max(curH, y + mh + 4);
+    if (needW > curW || needH > curH) {
+      menuGrowRef.current = { w: curW, h: curH };   // 记录原尺寸，关闭时还原
+      try { await getCurrentWindow().setSize(new LogicalSize(Math.round(needW), Math.round(needH))); }
+      catch { menuGrowRef.current = null; }
+    }
+    // 最终定位（钳进实际窗可视区，极小窗兜底时不裁断）
+    menu.style.left = `${Math.max(2, Math.min(x, window.innerWidth - mw - 2))}px`;
+    menu.style.top = `${Math.max(2, Math.min(y, window.innerHeight - mh - 2))}px`;
     menu.style.visibility = "visible";
   };
 

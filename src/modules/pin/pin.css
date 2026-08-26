@@ -128,7 +128,8 @@ html[data-window="pin"], html[data-window="pin"] body { background: transparent 
 
 /* 贴图右键菜单：跟随系统主题（文字/底色/描边用主题变量），透明度与毛玻璃
    由通用设置的「亚克力 + 不透明度」经 PinWindow 内联注入。
-   【注意】菜单渲染在贴图窗自己的 webview 里，PinWindow 会实测尺寸钳回可视区 */
+   【注意】菜单渲染在贴图窗自己的 webview 里、受 OS 窗裁剪——贴图太小时
+   PinWindow 会实测菜单尺寸并临时扩窗容下（关闭时还原），贴图贴屏边时翻到光标左/上 */
 .pin-ctx-menu {
   position: fixed; z-index: 9999; min-width: 168px; padding: 5px;
   border-radius: 10px; overflow: hidden;
