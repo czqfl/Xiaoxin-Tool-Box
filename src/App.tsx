@@ -11,6 +11,7 @@ import { CredentialPanel } from "./modules/credential/CredentialPanel";
 import { PortPanel } from "./modules/port/PortPanel";
 import { QuickFilesPanel } from "./modules/quickfiles/QuickFilesPanel";
 import { SnippetPanel } from "./modules/snippets/SnippetPanel";
+import { CommandPalette } from "./modules/palette/CommandPalette";
 import { TranslatePopup } from "./modules/translate/TranslatePopup";
 import { Toolbar } from "./modules/toolbar/Toolbar";
 import { ScreenshotOverlay } from "./modules/screenshot/ScreenshotOverlay";
@@ -89,6 +90,9 @@ export default function App() {
   }
   if (label === "snippets-panel") {
     return <SnippetPanel />;
+  }
+  if (label === "palette") {
+    return <CommandPalette />;
   }
   if (label === "translate-popup") {
     return <TranslatePopup />;

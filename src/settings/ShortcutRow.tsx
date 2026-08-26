@@ -24,7 +24,8 @@ export type ShortcutTarget =
   | "pins"
   | "pins_close"
   | "picker"
-  | "recorder";
+  | "recorder"
+  | "palette";
 
 /** 将键盘事件转换为 global-shortcut 可解析的组合键字符串，如 "Ctrl+Alt+C"。
  *  F1~F12 不与文本输入冲突，允许不搭配修饰键单独使用（Snipaste 即默认 F1 截图） */

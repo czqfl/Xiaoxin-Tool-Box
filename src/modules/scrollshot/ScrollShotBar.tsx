@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { save } from "@tauri-apps/plugin-dialog";
-import { Square, FolderOpen, X, Loader2, Image as ImageIcon, Ban } from "lucide-react";
+import { Square, Play, X, Loader2, Ban } from "lucide-react";
 import {
   EVT_SCROLLSHOT_PROGRESS, EVT_SCROLLSHOT_DONE, EVT_BAR_RESET,
-  scrollStop, scrollCancel, scrollDismiss, revealFile, scrollSaveAs,
+  scrollStop, scrollCancel, scrollDismiss, scrollStartScroll,
+  scrollSetSpeed, scrollGetSpeed,
   type ScrollDonePayload,
 } from "./api";
 import "./scrollshot.css";
@@ -13,11 +13,16 @@ type Phase = "running" | "encoding" | "done" | "error";
 
 export function ScrollShotBar() {
   const [phase, setPhase] = useState<Phase>("running");
+  // 自动滚动是否已开始：进入长截图先待命，空格/「开始」才启动
+  const [scrolling, setScrolling] = useState(false);
   const [height, setHeight] = useState(0);
   const [result, setResult] = useState<ScrollDonePayload | null>(null);
+  // 自动滚动速度档位（1..=10）：进度条上实时可调，滚动线程每步读取
+  const [speed, setSpeed] = useState(5);
   const stoppingRef = useRef(false);
 
   useEffect(() => {
+    void scrollGetSpeed().then((v) => setSpeed(v)).catch(() => {});
     const un1 = listen<{ height: number }>(EVT_SCROLLSHOT_PROGRESS, (e) => {
       setHeight(e.payload.height);
     });
@@ -32,6 +37,7 @@ export function ScrollShotBar() {
       stoppingRef.current = false;
       setHeight(0);
       setResult(null);
+      setScrolling(false);
       setPhase("running");
     });
     return () => {
@@ -40,6 +46,15 @@ export function ScrollShotBar() {
       void un3.then((u) => u());
     };
   }, []);
+
+  // 自动关闭计时器：done/error 状态停留 ~2.5s 后自动收起进度条
+  const autoCloseRef = useRef(0);
+  useEffect(() => {
+    if (phase !== "done" && phase !== "error") return;
+    window.clearTimeout(autoCloseRef.current);
+    autoCloseRef.current = window.setTimeout(dismiss, 2500);
+    return () => window.clearTimeout(autoCloseRef.current);
+  }, [phase]);
 
   const stop = () => {
     if (stoppingRef.current) return;
@@ -55,12 +70,24 @@ export function ScrollShotBar() {
     void scrollCancel().catch(() => {});
   };
 
+  /** 空格 / 开始：启动自动滚动 */
+  const beginScroll = () => {
+    if (stoppingRef.current) return;
+    setScrolling(true);
+    void scrollStartScroll().catch(() => setScrolling(false));
+  };
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
         if (phase === "running") cancelToShot();
         else dismiss();
+      } else if (e.key === " " && phase === "running" && !stoppingRef.current) {
+        // 空格 = 开始滚动；再次按 = 结束（保存并贴图）
+        e.preventDefault();
+        if (!scrolling) beginScroll();
+        else stop();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -69,15 +96,9 @@ export function ScrollShotBar() {
 
   function dismiss() { void scrollDismiss().catch(() => {}); }
 
-  const saveAs = async () => {
-    if (!result?.path) return;
-    const picked = await save({
-      defaultPath: result.path.split(/[\\/]/).pop() || "长截图.png",
-      filters: [{ name: "PNG 图片", extensions: ["png"] }],
-    });
-    if (!picked) return;
-    await scrollSaveAs(result.path, picked);
-    void revealFile(picked).catch(() => {});
+  const changeSpeed = (v: number) => {
+    setSpeed(v);
+    void scrollSetSpeed(v).catch(() => {});
   };
 
   return (
@@ -95,30 +116,41 @@ export function ScrollShotBar() {
             <span className="ssb-flex" />
             {phase === "running" && (
               <>
-                <button className="ssb-btn ssb-stop" onClick={stop} title="保存并贴到桌面">
-                  <Square size={10} fill="currentColor" /> 完成
-                </button>
+                {!scrolling ? (
+                  <button className="ssb-btn ssb-go" onClick={beginScroll} title="开始自动滚动 (空格)">
+                    <Play size={10} fill="currentColor" /> 开始
+                  </button>
+                ) : (
+                  <button className="ssb-btn ssb-stop" onClick={stop} title="结束并保存贴到桌面 (空格)">
+                    <Square size={10} fill="currentColor" /> 结束
+                  </button>
+                )}
                 <button className="ssb-btn ssb-cancel" onClick={cancelToShot} title="取消并回到截图 (Esc)">
                   <Ban size={11} /> 取消
                 </button>
               </>
             )}
           </div>
-          <div className="ssb-tip">自行滚动页面内容，边框内为捕获范围；Esc 取消退出</div>
+          <div className="ssb-tip">
+            <span>{!scrolling
+              ? "把鼠标放在要滚动的页面内，按 空格 或点「开始」；Esc 取消退出"
+              : "滚轮跟随鼠标（保持在页面内即滚动），按 空格 或「结束」完成拼接"}</span>
+            <span className="ssb-flex" />
+            <span className="ssb-speed" title="每档 = 每步滚动 40px">
+              步高
+              <input type="range" min={1} max={10} step={1} value={speed}
+                onChange={(e) => changeSpeed(+e.target.value)} />
+              <b>{speed * 40}px</b>
+            </span>
+          </div>
         </>
       )}
 
-      {phase === "done" && result?.path && (
+      {phase === "done" && (
         <div className="ssb-head">
           <span className="ssb-dot ok" />
-          <span className="ssb-title">已保存（{Math.round(result.height)} px）并贴到桌面</span>
+          <span className="ssb-title">完成（{Math.round(result?.height ?? height)} px）已贴到桌面</span>
           <span className="ssb-flex" />
-          <button className="ssb-btn" onClick={() => void revealFile(result.path!).catch(() => {})} title="打开位置">
-            <FolderOpen size={12} />
-          </button>
-          <button className="ssb-btn" onClick={() => void saveAs().catch(() => {})} title="另存为…">
-            <ImageIcon size={12} />
-          </button>
           <button className="ssb-btn" onClick={dismiss} title="关闭"><X size={12} /></button>
         </div>
       )}

@@ -44,6 +44,7 @@ const defaultConfig: AppConfig = {
     pins_close: "Ctrl+Alt+K",
     picker: "Alt+D",
     recorder: "Ctrl+Alt+R",
+    palette: "Alt+G",
   },
   general: {
     theme: "system",

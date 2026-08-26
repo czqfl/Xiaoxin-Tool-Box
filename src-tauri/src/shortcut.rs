@@ -41,6 +41,8 @@ pub struct ShortcutBindingsInner {
     pub picker: Option<Shortcut>,
     /// 屏幕录制 GIF（呼出区域选择）
     pub recorder: Option<Shortcut>,
+    /// 呼出全局命令面板
+    pub palette: Option<Shortcut>,
 }
 
 pub fn parse(shortcut: &str) -> Result<Shortcut, String> {
@@ -50,7 +52,7 @@ pub fn parse(shortcut: &str) -> Result<Shortcut, String> {
 }
 
 /// 全部快捷键目标（顺序 = 注册顺序 = 绑定表字段顺序）
-const TARGETS: [&str; 12] = [
+const TARGETS: [&str; 13] = [
     "clipboard",
     "folder",
     "credentials",
@@ -63,6 +65,7 @@ const TARGETS: [&str; 12] = [
     "pins_close",
     "picker",
     "recorder",
+    "palette",
 ];
 
 fn is_valid_target(t: &str) -> bool {
@@ -83,6 +86,7 @@ fn config_shortcut(config: &AppConfig, target: &str) -> String {
         "pins" => config.shortcuts.pins.clone(),
         "pins_close" => config.shortcuts.pins_close.clone(),
         "recorder" => config.shortcuts.recorder.clone(),
+        "palette" => config.shortcuts.palette.clone(),
         _ => config.shortcuts.picker.clone(),
     }
 }
@@ -101,6 +105,7 @@ fn set_config_shortcut(config: &mut AppConfig, target: &str, value: String) {
         "pins" => config.shortcuts.pins = value,
         "pins_close" => config.shortcuts.pins_close = value,
         "recorder" => config.shortcuts.recorder = value,
+        "palette" => config.shortcuts.palette = value,
         _ => config.shortcuts.picker = value,
     }
 }
@@ -119,6 +124,7 @@ fn set_binding(inner: &mut ShortcutBindingsInner, target: &str, v: Option<Shortc
         "pins" => inner.pins = v,
         "pins_close" => inner.pins_close = v,
         "recorder" => inner.recorder = v,
+        "palette" => inner.palette = v,
         _ => inner.picker = v,
     }
 }
@@ -197,6 +203,7 @@ pub fn shortcut_test(
             || inner.pins_close == Some(parsed)
             || inner.picker == Some(parsed)
             || inner.recorder == Some(parsed)
+            || inner.palette == Some(parsed)
         {
             return Ok(());
         }
@@ -313,6 +320,7 @@ pub fn shortcut_runtime_bindings(bindings: State<'_, ShortcutBindings>) -> Vec<S
     push("pins_close", &inner.pins_close);
     push("picker", &inner.picker);
     push("recorder", &inner.recorder);
+    push("palette", &inner.palette);
     out
 }
 
@@ -450,6 +458,8 @@ pub fn panel_label_for(
         Some(FILES_PANEL)
     } else if bindings.snippets == Some(*shortcut) {
         Some(SNIPPETS_PANEL)
+    } else if bindings.palette == Some(*shortcut) {
+        Some(crate::panel::PALETTE_PANEL)
     } else {
         None
     }

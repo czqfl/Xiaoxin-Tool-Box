@@ -110,7 +110,36 @@
 }
 .ssb-stop:hover { background: rgba(232, 76, 76, 1); }
 
+/* 开始按钮：主题色实心，与红色「结束」形成状态对比 */
+.ssb-go {
+  background: rgb(var(--accent-rgb));
+  border-color: transparent;
+  color: #fff;
+}
+.ssb-go:hover { filter: brightness(1.1); }
+
 .ssb-cancel:hover { background: var(--danger-soft); color: var(--danger); }
+
+/* 自动滚动速度调节：滑杆与档位数值，占提示行右侧 */
+.ssb-speed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  color: var(--text-secondary, var(--text-primary));
+}
+.ssb-speed input[type="range"] {
+  width: 110px;
+  height: 3px;
+  accent-color: rgb(var(--accent-rgb));
+  cursor: pointer;
+}
+.ssb-speed b {
+  min-width: 38px;
+  text-align: center;
+  color: rgb(var(--accent-rgb));
+  font-variant-numeric: tabular-nums;
+}
 
 .ssb-spin { animation: ssb-rotate 0.9s linear infinite; }
 @keyframes ssb-rotate { to { transform: rotate(360deg); } }

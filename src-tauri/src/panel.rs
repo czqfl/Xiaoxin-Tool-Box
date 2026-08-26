@@ -86,6 +86,8 @@ pub const FILES_PANEL: &str = "files-panel";
 pub const PORT_PANEL: &str = "port-panel";
 /// 常用语速贴面板（常用话术一键粘贴）
 pub const SNIPPETS_PANEL: &str = "snippets-panel";
+/// 全局命令面板（搜索 + 执行动作，Raycast 风格呼出框）
+pub const PALETTE_PANEL: &str = "palette";
 /// 悬浮工具栏窗口（常驻小工具条，不参与面板互斥，独立显隐）
 pub const TOOLBAR_WINDOW: &str = "toolbar";
 
@@ -155,6 +157,7 @@ pub const ALL_PANELS: &[&str] = &[
     PORT_PANEL,
     FILES_PANEL,
     SNIPPETS_PANEL,
+    PALETTE_PANEL,
 ];
 
 /// 工具栏呼出面板：工具栏前端点击图标呼出对应面板。
@@ -199,6 +202,7 @@ pub fn panel_toggle(app: tauri::AppHandle, label: String) -> Result<(), String> 
         "port" => PORT_PANEL,
         "files" => FILES_PANEL,
         "snippets" => SNIPPETS_PANEL,
+        "palette" => PALETTE_PANEL,
         "screenshot" => {
             // screenshot is not a panel; trigger via shot_begin
             let _ = crate::screenshot::shot_begin(app.clone());

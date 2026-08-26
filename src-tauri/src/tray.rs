@@ -172,7 +172,7 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         action_items.push(MenuItem::with_id(app, "pins_close", "关闭全部贴图", true, None::<&str>)?);
     }
     if enabled("recorder") {
-        action_items.push(MenuItem::with_id(app, "start_recorder", "屏幕录制 (GIF)", true, None::<&str>)?);
+        action_items.push(MenuItem::with_id(app, "start_recorder", "屏幕录制", true, None::<&str>)?);
     }
     if enabled("translation") {
         action_items.push(MenuItem::with_id(app, "translate_now", "划词翻译", true, None::<&str>)?);

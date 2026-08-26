@@ -102,9 +102,11 @@ export interface ShortcutsConfig {
   picker: string;
   /** 屏幕录制 GIF */
   recorder: string;
+  /** 全局命令面板 */
+  palette: string;
 }
 
-/** 屏幕录制（GIF）配置 */
+/** 屏幕录制配置 */
 export interface RecorderConfig {
   /** 是否启用屏幕录制功能（关闭：快捷键不注册、托盘/工具栏/侧栏入口隐藏） */
   enabled: boolean;

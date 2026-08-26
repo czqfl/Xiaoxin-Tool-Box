@@ -284,7 +284,8 @@ export const applyShortcut = (
     | "pins"
     | "pins_close"
     | "picker"
-    | "recorder",
+    | "recorder"
+    | "palette",
   shortcut: string
 ) => invoke<import("../types").AppConfig>("shortcut_apply", { target, shortcut });
 /** 运行时【真实生效】的绑定列表（["pins=Ctrl+N", ...]）——与配置声称值对照，

@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { listen, emitTo } from "@tauri-apps/api/event";
-import { PhysicalSize } from "@tauri-apps/api/dpi";
+import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
   pinImageUrl, pinUpdate, pinClose, pinSetClickThrough, pinReady, pinHideOne, pinResize, pinKind, diagLog,
@@ -377,17 +377,46 @@ export function PinWindow() {
     if (ocr.onMouseDown(e.nativeEvent)) return;
     ocr.clearSelection();
     setDragging(true);
-    // 同步直改：transition:none + 主题色边框在模态循环冻结前就位，
-    // 不存在"过渡僵在半途"的视觉卡顿
     rootRef.current?.classList.add("pin-dragging");
-    // 原生拖放循环里 webview 收不到 mouseup（纯点击无移动时也没有 onMoved），
-    // 拖拽态由「onMoved 停稳 180ms」或此超时兜底清除
     window.clearTimeout(dragClearRef.current);
     dragClearRef.current = window.setTimeout(clearDragState, 800);
-    // 【原生拖拽】交给 OS 模态拖放循环（WM_NCLBUTTONDOWN 语义）：拖动过程
-    // 由系统逐帧移动窗口，JS 零参与、零 IPC——此前 webview 里逐 mousemove
-    // 调 setPosition（一次 IPC 往返）无论怎么合并帧率都追不上原生丝滑度
-    getCurrentWindow().startDragging().catch(() => {});
+    // 【自定义拖拽】不能用 startDragging() 的 OS 模态拖放循环——系统会把
+    // 窗口钳制在可视区内，贴图无法拖出屏幕（长图想只露出某一段就没办法了）。
+    // 这里用 pointer capture + setPosition 自己驱动：光标位移增量 × DPR 累积成
+    // 目标物理坐标，rAF 合帧后一次 setPosition，可任意拖到屏幕外
+    const el = e.currentTarget as HTMLElement;
+    const win = getCurrentWindow();
+    const dpr = window.devicePixelRatio || 1;
+    void win.outerPosition().then((p0) => {
+      let tx = p0.x, ty = p0.y;           // 目标位置（物理像素，浮点累积防丢精度）
+      let lx = e.screenX, ly = e.screenY; // 上次光标逻辑屏幕坐标
+      let raf = 0;
+      const apply = () => {
+        raf = 0;
+        void win.setPosition(new PhysicalPosition(Math.round(tx), Math.round(ty))).catch(() => {});
+      };
+      const onMove = (ev: PointerEvent) => {
+        tx += (ev.screenX - lx) * dpr;
+        ty += (ev.screenY - ly) * dpr;
+        lx = ev.screenX; ly = ev.screenY;
+        window.clearTimeout(dragClearRef.current);
+        dragClearRef.current = window.setTimeout(clearDragState, 800);
+        if (!raf) raf = requestAnimationFrame(apply);
+      };
+      const onUp = () => {
+        el.removeEventListener("pointermove", onMove);
+        el.removeEventListener("pointerup", onUp);
+        el.removeEventListener("pointercancel", onUp);
+        if (raf) { cancelAnimationFrame(raf); raf = 0; }
+        // 松手兜底一次最终落点（rAF 可能在最后一帧前被取消）
+        void win.setPosition(new PhysicalPosition(Math.round(tx), Math.round(ty))).catch(() => {});
+      };
+      el.addEventListener("pointermove", onMove);
+      el.addEventListener("pointerup", onUp);
+      el.addEventListener("pointercancel", onUp);
+      // 指针捕获：光标快速甩出窗口/屏幕外时事件仍送达本元素
+      try { el.setPointerCapture((e.nativeEvent as PointerEvent).pointerId); } catch {}
+    }).catch(() => {});
   };
 
   // 拖动中的位置持久化与拖拽态复位：onMoved 持续触发视为拖拽中，停稳

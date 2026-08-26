@@ -16,7 +16,7 @@ export function RecorderPage() {
     <div className="settings-page">
       <h2>屏幕录制</h2>
       <p className="page-desc">
-        框选任意区域录制为 GIF 动图；托盘、悬浮工具栏或全局快捷键呼出
+        框选任意区域录制为视频 (AVI) 或 GIF 动图；托盘、悬浮工具栏或全局快捷键呼出
       </p>
 
       <SettingGroup>

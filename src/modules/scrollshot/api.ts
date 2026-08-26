@@ -13,6 +13,15 @@ export const scrollCancel = () => invoke<void>("scrollshot_cancel");
 
 export const scrollDismiss = () => invoke<void>("scrollshot_dismiss");
 
+/** 开始自动滚动（空格 / 「开始」按钮） */
+export const scrollStartScroll = () => invoke<void>("scrollshot_start_scroll");
+
+/** 自动滚动速度档位（1..=10） */
+export const scrollSetSpeed = (speed: number) =>
+  invoke<void>("scrollshot_set_speed", { speed });
+
+export const scrollGetSpeed = () => invoke<number>("scrollshot_get_speed");
+
 /** 边框指示窗几何（全局物理像素）：win=指示窗矩形，region=被捕获区域 */
 export interface FrameInfo { win: [number, number, number, number]; region: [number, number, number, number] }
 

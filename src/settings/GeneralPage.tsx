@@ -16,6 +16,7 @@ import {
   Slider,
   Switch,
 } from "./components";
+import { ShortcutRow } from "./ShortcutRow";
 import type { ThemeMode } from "../types";
 
 export function GeneralPage() {
@@ -93,6 +94,14 @@ export function GeneralPage() {
     <div className="settings-page">
       <h2>通用设置</h2>
       <p className="page-desc">启动行为、语言与外观</p>
+
+      <SettingGroup>
+        <ShortcutRow
+          target="palette"
+          title="全局命令面板"
+          desc="任意应用中按下快捷键呼出搜索框：搜便签/剪贴板/凭证/文件，或直接执行截图、换主题等动作"
+        />
+      </SettingGroup>
 
       <SettingGroup>
         <SettingRow

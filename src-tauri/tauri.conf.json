@@ -117,6 +117,21 @@
         "visible": false
       },
       {
+        "label": "palette",
+        "title": "命令面板",
+        "width": 680,
+        "height": 480,
+        "resizable": false,
+        "fullscreen": false,
+        "maximized": false,
+        "decorations": false,
+        "transparent": false,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false
+      },
+      {
         "label": "toolbar",
         "title": "悬浮工具栏",
         "width": 188,

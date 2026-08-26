@@ -143,6 +143,8 @@ pub struct ShortcutsConfig {
     pub picker: String,
     /// 屏幕录制 GIF
     pub recorder: String,
+    /// 呼出全局命令面板
+    pub palette: String,
 }
 
 impl Default for ShortcutsConfig {
@@ -170,6 +172,8 @@ impl Default for ShortcutsConfig {
             picker: "Alt+D".into(),
             // 屏幕录制：Ctrl+Alt+R（Record）
             recorder: "Ctrl+Alt+R".into(),
+            // 全局命令面板：Alt+G（Global，纯 Alt 组合由键盘钩子主动吞键）
+            palette: "Alt+G".into(),
         }
     }
 }
@@ -603,7 +607,7 @@ pub struct AppConfig {
     /// 截图功能配置
     #[serde(default)]
     pub shot: ShotConfig,
-    /// 屏幕录制（GIF）配置
+/// 屏幕录制配置
     #[serde(default)]
     pub recorder: RecorderConfig,
     /// 贴图配置

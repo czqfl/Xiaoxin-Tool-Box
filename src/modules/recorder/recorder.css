@@ -1,4 +1,12 @@
-/* ---- 录屏选区窗（全屏透明） ---- */
+/* ==========================================================================
+   屏幕录制 — 与应用主题完全统一
+   消费 theme.css 所有设计令牌，禁止硬编码色值/圆角/字号。
+   两个窗口共享一套玻璃语言：
+   - rec-select（选区窗）：整屏遮罩 + 选区边框 + 配置面板
+   - rec-bar（控制条）：录制中/完成/错误状态
+   ========================================================================== */
+
+/* ---- 选区窗（全屏透明，data-window="panel" 由 main.tsx 设置） ---- */
 .rec-select {
   position: fixed;
   inset: 0;
@@ -6,56 +14,62 @@
   user-select: none;
   overflow: hidden;
 }
+/* 录制中：只显示遮罩+边框，禁止拖拽/面板交互 */
+.rec-select-recording {
+  pointer-events: none;
+  cursor: default;
+}
 
+/* ---- 遮罩层：半透明黑色，镂空选区 ---- */
 .rec-shade {
   position: absolute;
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(0, 0, 0, 0.4);
   pointer-events: none;
 }
+.rec-shade-full { inset: 0; }
 
+/* ---- 选区边框：品牌色发光描边 ---- */
 .rec-frame {
   position: absolute;
-  border: 1.5px solid rgba(var(--accent-rgb, 76, 141, 255), 0.95);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35), 0 0 14px rgba(var(--accent-rgb, 76, 141, 255), 0.5);
+  border: 1.5px solid rgba(var(--accent-rgb), 0.95);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.3),
+    0 0 12px rgba(var(--accent-rgb), 0.45);
   pointer-events: none;
 }
 
+/* ---- 录制中边框：脉冲动画 + 四角标记 ---- */
+.rec-frame-recording {
+  border: 2px solid rgba(var(--accent-rgb), 0.9);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.25),
+    0 0 20px rgba(var(--accent-rgb), 0.4),
+    inset 0 0 20px rgba(var(--accent-rgb), 0.08);
+  animation: rec-frame-pulse 2s ease-in-out infinite;
+}
+@keyframes rec-frame-pulse {
+  0%, 100% { border-color: rgba(var(--accent-rgb), 0.9); box-shadow: 0 0 0 1px rgba(0,0,0,0.25), 0 0 20px rgba(var(--accent-rgb), 0.4); }
+  50%      { border-color: rgba(var(--accent-rgb), 0.5); box-shadow: 0 0 0 1px rgba(0,0,0,0.15), 0 0 30px rgba(var(--accent-rgb), 0.25); }
+}
+
+/* ---- 尺寸标签：品牌色胶囊 ---- */
 .rec-size {
   position: absolute;
-  top: -26px;
+  top: -28px;
   left: 0;
-  padding: 2px 8px;
+  padding: 3px 10px;
   border-radius: 6px;
-  background: rgba(var(--accent-rgb, 76, 141, 255), 0.95);
-  color: #fff;
-  font-size: 12px;
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.95), rgba(var(--accent-rgb), 0.82));
+  color: var(--accent-text);
+  font-size: 11px;
+  font-weight: 600;
   white-space: nowrap;
+  box-shadow: 0 1px 6px rgba(var(--accent-rgb), 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  letter-spacing: 0.02em;
 }
 
-.rec-confirm {
-  position: absolute;
-  right: 0;
-  bottom: -40px;
-  display: flex;
-  gap: 8px;
-  pointer-events: auto;
-}
-
-.rec-confirm button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  border-radius: 9px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(22, 24, 30, 0.94);
-  color: #f2f4f7;
-  font-size: 13px;
-  cursor: pointer;
-}
-.rec-confirm button:first-child { color: #ff6b6b; }
-.rec-confirm button:hover { background: rgba(40, 43, 52, 0.96); }
-
+/* ---- 提示条（顶部居中）：恒深玻璃 ---- */
 .rec-hint {
   position: absolute;
   top: 32px;
@@ -63,89 +77,302 @@
   transform: translateX(-50%);
   padding: 7px 18px;
   border-radius: 10px;
-  background: rgba(22, 24, 30, 0.88);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 13px;
+  background:
+    linear-gradient(rgba(var(--accent-rgb), 0.08), rgba(var(--accent-rgb), 0.08)),
+    rgba(24, 26, 30, 0.88);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 12px;
+  font-weight: 500;
   pointer-events: none;
+  white-space: nowrap;
 }
-
 .rec-hint-error {
   top: 76px;
-  background: rgba(140, 32, 32, 0.92);
-  border-color: rgba(255, 132, 132, 0.4);
+  border-color: rgba(229, 72, 77, 0.35);
+  background: rgba(229, 72, 77, 0.15);
+  color: var(--danger);
 }
 
-/* ---- 录制控制条：与悬浮面板同一套玻璃语言（主题变量 + 亚克力 +
-   --panel-opacity 由通用设置统一控制，Rust 侧 apply_panel_effects_for） ---- */
+/* ---- 配置面板：恒深玻璃（与截图工具栏同一语言） ----
+   选区窗浮在任意桌面内容上，必须保证文字在任何背景上清晰，
+   因此使用恒深玻璃（不跟随主题浅/深切换） */
+.rec-panel {
+  position: absolute;
+  transform: translateX(-100%);
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  box-sizing: border-box;
+  min-width: 300px;
+  border-radius: 12px;
+  background:
+    linear-gradient(rgba(var(--accent-rgb), 0.12), rgba(var(--accent-rgb), 0.12)),
+    rgba(24, 26, 30, 0.92);
+  backdrop-filter: blur(14px) saturate(1.35);
+  -webkit-backdrop-filter: blur(14px) saturate(1.35);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.09);
+  color: #f2f4f7;
+  font-size: 13px;
+  user-select: none;
+  pointer-events: auto;
+  cursor: default;
+  animation: rec-panel-in 0.2s var(--ease-out);
+}
+@keyframes rec-panel-in {
+  from { opacity: 0; transform: translateX(-100%) translateY(6px); }
+  to   { opacity: 1; transform: translateX(-100%) translateY(0); }
+}
+/* 区域贴近视口底部：面板放到选区上方 */
+.rec-panel-above {
+  margin-top: 0;
+  transform: translate(-100%, -100%);
+  animation-name: rec-panel-in-above;
+}
+@keyframes rec-panel-in-above {
+  from { opacity: 0; transform: translate(-100%, calc(-100% + 6px)); }
+  to   { opacity: 1; transform: translate(-100%, -100%); }
+}
+
+/* ---- 配置面板行 ---- */
+.rec-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+}
+.rec-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: rgba(255, 255, 255, 0.55);
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 500;
+}
+.rec-value {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 12px;
+}
+
+/* ---- 分段选择器：与截图工具栏按钮同一语言 ---- */
+.rec-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.06);
+}
+.rec-seg button {
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s var(--ease-out),
+    color 0.15s var(--ease-out),
+    box-shadow 0.15s var(--ease-out);
+}
+.rec-seg button:hover:not(.active) {
+  color: #f2f4f7;
+  background: rgba(255, 255, 255, 0.1);
+}
+.rec-seg button.active {
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.95), rgba(var(--accent-rgb), 0.82));
+  color: var(--accent-text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+    0 1px 6px rgba(var(--accent-rgb), 0.4);
+  font-weight: 600;
+}
+.rec-seg button.active:hover {
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 1), rgba(var(--accent-rgb), 0.9));
+}
+
+/* ---- 操作按钮区 ---- */
+.rec-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+}
+.rec-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.07);
+  color: #f2f4f7;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s var(--ease-out),
+    box-shadow 0.15s var(--ease-out),
+    transform 0.12s var(--ease-out);
+}
+.rec-actions button:hover {
+  background: rgba(255, 255, 255, 0.13);
+}
+.rec-actions button:not(:disabled):active {
+  transform: scale(0.96);
+}
+/* 开始录制：品牌色渐变（与截图工具栏 .active 同一语言） */
+.rec-actions .rec-start {
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.95), rgba(var(--accent-rgb), 0.82));
+  border-color: transparent;
+  color: var(--accent-text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 1px 6px rgba(var(--accent-rgb), 0.4);
+}
+.rec-actions .rec-start:hover {
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 1), rgba(var(--accent-rgb), 0.9));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 2px 10px rgba(var(--accent-rgb), 0.5);
+}
+
+/* ==========================================================================
+   录制控制条（rec-bar）：两个阶段，两种形态
+   1. 录制中：顶部居中迷你条（红点 + 时间 + 停止按钮）  200×36
+   2. 完成后：右下角小弹窗（信息 + 打开 + 关闭），5秒自动消失
+   ========================================================================== */
 .recb-root {
   width: 100vw;
   height: 100vh;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 16px;
+  gap: 8px;
+  padding: 0 14px;
   box-sizing: border-box;
   border-radius: var(--radius-panel);
   border: 1px solid var(--border-subtle);
-  background:
-    linear-gradient(
+  background: linear-gradient(
       180deg,
       rgba(var(--accent-rgb), 0.045),
       rgba(var(--accent-rgb), 0.012) 42%,
       transparent 78%
     ),
     rgba(var(--bg-panel-rgb), var(--panel-opacity));
+  backdrop-filter: blur(var(--panel-blur, 16px)) saturate(1.35);
   box-shadow: var(--panel-highlight);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: var(--font-sm);
   user-select: none;
   overflow: hidden;
 }
 
+/* ---- 录制中指示灯 ---- */
 .recb-dot {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: #ff4d4d;
-  box-shadow: 0 0 10px rgba(255, 77, 77, 0.9);
+  background: var(--danger);
+  box-shadow: 0 0 8px rgba(229, 72, 77, 0.9);
   animation: recb-pulse 1.1s ease-in-out infinite;
   flex-shrink: 0;
 }
-.recb-dot.off { background: #888; animation: none; }
-
+.recb-dot.off {
+  background: var(--text-tertiary);
+  animation: none;
+}
 @keyframes recb-pulse { 50% { opacity: 0.3; } }
 
+/* ---- 时间 ---- */
 .recb-time {
   font-variant-numeric: tabular-nums;
   font-weight: 600;
-  font-size: 15px;
+  font-size: var(--font-sm);
+  letter-spacing: 0.03em;
 }
 
-.recb-frames { color: var(--text-secondary, inherit); opacity: 0.7; font-size: 11px; }
-
+/* ---- 通用按钮 ---- */
 .recb-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 5px 11px;
-  border-radius: var(--radius-md, 8px);
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border-subtle);
-  background: var(--bg-input-glass, rgba(127, 127, 127, 0.08));
+  background: var(--bg-input-glass);
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: var(--font-xs);
+  font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
-  transition: background 0.15s ease;
+  transition: background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
 }
-.recb-btn:hover:not(:disabled) { background: rgba(var(--accent-rgb), 0.12); }
-.recb-btn:disabled { opacity: 0.55; cursor: default; }
+.recb-btn:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+.recb-btn:not(:disabled):active {
+  transform: scale(0.96);
+}
+.recb-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
 
+/* 停止按钮：危险红 */
 .recb-stop {
-  background: rgba(232, 76, 76, 0.85);
+  background: linear-gradient(180deg, rgba(229, 72, 77, 0.92), rgba(229, 72, 77, 0.82));
   border-color: transparent;
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
-.recb-stop:hover:not(:disabled) { background: rgba(232, 76, 76, 1); }
+.recb-stop:hover:not(:disabled) {
+  background: linear-gradient(180deg, rgba(229, 72, 77, 1), rgba(229, 72, 77, 0.9));
+}
 
-.recb-ok { white-space: nowrap; }
-.recb-err { color: var(--danger, #e5484d); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* ---- 完成弹窗样式（.recb-toast） ---- */
+.recb-toast {
+  padding: 0 14px;
+  gap: 8px;
+  animation: recb-slide-in 0.25s var(--ease-out);
+}
+@keyframes recb-slide-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.recb-ok {
+  white-space: nowrap;
+  color: var(--success);
+  font-size: var(--font-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.recb-err {
+  color: var(--danger);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--font-xs);
+}
+.recb-action {
+  background: rgba(var(--accent-rgb), 0.15);
+  border-color: rgba(var(--accent-rgb), 0.3);
+  color: rgb(var(--accent-rgb));
+}
+.recb-action:hover {
+  background: rgba(var(--accent-rgb), 0.25);
+}
+.recb-close {
+  padding: 4px 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+}
+.recb-close:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}

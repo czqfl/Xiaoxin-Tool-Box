@@ -86,6 +86,7 @@ const FAILED_TARGET_PAGE: Record<string, Page> = {
    pins: "screenshot",
    picker: "screenshot",
    recorder: "recorder",
+   palette: "general",
  };
 const FAILED_TARGET_NAME: Record<string, string> = {
   clipboard: "呼出剪贴板",
@@ -99,6 +100,7 @@ const FAILED_TARGET_NAME: Record<string, string> = {
    pins: "显示/隐藏全部贴图",
    picker: "屏幕取色",
    recorder: "屏幕录制",
+   palette: "全局命令面板",
  };
 
 /** 把 CSS 颜色（#rgb / #rrggbb / rgb()）解析成 "r,g,b" 字符串；失败返回 null */

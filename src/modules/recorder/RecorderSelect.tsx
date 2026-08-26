@@ -1,36 +1,56 @@
 import { useEffect, useRef, useState } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Circle, Square } from "lucide-react";
-import { recorderStart, recSelectCancel, type RecRect } from "./api";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { Circle, RotateCcw, Film } from "lucide-react";
+import { recorderStart, recSelectCancel, EVT_REC_STARTED, type RecRect, type RecOptions } from "./api";
+import type { AppConfig } from "../../types";
 import "./recorder.css";
 
-/** 录屏区域选择：全屏透明窗（覆盖光标所在显示器），拖拽框选 + Enter/按钮确认。
- *  与截图模块解耦：只依赖自身窗口几何（outerPosition）做坐标换算。 */
+/** 录屏区域选择：呼出即全屏压暗，拖拽框选后弹出配置面板，确认后开始录制。
+ *  录制中窗口不关闭——只显示选区边框（脉冲动画），直到录制结束自动关闭。 */
 export function RecorderSelect() {
-  const win = getCurrentWindow();
   const [rect, setRect] = useState<RecRect | null>(null);
+  const [dragging, setDragging] = useState(false);
   const dragRef = useRef<{ sx: number; sy: number } | null>(null);
   const rectRef = useRef<RecRect | null>(null);
   const startingRef = useRef(false);
-  const [monSize, setMonSize] = useState({ w: window.innerWidth, h: window.innerHeight });
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
+  // 录制参数：格式 / 帧率(GIF) / 分辨率缩放
+  const [opts, setOpts] = useState<RecOptions>({ fmt: "avi", fps: 12, scale: 1 });
+  // 录制中：收到 started 事件后切换，只显示边框
+  const [recording, setRecording] = useState(false);
+  const [recRegion, setRecRegion] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
-  // 双保险：确保 html 标记为面板级透明底（main.tsx 已按 label 设置，这里幂等兜底，
-  // 否则主题的 app 底色会铺满整屏——表现为"一开录制屏幕全黑"）
+  // 从配置读取默认帧率（设置页可调），面板选项覆盖之
+  useEffect(() => {
+    invoke<AppConfig>("config_load").then((cfg) => {
+      const fps = cfg.recorder?.fps ?? 12;
+      setOpts((o) => ({ ...o, fps }));
+    }).catch(() => {});
+  }, []);
+
+  // 监听 Rust 发来的 started 事件：切换到录制中模式（只显示边框）
+  useEffect(() => {
+    const un = listen<{ x: number; y: number; w: number; h: number }>(EVT_REC_STARTED, (e) => {
+      setRecording(true);
+      setRecRegion(e.payload);
+    });
+    return () => { void un.then((u) => u()); };
+  }, []);
+
+  // 双保险：确保 html 标记为面板级透明底
   useEffect(() => {
     document.documentElement.dataset.window = "panel";
   }, []);
 
-  useEffect(() => {
-    void win.outerSize().then((s) => setMonSize({ w: s.width / (window.devicePixelRatio || 1), h: s.height / (window.devicePixelRatio || 1) }));
-  }, [win]);
-
   const setBoth = (r: RecRect | null) => { rectRef.current = r; setRect(r); };
 
   const onDown = (e: React.PointerEvent) => {
-    if (e.button !== 0 || startingRef.current) return;
+    if (e.button !== 0 || startingRef.current || recording) return;
+    if ((e.target as Element).closest(".rec-panel")) return;
     dragRef.current = { sx: e.clientX, sy: e.clientY };
+    setDragging(true);
     setBoth({ x: e.clientX, y: e.clientY, w: 0, h: 0 });
     (e.target as Element).setPointerCapture(e.pointerId);
   };
@@ -45,7 +65,10 @@ export function RecorderSelect() {
     setBoth({ x, y, w, h });
   };
 
-  const onUp = () => { dragRef.current = null; };
+  const onUp = () => {
+    dragRef.current = null;
+    setDragging(false);
+  };
 
   const start = async () => {
     const r = rectRef.current;
@@ -59,10 +82,9 @@ export function RecorderSelect() {
       await recorderStart({
         x: Math.round(r.x * sc), y: Math.round(r.y * sc),
         w: Math.round(r.w * sc), h: Math.round(r.h * sc),
-      });
-      // 成功时 Rust 端会关闭本窗口
+      }, opts);
+      // Rust 发回 EVT_REC_STARTED 后切换到录制中模式
     } catch (err) {
-      // 失败要可见：恢复可重试并显示原因（此前只写 console，用户视角是"点了没反应"）
       console.error("recorder_start failed", err);
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -71,9 +93,16 @@ export function RecorderSelect() {
     }
   };
 
+  // P1#5: 错误提示 3 秒后自动消失
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(() => setError(""), 3000);
+    return () => clearTimeout(t);
+  }, [error]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (startingRef.current) return;
+      if (startingRef.current || recording) return;
       if (e.key === "Escape") {
         e.preventDefault();
         void recSelectCancel().catch(() => {});
@@ -82,39 +111,69 @@ export function RecorderSelect() {
         void start();
       }
     };
-    // 右键：已有选区先清除，没有选区直接取消——绝不让全屏窗静默滞留
     const onContext = (e: MouseEvent) => {
       e.preventDefault();
-      if (startingRef.current) return;
+      if (startingRef.current || recording) return;
       if (rectRef.current) setBoth(null);
       else void recSelectCancel().catch(() => {});
     };
-    // 失焦（点击了本窗以外的任何应用）：自动取消。
-    // 全屏置顶透明窗若在失焦后仍滞留，会隐形吃掉整屏输入，
-    // 表现为"系统像卡死/有一层东西挡着"——必须杜绝
+    let blurTimer: ReturnType<typeof setTimeout> | null = null;
     const onBlur = () => {
-      if (!startingRef.current) {
-        dragRef.current = null;
-        void recSelectCancel().catch(() => {});
-      }
+      if (startingRef.current || recording) return;
+      blurTimer = setTimeout(() => {
+        if (!document.hasFocus()) {
+          dragRef.current = null;
+          setDragging(false);
+          void recSelectCancel().catch(() => {});
+        }
+      }, 300);
+    };
+    const onFocus = () => {
+      if (blurTimer) { clearTimeout(blurTimer); blurTimer = null; }
     };
     window.addEventListener("keydown", onKey);
     window.addEventListener("contextmenu", onContext);
     window.addEventListener("blur", onBlur);
+    window.addEventListener("focus", onFocus);
     return () => {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("contextmenu", onContext);
       window.removeEventListener("blur", onBlur);
+      window.removeEventListener("focus", onFocus);
+      if (blurTimer) clearTimeout(blurTimer);
     };
   });
 
-  const valid = rect != null && rect.w >= 8 && rect.h >= 8;
+  // ---- 录制中模式：遮罩 + 脉冲边框（不可交互） ----
+  if (recording && recRegion) {
+    return (
+      <div className="rec-select rec-select-recording">
+        {/* 四向遮罩镂空选区 */}
+        <div className="rec-shade" style={{ left: 0, top: 0, width: "100%", height: recRegion.y }} />
+        <div className="rec-shade" style={{ left: 0, top: recRegion.y, width: recRegion.x, height: recRegion.h }} />
+        <div className="rec-shade" style={{ left: recRegion.x + recRegion.w, top: recRegion.y, right: 0, height: recRegion.h }} />
+        <div className="rec-shade" style={{ left: 0, top: recRegion.y + recRegion.h, width: "100%", bottom: 0 }} />
+        {/* 脉冲边框 */}
+        <div
+          className="rec-frame rec-frame-recording"
+          style={{ left: recRegion.x, top: recRegion.y, width: recRegion.w, height: recRegion.h }}
+        />
+      </div>
+    );
+  }
+
+  // ---- 选区模式 ----
+  const valid = rect != null && rect.w >= 24 && rect.h >= 24;
+  const PANEL_W_EST = 310;
+  const panelLeft = valid ? Math.max(8, Math.min(rect!.x + rect!.w - PANEL_W_EST, window.innerWidth - PANEL_W_EST - 8)) : 0;
+  const panelAbove = valid ? rect!.y + rect!.h + 118 > window.innerHeight : false;
+  const panelTop = valid ? (panelAbove ? rect!.y - 8 : rect!.y + rect!.h + 10) : 0;
 
   return (
     <div className="rec-select" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp}>
+      {!valid && <div className="rec-shade rec-shade-full" />}
       {valid && rect && (
         <>
-          {/* 四向压暗遮罩，中间镂空为选区 */}
           <div className="rec-shade" style={{ left: 0, top: 0, width: "100%", height: rect.y }} />
           <div className="rec-shade" style={{ left: 0, top: rect.y, width: rect.x, height: rect.h }} />
           <div className="rec-shade" style={{ left: rect.x + rect.w, top: rect.y, right: 0, height: rect.h }} />
@@ -124,15 +183,53 @@ export function RecorderSelect() {
             style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}
           >
             <span className="rec-size">{Math.round(rect.w)} × {Math.round(rect.h)}</span>
-            <div className="rec-confirm">
-              <button onClick={(e) => { e.stopPropagation(); void start(); }}>
-                <Circle size={11} fill="currentColor" stroke="none" /> 开始录制
-              </button>
-              <button onClick={(e) => { e.stopPropagation(); setBoth(null); }}>
-                <Square size={10} /> 重选
-              </button>
-            </div>
           </div>
+          {!dragging && (
+            <div
+              className={`rec-panel${panelAbove ? " rec-panel-above" : ""}`}
+              style={{ left: panelLeft, top: panelTop }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onDoubleClick={(e) => e.stopPropagation()}
+            >
+              <div className="rec-row">
+                <span className="rec-label"><Film size={12} /> 格式</span>
+                <div className="rec-seg">
+                  <button className={opts.fmt === "avi" ? "active" : ""}
+                    onClick={() => setOpts((o) => ({ ...o, fmt: "avi" }))}>视频 AVI</button>
+                  <button className={opts.fmt === "gif" ? "active" : ""}
+                    onClick={() => setOpts((o) => ({ ...o, fmt: "gif" }))}>动图 GIF</button>
+                </div>
+              </div>
+              <div className="rec-row">
+                <span className="rec-label">帧率</span>
+                {opts.fmt === "gif" ? (
+                  <div className="rec-seg">
+                    {[8, 12, 15, 20].map((f) => (
+                      <button key={f} className={opts.fps === f ? "active" : ""}
+                        onClick={() => setOpts((o) => ({ ...o, fps: f }))}>{f}</button>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="rec-value">30 帧/秒</span>
+                )}
+                <span className="rec-label">分辨率</span>
+                <div className="rec-seg">
+                  {([0.5, 0.75, 1] as const).map((s) => (
+                    <button key={s} className={opts.scale === s ? "active" : ""}
+                      onClick={() => setOpts((o) => ({ ...o, scale: s }))}>{s * 100}%</button>
+                  ))}
+                </div>
+              </div>
+              <div className="rec-actions">
+                <button className="rec-start" onClick={() => void start()}>
+                  <Circle size={11} fill="currentColor" stroke="none" /> 开始录制
+                </button>
+                <button onClick={() => setBoth(null)}>
+                  <RotateCcw size={11} /> 重选
+                </button>
+              </div>
+            </div>
+          )}
         </>
       )}
       {!valid && (
@@ -140,7 +237,6 @@ export function RecorderSelect() {
       )}
       {error && <div className="rec-hint rec-hint-error">启动失败：{error}</div>}
       {starting && <div className="rec-hint">正在启动录制…</div>}
-      {monSize.w === 0 && <div />}
     </div>
   );
 }

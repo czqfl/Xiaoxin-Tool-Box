@@ -52,6 +52,8 @@ enum Action {
     ToggleFiles,
     /// 呼出/隐藏语速贴面板
     ToggleSnippets,
+    /// 呼出/隐藏全局命令面板
+    TogglePalette,
     /// 触发截图
     ShotBegin,
     /// 触发屏幕取色
@@ -119,6 +121,9 @@ static PINS_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
 /// 关闭全部贴图热键（Win/Alt 组合）
 static PINS_CLOSE_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
 static PINS_CLOSE_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
+/// 全局命令面板热键（Win/Alt 组合）
+static PALETTE_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
+static PALETTE_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
 /// 翻译弹窗是否打开：打开时按 Esc 系统级关闭（弹窗 webview 可能无焦点收不到键）
 static TRANSLATE_POPUP_OPEN: AtomicBool = AtomicBool::new(false);
 static SENDER: OnceLock<Sender<Action>> = OnceLock::new();
@@ -185,6 +190,7 @@ pub fn set_panel_hotkey(target: &str, is_alt: bool, vk: u16) {
         ("pins_close", false) => &PINS_CLOSE_HOTKEY_VK,
         ("picker", false) => &PICKER_HOTKEY_VK,
         ("recorder", false) => &RECORDER_HOTKEY_VK,
+        ("palette", false) => &PALETTE_HOTKEY_VK,
         ("clipboard", true) => &CLIPBOARD_HOTKEY_ALT_VK,
         ("folder", true) => &FOLDER_HOTKEY_ALT_VK,
         ("credentials", true) => &CREDENTIAL_HOTKEY_ALT_VK,
@@ -197,6 +203,7 @@ pub fn set_panel_hotkey(target: &str, is_alt: bool, vk: u16) {
         ("pins_close", true) => &PINS_CLOSE_HOTKEY_ALT_VK,
         ("picker", true) => &PICKER_HOTKEY_ALT_VK,
         ("recorder", true) => &RECORDER_HOTKEY_ALT_VK,
+        ("palette", true) => &PALETTE_HOTKEY_ALT_VK,
         _ => return,
     };
     slot.store(vk, Ordering::SeqCst);
@@ -349,6 +356,10 @@ fn run_action<R: Runtime>(app: &AppHandle<R>, action: Action) {
         Action::ToggleSnippets => {
             crate::storage::diag_write("[keyhook] snippets hotkey pressed");
             crate::panel::toggle_panel(app, crate::panel::SNIPPETS_PANEL)
+        }
+        Action::TogglePalette => {
+            crate::storage::diag_write("[keyhook] palette hotkey pressed");
+            crate::panel::toggle_panel(app, crate::panel::PALETTE_PANEL)
         }
         Action::ShotBegin => {
             crate::storage::diag_write("[keyhook] screenshot hotkey pressed");
@@ -505,6 +516,8 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                 Some(Action::PickerBegin)
             } else if vk == RECORDER_HOTKEY_VK.load(Ordering::SeqCst) as u32 {
                 Some(Action::RecorderBegin)
+            } else if vk == PALETTE_HOTKEY_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::TogglePalette)
             } else {
                 None
             };
@@ -560,6 +573,8 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                 Some(Action::PickerBegin)
             } else if vk == RECORDER_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
                 Some(Action::RecorderBegin)
+            } else if vk == PALETTE_HOTKEY_ALT_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::TogglePalette)
             } else {
                 None
             };

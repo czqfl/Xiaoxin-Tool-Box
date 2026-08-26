@@ -1,13 +1,13 @@
-//! 滚动长截图：用户手动滚动 + 后台持续抓帧拼接。
+//! 滚动长截图：程序自动定速滚动 + 后台持续抓帧拼接。
 //!
 //! 流程：截图遮罩内选定区域 → 工具栏「长截图」→ 本模块隐藏遮罩、弹出
 //! 边框指示窗（scrollshot-frame，采集排除，不会拼进画面）与悬浮进度条
-//! （scrollshot-bar）→ 用户自己滚动页面（滚轮/拖滚动条/PageDown 均可，
-//! 工具绝不碰鼠标键盘）→ 后台线程以 ~8fps 抓帧：内容稳定后才做全画布
-//! 垂直对齐，只追加真正的新内容 → 完成/停止后 PNG 落盘 + 写剪贴板 +
+//! （scrollshot-bar）→ 光标挪到选区中心后由程序按固定节奏发送滚轮事件
+//! （滚一步 → 等画面停稳 → 全画布垂直对齐、只追加真正的新内容 → 再滚一步），
+//! 固定步长的机械式滚动最容易拼接 → 到底/完成后 PNG 落盘 + 写剪贴板 +
 //! 自动贴图到原选区位置。
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewWindowBuilder};
 
@@ -23,6 +23,19 @@ static RUNNING: AtomicBool = AtomicBool::new(false);
 static STOP: AtomicBool = AtomicBool::new(false);
 /// 用户主动取消：立即退出且不保存/贴图
 static CANCEL: AtomicBool = AtomicBool::new(false);
+
+/// 自动滚动速度档位（1..=10，默认 5）：【一档 = 每步滚动 40px】，
+/// 即速度直接代表一次固定滚动的高度（40~400px）。进度条上的滑杆实时
+/// 改这里，滚动线程每步重新读取
+static SPEED: AtomicU32 = AtomicU32::new(5);
+const SPEED_MIN: u32 = 1;
+const SPEED_MAX: u32 = 10;
+const PX_PER_LEVEL: f64 = 40.0;
+/// 自动滚动开关：进入长截图先不滚，等用户按 空格/「开始」才开始；
+/// 再按一次 空格/「结束」收尾保存。【没有任何自动收尾】——只有用户
+/// 主动结束/取消才会停（此前"到底自动收尾"在滚轮没生效时秒退，
+/// 用户观感就是"没点停止它自己停了"）
+static SCROLLING: AtomicBool = AtomicBool::new(false);
 
 /// 对齐接受阈值（弹性逐行匹配后的平均灰度差 /255）
 const THRESH_ALIGN: u32 = 22;
@@ -44,8 +57,6 @@ const MAX_HEIGHT_PX: usize = 20_000;
 const MAX_BYTES: usize = 400 * 1024 * 1024;
 /// 抓帧节奏
 const CAPTURE_INTERVAL_MS: u64 = 120;
-/// 连续多久没有新内容自动收尾（到底/用户忘记点停止的兜底）
-const IDLE_FINISH_MS: u128 = 6000;
 /// 对齐条带最大行数：新帧顶部与画布匹配用的参考条带（兼顾精度与速度）
 const ALIGN_STRIP_MAX: usize = 240;
 /// 灰度横向抽样步长
@@ -85,6 +96,19 @@ fn row_gray(bgra: &[u8], w: usize) -> Vec<u8> {
         .collect()
 }
 
+/// 两行抽样灰度的平均绝对差（供对齐评分与边界行检查共用）
+fn row_diff(a: &[u8], b: &[u8], cw: usize) -> u64 {
+    let mut s = 0u64;
+    let mut n = 0u64;
+    let mut c = 0;
+    while c < cw {
+        s += (a[c] as i32 - b[c] as i32).unsigned_abs() as u64;
+        n += 1;
+        c += 2;
+    }
+    s / n.max(1)
+}
+
 impl Canvas {
     fn new(frame: &[u8], fw: usize, fh: usize) -> Canvas {
         let stride = fw * 4;
@@ -96,8 +120,7 @@ impl Canvas {
     }
 
     /// 追加新帧的第 j_start..fh 行（前面的行与画布已有内容重复）。
-    /// j_start > 0 时多跳过一行：滚动常带亚像素位移，衔接行是前后内容的
-    /// 混合像素（发虚），直接拼接会在接缝处留重影——跳过它换干净起点。
+    /// j_start 由调用方按「边界行是否混合 + 亚像素累计误差」决定
     fn push_from(&mut self, frame: &[u8], fgray: &[Vec<u8>], fh: usize, j_start: usize) {
         let stride = self.w * 4;
         for r in j_start..fh {
@@ -107,27 +130,24 @@ impl Canvas {
         self.h += fh - j_start;
     }
 
-    /// 全范围垂直对齐（弹性逐行匹配）：在画布中找新帧顶部内容的最佳落点 p
-    /// （新帧第 j 行 ≈ 画布第 p+j 行）。返回 (p, 平均灰度差)，失败 None。
+    /// 垂直对齐：在画布中找新帧顶部内容的最佳落点 p（新帧第 j 行 ≈ 画布
+    /// 第 p+j 行）。返回 (p, 平均灰度差, 亚像素偏移)，失败 None。
     ///
-    /// 核心思想即"上一屏底部与下一屏顶部重叠"，但更稳：
     /// - 每一行允许 ±2px 垂直容差取最小差——浏览器按物理像素分数滚动时
-    ///   衔接行是混合像素，固定整行硬比会把真匹配判死（此前拼不上的主因）；
-    /// - 总是全画布粗搜 + 邻域精修取全局最优，重复纹理不会被"紧贴底部"
-    ///   的次优位置骗走。
-    fn find_align(&self, fgray: &[Vec<u8>], fh: usize) -> Option<(usize, u32)> {
+    ///   衔接行是混合像素，固定整行硬比会把真匹配判死；
+    /// - 【带落点提示时】只在提示窗口内逐像素密搜：滚动由本程序控制、
+    ///   步长已知，全画布盲搜会被重复纹理（文本行/表格线）骗到错误位置，
+    ///   造成重影与漏行。窗口内搜不到合格落点再回退全画布粗搜。
+    fn find_align(
+        &self,
+        fgray: &[Vec<u8>],
+        fh: usize,
+        hint: Option<(usize, usize)>,
+    ) -> Option<(usize, u32, f64)> {
         let h = self.h;
         let k = fh.min(ALIGN_STRIP_MAX).min(h);
         if k < 8 || fgray.len() < fh { return None; }
         let cw = self.w / GS;
-
-        let row_diff = |a: &[u8], b: &[u8]| -> u64 {
-            let mut s = 0u64;
-            for c in (0..cw).step_by(2) {
-                s += (a[c] as i32 - b[c] as i32).unsigned_abs() as u64;
-            }
-            s / ((cw / 2) as u64).max(1)
-        };
 
         // score(p)：条带内逐行（步距2）与画布对应行的 ±2px 邻域取最小差再平均
         let score_at = |p: usize| -> u64 {
@@ -140,7 +160,7 @@ impl Canvas {
                 for dp in -2i32..=2 {
                     let q = p as i32 + r as i32 + dp;
                     if q < 0 || q >= h as i32 { continue; }
-                    let v = row_diff(&self.gray[q as usize], fr);
+                    let v = row_diff(&self.gray[q as usize], fr, cw);
                     if v < best { best = v; }
                 }
                 if best != u64::MAX { total += best; n += 1; }
@@ -149,24 +169,52 @@ impl Canvas {
             total / n
         };
 
-        let step = ((h / 60).max(2)).max(4);
-        let mut best_p = h - k;
-        let mut best_v = score_at(best_p);
-        let mut p = 0;
-        while p + k <= h {
-            let v = score_at(p);
-            if v < best_v { best_v = v; best_p = p; }
-            p += step;
-        }
-        // 邻域精修 ±step
-        let lo = best_p.saturating_sub(step);
-        let hi = (best_p + step).min(h - k);
-        for q in lo..=hi {
-            let v = score_at(q);
-            if v < best_v { best_v = v; best_p = q; }
-        }
+        let best_in = |lo: usize, hi: usize, step: usize| -> Option<(usize, u64)> {
+            let hi = hi.min(h - k);
+            if lo > hi { return None; }
+            let mut best_p = lo;
+            let mut best_v = score_at(lo);
+            let mut p = lo;
+            while p < hi {
+                p = (p + step).min(hi);
+                let v = score_at(p);
+                if v < best_v { best_v = v; best_p = p; }
+            }
+            // 邻域精修 ±step
+            let lo2 = best_p.saturating_sub(step);
+            for q in lo2..=best_p + step {
+                if q > hi { break; }
+                let v = score_at(q);
+                if v < best_v { best_v = v; best_p = q; }
+            }
+            if best_v == u64::MAX { None } else { Some((best_p, best_v)) }
+        };
 
-        if best_v <= THRESH_ALIGN as u64 { Some((best_p, best_v as u32)) } else { None }
+        // 先试落点提示窗口（逐像素密搜），不合格回退全画布
+        let mut cand: Option<(usize, u64)> = None;
+        if let Some((lo, hi)) = hint {
+            if let Some(res) = best_in(lo, hi, 1) {
+                if res.1 <= THRESH_ALIGN as u64 { cand = Some(res); }
+            }
+        }
+        let (p, v) = match cand {
+            Some(x) => x,
+            None => best_in(0, h - k, ((h / 60).max(2)).max(4))?,
+        };
+        if v > THRESH_ALIGN as u64 { return None; }
+
+        // 亚像素估计：对 score(p-1/p/p+1) 抛物线插值取顶点偏移。
+        // 平滑滚动常停在分数像素上，真实位移是「整数+小数」，只按整数切
+        // 会每步留下 ≤1px 系统误差，逐帧累积成长距离漂移
+        let s_m = if p > 0 { score_at(p - 1) } else { v };
+        let s_p = score_at((p + 1).min(h - k));
+        let denom = (s_m + s_p) as i64 - 2 * (v as i64);
+        let frac: f64 = if denom > 0 {
+            (0.5 * (s_m as f64 - s_p as f64) / denom as f64).clamp(-0.5, 0.5)
+        } else {
+            0.0
+        };
+        Some((p, v as u32, frac))
     }
 }
 
@@ -418,6 +466,84 @@ fn monitor_containing<R: Runtime>(app: &AppHandle<R>, x: i32, y: i32) -> Option<
         .find(|(mx, my, mw, mh)| x >= *mx && x < mx + mw && y >= *my && y < my + mh)
 }
 
+// ---------- 自动滚动（程序代滚） ----------
+
+/// 光标是否在捕获区域内：SendInput 注入的滚轮落在光标下的窗口上，
+/// 光标在选区内时走这条最兼容的路径（与用户自己滚滚轮完全等价）
+#[cfg(windows)]
+fn cursor_in_region(rx: i32, ry: i32, rw: i32, rh: i32) -> bool {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+    let mut p = POINT::default();
+    unsafe {
+        if GetCursorPos(&mut p).is_ok() {
+            return p.x >= rx && p.x < rx + rw && p.y >= ry && p.y < ry + rh;
+        }
+    }
+    false
+}
+
+/// 选区中心下的目标窗口：PostMessage 虚拟滚动的收件人
+#[cfg(windows)]
+fn window_at_region_center(rx: i32, ry: i32, rw: i32, rh: i32) -> Option<isize> {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::WindowsAndMessaging::WindowFromPoint;
+    let p = POINT { x: rx + rw / 2, y: ry + rh / 2 };
+    unsafe {
+        let h = WindowFromPoint(p);
+        if h.is_invalid() { None } else { Some(h.0 as isize) }
+    }
+}
+
+/// 【虚拟鼠标】向目标窗口直接投递 WM_MOUSEWHEEL（向下 120）：
+/// 不移动、不占用用户的真实鼠标——鼠标停在进度条上点按钮的同时，
+/// 页面照常滚动。lParam 带选区中心的屏幕坐标，Chromium 等按坐标路由
+#[cfg(windows)]
+fn post_wheel_to(hwnd: isize, x: i32, y: i32) -> bool {
+    use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_MOUSEWHEEL};
+    let wparam = ((-120i32) as u16 as usize) << 16; // HIWORD = wheel delta -120
+    let lparam = (((y as i64 & 0xFFFF) << 16) | (x as i64 & 0xFFFF)) as isize;
+    unsafe {
+        PostMessageW(Some(HWND(hwnd as *mut _)), WM_MOUSEWHEEL, WPARAM(wparam), LPARAM(lparam))
+            .is_ok()
+    }
+}
+
+/// 向下滚一格（WHEEL_DELTA=120）：负 delta = 内容向上走，露出下方新内容。
+/// SendInput 注入的是真实系统级输入，浏览器/编辑器/资源管理器通吃
+#[cfg(windows)]
+fn wheel_down() {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        INPUT, INPUT_MOUSE, MOUSEEVENTF_WHEEL, MOUSEINPUT, SendInput,
+    };
+    let mut inp = INPUT { r#type: INPUT_MOUSE, ..Default::default() };
+    inp.Anonymous.mi = MOUSEINPUT {
+        dx: 0,
+        dy: 0,
+        mouseData: (-120i32) as u32,
+        dwFlags: MOUSEEVENTF_WHEEL,
+        time: 0,
+        dwExtraInfo: 0,
+    };
+    unsafe {
+        SendInput(&[inp], std::mem::size_of::<INPUT>() as i32);
+    }
+}
+
+/// 每步的目标滚动高度：速度档 × 40px，且钳到选区高度的 60%——
+/// 步进超过选区会让相邻两帧失去重叠，无法对齐
+fn step_target_px(fh: usize) -> f64 {
+    let s = SPEED.load(Ordering::Relaxed).clamp(SPEED_MIN, SPEED_MAX) as f64;
+    (s * PX_PER_LEVEL).min(fh as f64 * 0.6)
+}
+
+/// 当前速度档对应的每步间隔：大步进给更长的停顿让动画停稳
+fn step_pause_ms() -> u64 {
+    let s = SPEED.load(Ordering::Relaxed).clamp(SPEED_MIN, SPEED_MAX);
+    ((360 - s * 16) as u64).clamp(160, 344)
+}
+
 fn run<R: Runtime + 'static>(
     app: AppHandle<R>,
     rx: i32, ry: i32, rw: i32, rh: i32,
@@ -437,11 +563,28 @@ fn run<R: Runtime + 'static>(
     let fw = rw as usize;
     let fh = rh as usize;
 
+    // 【不碰用户的鼠标】光标在选区内走 SendInput；否则向目标窗口
+    // PostMessage 虚拟滚轮（见滚动步注释）
+    #[cfg(windows)]
+    let mut target_hwnd: Option<isize> = window_at_region_center(rx, ry, rw, rh);
+
     let mut canvas: Option<Canvas> = None;
+    // 上一次成功追加的新增行数：滚动步长已知（本程序自己发的滚轮），
+    // 作为本次对齐落点的搜索提示，避免全画布盲搜被重复纹理骗走
+    let mut last_shift: Option<usize> = None;
+    // 亚像素累计误差（Bresenham）：真实位移的小数部分在此累积，
+    // 每满一像素回调切割点一行，长图累计漂移压在 ±1px 内
+    let mut sub_err: f64 = 0.0;
+    // 实测单格滚轮的滚动像素数：不同应用差异大（~50~150px），
+    // 用它把「每步目标高度」换算成格数；初始按常见值 100px 估
+    #[cfg(windows)]
+    let mut notch_px: f64 = 100.0;
+    // 本步已发送、尚未被实测校准的格数
+    #[cfg(windows)]
+    let mut pending_notches: usize = 0;
     // 内容稳定检测：本帧与上一抓帧逐字节相同才算"滚动了且已停稳"。
     // 平滑滚动动画进行中的帧是运动的中间态，拿去对齐必然错位
     let mut last_raw: Vec<u8> = Vec::new();
-    let mut last_new = std::time::Instant::now();
     let mut fail_streak = 0usize;
 
     let mut cancelled = false;
@@ -467,51 +610,135 @@ fn run<R: Runtime + 'static>(
             return;
         }
 
-        // 与上一抓帧不同 → 还在滚动/动画中：记录并等下一帧
+        // 与上一抓帧不同 → 滚动/动画未停稳：记录并等下一帧
+        // 【绝不自动收尾】只有用户按 结束/取消 才停
         if f.bgra != last_raw {
             last_raw = f.bgra;
-            if canvas.is_some() && last_new.elapsed().as_millis() > IDLE_FINISH_MS {
-                break;
-            }
             std::thread::sleep(std::time::Duration::from_millis(CAPTURE_INTERVAL_MS));
             continue;
         }
 
+        // 画面已停稳：对齐并追加新内容，滚动开关打开时再推进一步
+        let scrolling = SCROLLING.load(Ordering::SeqCst);
         let fgray: Vec<Vec<u8>> =
             (0..fh).map(|r| row_gray(&f.bgra[r * stride..], fw)).collect();
 
         match &mut canvas {
             None => {
                 canvas = Some(Canvas::new(&f.bgra, fw, fh));
-                last_new = std::time::Instant::now();
                 let h = canvas.as_ref().unwrap().h as u32;
                 let _ = app.emit(EVT_PROGRESS, Progress { height: h });
             }
             Some(c) => {
                 if c.h < MAX_HEIGHT_PX && c.bgra.len() < MAX_BYTES {
-                    if let Some((p, diff)) = c.find_align(&fgray, fh) {
+                    // 预期落点窗口：上次新增 s 行 → 本帧顶部应落在
+                    // c.h + s - fh 附近（±s/2，至少 ±16px）
+                    let hint = last_shift.map(|s| {
+                        let exp = c.h as isize + s as isize - fh as isize;
+                        let w = ((s / 2) as isize).max(16).min(140);
+                        ((exp - w).max(0) as usize, (exp + w).max(0) as usize)
+                    });
+                    if let Some((p, diff, frac)) = c.find_align(&fgray, fh, hint) {
+                        let h_before = c.h;
+                        let cw = c.w / GS;
                         // 新帧第 j 行对应画布第 p+j 行；超出画布底部的内容为新增
-                        let j_start = c.h.saturating_sub(p);
-                        // 衔接行跳过（见 push_from 注释）
-                        let trim = if j_start > 0 { 1 } else { 0 };
-                        if j_start + trim < fh {
-                            let before = c.h;
-                            c.push_from(&f.bgra, &fgray, fh, j_start + trim);
-                            last_new = std::time::Instant::now();
-                            crate::storage::diag_write(&format!(
-                                "[scrollshot] +{}px (align p={p} diff={diff}) total={}px",
-                                c.h - before, c.h
-                            ));
-                            let _ = app.emit(EVT_PROGRESS, Progress { height: c.h as u32 });
+                        let mut j_start = h_before.saturating_sub(p);
+                        if j_start < fh {
+                            // 衔接行自适应：只有画布末行与新帧首行对不上
+                            // （亚像素混合行）才跳一行；整像素滚动时边界行
+                            // 本来就吻合，固定跳行会每步白丢一行内容
+                            let mut trim = 1usize;
+                            if j_start > 0
+                                && row_diff(&c.gray[h_before - 1], &fgray[j_start - 1], cw) <= 8
+                            {
+                                trim = 0;
+                            }
+                            j_start += trim;
+                            // 亚像素累计误差补偿（Bresenham）：真实位移含小数，
+                            // 整行切割的余数逐帧累积；每凑满一像素回调一行，
+                            // 长图的累计漂移被压在 ±1px 内
+                            sub_err += trim as f64 + frac;
+                            let corr = sub_err.round();
+                            if corr <= -1.0 && j_start + 1 < fh {
+                                j_start += 1;
+                                sub_err += 1.0;
+                            } else if corr >= 1.0 && j_start >= 1 {
+                                j_start -= 1;
+                                sub_err -= 1.0;
+                            }
+                            if j_start < fh {
+                                c.push_from(&f.bgra, &fgray, fh, j_start);
+                                last_shift = Some(c.h - h_before);
+                                // 用【实际滚动高度】校准单格像素数：不同应用
+                                // 一格滚的距离差异大（~50~150px）。到底/钳制
+                                // 时实测会偏小，偏差超 35% 视为异常不更新，
+                                // 防止到底阶段把估计值拖歪
+                                if pending_notches > 0 {
+                                    let measured =
+                                        (c.h - h_before) as f64 / pending_notches as f64;
+                                    if measured > 10.0
+                                        && (measured - notch_px).abs() <= notch_px * 0.35
+                                    {
+                                        notch_px = notch_px * 0.7 + measured * 0.3;
+                                    }
+                                    pending_notches = 0;
+                                }
+                                crate::storage::diag_write(&format!(
+                                    "[scrollshot] +{}px (p={p} diff={diff} frac={frac:.2} err={sub_err:.2} notch={notch_px:.0}) total={}px",
+                                    c.h - h_before, c.h
+                                ));
+                                let _ = app.emit(EVT_PROGRESS, Progress { height: c.h as u32 });
+                            }
                         }
+                        // 整帧都在画布里：本步没滚出新内容，继续滚即可
+                    } else {
+                        // 窗口与全画布都搜不到合格落点：画面变化过大或滚距突变，
+                        // 作废提示让下一帧重新全画布定位
+                        last_shift = None;
                     }
                     // 对齐失败：画面变化过大（动画/弹窗），跳过该帧继续观察
                 }
-                if last_new.elapsed().as_millis() > IDLE_FINISH_MS { break; }
             }
         }
 
-        std::thread::sleep(std::time::Duration::from_millis(CAPTURE_INTERVAL_MS));
+        // 【程序代滚】只有用户按下开始后才推进。速度档 = 每步目标高度
+        // （档×40px，钳到选区高 60%），按实测单格像素数换算成本步格数。
+        // 双路径：真实光标在选区内 → SendInput（最兼容）；光标在别处 →
+        // 向选区中心下的窗口 PostMessage 虚拟滚轮，绝不占用用户的鼠标。
+        // 无自动收尾：到底后页面不再变化拼接停止增长，由用户决定何时结束
+        if !scrolling {
+            std::thread::sleep(std::time::Duration::from_millis(CAPTURE_INTERVAL_MS));
+            continue;
+        }
+        if STOP.load(Ordering::SeqCst) || CANCEL.load(Ordering::SeqCst) { continue; }
+        #[cfg(windows)]
+        {
+            let n = ((step_target_px(fh) / notch_px).round() as usize).clamp(1, 8);
+            let use_input = cursor_in_region(rx, ry, rw, rh);
+            if !use_input && target_hwnd.is_none() {
+                target_hwnd = window_at_region_center(rx, ry, rw, rh);
+            }
+            let mut sent = 0usize;
+            for _ in 0..n {
+                let ok = if use_input {
+                    wheel_down();
+                    true
+                } else {
+                    match target_hwnd {
+                        Some(h) if post_wheel_to(h, rx + rw / 2, ry + rh / 2) => true,
+                        // 投递失败：窗口可能已销毁，重探一次
+                        _ => {
+                            target_hwnd = window_at_region_center(rx, ry, rw, rh);
+                            false
+                        }
+                    }
+                };
+                if ok { sent += 1; }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            pending_notches = if sent > 0 { sent } else { 0 };
+        }
+        std::thread::sleep(std::time::Duration::from_millis(step_pause_ms()));
     }
 
     // 用户取消：立即收场，不保存不贴图
@@ -589,6 +816,8 @@ pub fn scrollshot_begin<R: Runtime>(
     }
     STOP.store(false, Ordering::SeqCst);
     CANCEL.store(false, Ordering::SeqCst);
+    // 进入长截图先待命不滚：等用户按 空格/「开始」才开始自动滚动
+    SCROLLING.store(false, Ordering::SeqCst);
 
     if w <= 0 || h <= 0 {
         RUNNING.store(false, Ordering::SeqCst);
@@ -628,6 +857,26 @@ pub fn scrollshot_stop(_app: AppHandle) -> Result<(), String> {
 pub fn scrollshot_cancel(_app: AppHandle) -> Result<(), String> {
     CANCEL.store(true, Ordering::SeqCst);
     Ok(())
+}
+
+/// 设置自动滚动速度档位（1..=10），进度条滑杆实时调用，滚动线程每步读取
+#[tauri::command]
+pub fn scrollshot_set_speed(speed: u32) -> Result<(), String> {
+    SPEED.store(speed.clamp(SPEED_MIN, SPEED_MAX), Ordering::Relaxed);
+    Ok(())
+}
+
+/// 开始自动滚动（进度条「开始」按钮 / 空格键）
+#[tauri::command]
+pub fn scrollshot_start_scroll(_app: AppHandle) -> Result<(), String> {
+    SCROLLING.store(true, Ordering::SeqCst);
+    Ok(())
+}
+
+/// 查询当前自动滚动速度档位（进度条窗复用、每次呼出恢复显示用）
+#[tauri::command]
+pub fn scrollshot_get_speed() -> u32 {
+    SPEED.load(Ordering::Relaxed)
 }
 
 /// 关闭控制条（结果页的 ✕）：隐藏复用，不销毁

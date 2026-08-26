@@ -110,11 +110,14 @@ const IcoClose = () => <X {...IC} />;
 const IcoPin = () => <Pin {...IC} />;
 const IcoSaveAs = () => <Save {...IC} />;
 const IcoCopy = () => <Copy {...IC} />;
-// 长截图：矩形 + 底部下滚箭头（滚动拼接语义）
+// 长截图：竖向长页面 + 页内内容行 + 双下滚箭头（往下滚出更多内容的语义）
 const IcoLongShot = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="4" y="3" width="16" height="11" rx="2"/>
-    <path d="M12 17v4"/><path d="m8.5 18 3.5 3.5L15.5 18"/>
+    <rect x="6" y="3" width="12" height="18" rx="2"/>
+    <path d="M9 7.5h6"/>
+    <path d="M9 16.5h4"/>
+    <path d="m9.5 10.5 2.5 2.5 2.5-2.5"/>
+    <path d="m9.5 13 2.5 2.5 2.5-2.5"/>
   </svg>
 );
 
@@ -2188,7 +2191,7 @@ export function ScreenshotOverlay() {
                 onClick={()=>{if(undos.length>0){setAnnos(undos[undos.length-1]);setUndos(u=>u.slice(0,-1));}}}><IcoRedo/></button>
               <div className="shot-toolbar-sep" />
               <div className="shot-toolbar-group shot-toolbar-actions">
-                <button data-tip="长截图（滚动拼接）" onClick={startLongShot}>
+                <button data-tip="长截图（自动滚动拼接长图）" onClick={startLongShot}>
                   <span style={{ color: "rgba(255,255,255,0.92)", display: "inline-flex" }}><IcoLongShot /></span></button>
                 <button data-tip="文字识别 (OCR)" className={ocrPhase !== "idle" ? "active" : ""}
                   onClick={() => { if (ocrPhase === "idle" || ocrPhase === "error") void runOcr(); else resetOcr(); }}>
