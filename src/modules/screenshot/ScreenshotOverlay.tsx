@@ -878,23 +878,19 @@ export function ScreenshotOverlay() {
     ctx.fillStyle = "rgba(0,0,0,0.5)";
     ctx.fillRect(0, 0, geom.width, geom.height);
     if (selected || draggingNow) {
-      // 选定/拖拽中：区域镂空 + 双层描边。reg 为 CSS 像素，画布是物理像素，
+      // 选定/拖拽中：区域镂空 + 单层主题色描边。reg 为 CSS 像素，画布是物理像素，
       // 必须 ×scale 映射到物理位图（否则 150% 下选区框整体偏小、右下角不跟手）。
-      // 【双层描边】深色衬底 + 亮色主线——全屏/浅色桌面上单层主题色细线
-      // 与背景融为一体的"看不出在截图"问题就此解决
+      // 旧版"深色衬底+亮色主线"双层描边会在蓝线两侧各露一圈黑边，呈"黑+蓝+黑"，
+      // 已按需求去掉黑色衬底，仅留主题色细线
       const rx = reg.x * scale, ry = reg.y * scale, rw = reg.w * scale, rh = reg.h * scale;
       ctx.clearRect(rx, ry, rw, rh);
-      ctx.strokeStyle = "rgba(0,0,0,0.85)"; ctx.lineWidth = 4.5 * scale;
-      ctx.strokeRect(rx, ry, rw, rh);
       ctx.strokeStyle = accent; ctx.lineWidth = 2 * scale;
       ctx.strokeRect(rx, ry, rw, rh);
     } else if (snap) {
-      // 智能高亮：窗口镂空 + 同款双层描边。snap 已归一为【CSS 像素】（与 reg 同系），
-      // 画布是物理像素，同样 ×scale 映射
+      // 智能高亮：窗口镂空 + 单层主题色描边（去掉黑色衬底）。snap 已归一为
+      // 【CSS 像素】（与 reg 同系），画布是物理像素，同样 ×scale 映射
       const sx = snap.x * scale, sy = snap.y * scale, sw2 = snap.w * scale, sh2 = snap.h * scale;
       ctx.clearRect(sx, sy, sw2, sh2);
-      ctx.strokeStyle = "rgba(0,0,0,0.85)"; ctx.lineWidth = 5 * scale;
-      ctx.strokeRect(sx, sy, sw2, sh2);
       ctx.strokeStyle = accent; ctx.lineWidth = 2.5 * scale;
       ctx.strokeRect(sx, sy, sw2, sh2);
     }
