@@ -126,8 +126,9 @@ html[data-window="shot"] body { background: transparent; }
    【设计语言】条体永远是深色玻璃（浮在任意截图内容上，可读性优先），
    主题感不靠切换文字色，而由三处 accent 表达：激活胶囊、悬停光晕、
    浅色主题的整条微染——所有主题共用同一套规则，无割裂补丁 */
-/* 整条（工具条+展开面板）统一投影，避免两段各自描边 */
-.shot-toolbar-float { position: fixed; display: flex; flex-direction: column; align-items: flex-start; gap: 0; z-index: 200; max-width: calc(100vw - 16px); box-shadow: 0 6px 20px rgba(0,0,0,0.45); }
+/* 浮层容器：不挂背景/投影（投影下移到圆角的 .shot-toolbar，避免方形光晕
+   在圆角处露出「无圆角背景」的观感）；仅负责定位与层级 */
+.shot-toolbar-float { position: fixed; display: flex; flex-direction: column; align-items: flex-start; gap: 0; z-index: 200; max-width: calc(100vw - 16px); }
 /* 主题玻璃条：背景跟随主题令牌，毛玻璃模糊采样背后冻结画面；直角、无边框 */
 /* 毛玻璃 blur 移到 ::before：backdrop-filter 若直接放在条上会创建层叠上下文，
    把按钮 tooltip(::after, z-index:320) 关死在条内——颜色面板（后置兄弟）反而
@@ -143,7 +144,7 @@ html[data-window="shot"] body { background: transparent; }
   background:
     linear-gradient(rgba(var(--accent-rgb), 0.18), rgba(var(--accent-rgb), 0.18)),
     rgba(24, 26, 30, 0.9);
-  border-radius: 10px; padding: 3px 4px; flex-wrap: nowrap; white-space: nowrap; position: relative; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.09); }
+  border-radius: 10px; padding: 3px 4px; flex-wrap: nowrap; white-space: nowrap; position: relative; box-shadow: 0 6px 20px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(255,255,255,0.09); }
 .shot-toolbar::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
 /* 同主条：恒深玻璃（与 .shot-toolbar 一致），浅色主题下图标同样清晰 */
 .shot-toolbar-panel { display: flex; align-items: center; gap: 7px;
