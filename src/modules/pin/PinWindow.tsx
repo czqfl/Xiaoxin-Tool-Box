@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { listen } from "@tauri-apps/api/event";
+import { listen, emitTo } from "@tauri-apps/api/event";
 import { PhysicalSize } from "@tauri-apps/api/dpi";
 import {
   pinImageUrl, pinUpdate, pinClose, pinSetClickThrough, pinReady, pinHideOne, pinResize, pinKind, diagLog,
@@ -412,7 +412,6 @@ export function PinWindow() {
   }, []);
 
   // context menu（独立透明窗 pin-menu：不受贴图窗矩形裁剪、绝不改贴图尺寸）
-  const menuWinRef = useRef<WebviewWindow | null>(null);
   const runMenuActionRef = useRef<(id: string) => void>(() => {});
 
   // 接收菜单窗回传的指令：按贴图标签过滤，只响应本贴图发起的菜单
@@ -426,9 +425,10 @@ export function PinWindow() {
     return () => { un?.(); };
   }, [winLabel]);
 
-  // 贴图窗销毁时，关掉可能还开着的菜单窗（避免幽灵菜单）
+  // 贴图窗销毁时，关掉可能还开着的菜单窗（避免幽灵菜单）。菜单窗为复用单例，
+  // 用 getByLabel 取当前句柄，不依赖本组件引用
   useEffect(() => {
-    return () => { menuWinRef.current?.close().catch(() => {}); };
+    return () => { void WebviewWindow.getByLabel("pin-menu").then((w) => w?.close().catch(() => {})); };
   }, []);
 
   // 菜单项动作（id 驱动；切换类用函数式 setState 避开闭包陈旧值）
@@ -458,9 +458,6 @@ export function PinWindow() {
         }).catch(() => {});
         break;
       }
-      case "hide":
-        pinHideOne().catch(() => {});
-        break;
       case "close":
         pinClose(pid).catch(() => {});
         break;
@@ -520,8 +517,6 @@ export function PinWindow() {
     e.preventDefault();
     const id = idRef.current;
     if (!id) return;
-    // 关掉可能还开着的旧菜单窗（连续右键：新的覆盖旧的）
-    menuWinRef.current?.close().catch(() => {});
     // 文本/富文本贴图：原文本与图片两种复制都给；图片贴图只有「复制」
     // （Ctrl+C 默认复制为图片，复制原文本走菜单）
     const copyActions = kind === "html"
@@ -536,7 +531,6 @@ export function PinWindow() {
       // 鼠标穿透：点击/滚轮全部穿过贴图直达下面的窗口（Snipaste 同款）。
       // 穿透后贴图收不到任何鼠标事件——出口是贴图热键（隐藏后唤回自动解除）
       { id: "toggle-clickthrough", label: clickThrough ? "取消鼠标穿透" : "开启鼠标穿透" },
-      { id: "hide", label: "隐藏贴图" },
       { id: "close", label: "关闭贴图" },
     ];
     // 光标绝对屏幕坐标（逻辑像素）：贴图窗外位置 + 窗内光标偏移，
@@ -547,6 +541,15 @@ export function PinWindow() {
       const pos = await getCurrentWindow().outerPosition();   // 物理像素
       lx += pos.x / dpr; ly += pos.y / dpr;                    // → 逻辑屏幕坐标
     } catch { /* 取不到窗位置则用窗内坐标兜底 */ }
+    // 复用单例菜单窗：已存在则直接推送新数据并瞬时显示（无新建 WebView2 窗的
+    // 数百毫秒开销，右键即时弹出）；仅首次才创建（首弹稍慢，之后每次皆瞬时）
+    const existing = await WebviewWindow.getByLabel("pin-menu");
+    if (existing) {
+      void emitTo("pin-menu", "pin-menu-show", {
+        items, cx: Math.round(lx), cy: Math.round(ly), pin: winLabel,
+      }).catch(() => {});
+      return;
+    }
     const params = new URLSearchParams({
       wm: "pin-menu",
       items: JSON.stringify(items),
@@ -554,18 +557,16 @@ export function PinWindow() {
       cy: String(Math.round(ly)),
       pin: winLabel,
     });
-    // 独立透明窗 pin-menu-*：不受贴图窗裁剪，菜单可完整显示在任何位置。
-    // 唯一标签避免重复建窗竞态；命中 pin-* 权限通配。先隐藏，待定位后再显示，
-    // 避免初始尺寸/位置的闪烁
+    // 固定标签 pin-menu（命中 pin-* 权限通配）；先隐藏，待菜单窗自测尺寸贴边后
+    // 由 PinMenu 自行 show()，避免初始尺寸/位置的闪烁
     try {
-      const w = new WebviewWindow(`pin-menu-${Date.now()}`, {
+      new WebviewWindow("pin-menu", {
         url: `index.html?${params.toString()}`,
         width: 180, height: 40,
         decorations: false, transparent: true,
         alwaysOnTop: true, focus: true, resizable: false, shadow: false,
         visible: false, skipTaskbar: true,
       });
-      menuWinRef.current = w;
     } catch { /* 建窗失败静默：极少发生 */ }
   };
 

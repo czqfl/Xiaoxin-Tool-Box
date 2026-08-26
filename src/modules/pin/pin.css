@@ -126,7 +126,7 @@ html[data-window="pin"], html[data-window="pin"] body { background: transparent 
   to   { filter: hue-rotate(360deg); }
 }
 
-/* 贴图右键菜单：渲染在独立透明窗 pin-menu-* 里（由 PinMenu.tsx 承接），
+/* 贴图右键菜单：渲染在独立透明窗 pin-menu（复用单例，由 PinMenu.tsx 承接），
    彻底脱离贴图窗矩形约束——菜单可完整显示在任何位置、绝不改动贴图尺寸。
    玻璃底用主题变量（--bg-panel-rgb + --panel-opacity），随浅/深主题自适应；
    left/top:0 固定到菜单窗左上角，窗尺寸由 PinMenu 按实测内容设定，无偏移 */
