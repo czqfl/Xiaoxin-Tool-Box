@@ -58,12 +58,15 @@ html[data-window="shot"] body { background: transparent; }
    格式徽标收窄，保证与色值同行放下 */
 .shot-mag .shot-color-val { min-width: 0; flex: 0 1 auto; font-size: 11px; }
 .shot-mag .shot-mag-fmt { padding: 0 4px; font-size: 8.5px; }
-/* 快捷键提示：一行一个（C / Shift / Tab 各占一行） */
-.shot-mag-hints { display: flex; flex-direction: column; gap: 1px;
-  font-size: 10.5px; line-height: 1.6; color: rgba(255,255,255,0.68);
+/* 快捷键提示：一行一个（C / Shift / Tab 各占一行）。
+   与左下角 .shot-hint-row 同款两栏对齐：固定宽键帽列（居中）+ 说明列（左对齐），
+   避免「C/复制」与「Shift/换格式」因键帽宽度不同导致说明文字错位。
+   收窄上下间距（line-height/gap/margin/padding）消除原多余行距 */
+.shot-mag-hints { display: flex; flex-direction: column; gap: 2px;
+  font-size: 11px; line-height: 1.3; color: rgba(255,255,255,0.72);
   font-family: "Microsoft YaHei", sans-serif;
-  border-top: 1px solid rgba(255,255,255,0.1); margin-top: 4px; padding-top: 5px; }
-.shot-mag-hints div { white-space: nowrap; }
+  border-top: 1px solid rgba(255,255,255,0.1); margin-top: 3px; padding-top: 4px; }
+.shot-mag-hints div { display: grid; grid-template-columns: 40px 1fr; column-gap: 8px; align-items: center; white-space: nowrap; }
 /* 当前颜色格式徽标（RGB/HEX）：让用户随时知道 Shift 切到了哪种格式 */
 .shot-mag-fmt {
   flex: none; padding: 1px 5px; border-radius: 4px;
@@ -73,7 +76,8 @@ html[data-window="shot"] body { background: transparent; }
 }
 /* 键帽式提示：C / Shift 做成小键帽，精致不糊字 */
 .shot-mag-hints b {
-  display: inline-block; min-width: 15px; margin: 0 3px; padding: 1px 5px;
+  display: inline-block; min-width: 15px; margin: 0; padding: 1px 5px;
+  justify-self: center;
   border-radius: 4px; border: 1px solid rgba(255,255,255,0.32);
   background: rgba(255,255,255,0.09);
   color: #fff; font: 600 10px/1.5 Consolas, "Courier New", monospace; text-align: center;
@@ -312,7 +316,9 @@ html[data-window="shot"] body { background: transparent; }
   position: fixed; left: 50%; transform: translateX(-50%); bottom: 12px; z-index: 300;
   display: flex; flex-direction: column; gap: 8px; padding: 9px 12px 12px;
   max-width: min(760px, calc(100vw - 24px));
-  background: rgba(12,12,14,0.78); backdrop-filter: blur(10px);
+  /* 与通用设置「亚克力板 / 面板底色不透明度」统一：面板底色 RGB + 全局
+     --panel-opacity（acrylic_opacity/100，关闭时=1），不再写死深色 0.78 */
+  background: rgba(var(--bg-panel-rgb), var(--panel-opacity)); backdrop-filter: blur(10px);
   border-radius: 10px;
   box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 6px 20px rgba(0,0,0,0.45);
   animation: shot-submenu-in 120ms var(--ease-out) both;

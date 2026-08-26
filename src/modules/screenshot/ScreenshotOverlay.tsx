@@ -2232,7 +2232,17 @@ export function ScreenshotOverlay() {
               <div className="shot-hist-clear" onClick={() => void clearHist()}>清空历史</div>
             )}
           </div>
-          <div className="shot-hist-row">
+          <div className="shot-hist-row" onWheel={(e) => {
+            // 鼠标悬停时滚轮→横向滚动缩略图（鼠标滚轮仅有 deltaY）；
+            // 始终 stopPropagation，防止事件冒泡到根遮罩的滚轮
+            //（选区阶段滚轮=调画笔粗细，会误改画笔）
+            const row = e.currentTarget;
+            const max = row.scrollWidth - row.clientWidth;
+            if (max > 0) {
+              row.scrollLeft = Math.min(max, Math.max(0, row.scrollLeft + e.deltaY));
+            }
+            e.stopPropagation();
+          }}>
             <div className={`shot-hist-item${histPos === -1 ? " active" : ""}`}
               onClick={() => void jumpHistory(-1)}>
               <div className="shot-hist-thumb shot-hist-live">实时</div>
