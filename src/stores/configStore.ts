@@ -100,6 +100,7 @@ const defaultConfig: AppConfig = {
     smart_detect: true,
     smart_element: true,
     magnifier: true,
+    magnifier_round: false,
     remember_region: true,
     auto_copy: true,
     save_format: "png",

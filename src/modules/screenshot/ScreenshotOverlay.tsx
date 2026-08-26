@@ -783,14 +783,19 @@ export function ScreenshotOverlay() {
         && e.key === "Shift" && !e.repeat) {
         toggleColorFmt();
       }
-      // Tab 切换放大镜形状（方形/圆形）：仅放大镜可见时接管，阻止焦点跳转
+      // Tab 切换放大镜形状（方形/圆形）：仅放大镜可见时接管，阻止焦点跳转。
+      // 形状存入配置（magnifier_round）持久化，下次截图会话保持
       else if (e.key === "Tab" && showMagRef.current && !pickerModeRef.current && !textEditRef.current) {
         e.preventDefault();
         if (e.repeat) return;
-        magCircleRef.current = !magCircleRef.current;
-        magLensRef.current?.classList.toggle("shot-mag-lens--circle", magCircleRef.current);
+        const next = !magCircleRef.current;
+        magCircleRef.current = next;
+        setMagCircle(next);
+        // 持久化：读最新配置再写回（闭包里的 cfg 可能过期）
+        const st = useConfigStore.getState();
+        void updateCfg({ ...st.config, shot: { ...st.config.shot, magnifier_round: next } });
         if (magCopiedRef.current) {
-          magCopiedRef.current.textContent = magCircleRef.current ? "已切换为圆形" : "已切换为方形";
+          magCopiedRef.current.textContent = next ? "已切换为圆形" : "已切换为方形";
           magCopiedRef.current.style.display = "";
           window.clearTimeout(copyTimerRef.current);
           copyTimerRef.current = window.setTimeout(() => {
@@ -1245,10 +1250,17 @@ export function ScreenshotOverlay() {
   // 放大镜命令式节点：位置/坐标文本/画布采样全部直改，不经 React
   const magBoxRef = useRef<HTMLDivElement>(null);
   const magCanvasRef = useRef<HTMLCanvasElement>(null);
-  /** 镜头框节点：Tab 切换圆形/方形时直改 class，无重渲染 */
-  const magLensRef = useRef<HTMLDivElement>(null);
-  /** 镜头形状：false=方形（默认）/ true=圆形（Snipaste 同款双形态） */
+  /** 镜头形状（React state 驱动 className，避免命令式 classList 被重渲染抹掉）：
+   *  false=方形 / true=圆形；随配置持久化（cfg.shot.magnifier_round），
+   *  下次打开/下次截图会话保持上次形状 */
+  const [magCircle, setMagCircle] = useState(false);
+  /** magCircle 镜像：keydown 闭包读最新值（state 闭包会过期） */
   const magCircleRef = useRef(false);
+  useEffect(() => { magCircleRef.current = magCircle; }, [magCircle]);
+  /** 配置加载/变更（含每次截图会话挂载）→ 应用持久化的放大镜形状 */
+  useEffect(() => {
+    setMagCircle(cfg.shot.magnifier_round ?? false);
+  }, [cfg.shot.magnifier_round]);
   /** showMag 镜像：keydown 闭包读最新值（state 闭包会过期） */
   const showMagRef = useRef(false);
   useEffect(() => { showMagRef.current = showMag; }, [showMag]);
@@ -1979,7 +1991,7 @@ export function ScreenshotOverlay() {
           position:"fixed", left:-9999, top:-9999,
           width: MAG_BOX_W, pointerEvents:"none",
         }}>
-          <div ref={magLensRef} className="shot-mag-lens"><canvas ref={magCanvasRef} /></div>
+          <div className={`shot-mag-lens${magCircle ? " shot-mag-lens--circle" : ""}`}><canvas ref={magCanvasRef} /></div>
           <div className="shot-mag-info">
             <div className="shot-mag-row"><span ref={magCoordRef}>(0 , 0)</span></div>
             <div className="shot-mag-row shot-mag-colorline">

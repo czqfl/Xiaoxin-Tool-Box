@@ -346,6 +346,8 @@ pub struct ShotConfig {
     pub smart_detect: bool,
     /// 放大镜（像素级取色）
     pub magnifier: bool,
+    /// 放大镜形状：false=方形（默认）/ true=圆形（Tab 切换，持久化）
+    pub magnifier_round: bool,
     /// 记住上次截取区域（下次呼出预填同样区域）
     pub remember_region: bool,
     /// 选区完成后默认动作：复制到剪贴板（回车触发）
@@ -371,6 +373,7 @@ impl Default for ShotConfig {
             capture_cursor: false,
             smart_detect: true,
             magnifier: true,
+            magnifier_round: false,
             remember_region: true,
             auto_copy: true,
             save_format: "png".into(),

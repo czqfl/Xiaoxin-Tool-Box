@@ -12,12 +12,18 @@ html[data-window="shot"] body { background: transparent; }
 /* ---- 放大镜：镜头区固定正方形，信息区在镜头下方分多行（坐标/颜色/提示） ---- */
 /* z-index 260 > 工具栏 200：鼠标移到工具栏附近时坐标/颜色信息不被盖住。
    镜头框为与选区边框同款：1.5px 主题色细边 + 轻辉光，贴近 Snipaste。
-   【结构】卡片本身完全透明（仅定位容器）——圆形镜头内接圆之外的角落
-   （左上/右上）直接透出屏幕，不再露出卡片背景"边框残影"；玻璃底只给
-   镜头正下方的信息块。左右无边条（卡片与镜头同宽），顶部无边距 */
+   【结构】卡片持玻璃底（面板底色 + 透明度联动 + 毛玻璃）。卡片顶部圆角
+   84px（= 镜头圆半径 MAG/2 = 168/2，镜头 width:100% 撑满卡片）——圆形
+   镜头内接圆外的【左上/右上】角落处卡片背景被圆角裁掉、直接透出屏幕；
+   【左下/右下】角落仍在卡片背景内、保留玻璃（只去上两角空隙，用户要求）。
+   不能用 50% 纵向：纵向百分比按卡片高度算会变椭圆，与镜头圆对不上。
+   方形模式下镜头不透明覆盖卡片，圆角不可见。左右无边条（卡片与镜头同宽） */
 .shot-mag {
   position: fixed; z-index: 260;
-  background: transparent;
+  background: rgba(var(--bg-panel-rgb), var(--panel-opacity));
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border-radius: 84px 84px 8px 8px;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.22);
 }
 /* 镜头框：与截图选区边框同款（1.5px 主题色细边 + 轻辉光），方角更干净。
    不加黑色外环——Snipaste 只有一圈主题色细边，黑环会显得像"黑色边框"。
@@ -30,20 +36,16 @@ html[data-window="shot"] body { background: transparent; }
     0 0 8px rgba(var(--accent-rgb, 76,141,255), 0.4),
     inset 0 0 6px rgba(var(--accent-rgb, 76,141,255), 0.2);
 }
-/* 圆形放大镜（Tab 切换）：镜头圆角 50%，canvas 被 overflow 裁剪成圆形取景；
-   内接圆外的四角区域为透明，直接透出屏幕（不再露出卡片背景） */
+/* 圆形放大镜（Tab 切换）：镜头圆角 50%，canvas 被 overflow 裁剪成圆形取景。
+   内接圆外的角落是否露玻璃由卡片顶部圆角（50%）决定——只裁上两角 */
 .shot-mag-lens--circle {
   border-radius: 50%;
 }
 .shot-mag-lens canvas { display: block; width: 100%; height: 100%; }
-/* 信息块：镜头正下方，独占玻璃底（毛玻璃 + 面板底色/透明度联动），
-   上下圆角分别贴合镜头与悬浮效果。保留呼吸感，放不下自然换行 */
+/* 信息块：镜头正下方。玻璃底由卡片提供（本块不再重复铺底，避免双层叠加
+   变不透明），仅保留内边距与列排布；放不下自然换行 */
 .shot-mag-info {
   padding: 8px 8px 9px; display: flex; flex-direction: column; gap: 4px;
-  background: rgba(var(--bg-panel-rgb), var(--panel-opacity));
-  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-  border-radius: 0 0 8px 8px;
-  box-shadow: 0 3px 10px rgba(0,0,0,0.22);
 }
 .shot-mag-row {
   text-align: center; font-size: 12px; line-height: 1.55; color: #fff;

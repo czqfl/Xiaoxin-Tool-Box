@@ -288,6 +288,8 @@ export interface ShotConfig {
   smart_detect: boolean;
   smart_element: boolean;
   magnifier: boolean;
+  /** 放大镜形状：false=方形（默认）/ true=圆形（Tab 切换，持久化） */
+  magnifier_round: boolean;
   remember_region: boolean;
   auto_copy: boolean;
   save_format: string;
