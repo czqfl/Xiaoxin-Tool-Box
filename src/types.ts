@@ -100,6 +100,22 @@ export interface ShortcutsConfig {
   pins_close: string;
   /** 屏幕取色（呼出十字取色模式） */
   picker: string;
+  /** 屏幕录制 GIF */
+  recorder: string;
+}
+
+/** 屏幕录制（GIF）配置 */
+export interface RecorderConfig {
+  /** 是否启用屏幕录制功能（关闭：快捷键不注册、托盘/工具栏/侧栏入口隐藏） */
+  enabled: boolean;
+  /** 采集帧率（5-24） */
+  fps: number;
+  /** 编码质量："high" | "normal" | "fast" */
+  quality: string;
+  /** 单次录制时长上限（秒，0 = 不限） */
+  max_duration_secs: number;
+  /** 录像保存目录；为空回退截图保存目录，再回退系统图片目录 */
+  save_dir?: string | null;
 }
 
 /** 端口工具面板配置 */
@@ -209,6 +225,7 @@ export type ToolKey =
   | "files"
   | "snippets"
   | "screenshot"
+  | "recorder"
   | "settings";
 
 /** 悬浮工具栏配置：常驻小工具条，快速呼出各面板 */
@@ -330,6 +347,7 @@ export interface AppConfig {
   toolbar: ToolbarConfig;
   snippets: SnippetsConfig;
   shot: ShotConfig;
+  recorder: RecorderConfig;
   pin: PinConfig;
   annotate: AnnotateConfig;
   panel_positions: Record<string, [number, number]>;

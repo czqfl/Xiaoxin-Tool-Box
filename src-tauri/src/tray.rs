@@ -152,22 +152,44 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         }
         Ok(())
     };
+    // 第一组：面板开关（受功能开关控制，停用即隐藏）
     push_panel(app, "toggle_clipboard", "剪贴板面板", "clipboard", &mut items)?;
     push_panel(app, "toggle_folder", "文件夹面板", "folder", &mut items)?;
     push_panel(app, "toggle_credential", "账号密码面板", "credentials", &mut items)?;
+    push_panel(app, "toggle_files", "快速文件", "files", &mut items)?;
+    push_panel(app, "toggle_snippets", "常用语速贴", "snippets", &mut items)?;
     push_panel(app, "toggle_port", "端口工具", "port", &mut items)?;
     if enabled("toolbar") {
         items.push(MenuItem::with_id(app, "toggle_toolbar", "悬浮工具栏", true, None::<&str>)?);
     }
+    // 第二组：动作类功能（截图/取色/贴图/录屏/翻译）
+    let sep1 = tauri::menu::PredefinedMenuItem::separator(app)?;
+    let mut action_items: Vec<MenuItem<R>> = Vec::new();
+    if enabled("screenshot") {
+        action_items.push(MenuItem::with_id(app, "shot_begin", "截  图", true, None::<&str>)?);
+        action_items.push(MenuItem::with_id(app, "shot_picker", "屏幕取色", true, None::<&str>)?);
+        action_items.push(MenuItem::with_id(app, "pins_toggle", "显示 / 隐藏贴图", true, None::<&str>)?);
+        action_items.push(MenuItem::with_id(app, "pins_close", "关闭全部贴图", true, None::<&str>)?);
+    }
+    if enabled("recorder") {
+        action_items.push(MenuItem::with_id(app, "start_recorder", "屏幕录制 (GIF)", true, None::<&str>)?);
+    }
+    if enabled("translation") {
+        action_items.push(MenuItem::with_id(app, "translate_now", "划词翻译", true, None::<&str>)?);
+    }
     let open_item = MenuItem::with_id(app, "open_settings", "打开设置", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-    // 分隔线：把「面板开关」与「打开设置/退出」分成两组，右键菜单一眼能看清
-    // 结构（尤其最底部的「退出」，避免与上方开关项挤在一起被忽略）
+    // 分隔线：把「面板开关」「动作」「打开设置/退出」分成三组，
+    // 右键菜单一眼能看清结构（尤其最底部的「退出」）
     let sep = tauri::menu::PredefinedMenuItem::separator(app)?;
     let mut refs: Vec<&dyn tauri::menu::IsMenuItem<R>> = items
         .iter()
         .map(|i| i as &dyn tauri::menu::IsMenuItem<R>)
         .collect();
+    refs.push(&sep1);
+    for a in &action_items {
+        refs.push(a);
+    }
     refs.push(&sep);
     refs.push(&open_item);
     refs.push(&quit_item);
@@ -192,6 +214,23 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
                 crate::panel::toggle_panel(app, crate::panel::CREDENTIAL_PANEL)
             }
             "toggle_port" => crate::panel::toggle_panel(app, crate::panel::PORT_PANEL),
+            "toggle_files" => crate::panel::toggle_panel(app, crate::panel::FILES_PANEL),
+            "toggle_snippets" => crate::panel::toggle_panel(app, crate::panel::SNIPPETS_PANEL),
+            // 截图 / 取色：与全局快捷键同一实现
+            "shot_begin" => {
+                let _ = crate::screenshot::begin_impl(app.clone(), false);
+            }
+            "shot_picker" => {
+                let _ = crate::screenshot::begin_impl(app.clone(), true);
+            }
+            "pins_toggle" => crate::pin::toggle_all(app),
+            "pins_close" => {
+                let _ = crate::pin::hide_all_impl(app);
+            }
+            // 屏幕录制：弹出全屏选区窗框选录制区域
+            "start_recorder" => crate::recorder::begin_select(app),
+            // 划词翻译
+            "translate_now" => crate::translate::trigger_selection_translate(app),
             // 悬浮工具栏：切换显隐（位置自动记忆）
             "toggle_toolbar" => crate::panel::toggle_toolbar(app),
             "open_settings" => show_settings_window(app),

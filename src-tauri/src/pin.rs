@@ -880,6 +880,15 @@ pub fn pin_file_path(app: AppHandle, id: String) -> Option<String> {
     entries.iter().find(|p| p.id == id).map(|p| p.file.clone())
 }
 
+/// 另存为：把贴图原图文件复制到用户指定位置（右键菜单「另存为...」）。
+/// dest 来自系统保存对话框，这里只做基本的路径合法性兜底。
+#[tauri::command]
+pub fn pin_save_as(app: AppHandle, id: String, dest: String) -> Result<(), String> {
+    let file = pin_file_path(app, id).ok_or("not found")?;
+    if dest.is_empty() || dest.contains("..") { return Err("bad dest".into()); }
+    std::fs::copy(&file, &dest).map(|_| ()).map_err(|e| format!("copy: {e}"))
+}
+
 /// 贴图 OCR 文字识别：Rust 直读 pins/{id} 图像文件，前端不再 fetch 整图经
 /// IPC 回传——省掉一次协议请求、一份 JS ArrayBuffer 拷贝和整图 IPC 序列化，
 /// 大截图能省几十到上百毫秒。HTML 贴图的 file 是 .html，解码失败返回 Err，

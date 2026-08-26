@@ -22,6 +22,7 @@ import {
   IconFolder,
   IconKey,
   IconPort,
+  IconRecord,
   IconSettings,
   IconSnippet,
   IconTranslate,
@@ -87,6 +88,11 @@ export const TOOLS: Record<ToolKey, { label: string; color: string; icon: React.
     label: "截图",
     color: "var(--tool-screenshot)",
     icon: <IconScreenshot size={14} />,
+  },
+  recorder: {
+    label: "屏幕录制",
+    color: "#ff5c5c",
+    icon: <IconRecord size={14} />,
   },
   settings: {
     label: "打开设置",

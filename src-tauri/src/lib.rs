@@ -4,6 +4,8 @@ mod dupl;
 mod ocr;
 mod screenshot;
 mod pin;
+mod scrollshot;
+mod recorder;
 mod clipboard;
 mod config;
 #[cfg(windows)]
@@ -38,7 +40,7 @@ pub fn defer_to_main_loop<R: tauri::Runtime>(app: tauri::AppHandle<R>, f: impl F
 ///
 /// 【血泪坑】不能只判断 `app.config().build.dev_url.is_some()` —— tauri.conf.json
 /// 里的 devUrl 在打包后【依然存在】，直接用它会让生产环境运行时创建的窗口
-/// （截图遮罩 / 贴图 / 重建的面板与设置窗）去连 `http://localhost:1422`，
+/// （截图遮罩 / 贴图 / 重建的面板与设置窗）去连 `http://localhost:1423`，
 /// 表现为 ERR_CONNECTION_REFUSED + 关不掉的空白错误页（dev 模式正常，打包必现）。
 /// 必须叠加 `tauri::is_dev()`（编译期 dev cfg）判定。
 pub(crate) fn frontend_url<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::WebviewUrl {
@@ -146,7 +148,7 @@ fn apply_panel_acrylic<R: tauri::Runtime>(app: &tauri::AppHandle<R>, acrylic: bo
 
 /// 把 webview 默认背景设为全透明（亚克力层透出的前提；见 apply_panel_acrylic 注释）。
 #[cfg(windows)]
-fn make_webview_transparent<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+pub(crate) fn make_webview_transparent<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
     let _ = window.with_webview(|wv| {
         use webview2_com::Microsoft::Web::WebView2::Win32::{
             COREWEBVIEW2_COLOR, ICoreWebView2Controller2,
@@ -320,6 +322,14 @@ pub fn run() {
                     crate::screenshot::prewarm_overlays(&h);
                 });
             }
+            // 长截图进度条窗预热：同遮罩窗策略，首次点「长截图」瞬时显示
+            {
+                let h = handle.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(1800));
+                    crate::scrollshot::prewarm(&h);
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -424,6 +434,19 @@ pub fn run() {
             // 原生拖拽层：框选/缩放热路径由 Rust 直绘冻结层，前端只报开始/结束
             screenshot::shot_drag_begin,
             screenshot::shot_drag_end,
+            // 滚动长截图（手动滚动 + 拼接，独立模块）
+            scrollshot::scrollshot_begin,
+            scrollshot::scrollshot_stop,
+            scrollshot::scrollshot_cancel,
+            scrollshot::scrollshot_dismiss,
+            scrollshot::scrollshot_frame_info,
+            scrollshot::scrollshot_save_as,
+            // 屏幕录制 GIF（独立选区 + 控制条）
+            recorder::rec_begin,
+            recorder::rec_select_cancel,
+            recorder::recorder_start,
+            recorder::recorder_stop,
+            recorder::rec_dismiss,
             pin::pin_create,
             pin::pin_from_clipboard,
             pin::pin_list,
@@ -443,6 +466,8 @@ pub fn run() {
             pin::pin_file_path,
             // 贴图 Alt 文字选择：Rust 直读贴图文件识别（免前端传图）
             pin::pin_ocr,
+            // 贴图另存为（右键菜单）
+            pin::pin_save_as,
             // 贴图图片展示走协议 GET /pin/{id} 直出文件字节，pin_image_data 已删
             pin::pin_copy_image,
             // 按原始格式复制（图片→位图，文本/富文本→HTML+纯文本）
@@ -462,6 +487,17 @@ pub fn run() {
             {
                 if label.starts_with(screenshot::OVERLAY_PREFIX) {
                     screenshot::on_overlay_destroyed(app_handle);
+                } else if label.starts_with(scrollshot::BAR_LABEL) {
+                    // 长截图控制条被 Alt+F4 等途径关闭：置停止标志，
+                    // 后台线程收尾落盘（已有内容不丢）
+                    scrollshot::on_bar_destroyed(app_handle);
+                } else if label.starts_with(scrollshot::FRAME_LABEL) {
+                    scrollshot::on_frame_destroyed(app_handle);
+                } else if label.starts_with(recorder::SELECT_LABEL) {
+                    recorder::on_select_destroyed(app_handle);
+                } else if label.starts_with(recorder::BAR_LABEL) {
+                    // 录制控制条被销毁（Alt+F4）：等同点停止，GIF 正常收尾
+                    recorder::on_bar_destroyed(app_handle);
                 } else if label.starts_with(pin::STAGING_LABEL) {
                     // 复用贴图窗（待命池，pin-staging / pin-staging-N）被销毁
                     // （关闭其承载的贴图/Alt+F4 等）：清分配关系并补建待命窗，

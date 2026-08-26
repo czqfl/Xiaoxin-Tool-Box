@@ -39,6 +39,8 @@ pub struct ShortcutBindingsInner {
     pub pins_close: Option<Shortcut>,
     /// 屏幕取色（呼出十字取色模式，复用截图遮罩窗）
     pub picker: Option<Shortcut>,
+    /// 屏幕录制 GIF（呼出区域选择）
+    pub recorder: Option<Shortcut>,
 }
 
 pub fn parse(shortcut: &str) -> Result<Shortcut, String> {
@@ -48,7 +50,7 @@ pub fn parse(shortcut: &str) -> Result<Shortcut, String> {
 }
 
 /// 全部快捷键目标（顺序 = 注册顺序 = 绑定表字段顺序）
-const TARGETS: [&str; 11] = [
+const TARGETS: [&str; 12] = [
     "clipboard",
     "folder",
     "credentials",
@@ -60,6 +62,7 @@ const TARGETS: [&str; 11] = [
     "pins",
     "pins_close",
     "picker",
+    "recorder",
 ];
 
 fn is_valid_target(t: &str) -> bool {
@@ -79,6 +82,7 @@ fn config_shortcut(config: &AppConfig, target: &str) -> String {
         "screenshot" => config.shortcuts.screenshot.clone(),
         "pins" => config.shortcuts.pins.clone(),
         "pins_close" => config.shortcuts.pins_close.clone(),
+        "recorder" => config.shortcuts.recorder.clone(),
         _ => config.shortcuts.picker.clone(),
     }
 }
@@ -96,6 +100,7 @@ fn set_config_shortcut(config: &mut AppConfig, target: &str, value: String) {
         "screenshot" => config.shortcuts.screenshot = value,
         "pins" => config.shortcuts.pins = value,
         "pins_close" => config.shortcuts.pins_close = value,
+        "recorder" => config.shortcuts.recorder = value,
         _ => config.shortcuts.picker = value,
     }
 }
@@ -113,6 +118,7 @@ fn set_binding(inner: &mut ShortcutBindingsInner, target: &str, v: Option<Shortc
         "screenshot" => inner.screenshot = v,
         "pins" => inner.pins = v,
         "pins_close" => inner.pins_close = v,
+        "recorder" => inner.recorder = v,
         _ => inner.picker = v,
     }
 }
@@ -190,6 +196,7 @@ pub fn shortcut_test(
             || inner.pins == Some(parsed)
             || inner.pins_close == Some(parsed)
             || inner.picker == Some(parsed)
+            || inner.recorder == Some(parsed)
         {
             return Ok(());
         }
@@ -305,6 +312,7 @@ pub fn shortcut_runtime_bindings(bindings: State<'_, ShortcutBindings>) -> Vec<S
     push("pins", &inner.pins);
     push("pins_close", &inner.pins_close);
     push("picker", &inner.picker);
+    push("recorder", &inner.recorder);
     out
 }
 
@@ -481,6 +489,16 @@ pub fn handle_shortcut_pressed<R: Runtime>(app: &AppHandle<R>, shortcut: &Shortc
     if is_picker {
         crate::storage::diag_write("[shortcut] picker triggered");
         let _ = crate::screenshot::begin_impl(app.clone(), true);
+        return;
+    }
+    // 屏幕录制 GIF
+    let is_recorder = {
+        let inner = bindings.0.lock().unwrap();
+        inner.recorder == Some(*shortcut)
+    };
+    if is_recorder {
+        crate::storage::diag_write("[shortcut] recorder triggered");
+        crate::recorder::begin_select(app);
         return;
     }
     // 贴图显示/隐藏

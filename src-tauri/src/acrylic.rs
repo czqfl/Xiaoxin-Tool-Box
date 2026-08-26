@@ -254,3 +254,13 @@ pub fn force_foreground_robust(hwnd: HWND) {
         }
     }
 }
+
+/// 把窗口从屏幕采集中排除（SetWindowDisplayAffinity / WDA_EXCLUDEFROMCAPTURE）：
+/// DXGI 桌面复制与 GDI 抓屏都拍不到该窗口——滚动长截图的边框指示窗、
+/// 各悬浮控制条绝不能出现在捕获内容里（否则边框会被拼进长图）。
+pub fn exclude_from_capture(hwnd: HWND) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE,
+    };
+    unsafe { SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE).is_ok() }
+}

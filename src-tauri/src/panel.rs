@@ -205,6 +205,11 @@ pub fn panel_toggle(app: tauri::AppHandle, label: String) -> Result<(), String> 
             broadcast_panel_visibility(&app, "screenshot", true);
             return Ok(());
         }
+        "recorder" => {
+            // recorder is not a panel; trigger region select
+            crate::recorder::begin_select(&app);
+            return Ok(());
+        }
         _ => return Err("unknown panel".into()),
     };
     crate::panel::toggle_panel(&app, full);

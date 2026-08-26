@@ -7,9 +7,10 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { listen, emitTo } from "@tauri-apps/api/event";
 import { PhysicalSize } from "@tauri-apps/api/dpi";
+import { save } from "@tauri-apps/plugin-dialog";
 import {
   pinImageUrl, pinUpdate, pinClose, pinSetClickThrough, pinReady, pinHideOne, pinResize, pinKind, diagLog,
-  pinCopyOriginal, pinCopyImageBytes,
+  pinCopyOriginal, pinCopyImageBytes, pinFilePath, pinSaveAs,
 } from "../../core/tauri";
 import { usePinOcrSelect } from "./usePinOcrSelect";
 import "./pin.css";
@@ -441,6 +442,27 @@ export function PinWindow() {
         showBadge("已复制图片", 1200, "copied");
         pinCopyOriginal(pid).catch(() => showBadge("复制失败", 1500, "failed"));
         break;
+      case "save-as": {
+        // 另存为：按原图扩展名建议文件名，把原图文件复制到所选位置
+        void (async () => {
+          try {
+            const src = await pinFilePath(pid);
+            const ext = src ? (src.split(".").pop() || "png").toLowerCase() : "png";
+            const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+            const picked = await save({
+              defaultPath: `pin-${ts}.${ext}`,
+              filters: [{ name: "图片", extensions: [ext] }],
+            });
+            if (!picked) return;
+            await pinSaveAs(pid, picked);
+            showBadge("已保存", 1500, "copied");
+          } catch (err) {
+            void diagLog(`[pin] save-as failed: ${String(err)}`);
+            showBadge("保存失败", 1500, "failed");
+          }
+        })();
+        break;
+      }
       case "toggle-shadow":
         setShadow((s) => !s);
         break;
@@ -521,6 +543,7 @@ export function PinWindow() {
       : [{ id: "copy", label: "复制" }];
     const items = [
       ...copyActions,
+      ...(kind === "image" ? [{ id: "save-as", label: "另存为..." }] : []),
       { id: "toggle-shadow", label: shadow ? "关闭阴影" : "开启阴影" },
       // 鼠标穿透：点击/滚轮全部穿过贴图直达下面的窗口（Snipaste 同款）。
       // 穿透后贴图收不到任何鼠标事件——出口是贴图热键（隐藏后唤回自动解除）

@@ -16,6 +16,10 @@ import { Toolbar } from "./modules/toolbar/Toolbar";
 import { ScreenshotOverlay } from "./modules/screenshot/ScreenshotOverlay";
 import { PinWindow } from "./modules/pin/PinWindow";
 import PinMenu from "./modules/pin/PinMenu";
+import { ScrollShotBar } from "./modules/scrollshot/ScrollShotBar";
+import { ScrollShotFrame } from "./modules/scrollshot/ScrollShotFrame";
+import { RecorderSelect } from "./modules/recorder/RecorderSelect";
+import { RecorderBar } from "./modules/recorder/RecorderBar";
 import { SettingsApp } from "./settings/SettingsApp";
 import { diagLog } from "./core/tauri";
 
@@ -94,6 +98,18 @@ export default function App() {
   }
   if (label.startsWith("shot-overlay")) {
     return <ScreenshotOverlay />;
+  }
+  if (label.startsWith("scrollshot-frame")) {
+    return <ScrollShotFrame />;
+  }
+  if (label.startsWith("scrollshot-bar")) {
+    return <ScrollShotBar />;
+  }
+  if (label.startsWith("rec-select")) {
+    return <RecorderSelect />;
+  }
+  if (label.startsWith("rec-bar")) {
+    return <RecorderBar />;
   }
   if (label.startsWith("pin-menu")) {
     return <PinMenu />;

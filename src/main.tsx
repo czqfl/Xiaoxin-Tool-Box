@@ -14,6 +14,11 @@ async function bootstrap() {
     "snippets-panel",
     "translate-popup",
     "toolbar",
+    // 悬浮控制条/指示窗：同一套透明底 + 主题变量（亚克力由 Rust 端应用）
+    "scrollshot-bar",
+    "scrollshot-frame",
+    "rec-select",
+    "rec-bar",
   ];
   if (panelLabels.includes(label)) {
     document.documentElement.dataset.window = "panel";

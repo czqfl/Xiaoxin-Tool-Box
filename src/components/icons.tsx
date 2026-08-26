@@ -296,6 +296,14 @@ export const IconScreenshot = (p: IconProps) => (
   </svg>
 );
 
+/** 屏幕录制：实心圆点（REC 录制通用符号） */
+export const IconRecord = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="9" />
+    <circle cx="12" cy="12" r="4" fill="currentColor" stroke="none" />
+  </svg>
+);
+
 export const IconEye = (p: IconProps & { filled?: boolean }) => {
   const { filled, ...rest } = p;
   return (
