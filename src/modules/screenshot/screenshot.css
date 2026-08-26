@@ -262,15 +262,20 @@ html[data-window="shot"] body { background: transparent; }
   backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
   box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 4px 14px rgba(0,0,0,0.35);
 }
+/* 两栏网格：固定宽「按键列」+ 说明列，保证每行说明文字落在同一竖线（对齐） */
 .shot-hint-row {
-  display: flex; align-items: center; gap: 12px;
+  display: grid; grid-template-columns: 96px 1fr; align-items: center;
+  column-gap: 12px;
   color: rgba(255,255,255,0.9); font-size: 15px; line-height: 2.1; white-space: nowrap;
 }
+/* 按键列：包住单/双 kbd，统一占据 96px，说明文字因此对齐 */
+.shot-hint-keys { display: flex; align-items: center; justify-content: center; gap: 4px; }
 .shot-hint-row kbd {
-  min-width: 26px; text-align: center; padding: 2px 9px; border-radius: 5px;
+  flex: none; min-width: 26px; text-align: center; padding: 2px 9px; border-radius: 5px;
   border: 1px solid rgba(255,255,255,0.45); background: rgba(255,255,255,0.09);
   color: #fff; font: 600 13px/1.7 Consolas, "Courier New", monospace;
 }
+.shot-hint-desc { text-align: left; }
 /* 正在浏览历史截屏时的引导行（主题色高亮） */
 .shot-hint-row.shot-hint-viewing { color: var(--accent-text, #8ab4ff); }
 .shot-hint-row.shot-hint-viewing kbd { border-color: currentColor; }

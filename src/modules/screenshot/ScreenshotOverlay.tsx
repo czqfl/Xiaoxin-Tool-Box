@@ -2153,27 +2153,27 @@ export function ScreenshotOverlay() {
           style={{ visibility: (dragging || hintCovered) ? "hidden" : "visible" }}>
           {(phase === "selected" || dragging) ? (
             <>
-              <div className="shot-hint-row"><kbd>Enter</kbd><span>复制到剪贴板</span></div>
-              <div className="shot-hint-row"><kbd>{cfg.shortcuts.pins}</kbd><span>贴到屏幕</span></div>
-              {annos.length > 0 && <div className="shot-hint-row"><kbd>Ctrl+Z</kbd><span>撤销标注</span></div>}
-              <div className="shot-hint-row"><kbd>Esc</kbd><span>退出截图</span></div>
+              <div className="shot-hint-row"><span className="shot-hint-keys"><kbd>Enter</kbd></span><span className="shot-hint-desc">复制到剪贴板</span></div>
+              <div className="shot-hint-row"><span className="shot-hint-keys"><kbd>{cfg.shortcuts.pins}</kbd></span><span className="shot-hint-desc">贴到屏幕</span></div>
+              {annos.length > 0 && <div className="shot-hint-row"><span className="shot-hint-keys"><kbd>Ctrl+Z</kbd></span><span className="shot-hint-desc">撤销标注</span></div>}
+              <div className="shot-hint-row"><span className="shot-hint-keys"><kbd>Esc</kbd></span><span className="shot-hint-desc">退出截图</span></div>
             </>
           ) : (
             <>
               {histViewing && (
-                <div className="shot-hint-row shot-hint-viewing"><kbd>&lt;</kbd><span>正在查看历史截屏，按 &lt; 返回实时画面</span></div>
+                <div className="shot-hint-row shot-hint-viewing"><span className="shot-hint-keys"><kbd>&lt;</kbd></span><span className="shot-hint-desc">正在查看历史截屏，按 &lt; 返回实时画面</span></div>
               )}
-              {cfg.shot.smart_detect && <div className="shot-hint-row"><kbd>左键点击</kbd><span>采纳识别的窗口</span></div>}
-              <div className="shot-hint-row"><kbd>左键拖拽</kbd><span>自定义框选区域</span></div>
+              {cfg.shot.smart_detect && <div className="shot-hint-row"><span className="shot-hint-keys"><kbd>左键点击</kbd></span><span className="shot-hint-desc">采纳识别的窗口</span></div>}
+              <div className="shot-hint-row"><span className="shot-hint-keys"><kbd>左键拖拽</kbd></span><span className="shot-hint-desc">自定义框选区域</span></div>
               {cfg.shot.history_enabled !== false && (
                 <>
-                  <div className="shot-hint-row"><kbd>&lt;</kbd><kbd>&gt;</kbd><span>翻看历史截屏，可重新框选</span></div>
-                  <div className="shot-hint-row"><kbd>H</kbd><span>历史截屏列表</span></div>
+                  <div className="shot-hint-row"><span className="shot-hint-keys"><kbd>&lt;</kbd><kbd>&gt;</kbd></span><span className="shot-hint-desc">翻看历史截屏，可重新框选</span></div>
+                  <div className="shot-hint-row"><span className="shot-hint-keys"><kbd>H</kbd></span><span className="shot-hint-desc">历史截屏列表</span></div>
                 </>
               )}
-              <div className="shot-hint-row"><kbd>C</kbd><span>取色</span></div>
-              <div className="shot-hint-row"><kbd>{cfg.shortcuts.pins}</kbd><span>快速贴图</span></div>
-              <div className="shot-hint-row"><kbd>Esc</kbd><span>退出截图</span></div>
+              <div className="shot-hint-row"><span className="shot-hint-keys"><kbd>C</kbd></span><span className="shot-hint-desc">取色</span></div>
+              <div className="shot-hint-row"><span className="shot-hint-keys"><kbd>{cfg.shortcuts.pins}</kbd></span><span className="shot-hint-desc">快速贴图</span></div>
+              <div className="shot-hint-row"><span className="shot-hint-keys"><kbd>Esc</kbd></span><span className="shot-hint-desc">退出截图</span></div>
             </>
           )}
         </div>
