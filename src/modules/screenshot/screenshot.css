@@ -9,49 +9,59 @@ html[data-window="shot"] body { background: transparent; }
 @keyframes shot-dim-in { from { opacity: 0; } to { opacity: 1; } }
 .shot-dim-fade { animation: shot-dim-in 180ms ease-out both; }
 
-/* ---- 放大镜：镜头区固定正方形，信息区在镜头下方分三行（坐标/颜色/提示） ---- */
+/* ---- 放大镜：镜头区固定正方形，信息区在镜头下方分多行（坐标/颜色/提示） ---- */
 /* z-index 260 > 工具栏 200：鼠标移到工具栏附近时坐标/颜色信息不被盖住。
-   整体走轻量玻璃卡片：细描边 + 轻投影，不再用粗圆角+重投影显得边框厚重。
    镜头框为与选区边框同款：1.5px 主题色细边 + 轻辉光，贴近 Snipaste。
-   【宽边根因】卡片宽 176px、镜头 140px，镜头左右各露 18px 卡片背景，
-   亚克力关闭（--panel-opacity=1）时是实心色条 → "左右很粗的边框"。
-   MAG_BOX_W 已改为 140（与镜头同宽），左右零边条；overflow 不再裁剪，
-   否则镜头外辉光会被卡片裁掉 */
+   【结构】卡片本身完全透明（仅定位容器）——圆形镜头内接圆之外的角落
+   （左上/右上）直接透出屏幕，不再露出卡片背景"边框残影"；玻璃底只给
+   镜头正下方的信息块。左右无边条（卡片与镜头同宽），顶部无边距 */
 .shot-mag {
   position: fixed; z-index: 260;
-  background: rgba(var(--bg-panel-rgb), var(--panel-opacity));
-  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-  border-radius: 4px;
-  box-shadow: 0 3px 10px rgba(0,0,0,0.22);
+  background: transparent;
 }
 /* 镜头框：与截图选区边框同款（1.5px 主题色细边 + 轻辉光），方角更干净。
    不加黑色外环——Snipaste 只有一圈主题色细边，黑环会显得像"黑色边框"。
-   margin 顶部分 0：此前 6px 顶部边距会露出卡片背景，看起来像"上方还有边框" */
+   width 100% 撑满卡片（与镜头同宽 168px），aspect-ratio 保证正方形 */
 .shot-mag-lens {
-  box-sizing: border-box; width: 140px; height: 140px; margin: 0 auto;
+  box-sizing: border-box; width: 100%; aspect-ratio: 1 / 1;
   border-radius: 2px; overflow: hidden;
   border: 1.5px solid var(--accent, #4c8dff);
   box-shadow:
     0 0 8px rgba(var(--accent-rgb, 76,141,255), 0.4),
     inset 0 0 6px rgba(var(--accent-rgb, 76,141,255), 0.2);
 }
-/* 圆形放大镜（Tab 切换）：镜头圆角 50%，canvas 被 overflow 裁剪成圆形取景 */
+/* 圆形放大镜（Tab 切换）：镜头圆角 50%，canvas 被 overflow 裁剪成圆形取景；
+   内接圆外的四角区域为透明，直接透出屏幕（不再露出卡片背景） */
 .shot-mag-lens--circle {
   border-radius: 50%;
 }
 .shot-mag-lens canvas { display: block; width: 100%; height: 100%; }
-/* 信息区：镜头正下方（卡片与镜头同宽 140px）。保留呼吸感的内边距与行距，
-   放不下的行（如 RGB 长色值 / 多提示键）自然换行，不再硬挤 */
-.shot-mag-info { padding: 7px 8px 8px; display: flex; flex-direction: column; gap: 4px; }
+/* 信息块：镜头正下方，独占玻璃底（毛玻璃 + 面板底色/透明度联动），
+   上下圆角分别贴合镜头与悬浮效果。保留呼吸感，放不下自然换行 */
+.shot-mag-info {
+  padding: 8px 8px 9px; display: flex; flex-direction: column; gap: 4px;
+  background: rgba(var(--bg-panel-rgb), var(--panel-opacity));
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border-radius: 0 0 8px 8px;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.22);
+}
 .shot-mag-row {
   text-align: center; font-size: 12px; line-height: 1.55; color: #fff;
   font-family: Consolas, "Courier New", monospace; white-space: nowrap;
 }
-.shot-mag-colorline { display: flex; align-items: center; justify-content: center; gap: 5px;
-  flex-wrap: wrap; padding: 2px 0 1px; }
-/* 放大镜内 140px 窄幅：色值列弹性收缩，格式徽标收窄，保证不溢出 */
-.shot-mag .shot-color-val { min-width: 0; flex: 1 1 auto; font-size: 11.5px; }
+/* 颜色行：色块 + 色值 + 格式徽标【一行展示，不换行】（用户要求保持） */
+.shot-mag-colorline { display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 2px 0 1px; }
+/* 放大镜内 168px 窄幅：色值列按内容伸缩（RGB 最长 "255 , 255 , 255"），
+   格式徽标收窄，保证与色值同行放下 */
+.shot-mag .shot-color-val { min-width: 0; flex: 0 1 auto; font-size: 11px; }
 .shot-mag .shot-mag-fmt { padding: 0 4px; font-size: 8.5px; }
+/* 快捷键提示：一行一个（C / Shift / Tab 各占一行） */
+.shot-mag-hints { display: flex; flex-direction: column; gap: 1px;
+  font-size: 10.5px; line-height: 1.6; color: rgba(255,255,255,0.68);
+  font-family: "Microsoft YaHei", sans-serif;
+  border-top: 1px solid rgba(255,255,255,0.1); margin-top: 4px; padding-top: 5px; }
+.shot-mag-hints div { white-space: nowrap; }
 /* 当前颜色格式徽标（RGB/HEX）：让用户随时知道 Shift 切到了哪种格式 */
 .shot-mag-fmt {
   flex: none; padding: 1px 5px; border-radius: 4px;
@@ -59,9 +69,6 @@ html[data-window="shot"] body { background: transparent; }
   background: rgba(var(--accent-rgb, 76,141,255), 0.18);
   color: #fff; font: 600 9px/1.4 Consolas, monospace; letter-spacing: 0.5px;
 }
-.shot-mag-hints { font-size: 10px; line-height: 1.9; color: rgba(255,255,255,0.68);
-  font-family: "Microsoft YaHei", sans-serif; white-space: normal;
-  border-top: 1px solid rgba(255,255,255,0.1); margin-top: 2px; padding-top: 5px; }
 /* 键帽式提示：C / Shift 做成小键帽，精致不糊字 */
 .shot-mag-hints b {
   display: inline-block; min-width: 15px; margin: 0 3px; padding: 1px 5px;

@@ -26,11 +26,12 @@ interface Anno {
   sid?: number;
 }
 
-const MAG = 140, MAG_Z = 2;
-/** 放大镜整体宽度：与镜头同宽（140px），镜头左右不留卡片边条——
- *  此前 176px 时镜头两侧各露 18px 卡片背景，亚克力关闭时是实心色条，
- *  看起来像"左右很粗的边框"（用户反馈）。信息区压缩进镜头正下方 */
-const MAG_BOX_W = 140;
+const MAG = 168, MAG_Z = 2;
+/** 放大镜整体宽度：与镜头同宽（168px，镜头适当放大），镜头左右不留卡片边条。
+ *  168px 下信息区一行可放下「色块 + RGB 色值(255 , 255 , 255) + 格式徽标」，
+ *  无需换行；此前 140px 时 RGB 色值放不下会挤压/换行（用户反馈文字排列不齐）。
+ *  位置翻转阈值同样按此宽度计算 */
+const MAG_BOX_W = 168;
 
 /* 画布位图(物理像素)与 CSS 像素的比例由组件内的 cssScale() 提供（见下方定义），
    统一在「往画布画 / 采样冻结帧」两处边界乘以它——彻底消除高 DPI（150%）下
@@ -1986,7 +1987,11 @@ export function ScreenshotOverlay() {
               <span ref={magValRef} className="shot-color-val">--</span>
               <span ref={magFmtRef} className="shot-mag-fmt">RGB</span>
             </div>
-            <div className="shot-mag-row shot-mag-hints"><b>C</b> 复制 <b>Shift</b> 换格式 <b>Tab</b> 圆形/方形</div>
+            <div className="shot-mag-row shot-mag-hints">
+              <div><b>C</b> 复制</div>
+              <div><b>Shift</b> 换格式</div>
+              <div><b>Tab</b> 圆形/方形</div>
+            </div>
             <div ref={magCopiedRef} className="shot-copied shot-copied-center" style={{display:"none"}} />
           </div>
         </div>
