@@ -254,8 +254,12 @@ html[data-window="shot"] body { background: transparent; }
 .shot-hint-panel {
   /* bottom 抬高到 Windows 任务栏上方（任务栏约 40~48px），避免被遮挡 */
   position: fixed; left: 12px; bottom: 56px; z-index: 55; pointer-events: none;
-  background: rgba(12,12,14,0.72); border-radius: 10px; padding: 12px 18px 13px;
-  backdrop-filter: blur(8px);
+  /* 背景与通用设置「亚克力板 / 面板底色不透明度」统一：
+     用面板底色 RGB + 全局 --panel-opacity（acrylic_opacity/100，关闭时=1），
+     不再写死深色 0.72——透明度随通用设置联动、默认更通透，且平底无圆角 */
+  background: rgba(var(--bg-panel-rgb), var(--panel-opacity));
+  border-radius: 0; padding: 12px 18px 13px;
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
   box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 4px 14px rgba(0,0,0,0.35);
 }
 .shot-hint-row {
