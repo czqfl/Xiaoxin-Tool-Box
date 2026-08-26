@@ -18,6 +18,8 @@ export interface GlassOption {
   group?: string;
   /** 禁用项：不可点击、半透明（如"正在扫描…"、自定义占位） */
   disabled?: boolean;
+  /** 预览色块（CSS background 值，如主题色）：选项与按钮左侧显示小色点，提升辨识度 */
+  swatch?: string;
 }
 
 export function GlassSelect({
@@ -102,6 +104,9 @@ export function GlassSelect({
         {current?.icon && (
           <img className="glass-select-btn-icon" src={current.icon} alt="" draggable={false} />
         )}
+        {current?.swatch && (
+          <span className="glass-select-swatch" style={{ background: current.swatch }} aria-hidden />
+        )}
         <span className="glass-select-label">{current?.label ?? value}</span>
         <span className="glass-select-caret">▾</span>
       </button>
@@ -141,6 +146,9 @@ export function GlassSelect({
                   <span className="glass-select-opt-label">
                     {o.icon && (
                       <img className="glass-select-opt-icon" src={o.icon} alt="" draggable={false} />
+                    )}
+                    {o.swatch && (
+                      <span className="glass-select-swatch" style={{ background: o.swatch }} aria-hidden />
                     )}
                     <span className="glass-select-opt-text">{o.label}</span>
                   </span>

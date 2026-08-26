@@ -1,5 +1,7 @@
 /* 玻璃风格下拉选择器：按钮（玻璃底）+ 自绘弹出层（毛玻璃面板）。
-   替代原生 <select>——原生选项列表系统渲染、与应用风格违和 */
+   替代原生 <select>——原生选项列表系统渲染、与应用风格违和。
+   弹出层 position 由组件内联 fixed 接管（逃逸祖先 overflow 裁切），
+   此处样式仅作兜底与视觉定义。 */
 
 .glass-select {
   position: relative;
@@ -12,12 +14,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
-  max-width: 136px;
+  max-width: 150px;
   width: 100%;
-  padding: 5px 10px;
-  border-radius: 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border-subtle);
   background: var(--bg-input-glass);
   color: var(--text-primary);
@@ -38,34 +40,54 @@
   border-color: var(--border-strong);
 }
 .glass-select-btn.open {
-  border-color: rgba(var(--accent-rgb), 0.5);
+  border-color: rgba(var(--accent-rgb), 0.55);
   box-shadow: var(--ring);
 }
 .glass-select-label {
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: left;
 }
 .glass-select-caret {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: 9px;
   color: var(--text-tertiary);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.glass-select-btn.open .glass-select-caret {
+  transform: rotate(180deg);
 }
 
-/* 弹出层：毛玻璃面板 */
+/* 预览色块：选项与按钮左侧的小色点（如主题色），提升辨识度与精致感 */
+.glass-select-swatch {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2), 0 1px 1px rgba(0, 0, 0, 0.14);
+}
+.glass-select-btn .glass-select-swatch {
+  margin-right: -2px;
+}
+
+/* 弹出层：毛玻璃面板（blur + 精致阴影 + 圆角，与设置卡片/菜单同一玻璃语言） */
 .glass-select-pop {
   position: absolute;
-  top: calc(100% + 4px);
+  top: calc(100% + 6px);
   left: 0;
   z-index: 120;
   min-width: 100%;
-  max-height: 240px;
+  max-height: 280px;
   overflow-y: auto;
-  padding: 4px;
-  border-radius: 12px;
+  padding: 6px;
+  border-radius: var(--radius-lg);
   border: 1px solid var(--border-strong);
-  background: rgba(var(--bg-panel-rgb), 0.97);
-  box-shadow: var(--shadow-menu);
+  background: rgba(var(--bg-panel-rgb), 0.82);
+  backdrop-filter: blur(24px) saturate(150%);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  box-shadow: var(--shadow-menu), inset 0 0 0 1px rgba(255, 255, 255, 0.06);
   animation: glass-pop-in var(--dur-fast) var(--ease-out);
 }
 @keyframes glass-pop-in {
@@ -78,14 +100,16 @@
     transform: translateY(0) scale(1);
   }
 }
+
+/* 选项 */
 .glass-select-opt {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   width: 100%;
-  padding: 6px 10px;
-  border-radius: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
   font-size: 12px;
   color: var(--text-primary);
   white-space: nowrap;
@@ -100,6 +124,7 @@
 .glass-select-opt.selected {
   color: var(--accent);
   font-weight: 600;
+  background: var(--accent-soft);
 }
 .glass-select-opt.disabled {
   opacity: 0.55;
@@ -116,7 +141,7 @@
 .glass-select-opt-label {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   min-width: 0;
   overflow: hidden;
 }
@@ -124,13 +149,18 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* 分组标题（如「常用编辑器」「浏览器」） */
+
+/* 分组标题（如「浅色主题」「深色主题」）：大写小字 + 字距 + 底部发丝分隔线，
+   把选项收束成清晰的「分区」，告别廉价的小灰字 */
 .glass-select-group {
-  padding: 7px 10px 3px;
+  padding: 10px 10px 5px;
+  margin: 2px 2px 3px;
   font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.4px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
   color: var(--text-tertiary);
+  border-bottom: 1px solid var(--border-subtle);
 }
 .glass-select-opt-check {
   flex-shrink: 0;

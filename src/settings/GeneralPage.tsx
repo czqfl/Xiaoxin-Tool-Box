@@ -132,13 +132,13 @@ export function GeneralPage() {
             value={config.general.theme}
             onChange={(v) => patchGeneral({ theme: v as ThemeMode })}
             options={[
-              { value: "system", label: "跟随系统" },
-              { value: "light", label: "浅色", group: "浅色主题" },
-              { value: "mint", label: "浅青", group: "浅色主题" },
-              { value: "skyblue", label: "浅蓝", group: "浅色主题" },
-              { value: "red", label: "红色", group: "浅色主题" },
-              { value: "orange", label: "橙色", group: "浅色主题" },
-              { value: "dark", label: "深色", group: "深色主题" },
+              { value: "system", label: "跟随系统", swatch: "linear-gradient(135deg,#eef0f3 0 50%,#2b2f36 50% 100%)" },
+              { value: "light", label: "浅色", swatch: "#eef0f3", group: "浅色主题" },
+              { value: "mint", label: "浅青", swatch: "#0f9f8c", group: "浅色主题" },
+              { value: "skyblue", label: "浅蓝", swatch: "#4c8dff", group: "浅色主题" },
+              { value: "red", label: "红色", swatch: "#e5484d", group: "浅色主题" },
+              { value: "orange", label: "橙色", swatch: "#e58a2b", group: "浅色主题" },
+              { value: "dark", label: "深色", swatch: "#2b2f36", group: "深色主题" },
             ]}
           />
         </SettingRow>
