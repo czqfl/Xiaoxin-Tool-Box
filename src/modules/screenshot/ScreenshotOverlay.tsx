@@ -26,7 +26,7 @@ interface Anno {
   sid?: number;
 }
 
-const MAG = 140, MAG_Z = 8;
+const MAG = 140, MAG_Z = 2;
 /** 放大镜整体宽度：镜头区保持 MAG×MAG 正方形，信息区比镜头宽、文字不截断 */
 const MAG_BOX_W = 176;
 
