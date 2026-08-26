@@ -8,6 +8,7 @@ import {
   importConfigFrom,
 } from "../core/tauri";
 import { broadcastConfigChanged } from "../core/events";
+import { GlassSelect } from "../components/GlassSelect";
 import {
   Segmented,
   SettingGroup,
@@ -126,19 +127,19 @@ export function GeneralPage() {
       </SettingGroup>
 
       <SettingGroup>
-        <SettingRow title="主题模式" desc="跟随系统将根据 Windows 外观自动切换">
-          <Segmented<ThemeMode>
+        <SettingRow title="主题" desc="跟随系统按 Windows 外观自动切换；其余为固定浅色 / 深色配色">
+          <GlassSelect
             value={config.general.theme}
+            onChange={(v) => patchGeneral({ theme: v as ThemeMode })}
             options={[
               { value: "system", label: "跟随系统" },
-              { value: "light", label: "浅色" },
-              { value: "mint", label: "浅青" },
-              { value: "skyblue", label: "浅蓝" },
-              { value: "red", label: "红色" },
-              { value: "orange", label: "橙色" },
-              { value: "dark", label: "深色" },
+              { value: "light", label: "浅色", group: "浅色主题" },
+              { value: "mint", label: "浅青", group: "浅色主题" },
+              { value: "skyblue", label: "浅蓝", group: "浅色主题" },
+              { value: "red", label: "红色", group: "浅色主题" },
+              { value: "orange", label: "橙色", group: "浅色主题" },
+              { value: "dark", label: "深色", group: "深色主题" },
             ]}
-            onChange={(v) => patchGeneral({ theme: v })}
           />
         </SettingRow>
       </SettingGroup>

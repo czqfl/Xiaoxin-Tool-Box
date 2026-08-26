@@ -48,24 +48,27 @@ html[data-window="shot"] body { background: transparent; }
   padding: 8px 8px 9px; display: flex; flex-direction: column; gap: 4px;
 }
 .shot-mag-row {
-  text-align: center; font-size: 12px; line-height: 1.55; color: #fff;
+  text-align: center; font-size: 12px; line-height: 1.55; color: var(--ovl-fg);
   font-family: Consolas, "Courier New", monospace; white-space: nowrap;
 }
 /* 颜色行：色块 + 色值 + 格式徽标【一行展示，不换行】（用户要求保持） */
 .shot-mag-colorline { display: flex; align-items: center; justify-content: center; gap: 6px;
   padding: 2px 0 1px; }
 /* 放大镜内 168px 窄幅：色值列按内容伸缩（RGB 最长 "255 , 255 , 255"），
-   格式徽标收窄，保证与色值同行放下 */
-.shot-mag .shot-color-val { min-width: 0; flex: 0 1 auto; font-size: 11px; }
-.shot-mag .shot-mag-fmt { padding: 0 4px; font-size: 8.5px; }
+   格式徽标收窄，保证与色值同行放下。
+   放大镜卡片是「浅色主题下的浅玻璃」，色值/格式徽标必须随主题翻转文字色
+   （var(--ovl-fg)）；作用域限定到 .shot-mag 以免破坏写死深色底的取色面板
+   （.shot-picker-panel 内的 .shot-color-val/.shot-mag-fmt 仍保持白字） */
+.shot-mag .shot-color-val { min-width: 0; flex: 0 1 auto; font-size: 11px; color: var(--ovl-fg); }
+.shot-mag .shot-mag-fmt { padding: 0 4px; font-size: 8.5px; color: var(--ovl-fg); }
 /* 快捷键提示：一行一个（C / Shift / Tab 各占一行）。
    与左下角 .shot-hint-row 同款两栏对齐：固定宽键帽列（居中）+ 说明列（左对齐），
    避免「C/复制」与「Shift/换格式」因键帽宽度不同导致说明文字错位。
    收窄上下间距（line-height/gap/margin/padding）消除原多余行距 */
 .shot-mag-hints { display: flex; flex-direction: column; gap: 2px;
-  font-size: 11px; line-height: 1.3; color: rgba(255,255,255,0.72);
+  font-size: 11px; line-height: 1.3; color: var(--ovl-fg-dim);
   font-family: "Microsoft YaHei", sans-serif;
-  border-top: 1px solid rgba(255,255,255,0.1); margin-top: 3px; padding-top: 4px; }
+  border-top: 1px solid var(--ovl-line); margin-top: 3px; padding-top: 4px; }
 .shot-mag-hints div { display: grid; grid-template-columns: 40px 1fr; column-gap: 8px; align-items: center; white-space: nowrap; }
 /* 当前颜色格式徽标（RGB/HEX）：让用户随时知道 Shift 切到了哪种格式 */
 .shot-mag-fmt {
@@ -74,13 +77,14 @@ html[data-window="shot"] body { background: transparent; }
   background: rgba(var(--accent-rgb, 76,141,255), 0.18);
   color: #fff; font: 600 9px/1.4 Consolas, monospace; letter-spacing: 0.5px;
 }
-/* 键帽式提示：C / Shift 做成小键帽，精致不糊字 */
+/* 键帽式提示：C / Shift 做成小键帽，精致不糊字。
+   文字/描边/底随主题翻转（浅色主题=深字+浅描边+浅底），作用域限定 .shot-mag */
 .shot-mag-hints b {
   display: inline-block; min-width: 15px; margin: 0; padding: 1px 5px;
   justify-self: center;
-  border-radius: 4px; border: 1px solid rgba(255,255,255,0.32);
-  background: rgba(255,255,255,0.09);
-  color: #fff; font: 600 10px/1.5 Consolas, "Courier New", monospace; text-align: center;
+  border-radius: 4px; border: 1px solid var(--ovl-chip-bd);
+  background: var(--ovl-chip-bg);
+  color: var(--ovl-fg); font: 600 10px/1.5 Consolas, "Courier New", monospace; text-align: center;
 }
 
 /* ---- 取色共用元素（放大镜信息行 / 独立取色面板） ---- */
@@ -89,10 +93,11 @@ html[data-window="shot"] body { background: transparent; }
 .shot-color-swatch { display: inline-block; flex: none; border-radius: 2px; border: 1px solid rgba(255,255,255,0.9); background: #000; box-shadow: 0 0 0 1px rgba(0,0,0,0.25); }
 .shot-color-swatch-sm { width: 13px; height: 13px; }
 .shot-color-swatch-md { width: 16px; height: 16px; }
-/* 放大镜实时颜色块：放大到 20px 并加主题色辉光，明确标识「光标处实时取色」 */
+/* 放大镜实时颜色块：放大到 20px 并加主题色辉光，明确标识「光标处实时取色」。
+   描边随主题翻转（浅色主题=深描边，避免白边在浅玻璃上消失），作用域 .shot-mag */
 .shot-mag-liveswatch {
   width: 20px; height: 20px; flex: none; border-radius: 4px;
-  border: 1px solid rgba(255,255,255,0.9);
+  border: 1px solid var(--ovl-swatch-bd);
   background: #000; box-shadow: 0 0 6px rgba(var(--accent-rgb, 76,141,255), 0.4);
 }
 .shot-color-val { font-family: Consolas, "Courier New", monospace; font-size: 12px; color: #fff; min-width: 72px; text-align: left; }
@@ -290,24 +295,25 @@ html[data-window="shot"] body { background: transparent; }
   background: rgba(var(--bg-panel-rgb), var(--panel-opacity));
   border-radius: 0; padding: 12px 18px 13px;
   backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 4px 14px rgba(0,0,0,0.35);
+  box-shadow: inset 0 0 0 1px var(--ovl-line), 0 4px 14px rgba(0,0,0,0.35);
 }
 /* 两栏网格：固定宽「按键列」+ 说明列，保证每行说明文字落在同一竖线（对齐） */
 .shot-hint-row {
   display: grid; grid-template-columns: 96px 1fr; align-items: center;
   column-gap: 12px;
-  color: rgba(255,255,255,0.9); font-size: 15px; line-height: 2.1; white-space: nowrap;
+  color: var(--ovl-fg); font-size: 15px; line-height: 2.1; white-space: nowrap;
 }
 /* 按键列：包住单/双 kbd，统一占据 96px，说明文字因此对齐 */
 .shot-hint-keys { display: flex; align-items: center; justify-content: center; gap: 4px; }
 .shot-hint-row kbd {
   flex: none; min-width: 26px; text-align: center; padding: 2px 9px; border-radius: 5px;
-  border: 1px solid rgba(255,255,255,0.45); background: rgba(255,255,255,0.09);
-  color: #fff; font: 600 13px/1.7 Consolas, "Courier New", monospace;
+  border: 1px solid var(--ovl-chip-bd); background: var(--ovl-chip-bg);
+  color: var(--ovl-fg); font: 600 13px/1.7 Consolas, "Courier New", monospace;
 }
 .shot-hint-desc { text-align: left; }
-/* 正在浏览历史截屏时的引导行（主题色高亮） */
-.shot-hint-row.shot-hint-viewing { color: var(--accent-text, #8ab4ff); }
+/* 正在浏览历史截屏时的引导行（主题色高亮）：用主题色本身作前景（非白色
+   accent-text），浅色主题下蓝/accent 在浅玻璃上清晰，深色主题下提亮蓝亦清晰 */
+.shot-hint-row.shot-hint-viewing { color: var(--accent); }
 .shot-hint-row.shot-hint-viewing kbd { border-color: currentColor; }
 
 /* 截图历史缩略图列表（H 开关）：屏幕底部居中横排玻璃面板，
@@ -320,14 +326,14 @@ html[data-window="shot"] body { background: transparent; }
      --panel-opacity（acrylic_opacity/100，关闭时=1），不再写死深色 0.78 */
   background: rgba(var(--bg-panel-rgb), var(--panel-opacity)); backdrop-filter: blur(10px);
   border-radius: 10px;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 6px 20px rgba(0,0,0,0.45);
+  box-shadow: inset 0 0 0 1px var(--ovl-line), 0 6px 20px rgba(0,0,0,0.45);
   animation: shot-submenu-in 120ms var(--ease-out) both;
 }
 /* 面板头部：标题 + 清空入口常驻（不随缩略图横向滚动跑丢） */
 .shot-hist-head {
   display: flex; align-items: center; justify-content: space-between; gap: 16px; flex: none;
 }
-.shot-hist-title { color: rgba(255,255,255,0.55); font-size: 12px; letter-spacing: 1px; }
+.shot-hist-title { color: var(--ovl-fg-dim); font-size: 12px; letter-spacing: 1px; }
 .shot-hist-row { display: flex; align-items: stretch; gap: 12px; overflow-x: auto; }
 .shot-hist-item { cursor: pointer; text-align: center; flex: none; }
 .shot-hist-thumbwrap { position: relative; }
@@ -343,8 +349,8 @@ html[data-window="shot"] body { background: transparent; }
 /* 面板头部「清空历史」入口 */
 .shot-hist-clear {
   flex: none; cursor: pointer; user-select: none;
-  color: rgba(255,255,255,0.65); font-size: 12px; padding: 3px 10px;
-  border-radius: 6px; border: 1px dashed rgba(255,255,255,0.22);
+  color: var(--ovl-fg-dim); font-size: 12px; padding: 3px 10px;
+  border-radius: 6px; border: 1px dashed var(--ovl-chip-bd);
 }
 .shot-hist-clear:hover { color: #ff8d8d; border-color: rgba(229,72,77,0.6); background: rgba(229,72,77,0.12); }
 .shot-hist-item img {
@@ -359,7 +365,7 @@ html[data-window="shot"] body { background: transparent; }
   box-shadow: 0 0 0 1px rgba(0,0,0,0.45), 0 0 12px rgba(var(--accent-rgb, 76,141,255), 0.55);
 }
 .shot-hist-item span {
-  display: block; margin-top: 5px; color: rgba(255,255,255,0.85); font-size: 12px;
+  display: block; margin-top: 5px; color: var(--ovl-fg); font-size: 12px;
 }
 /* 缩略图上叠加的「当时框选范围」描边：历史帧是整屏快照，
    小框按 region/整屏比例定位，标出当时真正圈住的是哪块区域 */
@@ -384,7 +390,7 @@ html[data-window="shot"] body { background: transparent; }
   border-color: var(--accent, #4c8dff);
   box-shadow: 0 0 0 1px rgba(0,0,0,0.45), 0 0 12px rgba(var(--accent-rgb, 76,141,255), 0.55);
 }
-.shot-hist-empty { color: rgba(255,255,255,0.75); font-size: 14px; align-self: center; padding: 30px 20px; }
+.shot-hist-empty { color: var(--ovl-fg); font-size: 14px; align-self: center; padding: 30px 20px; }
 /* 选区提示条已并入左下角 .shot-hint-panel（选区操作提示 + 覆盖隐藏） */
 /* ---- 原生即时亮窗竞态保护 ----
    呼出时 Rust 在冻结帧写入后 ~24ms 即亮窗（不等前端链路），本页收到

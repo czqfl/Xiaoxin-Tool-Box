@@ -128,6 +128,17 @@
   --panel-highlight: inset 0 1px 0 light-dark(rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.08));
   --panel-highlight-strong: inset 0 1px 0 light-dark(rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0.14));
 
+  /* 浮层叠加文字（截图提示框 / 放大镜 / 历史缩略图等「跟随主题面板底色」的浮层）：
+     随 color-scheme 翻转——浅色主题=深色字（面板是浅色玻璃），深色主题=浅色字。
+     用 light-dark() 一次性定义，所有主题（含 mint/skyblue/red/orange）自动按 color-scheme 取对，
+     无需逐个主题枚举。取色/OCR 等写死深色底的浮层仍用白字，不在此列 */
+  --ovl-fg: light-dark(#1b1d22, #f2f4f7);
+  --ovl-fg-dim: light-dark(rgba(0, 0, 0, 0.6), rgba(255, 255, 255, 0.72));
+  --ovl-line: light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.1));
+  --ovl-chip-bg: light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.09));
+  --ovl-chip-bd: light-dark(rgba(0, 0, 0, 0.2), rgba(255, 255, 255, 0.32));
+  --ovl-swatch-bd: light-dark(rgba(0, 0, 0, 0.35), rgba(255, 255, 255, 0.9));
+
   /* 字号阶梯：全局统一语义字号，主次分明 */
   --font-xs: 11px;
   --font-sm: 12px;
