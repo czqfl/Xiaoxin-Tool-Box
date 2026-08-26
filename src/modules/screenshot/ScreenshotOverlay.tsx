@@ -1958,7 +1958,7 @@ export function ScreenshotOverlay() {
           <div className="shot-mag-info">
             <div className="shot-mag-row"><span ref={magCoordRef}>(0 , 0)</span></div>
             <div className="shot-mag-row shot-mag-colorline">
-              <span ref={magSwatchRef} className="shot-color-swatch shot-color-swatch-sm" />
+              <span ref={magSwatchRef} className="shot-mag-liveswatch" />
               <span ref={magValRef} className="shot-color-val">--</span>
               <span ref={magFmtRef} className="shot-mag-fmt">RGB</span>
             </div>

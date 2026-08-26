@@ -11,15 +11,25 @@ html[data-window="shot"] body { background: transparent; }
 
 /* ---- 放大镜：镜头区固定正方形，信息区在镜头下方分三行（坐标/颜色/提示） ---- */
 /* z-index 260 > 工具栏 200：鼠标移到工具栏附近时坐标/颜色信息不被盖住。
-   整体走玻璃卡片风：圆角 + 毛玻璃 + 内描边，与取色面板观感统一 */
+   整体走轻量玻璃卡片：细描边 + 轻投影，不再用粗圆角+重投影显得边框厚重。
+   镜头框改为与选区边框同款：1.5px 主题色细边 + 轻辉光，贴近 Snipaste */
 .shot-mag {
   position: fixed; z-index: 260;
-  background: rgba(12,12,14,0.86); backdrop-filter: blur(14px);
-  border-radius: 10px; overflow: hidden;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12), 0 8px 26px rgba(0,0,0,0.55);
+  background: rgba(12,12,14,0.86); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border-radius: 8px; overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1), 0 4px 14px rgba(0,0,0,0.45);
 }
-.shot-mag-lens { width: 140px; height: 140px; margin: 6px auto 0; border-radius: 7px; overflow: hidden; }
-.shot-mag-lens canvas { display: block; width: 140px; height: 140px; }
+/* 镜头框：与截图选区边框同款（1.5px 主题色细边 + 轻辉光），方角更干净 */
+.shot-mag-lens {
+  box-sizing: border-box; width: 140px; height: 140px; margin: 6px auto 0;
+  border-radius: 2px; overflow: hidden;
+  border: 1.5px solid var(--accent, #4c8dff);
+  box-shadow:
+    0 0 0 1px rgba(0,0,0,0.55),
+    0 0 8px rgba(var(--accent-rgb, 76,141,255), 0.4),
+    inset 0 0 6px rgba(var(--accent-rgb, 76,141,255), 0.2);
+}
+.shot-mag-lens canvas { display: block; width: 100%; height: 100%; }
 .shot-mag-info { padding: 8px 10px 9px; display: flex; flex-direction: column; gap: 4px; }
 .shot-mag-row {
   text-align: center; font-size: 12.5px; line-height: 1.5; color: #fff;
@@ -49,6 +59,12 @@ html[data-window="shot"] body { background: transparent; }
 .shot-color-swatch { display: inline-block; flex: none; border-radius: 2px; border: 1px solid rgba(255,255,255,0.9); outline: 1px solid rgba(0,0,0,0.55); background: #000; }
 .shot-color-swatch-sm { width: 13px; height: 13px; }
 .shot-color-swatch-md { width: 16px; height: 16px; }
+/* 放大镜实时颜色块：放大到 20px 并加主题色辉光，明确标识「光标处实时取色」 */
+.shot-mag-liveswatch {
+  width: 20px; height: 20px; flex: none; border-radius: 4px;
+  border: 1px solid rgba(255,255,255,0.9); outline: 1px solid rgba(0,0,0,0.55);
+  background: #000; box-shadow: 0 0 6px rgba(var(--accent-rgb, 76,141,255), 0.4);
+}
 .shot-color-val { font-family: Consolas, "Courier New", monospace; font-size: 12px; color: #fff; min-width: 72px; text-align: left; }
 .shot-color-val-md { font-size: 13px; min-width: 96px; text-align: left; }
 .shot-copied { font-size: 11px; color: #4ade80; padding: 0 6px 4px; }
