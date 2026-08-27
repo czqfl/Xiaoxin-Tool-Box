@@ -13,7 +13,7 @@ import {
 import { translateText } from "../../core/tauri";
 import { useConfigStore } from "../../stores/configStore";
 import { scrollBegin } from "../scrollshot/api";
-import { Square, Circle, ArrowUpRight, Pencil, Type, Undo2, Redo2, X, Pin, Save, Copy } from "lucide-react";
+import { Square, Circle, ArrowUpRight, Pencil, Undo2, Redo2, X, Pin, Save, Copy } from "lucide-react";
 import "./screenshot.css";
 
 type Tool = "select"|"rect"|"ellipse"|"arrow"|"line"|"brush"|"mosaic"|"text"|"number";
@@ -81,16 +81,21 @@ const IcoLineGroup = () => (
   </svg>
 );
 const IcoBrush = () => <Pencil {...IC} />;
-// 马赛克：棋盘格——左上/右下实心、右上/左下描边（Snipaste 同款）
+// 马赛克：一个方框 + 左上/右下两格填充（像素化的对角示意）
 const IcoMosaic = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round">
-    <rect x="3.5" y="3.5" width="7.5" height="7.5" fill="currentColor" stroke="none"/>
-    <rect x="13" y="3.5" width="7.5" height="7.5"/>
-    <rect x="3.5" y="13" width="7.5" height="7.5"/>
-    <rect x="13" y="13" width="7.5" height="7.5" fill="currentColor" stroke="none"/>
+    <rect x="3.5" y="3.5" width="17" height="17" rx="1.5"/>
+    <rect x="6" y="6" width="4.5" height="4.5" fill="currentColor" stroke="none"/>
+    <rect x="13.5" y="13.5" width="4.5" height="4.5" fill="currentColor" stroke="none"/>
   </svg>
 );
-const IcoTextT = () => <Type {...IC} />;
+// 文字：一横 + 一竖的极简 T（Lucide Type 顶部带衬线端点的"刺"观感）
+const IcoTextT = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="5" y1="6" x2="19" y2="6" />
+    <line x1="12" y1="6" x2="12" y2="19" />
+  </svg>
+);
 // 序号：Lucide 无对应，保留精简自绘（描线风格统一）
 const IcoNumber = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -113,14 +118,12 @@ const IcoClose = () => <X {...IC} />;
 const IcoPin = () => <Pin {...IC} />;
 const IcoSaveAs = () => <Save {...IC} />;
 const IcoCopy = () => <Copy {...IC} />;
-// 长截图：竖向长页面 + 页内内容行 + 双下滚箭头（往下滚出更多内容的语义）
+// 长截图：竖向长页面 + 一个向下箭头（表示继续往下滚动拼接）
 const IcoLongShot = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="6" y="3" width="12" height="18" rx="2"/>
-    <path d="M9 7.5h6"/>
-    <path d="M9 16.5h4"/>
-    <path d="m9.5 10.5 2.5 2.5 2.5-2.5"/>
-    <path d="m9.5 13 2.5 2.5 2.5-2.5"/>
+    <path d="M7 3.5h10a1 1 0 0 1 1 1V19a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z"/>
+    <path d="M12 8v5"/>
+    <path d="m9.5 11.5 2.5 2.5 2.5-2.5"/>
   </svg>
 );
 
