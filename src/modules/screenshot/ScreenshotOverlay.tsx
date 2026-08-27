@@ -13,7 +13,7 @@ import {
 import { translateText } from "../../core/tauri";
 import { useConfigStore } from "../../stores/configStore";
 import { scrollBegin } from "../scrollshot/api";
-import { Circle, ArrowUpRight, Pencil, Undo2, Redo2, X, Download, Copy } from "lucide-react";
+import { ArrowUpRight, Pencil, Undo2, Redo2, X, Download, Copy } from "lucide-react";
 import "./screenshot.css";
 
 type Tool = "select"|"rect"|"ellipse"|"arrow"|"line"|"brush"|"mosaic"|"text"|"number";
@@ -53,13 +53,18 @@ const fmtCopy = (c: [number, number, number], fmt: ColorFmt) =>
 /* ---- 工具图标：Lucide React 矢量图标（Snipaste 同风格描线），统一 22px / strokeWidth 2。
    两个组合图标（形状组、线组）由 Lucide 单图标叠合而成 ---- */
 const IC = { size: 22, strokeWidth: 2, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
-// 矩形（圆角，与形状组 IcoShape 视觉一致；不依赖 Lucide 的方角 Square）
+// 矩形：圆角矩形，比上一版整体放大（更占满画布、识别度更高）；与形状组 IcoShape 视觉一致
 const IcoRect = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="3.5" y="5.5" width="17" height="13" rx="3" />
+    <rect x="3" y="4.5" width="18" height="15" rx="3.5" />
   </svg>
 );
-const IcoEllipse = () => <Circle {...IC} />;
+// 椭圆（扁椭圆，比 Lucide 正圆 Circle 更扁、更接近\"椭圆\"语义）
+const IcoEllipse = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <ellipse cx="12" cy="12" rx="11" ry="7.5" />
+  </svg>
+);
 // 形状组图标：矩形（圆角）+ 椭圆叠合（Snipaste 第一格风格）。统一 22×22，
 // 矩形加 rx 与其他自绘图标保持一致的圆润观感；viewBox 24×24，几何稍外推
 const IcoShape = () => (
