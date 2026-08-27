@@ -1,6 +1,7 @@
-/** 屏幕录制（GIF）设置页：快捷键 / 帧率 / 编码质量 / 时长上限 / 保存目录 */
+/** 屏幕录制（GIF / AVI / MP4）设置页：快捷键 / 帧率 / 编码质量 / 时长上限 / 保存目录 */
 import { useConfigStore } from "../stores/configStore";
 import { pickFolder } from "../core/tauri";
+import { invoke } from "@tauri-apps/api/core";
 import { Segmented, SettingGroup, SettingRow, Slider, Switch } from "./components";
 import { ShortcutRow } from "./ShortcutRow";
 
@@ -12,11 +13,13 @@ export function RecorderPage() {
     update({ ...config, recorder: { ...config.recorder, ...patch } });
   };
 
+  const openDir = () => void invoke<void>("recorder_open_dir").catch(() => {});
+
   return (
     <div className="settings-page">
       <h2>屏幕录制</h2>
       <p className="page-desc">
-        框选任意区域录制为视频 (AVI) 或 GIF 动图；托盘、悬浮工具栏或全局快捷键呼出
+        框选任意区域录制为 GIF 动图或 AVI / MP4 视频；托盘、悬浮工具栏或全局快捷键呼出
       </p>
 
       <SettingGroup>
@@ -84,6 +87,9 @@ export function RecorderPage() {
               }}
             >
               选择…
+            </button>
+            <button className="btn btn-sm" onClick={openDir} title="在资源管理器中打开录屏保存文件夹">
+              打开保存文件夹
             </button>
             {config.recorder?.save_dir && (
               <button className="btn btn-sm" onClick={() => updateRec({ save_dir: null })}>

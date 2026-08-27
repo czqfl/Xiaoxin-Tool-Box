@@ -1,6 +1,7 @@
 #[cfg(windows)]
 mod acrylic;
 mod avi;
+mod mp4;
 mod dupl;
 mod ocr;
 mod screenshot;
@@ -453,6 +454,7 @@ pub fn run() {
             recorder::recorder_stop,
             recorder::recorder_bar_popup,
             recorder::rec_dismiss,
+            recorder::recorder_open_dir,
             pin::pin_create,
             pin::pin_from_clipboard,
             pin::pin_list,

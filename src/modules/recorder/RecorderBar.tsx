@@ -109,10 +109,11 @@ export function RecorderBar() {
 
   return (
     <div className={`recb-root${phase !== "recording" ? " recb-toast" : ""}`}>
-      {/* 录制中：迷你条（红点 + 时间 + 停止） */}
+      {/* 录制中：顶部迷你条（红点 + REC + 时间 + 停止） */}
       {phase === "recording" && (
         <>
           <span className="recb-dot" />
+          <span className="recb-rec">REC</span>
           <span className="recb-time">{fmt(elapsed)}</span>
           <button
             className="recb-btn recb-stop"
@@ -141,7 +142,10 @@ export function RecorderBar() {
               <span className="recb-ic"><Film size={15} /></span>
               <div className="recb-info">
                 <div className="recb-title">
-                  已保存 {result.path.endsWith(".gif") ? "GIF 动图" : "视频"}
+                  已保存 {(() => {
+                    const e = result.path!.split(".").pop()?.toLowerCase();
+                    return e === "gif" ? "GIF 动图" : e === "mp4" ? "MP4 视频" : "AVI 视频";
+                  })()}
                 </div>
                 <div className="recb-sub">
                   {fmt(result.duration_ms)} · {fmtSize(result.bytes)}

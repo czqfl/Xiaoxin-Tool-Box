@@ -10,18 +10,20 @@ export const recSelectCancel = () => invoke<void>("rec_select_cancel");
 
 /** 录制参数：格式与画质 */
 export interface RecOptions {
-  /** "gif" = 动图；"avi" = 视频(MJPEG) */
-  fmt: "gif" | "avi";
+  /** "gif" = 动图；"avi"/"mp4" = 视频(MJPEG) */
+  fmt: "gif" | "avi" | "mp4";
   /** 帧率（GIF 生效；视频固定 30fps） */
   fps: number;
-  /** 分辨率缩放 0.5 / 0.75 / 1 */
+  /** 分辨率缩放 0.25~1（由分辨率预设按选区高度换算） */
   scale: number;
+  /** 画质：high / normal / fast */
+  quality: "high" | "normal" | "fast";
 }
 
 export const recorderStart = (rect: RecRect, o: RecOptions) =>
   invoke<void>("recorder_start", {
     x: rect.x, y: rect.y, w: rect.w, h: rect.h,
-    fmt: o.fmt, fps: o.fps, scale: o.scale,
+    fmt: o.fmt, fps: o.fps, scale: o.scale, quality: o.quality,
   });
 
 export const recorderStop = () => invoke<void>("recorder_stop");
@@ -30,6 +32,9 @@ export const recorderStop = () => invoke<void>("recorder_stop");
 export const recorderBarPopup = () => invoke<void>("recorder_bar_popup");
 
 export const recDismiss = () => invoke<void>("rec_dismiss");
+
+/** 打开录屏保存目录（设置页入口） */
+export const recorderOpenDir = () => invoke<void>("recorder_open_dir");
 
 export const EVT_REC_TICK = "recorder://tick";
 export const EVT_REC_DONE = "recorder://done";

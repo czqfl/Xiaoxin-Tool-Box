@@ -3,11 +3,16 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Circle, RotateCcw, Film } from "lucide-react";
 import { recorderStart, recSelectCancel, EVT_REC_STARTED, type RecRect, type RecOptions } from "./api";
+import { GlassSelect } from "../../components/GlassSelect";
 import type { AppConfig } from "../../types";
 import "./recorder.css";
 
+/** 分辨率预设（按选区高度换算缩放比，不超过原始尺寸） */
+type ResPreset = "raw" | "1080" | "720" | "360";
+const RES_HEIGHT: Record<ResPreset, number> = { raw: 0, "1080": 1080, "720": 720, "360": 360 };
+
 /** 录屏区域选择：呼出即全屏压暗，拖拽框选后弹出配置面板，确认后开始录制。
- *  录制中窗口不关闭——只显示选区边框（脉冲动画），直到录制结束自动关闭。 */
+ *  录制中窗口不关闭——只显示遮罩 + 虚线边框（脉冲），直到录制结束自动关闭。 */
 export function RecorderSelect() {
   const [rect, setRect] = useState<RecRect | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -16,9 +21,10 @@ export function RecorderSelect() {
   const startingRef = useRef(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
-  // 录制参数：格式 / 帧率(GIF) / 分辨率缩放
-  const [opts, setOpts] = useState<RecOptions>({ fmt: "avi", fps: 12, scale: 1 });
-  // 录制中：收到 started 事件后切换，只显示边框
+  // 录制参数：格式 / 帧率(GIF) / 画质；分辨率预设单独存（开始录制时换算 scale）
+  const [opts, setOpts] = useState<RecOptions>({ fmt: "avi", fps: 12, scale: 1, quality: "normal" });
+  const [res, setRes] = useState<ResPreset>("raw");
+  // 录制中：只显示遮罩 + 边框
   const [recording, setRecording] = useState(false);
   const [recRegion, setRecRegion] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
@@ -77,14 +83,22 @@ export function RecorderSelect() {
     startingRef.current = true;
     setStarting(true);
     setError("");
+    // 分辨率预设 → 缩放比：按选区高度换算，目标高度超过选区则用原始尺寸
+    const target = RES_HEIGHT[res];
+    const scale = target > 0 ? Math.min(1, Math.max(0.25, target / r.h)) : 1;
+    // 【立即切录制模式】遮罩/虚线边框马上显示，不等 Rust IPC 往返（否则黑遮罩出现偏慢）
+    setRecording(true);
+    setRecRegion({ x: r.x, y: r.y, w: r.w, h: r.h });
     const sc = window.devicePixelRatio || 1;
     try {
       await recorderStart({
         x: Math.round(r.x * sc), y: Math.round(r.y * sc),
         w: Math.round(r.w * sc), h: Math.round(r.h * sc),
-      }, opts);
-      // Rust 发回 EVT_REC_STARTED 后切换到录制中模式
+      }, { fmt: opts.fmt, fps: opts.fps, scale, quality: opts.quality });
     } catch (err) {
+      // 启动失败：退回选区模式
+      setRecording(false);
+      setRecRegion(null);
       console.error("recorder_start failed", err);
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -144,7 +158,7 @@ export function RecorderSelect() {
     };
   });
 
-  // ---- 录制中模式：遮罩 + 脉冲边框（不可交互） ----
+  // ---- 录制中模式：遮罩 + 虚线边框（鼠标穿透由 Rust 侧开启，可正常操作屏幕） ----
   if (recording && recRegion) {
     return (
       <div className="rec-select rec-select-recording">
@@ -153,32 +167,31 @@ export function RecorderSelect() {
         <div className="rec-shade" style={{ left: 0, top: recRegion.y, width: recRegion.x, height: recRegion.h }} />
         <div className="rec-shade" style={{ left: recRegion.x + recRegion.w, top: recRegion.y, right: 0, height: recRegion.h }} />
         <div className="rec-shade" style={{ left: 0, top: recRegion.y + recRegion.h, width: "100%", bottom: 0 }} />
-        {/* 脉冲边框 */}
+        {/* 虚线脉冲边框：清晰标出录制区域 */}
         <div
           className="rec-frame rec-frame-recording"
           style={{ left: recRegion.x, top: recRegion.y, width: recRegion.w, height: recRegion.h }}
         />
+        {/* 录制中角标 */}
+        <div className="rec-rec-badge" style={{ left: recRegion.x + 8, top: recRegion.y + 8 }}>
+          <span className="rec-rec-dot" /> 录制中
+        </div>
       </div>
     );
   }
 
   // ---- 选区模式 ----
   const valid = rect != null && rect.w >= 24 && rect.h >= 24;
-  // 面板位置（初始估算，layout effect 用真实尺寸精确夹回）：
-  // 优先放【非录制区域（遮罩）右下方】= 屏幕右下角；若该位置会压到录制区域
-  // （遮罩处放不下），则放到【录制区域右下方】= 选区内部右下角
+  // 面板位置：紧挨录制区域——默认在选区正下方、右对齐选区右缘；
+  // 下方放不下翻到选区上方，最后统一夹回视口（初始估算，layout effect 用真实尺寸精确夹回）
   const PANEL_W_EST = 320;
-  const PANEL_H_EST = 176;
-  let panelLeft = window.innerWidth - PANEL_W_EST - 8;
-  let panelTop = window.innerHeight - PANEL_H_EST - 8;
+  const PANEL_H_EST = 214;
+  let panelLeft = 0, panelTop = 0;
   if (valid && rect) {
-    const overlaps = !(panelLeft + PANEL_W_EST <= rect.x || panelLeft >= rect.x + rect.w
-      || panelTop + PANEL_H_EST <= rect.y || panelTop >= rect.y + rect.h);
-    if (overlaps) {
-      panelLeft = rect.x + rect.w - PANEL_W_EST - 8;
-      panelTop = rect.y + rect.h - PANEL_H_EST - 8;
-      panelLeft = Math.max(rect.x + 4, panelLeft);
-      panelTop = Math.max(rect.y + 4, panelTop);
+    panelLeft = rect.x + rect.w - PANEL_W_EST - 4;
+    panelTop = rect.y + rect.h + 8;
+    if (panelTop + PANEL_H_EST > window.innerHeight - 8) {
+      panelTop = rect.y - PANEL_H_EST - 8;
     }
     panelLeft = Math.max(4, Math.min(panelLeft, window.innerWidth - PANEL_W_EST - 4));
     panelTop = Math.max(4, Math.min(panelTop, window.innerHeight - PANEL_H_EST - 4));
@@ -190,16 +203,9 @@ export function RecorderSelect() {
     const el = panelRef.current;
     if (!valid || !el || !rect) return;
     const w = el.offsetWidth, h = el.offsetHeight;
-    let left = window.innerWidth - w - 8;
-    let top = window.innerHeight - h - 8;
-    const overlaps = !(left + w <= rect.x || left >= rect.x + rect.w
-      || top + h <= rect.y || top >= rect.y + rect.h);
-    if (overlaps) {
-      left = rect.x + rect.w - w - 8;
-      top = rect.y + rect.h - h - 8;
-      left = Math.max(rect.x + 4, left);
-      top = Math.max(rect.y + 4, top);
-    }
+    let left = rect.x + rect.w - w - 4;
+    let top = rect.y + rect.h + 8;
+    if (top + h > window.innerHeight - 8) top = rect.y - h - 8;
     el.style.left = `${Math.max(4, Math.min(left, window.innerWidth - w - 4))}px`;
     el.style.top = `${Math.max(4, Math.min(top, window.innerHeight - h - 4))}px`;
   }, [rect, valid, dragging]);
@@ -234,32 +240,49 @@ export function RecorderSelect() {
 
               <div className="rec-field">
                 <span className="rec-label">格式</span>
+                <GlassSelect
+                  value={opts.fmt}
+                  onChange={(v) => setOpts((o) => ({ ...o, fmt: v as RecOptions["fmt"] }))}
+                  options={[
+                    { value: "gif", label: "动图 GIF" },
+                    { value: "avi", label: "视频 AVI" },
+                    { value: "mp4", label: "视频 MP4" },
+                  ]}
+                  title="选择输出格式"
+                />
+              </div>
+
+              <div className="rec-field">
+                <span className="rec-label">分辨率</span>
                 <div className="rec-seg">
-                  <button className={opts.fmt === "avi" ? "active" : ""}
-                    onClick={() => setOpts((o) => ({ ...o, fmt: "avi" }))}>视频 AVI</button>
-                  <button className={opts.fmt === "gif" ? "active" : ""}
-                    onClick={() => setOpts((o) => ({ ...o, fmt: "gif" }))}>动图 GIF</button>
+                  {(["raw", "1080", "720", "360"] as ResPreset[]).map((p) => (
+                    <button key={p} className={res === p ? "active" : ""}
+                      onClick={() => setRes(p)}>{p === "raw" ? "原始" : `${p}p`}</button>
+                  ))}
                 </div>
               </div>
 
               <div className="rec-field">
-                <span className="rec-label">{opts.fmt === "gif" ? "帧率" : "画质"}</span>
-                {opts.fmt === "gif" ? (
+                <span className="rec-label">画质</span>
+                <div className="rec-seg">
+                  {([["high", "高"], ["normal", "标准"], ["fast", "快速"]] as const).map(([v, l]) => (
+                    <button key={v} className={opts.quality === v ? "active" : ""}
+                      onClick={() => setOpts((o) => ({ ...o, quality: v }))}>{l}</button>
+                  ))}
+                </div>
+              </div>
+
+              {opts.fmt === "gif" && (
+                <div className="rec-field">
+                  <span className="rec-label">帧率</span>
                   <div className="rec-seg">
                     {[8, 12, 15, 20].map((f) => (
                       <button key={f} className={opts.fps === f ? "active" : ""}
                         onClick={() => setOpts((o) => ({ ...o, fps: f }))}>{f}</button>
                     ))}
                   </div>
-                ) : (
-                  <div className="rec-seg">
-                    {([0.5, 0.75, 1] as const).map((s) => (
-                      <button key={s} className={opts.scale === s ? "active" : ""}
-                        onClick={() => setOpts((o) => ({ ...o, scale: s }))}>{s * 100}%</button>
-                    ))}
-                  </div>
-                )}
-              </div>
+                </div>
+              )}
 
               <div className="rec-actions">
                 <button onClick={() => setBoth(null)}>

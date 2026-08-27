@@ -25,8 +25,6 @@ static ACTIVE: AtomicBool = AtomicBool::new(false);
 static PENDING: AtomicBool = AtomicBool::new(false);
 static STOP: AtomicBool = AtomicBool::new(false);
 
-const NEUQUANT_SPEED_DEFAULT: i32 = 20;
-
 #[derive(Clone, serde::Serialize)]
 struct Tick { elapsed_ms: u64, frames: u32 }
 
@@ -46,23 +44,15 @@ struct Done {
     error: Option<String>,
 }
 
-/// 读录屏配置（缺省兜底）。帧率由选区面板按次传入，这里只取质量/时长
-struct RecCfg { speed: i32, max_secs: u32 }
+/// 读录屏配置（缺省兜底）。画质已由面板逐次传入，这里只取时长上限
+struct RecCfg { max_secs: u32 }
 
 fn load_cfg<R: Runtime>(app: &AppHandle<R>) -> RecCfg {
     let cfg = app.try_state::<crate::config::ConfigState>()
         .map(|s| s.0.lock().unwrap().recorder.clone());
     match cfg {
-        Some(c) => RecCfg {
-            // quality: high/normal/fast → NeuQuant/JPEG 质量
-            speed: match c.quality.as_str() {
-                "high" => 10,
-                "fast" => 30,
-                _ => 20,
-            },
-            max_secs: c.max_duration_secs,
-        },
-        None => RecCfg { speed: NEUQUANT_SPEED_DEFAULT, max_secs: 120 },
+        Some(c) => RecCfg { max_secs: c.max_duration_secs },
+        None => RecCfg { max_secs: 120 },
     }
 }
 
@@ -175,17 +165,11 @@ pub fn on_bar_destroyed<R: Runtime>(app: &AppHandle<R>) {
 const BAR_W: i32 = 200;
 const BAR_H: i32 = 36;
 
-fn ensure_bar<R: Runtime>(app: &AppHandle<R>, mon: (i32, i32, i32, i32), region: (i32, i32, i32, i32)) {
-    let (mx, my, mw, mh) = mon;
-    let (rx, ry, rw, rh) = region;
-    let mut bx = rx + rw / 2 - BAR_W / 2;
-    bx = bx.clamp(mx + 8, mx + mw - BAR_W - 8);
-    // 优先放区域正上方，放不下放正下方
-    let mut by = ry - BAR_H - 12;
-    if by < my + 8 {
-        by = ry + rh + 12;
-    }
-    let by = by.min(my + mh - BAR_H - 8);
+fn ensure_bar<R: Runtime>(app: &AppHandle<R>, mon: (i32, i32, i32, i32), _region: (i32, i32, i32, i32)) {
+    let (mx, my, mw, _mh) = mon;
+    // 控制条固定在显示器顶部居中（不随录制区域浮动，避免出现在屏幕中间）
+    let bx = mx + (mw - BAR_W) / 2;
+    let by = my + 12;
     if let Some(w) = app.get_webview_window(BAR_LABEL) {
         let _ = w.set_position(tauri::PhysicalPosition::new(bx, by));
         let _ = w.show();
@@ -258,14 +242,22 @@ fn save_path_for<R: Runtime>(app: &AppHandle<R>, ext: &str) -> std::path::PathBu
 
 // ---------- 采集 + 编码线程 ----------
 
-/// 录制参数：格式（GIF 动图 / AVI 视频）、帧率、分辨率缩放
+/// 录制格式
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum RecFmt { Gif, Avi, Mp4 }
+
+/// 画质（逐次覆盖通用设置里的编码质量）
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum RecQuality { High, Normal, Fast }
+
+/// 录制参数：格式（GIF / AVI / MP4）、帧率、分辨率缩放、画质
 #[derive(Clone, Copy)]
 pub struct RecOpts {
-    /// true=GIF 动图；false=AVI 视频(MJPEG)
-    pub gif: bool,
+    pub fmt: RecFmt,
     pub fps: u32,
     /// 输出分辨率缩放（0.25~1.0），1.0 = 原始选区尺寸
     pub scale: f32,
+    pub quality: RecQuality,
 }
 
 /// BGRA → RGB 转缩放（最近邻）；写入预分配的 rgb_buf，返回切片
@@ -282,13 +274,17 @@ fn prepare_frame_into(bgra: &[u8], rw: i32, rh: i32, ow: u32, oh: u32, rgb_buf: 
             rgb_buf.push(px[0]);
         }
     } else {
-        // 缩放：nearest-neighbor 手写（避免 image crate 的 RgbaImage 中间分配）
+        // 缩放：nearest-neighbor 手写（避免 image crate 的 RgbaImage 中间分配）。
+        // 注意 XY 双轴都要采样——旧实现水平方向只取每行前 ow 像素（裁掉右半边，
+        // 缩放录制时画面像被"切扁"），这里修正为真正的最近邻缩放。
         let src_stride = rw as usize * 4;
         rgb_buf.reserve(ow as usize * oh as usize * 3);
         for dy in 0..oh as usize {
             let sy = (dy * rh as usize) / oh as usize;
-            let src_row = &bgra[sy * src_stride..][..ow as usize * 4];
-            for px in src_row.chunks_exact(4) {
+            let src_row = &bgra[sy * src_stride..];
+            for dx in 0..ow as usize {
+                let sx = (dx * rw as usize) / ow as usize;
+                let px = &src_row[sx * 4..sx * 4 + 4];
                 rgb_buf.push(px[2]);
                 rgb_buf.push(px[1]);
                 rgb_buf.push(px[0]);
@@ -315,11 +311,18 @@ fn run<R: Runtime + 'static>(
     };
 
     let cfg = load_cfg(&app);
-    let fps = if opts.gif { opts.fps.clamp(5, 24) } else { AVI_FPS };
+    let fps = if opts.fmt == RecFmt::Gif { opts.fps.clamp(5, 24) } else { AVI_FPS };
     let scale = opts.scale.clamp(0.25, 1.0);
     // 输出尺寸取偶（视频编码器友好）
     let ow = (((rw as f32 * scale).round() as u32) / 2 * 2).max(2);
     let oh = (((rh as f32 * scale).round() as u32) / 2 * 2).max(2);
+
+    // 画质 → GIF NeuQuant 速度 / JPEG 质量（面板逐次传入，覆盖设置页默认）
+    let (speed, jpg_q): (i32, u8) = match opts.quality {
+        RecQuality::High => (10, 90),
+        RecQuality::Normal => (20, 82),
+        RecQuality::Fast => (30, 70),
+    };
 
     // 等选区窗完全销毁再抓第一帧（DXGI 会拍到分层窗口，避免前几帧残留遮罩）
     std::thread::sleep(std::time::Duration::from_millis(200));
@@ -329,27 +332,24 @@ fn run<R: Runtime + 'static>(
     let started = std::time::Instant::now();
     let stride = rw as usize * 4;
     let (mx, my, mw, mh) = mon;
+    let fmt_name = match opts.fmt { RecFmt::Gif => "gif", RecFmt::Avi => "avi", RecFmt::Mp4 => "mp4" };
     crate::storage::diag_write(&format!(
-        "[recorder] started region=({rx},{ry}) {rw}x{rh} out={ow}x{oh} fmt={} fps={} speed={}",
-        if opts.gif { "gif" } else { "avi" }, fps, cfg.speed
+        "[recorder] started region=({rx},{ry}) {rw}x{rh} out={ow}x{oh} fmt={fmt_name} fps={fps} speed={speed}"
     ));
 
-    let ext = if opts.gif { "gif" } else { "avi" };
+    let ext = match opts.fmt { RecFmt::Gif => "gif", RecFmt::Avi => "avi", RecFmt::Mp4 => "mp4" };
     let path = save_path_for(&app, ext);
-    // Option 包一层：file 会被 GIF 或 AVI 其中一个编码器消费
+    // Option 包一层：file 会被三个封装器（GIF/AVI/MP4）之一消费
     let mut file = match std::fs::File::create(&path) {
         Ok(f) => Some(f),
         Err(e) => { finish(&app, false, None, 0, 0, Some(format!("创建文件失败: {e}"))); return; }
     };
 
-    // JPEG 质量：跟随设置页的质量偏好（high=90 / normal=82 / fast=70）
-    let jpg_q: u8 = match cfg.speed { 10 => 90, 30 => 70, _ => 82 };
-
     // GIF 编码器与去重缓存
     let mut gif_enc: Option<gif::Encoder<std::fs::File>> = None;
     let mut prev_palette: Vec<u8> = Vec::new();
     let mut prev_indexed: Vec<u8> = Vec::new();
-    if opts.gif {
+    if opts.fmt == RecFmt::Gif {
         match gif::Encoder::new(file.take().unwrap(), ow as u16, oh as u16, &[]) {
             Ok(mut e) => {
                 let _ = e.set_repeat(gif::Repeat::Infinite);
@@ -359,14 +359,19 @@ fn run<R: Runtime + 'static>(
         }
     }
     // AVI 封装器（MJPEG：每帧一张 JPEG，兼容性最好的无编码器视频方案）
-    let mut avi: Option<crate::avi::AviWriter<std::fs::File>> = if opts.gif {
-        None
-    } else {
+    let mut avi: Option<crate::avi::AviWriter<std::fs::File>> = if opts.fmt == RecFmt::Avi {
         match crate::avi::AviWriter::new(file.take().unwrap(), ow, oh, fps) {
             Ok(a) => Some(a),
             Err(e) => { finish(&app, false, None, 0, 0, Some(format!("AVI 初始化失败: {e}"))); return; }
         }
-    };
+    } else { None };
+    // MP4 封装器（MJPEG-in-MP4：帧内容与 AVI 同源，无需额外编码器）
+    let mut mp4: Option<crate::mp4::Mp4Writer<std::fs::File>> = if opts.fmt == RecFmt::Mp4 {
+        match crate::mp4::Mp4Writer::new(file.take().unwrap(), ow, oh, fps) {
+            Ok(m) => Some(m),
+            Err(e) => { finish(&app, false, None, 0, 0, Some(format!("MP4 初始化失败: {e}"))); return; }
+        }
+    } else { None };
 
     let mut prev_bgra_hash: u64 = 0;
     // 复用缓冲区：避免每帧分配/释放 6~8MB
@@ -436,37 +441,46 @@ fn run<R: Runtime + 'static>(
 
         prepare_frame_into(&f.bgra, rw, rh, ow, oh, &mut rgb_buf);
 
-        if opts.gif {
-            let Some(enc) = gif_enc.as_mut() else { unreachable!() };
-            if unchanged && !prev_indexed.is_empty() {
-                // 静止画面：复用上帧量化结果维持时间轴（省 NeuQuant）
-                let frame = gif::Frame {
-                    width: ow as u16,
-                    height: oh as u16,
-                    delay: delay_units,
-                    buffer: std::borrow::Cow::Borrowed(&prev_indexed),
-                    palette: Some(prev_palette.clone()),
-                    ..Default::default()
-                };
-                if enc.write_frame(&frame).is_err() { break; }
-            } else {
-                let mut frame = gif::Frame::from_rgb_speed(ow as u16, oh as u16, &rgb_buf, cfg.speed);
-                frame.delay = delay_units;
-                prev_palette = frame.palette.as_ref().map(|c| c.to_vec()).unwrap_or_default();
-                prev_indexed = frame.buffer.to_vec();
-                if enc.write_frame(&frame).is_err() { break; }
-            }
-        } else {
-            let Some(a) = avi.as_mut() else { unreachable!() };
-            jpg_buf.clear();
-            {
-                use image::ImageEncoder;
-                let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpg_buf, jpg_q);
-                if enc.write_image(&rgb_buf, ow, oh, image::ExtendedColorType::Rgb8).is_err() {
-                    break;
+        match opts.fmt {
+            RecFmt::Gif => {
+                let Some(enc) = gif_enc.as_mut() else { unreachable!() };
+                if unchanged && !prev_indexed.is_empty() {
+                    // 静止画面：复用上帧量化结果维持时间轴（省 NeuQuant）
+                    let frame = gif::Frame {
+                        width: ow as u16,
+                        height: oh as u16,
+                        delay: delay_units,
+                        buffer: std::borrow::Cow::Borrowed(&prev_indexed),
+                        palette: Some(prev_palette.clone()),
+                        ..Default::default()
+                    };
+                    if enc.write_frame(&frame).is_err() { break; }
+                } else {
+                    let mut frame = gif::Frame::from_rgb_speed(ow as u16, oh as u16, &rgb_buf, speed);
+                    frame.delay = delay_units;
+                    prev_palette = frame.palette.as_ref().map(|c| c.to_vec()).unwrap_or_default();
+                    prev_indexed = frame.buffer.to_vec();
+                    if enc.write_frame(&frame).is_err() { break; }
                 }
             }
-            if a.write_jpeg(&jpg_buf).is_err() { break; }
+            RecFmt::Avi | RecFmt::Mp4 => {
+                // 每帧 JPEG 编码（AVI 与 MP4 共用）
+                jpg_buf.clear();
+                {
+                    use image::ImageEncoder;
+                    let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpg_buf, jpg_q);
+                    if enc.write_image(&rgb_buf, ow, oh, image::ExtendedColorType::Rgb8).is_err() {
+                        break;
+                    }
+                }
+                if opts.fmt == RecFmt::Avi {
+                    let Some(a) = avi.as_mut() else { unreachable!() };
+                    if a.write_jpeg(&jpg_buf).is_err() { break; }
+                } else {
+                    let Some(m) = mp4.as_mut() else { unreachable!() };
+                    if m.write_jpeg(&jpg_buf).is_err() { break; }
+                }
+            }
         }
         frames += 1;
 
@@ -479,8 +493,7 @@ fn run<R: Runtime + 'static>(
             last_tick = std::time::Instant::now();
             let avg_ms = if frames > 0 { total_frame_ms / frames as u64 } else { 0 };
             crate::storage::diag_write(&format!(
-                "[recorder] perf: frames={} avg={avg_ms}ms max={max_frame_ms}ms fmt={} {ow}x{oh}",
-                frames, if opts.gif { "gif" } else { "avi" }
+                "[recorder] perf: frames={frames} avg={avg_ms}ms max={max_frame_ms}ms fmt={fmt_name} {ow}x{oh}"
             ));
             let _ = app.emit(EVT_TICK, Tick { elapsed_ms: started.elapsed().as_millis() as u64, frames });
         }
@@ -490,19 +503,23 @@ fn run<R: Runtime + 'static>(
         }
     }
 
-    // 收尾：GIF Encoder drop 即写终止块；AVI 回填头部 + 追加索引
+    // 收尾：GIF Encoder drop 即写终止块；AVI 回填头部 + 追加索引；MP4 回填 mdat + 写 moov
     drop(gif_enc.take());
     if let Some(a) = avi.take() {
         if let Err(e) = a.finish() {
             crate::storage::diag_write(&format!("[recorder] avi finish: {e}"));
         }
     }
+    if let Some(m) = mp4.take() {
+        if let Err(e) = m.finish() {
+            crate::storage::diag_write(&format!("[recorder] mp4 finish: {e}"));
+        }
+    }
     let dur = started.elapsed().as_millis() as u64;
     let avg_ms = if frames > 0 { total_frame_ms / frames as u64 } else { 0 };
     crate::storage::diag_write(&format!(
-        "[recorder] finished: frames={frames} dur={dur}ms avg_frame={avg_ms}ms max_frame={max_frame_ms}ms stop={} fmt={}",
-        STOP.load(Ordering::SeqCst),
-        if opts.gif { "gif" } else { "avi" }
+        "[recorder] finished: frames={frames} dur={dur}ms avg_frame={avg_ms}ms max_frame={max_frame_ms}ms stop={} fmt={fmt_name}",
+        STOP.load(Ordering::SeqCst)
     ));
     if frames == 0 {
         let _ = std::fs::remove_file(&path);
@@ -543,11 +560,23 @@ pub fn recorder_start(
     fmt: Option<String>,
     fps: Option<u32>,
     scale: Option<f64>,
+    quality: Option<String>,
 ) -> Result<(), String> {
+    let fmt = match fmt.as_deref() {
+        Some("avi") => RecFmt::Avi,
+        Some("mp4") => RecFmt::Mp4,
+        _ => RecFmt::Gif,
+    };
+    let quality = match quality.as_deref() {
+        Some("high") => RecQuality::High,
+        Some("fast") => RecQuality::Fast,
+        _ => RecQuality::Normal,
+    };
     let opts = RecOpts {
-        gif: fmt.as_deref().unwrap_or("gif") != "avi",
+        fmt,
         fps: fps.unwrap_or(12),
         scale: scale.unwrap_or(1.0) as f32,
+        quality,
     };
     if ACTIVE.swap(true, Ordering::SeqCst) {
         crate::storage::diag_write("[recorder] start REJECTED: already active");
@@ -634,5 +663,27 @@ pub fn rec_dismiss(app: AppHandle) -> Result<(), String> {
         let _ = w.close();
     }
     PENDING.store(false, Ordering::SeqCst);
+    Ok(())
+}
+
+/// 打开录屏保存目录（与 save_path_for 同一套解析逻辑）
+#[tauri::command]
+pub fn recorder_open_dir(app: AppHandle) -> Result<(), String> {
+    let base = app
+        .try_state::<crate::config::ConfigState>()
+        .and_then(|s| {
+            let c = s.0.lock().unwrap();
+            c.recorder.save_dir.clone().filter(|p| !p.is_empty())
+                .or_else(|| c.shot.save_dir.clone().filter(|p| !p.is_empty()))
+        })
+        .map(std::path::PathBuf::from)
+        .or_else(default_save_dir)
+        .unwrap_or_else(|| app.state::<crate::storage::AppPaths>().data_dir.clone());
+    let dir = base.join("小心工具箱");
+    let _ = std::fs::create_dir_all(&dir);
+    std::process::Command::new("explorer")
+        .arg(&dir)
+        .spawn()
+        .map_err(|e| format!("打开文件夹失败：{e}"))?;
     Ok(())
 }
