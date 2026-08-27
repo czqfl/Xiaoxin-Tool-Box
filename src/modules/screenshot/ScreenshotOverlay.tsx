@@ -13,7 +13,7 @@ import {
 import { translateText } from "../../core/tauri";
 import { useConfigStore } from "../../stores/configStore";
 import { scrollBegin } from "../scrollshot/api";
-import { Square, Circle, ArrowUpRight, Pencil, Undo2, Redo2, X, Pin, Save, Copy } from "lucide-react";
+import { Circle, ArrowUpRight, Pencil, Undo2, Redo2, X, Pin, Save, Copy } from "lucide-react";
 import "./screenshot.css";
 
 type Tool = "select"|"rect"|"ellipse"|"arrow"|"line"|"brush"|"mosaic"|"text"|"number";
@@ -53,14 +53,18 @@ const fmtCopy = (c: [number, number, number], fmt: ColorFmt) =>
 /* ---- 工具图标：Lucide React 矢量图标（Snipaste 同风格描线），统一 22px / strokeWidth 2。
    两个组合图标（形状组、线组）由 Lucide 单图标叠合而成 ---- */
 const IC = { size: 22, strokeWidth: 2, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
-const IcoRect = () => <Square {...IC} />;
+// 矩形（圆角，与形状组 IcoShape 视觉一致；不依赖 Lucide 的方角 Square）
+const IcoRect = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3.5" y="5.5" width="17" height="13" rx="3" />
+  </svg>
+);
 const IcoEllipse = () => <Circle {...IC} />;
-// 形状组图标：矩形 + 椭圆叠合（Snipaste 第一格风格）。统一 22×22 与
-// 周围单工具图标对齐，去掉 rx 与圆角让两组图形几何感整齐，避免 26×26
-// 时显"超载"。viewBox 24×24，几何稍外推贴近画布边缘
+// 形状组图标：矩形（圆角）+ 椭圆叠合（Snipaste 第一格风格）。统一 22×22，
+// 矩形加 rx 与其他自绘图标保持一致的圆润观感；viewBox 24×24，几何稍外推
 const IcoShape = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="2.5" y="5" width="12" height="10"/>
+    <rect x="2.5" y="5" width="12" height="10" rx="3"/>
     <circle cx="16.5" cy="16" r="5.5"/>
   </svg>
 );
@@ -81,12 +85,12 @@ const IcoLineGroup = () => (
   </svg>
 );
 const IcoBrush = () => <Pencil {...IC} />;
-// 马赛克：一个方框 + 左上/右下两格填充（像素化的对角示意）
+// 马赛克：一个圆角方框 + 左上/右下两个放大的填充格（像素化的对角示意）
 const IcoMosaic = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round">
-    <rect x="3.5" y="3.5" width="17" height="17" rx="1.5"/>
-    <rect x="6" y="6" width="4.5" height="4.5" fill="currentColor" stroke="none"/>
-    <rect x="13.5" y="13.5" width="4.5" height="4.5" fill="currentColor" stroke="none"/>
+    <rect x="3.5" y="3.5" width="17" height="17" rx="4"/>
+    <rect x="5.5" y="5.5" width="6" height="6" rx="1" fill="currentColor" stroke="none"/>
+    <rect x="12.5" y="12.5" width="6" height="6" rx="1" fill="currentColor" stroke="none"/>
   </svg>
 );
 // 文字：一横 + 一竖的极简 T（Lucide Type 顶部带衬线端点的"刺"观感）
@@ -121,7 +125,7 @@ const IcoCopy = () => <Copy {...IC} />;
 // 长截图：竖向长页面 + 一个向下箭头（表示继续往下滚动拼接）
 const IcoLongShot = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M7 3.5h10a1 1 0 0 1 1 1V19a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z"/>
+    <path d="M7 3.5h10a2.5 2.5 0 0 1 2.5 2.5V19a2.5 2.5 0 0 1-2.5 2.5H7a2.5 2.5 0 0 1-2.5-2.5V6a2.5 2.5 0 0 1 2.5-2.5Z"/>
     <path d="M12 8v5"/>
     <path d="m9.5 11.5 2.5 2.5 2.5-2.5"/>
   </svg>
