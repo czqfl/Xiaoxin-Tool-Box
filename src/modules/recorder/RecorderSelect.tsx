@@ -71,9 +71,12 @@ export function RecorderSelect() {
     setBoth({ x, y, w, h });
   };
 
-  const onUp = () => {
+  const onUp = (e: React.PointerEvent) => {
     dragRef.current = null;
     setDragging(false);
+    // 释放指针捕获：拖拽后若不释放，捕获会把后续点击都路由给捕获元素，
+    // 导致面板上的按钮（如下拉框）点了没反应
+    try { (e.target as Element).releasePointerCapture(e.pointerId); } catch { /* 未捕获则忽略 */ }
   };
 
   const start = async () => {
@@ -182,19 +185,27 @@ export function RecorderSelect() {
 
   // ---- 选区模式 ----
   const valid = rect != null && rect.w >= 24 && rect.h >= 24;
-  // 面板位置：紧挨录制区域——默认在选区正下方、右对齐选区右缘；
-  // 下方放不下翻到选区上方，最后统一夹回视口（初始估算，layout effect 用真实尺寸精确夹回）
+  // 面板位置：紧挨录制区【外部右下角】——在选区正下方、右缘对齐选区右缘；
+  // 若该处剩余空间放不下，回退到录制区【内部右下角】（面板右下角对齐选区右下角）。
+  // 初始估算用固定尺寸，layout effect 用真实尺寸精确夹回。
   const PANEL_W_EST = 320;
   const PANEL_H_EST = 214;
   let panelLeft = 0, panelTop = 0;
   if (valid && rect) {
-    panelLeft = rect.x + rect.w - PANEL_W_EST - 4;
-    panelTop = rect.y + rect.h + 8;
-    if (panelTop + PANEL_H_EST > window.innerHeight - 8) {
-      panelTop = rect.y - PANEL_H_EST - 8;
+    // 外部右下角：正下方 + 右对齐选区右缘
+    let left = rect.x + rect.w - PANEL_W_EST - 4;
+    let top = rect.y + rect.h + 8;
+    const outsideFits = top + PANEL_H_EST <= window.innerHeight - 4
+      && left >= 4 && left + PANEL_W_EST <= window.innerWidth - 4;
+    if (!outsideFits) {
+      // 回退：录制区内部右下角
+      left = rect.x + rect.w - PANEL_W_EST - 6;
+      top = rect.y + rect.h - PANEL_H_EST - 6;
+      left = Math.max(rect.x + 4, Math.min(left, rect.x + rect.w - PANEL_W_EST - 4));
+      top = Math.max(rect.y + 4, Math.min(top, rect.y + rect.h - PANEL_H_EST - 4));
     }
-    panelLeft = Math.max(4, Math.min(panelLeft, window.innerWidth - PANEL_W_EST - 4));
-    panelTop = Math.max(4, Math.min(panelTop, window.innerHeight - PANEL_H_EST - 4));
+    panelLeft = Math.max(4, Math.min(left, window.innerWidth - PANEL_W_EST - 4));
+    panelTop = Math.max(4, Math.min(top, window.innerHeight - PANEL_H_EST - 4));
   }
 
   // 面板真实尺寸夹回：render 后量一次，避免估算偏差
@@ -205,7 +216,14 @@ export function RecorderSelect() {
     const w = el.offsetWidth, h = el.offsetHeight;
     let left = rect.x + rect.w - w - 4;
     let top = rect.y + rect.h + 8;
-    if (top + h > window.innerHeight - 8) top = rect.y - h - 8;
+    const outsideFits = top + h <= window.innerHeight - 4
+      && left >= 4 && left + w <= window.innerWidth - 4;
+    if (!outsideFits) {
+      left = rect.x + rect.w - w - 6;
+      top = rect.y + rect.h - h - 6;
+      left = Math.max(rect.x + 4, Math.min(left, rect.x + rect.w - w - 4));
+      top = Math.max(rect.y + 4, Math.min(top, rect.y + rect.h - h - 4));
+    }
     el.style.left = `${Math.max(4, Math.min(left, window.innerWidth - w - 4))}px`;
     el.style.top = `${Math.max(4, Math.min(top, window.innerHeight - h - 4))}px`;
   }, [rect, valid, dragging]);

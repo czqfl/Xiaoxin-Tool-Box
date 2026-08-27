@@ -7,6 +7,7 @@
  *  overflow:hidden（如设置卡片 .setting-group 的圆角裁切），选项不再被遮挡；
  *  贴底/贴边时自动向上翻转、水平夹回视口内。 */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import "../styles/glass-select.css";
 
 export interface GlassOption {
@@ -72,7 +73,10 @@ export function GlassSelect({
   useEffect(() => {
     if (!open) return;
     const onDocDown = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+      // 弹出层 portal 到 body，不在 rootRef 内——点击选项需视为"内部"不关闭
+      if (rootRef.current?.contains(e.target as Node)) return;
+      if (popRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
     };
     const onScroll = (e: Event) => {
       // 弹出层自身内容滚动（overflow-y:auto）不应关闭它
@@ -110,55 +114,57 @@ export function GlassSelect({
         <span className="glass-select-label">{current?.label ?? value}</span>
         <span className="glass-select-caret">▾</span>
       </button>
-      {open && (
-        <div
-          ref={popRef}
-          className="glass-select-pop"
-          style={{
-            position: "fixed",
-            top: coords.top,
-            left: coords.left,
-            minWidth: coords.minWidth,
-          }}
-        >
-          {options.map((o) => {
-            const header =
-              o.group && o.group !== lastGroup ? (
-                <div className="glass-select-group" key={`g-${o.group}`}>
-                  {o.group}
-                </div>
-              ) : null;
-            lastGroup = o.group ?? undefined;
-            return (
-              <span key={o.value}>
-                {header}
-                <button
-                  type="button"
-                  className={`glass-select-opt${o.value === value ? " selected" : ""}${
-                    o.disabled ? " disabled" : ""
-                  }`}
-                  disabled={o.disabled}
-                  onClick={() => {
-                    onChange(o.value);
-                    setOpen(false);
-                  }}
-                >
-                  <span className="glass-select-opt-label">
-                    {o.icon && (
-                      <img className="glass-select-opt-icon" src={o.icon} alt="" draggable={false} />
-                    )}
-                    {o.swatch && (
-                      <span className="glass-select-swatch" style={{ background: o.swatch }} aria-hidden />
-                    )}
-                    <span className="glass-select-opt-text">{o.label}</span>
-                  </span>
-                  {o.value === value && <span className="glass-select-opt-check">✓</span>}
-                </button>
-              </span>
-            );
-          })}
-        </div>
-      )}
+      {open &&
+        createPortal(
+          <div
+            ref={popRef}
+            className="glass-select-pop"
+            style={{
+              position: "fixed",
+              top: coords.top,
+              left: coords.left,
+              minWidth: coords.minWidth,
+            }}
+          >
+            {options.map((o) => {
+              const header =
+                o.group && o.group !== lastGroup ? (
+                  <div className="glass-select-group" key={`g-${o.group}`}>
+                    {o.group}
+                  </div>
+                ) : null;
+              lastGroup = o.group ?? undefined;
+              return (
+                <span key={o.value}>
+                  {header}
+                  <button
+                    type="button"
+                    className={`glass-select-opt${o.value === value ? " selected" : ""}${
+                      o.disabled ? " disabled" : ""
+                    }`}
+                    disabled={o.disabled}
+                    onClick={() => {
+                      onChange(o.value);
+                      setOpen(false);
+                    }}
+                  >
+                    <span className="glass-select-opt-label">
+                      {o.icon && (
+                        <img className="glass-select-opt-icon" src={o.icon} alt="" draggable={false} />
+                      )}
+                      {o.swatch && (
+                        <span className="glass-select-swatch" style={{ background: o.swatch }} aria-hidden />
+                      )}
+                      <span className="glass-select-opt-text">{o.label}</span>
+                    </span>
+                    {o.value === value && <span className="glass-select-opt-check">✓</span>}
+                  </button>
+                </span>
+              );
+            })}
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
