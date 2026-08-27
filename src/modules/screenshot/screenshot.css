@@ -122,37 +122,67 @@ html[data-window="shot"] body { background: transparent; }
 .shot-picker-hints { font-size: 10px; line-height: 1.8; color: rgba(255,255,255,0.72); border-top: 1px solid rgba(255,255,255,0.14); padding-top: 4px; }
 .shot-picker-hints b { color: #fff; }
 
-/* ---- 工具条：跟随主题玻璃、直角无边框、整条统一投影 ----
-   【设计语言】条体永远是深色玻璃（浮在任意截图内容上，可读性优先），
-   主题感不靠切换文字色，而由三处 accent 表达：激活胶囊、悬停光晕、
-   浅色主题的整条微染——所有主题共用同一套规则，无割裂补丁 */
+/* ---- 工具条：明暗两态（不精细匹配主题色）----
+   【设计语言】主人要求：工具栏背景只分「明暗」两态——浅色主题白底、
+   深色主题黑底，不跟随主题强调色染色（去掉恒深玻璃的"彩色雾"观感）。
+   图标颜色随之翻转，保证两种背景下都清晰可读。system 模式无 data-theme
+   时由 prefers-color-scheme 媒体查询兜底。 */
+/* 工具栏主题令牌：纯白底深字 (light) / 纯黑底浅字 (dark) */
+html[data-theme="light"] {
+  --tb-bg: #ffffff;
+  --tb-fg: #2b2f36;
+  --tb-hover-bg: rgba(0, 0, 0, 0.07);
+  --tb-line: rgba(0, 0, 0, 0.20);
+  --tb-border: rgba(0, 0, 0, 0.12);
+  --tb-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+html[data-theme="dark"] {
+  --tb-bg: #000000;
+  --tb-fg: #e9eaec;
+  --tb-hover-bg: rgba(255, 255, 255, 0.14);
+  --tb-line: rgba(255, 255, 255, 0.28);
+  --tb-border: rgba(255, 255, 255, 0.10);
+  --tb-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+}
+/* system 模式：html 无 data-theme，跟随系统配色 */
+@media (prefers-color-scheme: light) {
+  html:not([data-theme]) {
+    --tb-bg: #ffffff; --tb-fg: #2b2f36; --tb-hover-bg: rgba(0, 0, 0, 0.07);
+    --tb-line: rgba(0, 0, 0, 0.20); --tb-border: rgba(0, 0, 0, 0.12); --tb-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  }
+}
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme]) {
+    --tb-bg: #000000; --tb-fg: #e9eaec; --tb-hover-bg: rgba(255, 255, 255, 0.14);
+    --tb-line: rgba(255, 255, 255, 0.28); --tb-border: rgba(255, 255, 255, 0.10); --tb-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+  }
+}
 /* 浮层容器：不挂背景/投影（投影下移到圆角的 .shot-toolbar，避免方形光晕
-   在圆角处露出「无圆角背景」的观感）；仅负责定位与层级 */
-.shot-toolbar-float { position: fixed; display: flex; flex-direction: column; align-items: flex-start; gap: 0; z-index: 200; max-width: calc(100vw - 16px); }
-/* 主题玻璃条：背景跟随主题令牌，毛玻璃模糊采样背后冻结画面；直角、无边框 */
-/* 毛玻璃 blur 移到 ::before：backdrop-filter 若直接放在条上会创建层叠上下文，
-   把按钮 tooltip(::after, z-index:320) 关死在条内——颜色面板（后置兄弟）反而
-   盖住 tooltip（"提示框被颜色面板挡住"根因）。伪元素做模糊效果相同，
-   且不产生条级层叠上下文，tooltip 可正常浮到面板之上 */
+   在圆角处露出「无圆角背景」的观感）；仅负责定位与层级。
+   以下为令牌默认值（深色调），被上面的主题规则按 specificity 覆盖 */
+.shot-toolbar-float { position: fixed; display: flex; flex-direction: column; align-items: flex-start; gap: 0; z-index: 200; max-width: calc(100vw - 16px);
+  --tb-bg: #000000; --tb-fg: #e9eaec; --tb-hover-bg: rgba(255, 255, 255, 0.14);
+  --tb-line: rgba(255, 255, 255, 0.28); --tb-border: rgba(255, 255, 255, 0.10); --tb-shadow: 0 8px 28px rgba(0, 0, 0, 0.5); }
 /* 工具栏贴近屏幕底缘时：把色板/粗细面板翻转到工具栏【上方】（旧版跑到屏幕外） */
 .shot-toolbar-float.panel-above { flex-direction: column-reverse; }
-/* 条体：实心深色 + 顶部内高光，零毛玻璃（截图背景已被冻结，模糊无意义，
-   反而让图标显得糊在彩色雾里）。圆角 12px + 单层加深阴影，"高级感"靠
-   高对比度，而非玻璃材质。参照企业微信截图工具栏 */
+/* 条体：纯白/纯黑实底（按主题令牌）+ 1px 细描边定义边缘 + 单层投影。
+   去掉毛玻璃/主题色染色：截图背景已被冻结，模糊与染色只会让图标显得
+   "糊在彩色雾里"；高级感靠高对比度，而非玻璃材质（参照企业微信） */
 .shot-toolbar { display: flex; align-items: center; gap: 1px;
-  background: rgba(28, 30, 35, 0.96);
-  border-radius: 12px; padding: 3px 4px; flex-wrap: nowrap; white-space: nowrap; position: relative; box-shadow: 0 8px 28px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06); }
-.shot-toolbar::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; }
-/* 同主条：实心深色、无毛玻璃（让视觉语言统一，"高级感"靠对比度） */
+  background: var(--tb-bg);
+  border: 1px solid var(--tb-border);
+  border-radius: 12px; padding: 3px 4px; flex-wrap: nowrap; white-space: nowrap; position: relative; box-shadow: var(--tb-shadow); }
+/* 同主条：纯白/纯黑实底、1px 细描边（让视觉语言统一，"高级感"靠对比度） */
 .shot-toolbar-panel { display: flex; align-items: center; gap: 7px;
-  background: rgba(28, 30, 35, 0.96);
-  border-radius: 12px; padding: 8px 10px; white-space: nowrap; align-self: stretch; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06); }
+  background: var(--tb-bg);
+  border: 1px solid var(--tb-border);
+  border-radius: 12px; padding: 8px 10px; white-space: nowrap; align-self: stretch; box-shadow: var(--tb-shadow); }
 /* 按钮：圆角与全局 radius-sm 对齐；浅色图标（深玻璃上唯一可读解）；
    transform 过渡承载按压回弹反馈 */
-.shot-toolbar button { background: transparent; border: none; color: #f2f4f7; padding: 6px; border-radius: 9px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; min-width: 34px; min-height: 34px; position: relative; transition: background var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out); }
+.shot-toolbar button { background: transparent; border: none; color: var(--tb-fg); padding: 6px; border-radius: 9px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; min-width: 34px; min-height: 34px; position: relative; transition: background var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out); }
 /* 图标：纯细线描边，【不发光】——drop-shadow 会让细线图标发糊、不利索。
    可读性靠图标自身颜色 + 悬停/激活时按钮背景反馈（几何已在组件内重校）。 */
-.shot-toolbar button:hover:not(:disabled) { background: rgba(255,255,255,0.13); color: #fff; }
+.shot-toolbar button:hover:not(:disabled) { background: var(--tb-hover-bg); color: var(--tb-fg); }
 .shot-toolbar button:not(:disabled):active { transform: scale(0.93); }
 .shot-toolbar button:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.75); outline-offset: 1px; }
 .shot-toolbar button:disabled { opacity: 0.3; cursor: default; }
@@ -179,8 +209,9 @@ html[data-window="shot"] body { background: transparent; }
   display: flex; flex-direction: row; flex-wrap: nowrap; white-space: nowrap;
   gap: 5px; padding: 5px 8px;
   align-items: center; justify-content: flex-start;
-  background: rgba(28, 30, 35, 0.96);
-  box-shadow: 0 6px 20px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06);
+  background: var(--tb-bg);
+  box-shadow: var(--tb-shadow);
+  border: 1px solid var(--tb-border);
   border-radius: 12px;
   animation: shot-submenu-in 100ms var(--ease-out) both;
 }
@@ -188,7 +219,7 @@ html[data-window="shot"] body { background: transparent; }
 .shot-toolbtn-submenu button { min-width: 27px; min-height: 27px; flex: none; }
 /* 图形与颜色之间的小竖线分隔（与主条分隔符同款渐隐竖线） */
 .shot-submenu-divider { width: 1px; height: 18px; flex: none; margin: 0 3px;
-  background: linear-gradient(180deg, transparent, rgba(255,255,255,0.26) 28% 72%, transparent); }
+  background: linear-gradient(180deg, transparent, var(--tb-line) 28% 72%, transparent); }
 /* 枚举内嵌的颜色/粗细面板：复用主面板内容，去掉自己的底（枚举已有玻璃底），
    与子图形严格同行、不换行；内发丝描边一并去掉（枚举容器已有） */
 .shot-toolbtn-submenu .shot-toolbar-panel {
@@ -217,15 +248,15 @@ html[data-window="shot"] body { background: transparent; }
 /* 分隔符：上下两端渐隐的竖线，深色玻璃上清晰又不生硬（纯色 var 在深玻璃
    上几乎不可见）；两套主题共用此规则，无需再打浅色补丁 */
 .shot-toolbar-sep { width: 1px; height: 18px; margin: 0 5px; flex-shrink: 0; border-radius: 1px;
-  background: linear-gradient(180deg, transparent, rgba(255,255,255,0.28) 28% 72%, transparent); }
+  background: linear-gradient(180deg, transparent, var(--tb-line) 28% 72%, transparent); }
 .shot-toolbar-actions { gap: 2px; }
 /* 色板小方块，选中白圈描边 + 暗色外环（浅色色块在深玻璃上的分离度） */
-.shot-color-btn { width: 15px !important; height: 15px !important; min-width: 15px !important; min-height: 15px !important; border-radius: 3.5px !important; border: 1.5px solid rgba(255,255,255,0.28) !important; cursor: pointer; padding: 0 !important; transition: transform 80ms ease, box-shadow var(--dur-fast) var(--ease-out); }
-.shot-color-btn.active { border-color: #fff !important; transform: scale(1.18); box-shadow: 0 0 0 2px rgba(0,0,0,0.42); }
+.shot-color-btn { width: 15px !important; height: 15px !important; min-width: 15px !important; min-height: 15px !important;   border-radius: 3.5px !important; border: 1.5px solid var(--tb-line) !important; cursor: pointer; padding: 0 !important; transition: transform 80ms ease, box-shadow var(--dur-fast) var(--ease-out); }
+.shot-color-btn.active { border-color: var(--tb-fg) !important; transform: scale(1.18); box-shadow: 0 0 0 2px rgba(0,0,0,0.42); }
 /* 自定义颜色按钮：彩虹环，唤起原生系统取色器（Snipaste 同款交互） */
 .shot-color-custom {
   width: 16px !important; height: 16px !important; min-width: 16px !important; min-height: 16px !important;
-  border-radius: 50% !important; border: 1.5px solid rgba(255,255,255,0.38) !important; cursor: pointer; padding: 0 !important;
+  border-radius: 50% !important; border: 1.5px solid var(--tb-line) !important; cursor: pointer; padding: 0 !important;
   background: conic-gradient(#e5484d, #ffd60a, #36b37e, #4c8dff, #b06fd6, #e5484d);
   box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25);
   transition: transform 80ms ease, box-shadow var(--dur-fast) var(--ease-out);
@@ -251,8 +282,8 @@ html[data-window="shot"] body { background: transparent; }
 }
 .shot-sw-wheel:hover span { background: #fff; }
 
-/* 截图工具栏恒深玻璃（见 .shot-toolbar 注释）：不再按主题打补丁——
-   基础规则已是深色玻璃，浅色/深色主题、system+浅色系统下图标均始终可读 */
+/* 截图工具栏明暗两态（见上方 --tb-* 令牌）：浅色白底深字 / 深色黑底浅字，
+   system 模式靠 prefers-color-scheme 兜底；图标颜色随之翻转保证可读 */
 
 /* 文字标注编辑器 */
 .shot-text-editor { position: fixed; z-index: 300; display: inline-flex; align-items: center; gap: 5px; background: transparent; border: 1.5px solid rgba(255,255,255,0.95); outline: 1px solid rgba(0,0,0,0.35); border-radius: 2px; padding: 3px 6px; transform: translateY(-50%); }

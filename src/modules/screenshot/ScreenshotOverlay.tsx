@@ -2189,7 +2189,7 @@ export function ScreenshotOverlay() {
                         }
                       }}>
                       {/* Snipaste 式单色白图标：激活反白，不按功能染色 */}
-                      <span style={{ color: active ? "#fff" : "rgba(255,255,255,0.92)", display: "inline-flex" }}><MainIcon /></span>
+                      <span style={{ display: "inline-flex" }}><MainIcon /></span>
                     </button>
                     {/* 二次选项枚举：平铺在一级图标正下方，子图形 + 颜色/粗细
                         同行展示。所有工具统一此逻辑；单工具无子图形、只显示
@@ -2199,7 +2199,7 @@ export function ScreenshotOverlay() {
                         {isGroup && b.items.map(([t, Ic, name]) => (
                           <button key={t} className={tool === t ? "active" : ""} data-tip={name}
                             onClick={() => setTool(t)}>
-                            <span style={{ color: tool === t ? "#fff" : "rgba(255,255,255,0.92)", display: "inline-flex" }}><Ic /></span>
+                            <span style={{ display: "inline-flex" }}><Ic /></span>
                           </button>
                         ))}
                         {isGroup && <span className="shot-submenu-divider" />}
@@ -2217,18 +2217,18 @@ export function ScreenshotOverlay() {
               <div className="shot-toolbar-sep" />
               <div className="shot-toolbar-group shot-toolbar-actions">
                 <button data-tip="长截图（自动滚动拼接长图）" onClick={startLongShot}>
-                  <span style={{ color: "rgba(255,255,255,0.92)", display: "inline-flex" }}><IcoLongShot /></span></button>
+                  <span style={{ display: "inline-flex" }}><IcoLongShot /></span></button>
                 <button data-tip="文字识别 (OCR)" className={ocrPhase !== "idle" ? "active" : ""}
                   onClick={() => { if (ocrPhase === "idle" || ocrPhase === "error") void runOcr(); else resetOcr(); }}>
-                  <span style={{ color: "rgba(255,255,255,0.92)", display: "inline-flex" }}><IcoOcr /></span></button>
+                  <span style={{ display: "inline-flex" }}><IcoOcr /></span></button>
                 <button data-tip="另存为..." onClick={()=>doOutput("save")}>
-                  <span style={{ color: "rgba(255,255,255,0.92)", display: "inline-flex" }}><IcoSaveAs/></span></button>
+                  <span style={{ display: "inline-flex" }}><IcoSaveAs/></span></button>
                 <button data-tip="复制 (Enter)" onClick={()=>doOutput("copy")}>
-                  <span style={{ color: "rgba(255,255,255,0.92)", display: "inline-flex" }}><IcoCopy/></span></button>
+                  <span style={{ display: "inline-flex" }}><IcoCopy/></span></button>
                 <button data-tip={`贴图 (${cfg.shortcuts.pins})`} onClick={()=>doOutput("pin")}>
-                  <span style={{ color: "rgba(255,255,255,0.92)", display: "inline-flex" }}><IcoPin/></span></button>
+                  <span style={{ display: "inline-flex" }}><IcoPin/></span></button>
                 <button data-tip="取消 (Esc)" onClick={()=>void shotCancel().catch(()=>{})}>
-                  <span style={{ color: "rgba(255,255,255,0.92)", display: "inline-flex" }}><IcoClose/></span></button>
+                  <span style={{ display: "inline-flex" }}><IcoClose/></span></button>
               </div>
             </div>
           </div>
