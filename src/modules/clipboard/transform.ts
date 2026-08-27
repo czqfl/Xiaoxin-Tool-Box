@@ -28,7 +28,7 @@ function base64Encode(text: string): string {
 }
 
 /** 时间戳（10 位秒 / 13 位毫秒）→ 本地时间字符串；非法返回 null */
-function formatTimestamp(text: string): string | null {
+export function formatTimestamp(text: string): string | null {
   const t = text.trim();
   const v = Number(t);
   if (!Number.isFinite(v) || v <= 0) return null;

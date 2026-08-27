@@ -20,6 +20,7 @@ mod port;
 mod quickfiles;
 mod shortcut;
 mod snippets;
+mod palette_stats;
 mod storage;
 mod translate;
 mod tray;
@@ -404,11 +405,16 @@ pub fn run() {
             quickfiles::quickfiles_reveal,
             quickfiles::quickfiles_delete,
             quickfiles::list_installed_apps,
+            quickfiles::app_launch,
             snippets::snippets_list,
             snippets::snippets_create,
             snippets::snippets_update,
             snippets::snippets_delete,
             snippets::snippets_paste,
+            // 命令面板：用量统计（频次/最近使用）与内联工具结果直接粘贴
+            palette_stats::palette_stats_list,
+            palette_stats::palette_stat_bump,
+            clipboard::clipboard_paste_text,
             screenshot::shot_begin,
             // 屏幕取色：复用遮罩窗的纯取色模式（前端 shotBeginPicker 包装待接入）
             screenshot::shot_begin_picker,

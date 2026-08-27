@@ -888,6 +888,19 @@ pub fn clipboard_paste(
     Ok(())
 }
 
+/// 把一段现算的文本写入剪贴板并模拟粘贴到当前焦点应用。
+/// 命令面板内联工具（算式结果 / 译文 / JSON·Base64 转换）用：
+/// 这些结果是临时产物，不进剪贴板历史，故复用 clipboard_copy_text 的抑制监听写入。
+#[tauri::command]
+pub fn clipboard_paste_text(text: String) -> Result<(), String> {
+    clipboard_copy_text(text)?;
+    std::thread::spawn(|| {
+        std::thread::sleep(Duration::from_millis(80));
+        let _ = simulate_paste();
+    });
+    Ok(())
+}
+
 /// 直接写入一段文本到系统剪贴板（不触发监听重复记录）。
 /// 供账号密码面板使用：复制账号/密码时不污染剪贴板历史，避免凭据泄露。
 #[tauri::command]

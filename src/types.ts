@@ -398,3 +398,13 @@ export interface PortProcess {
   /** 进程命令行（best-effort）：含启动参数与项目路径，用于反查“启动项目” */
   cmdline: string;
 }
+
+/** 命令面板单条用量统计（与 Rust PaletteStat 对应，存 data/palette_stats.json） */
+export interface PaletteStatEntry {
+  /** 稳定定位符：`clip:<id>` / `qfile:<路径>` / `panel-clipboard` / `app:<exe>` … */
+  key: string;
+  /** 累计执行次数 */
+  count: number;
+  /** 最近一次执行时间（毫秒时间戳） */
+  last_used: number;
+}
