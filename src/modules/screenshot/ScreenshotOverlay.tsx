@@ -119,12 +119,12 @@ const IcoOcr = () => (
 );
 const IcoUndo = () => <Undo2 {...IC} />;const IcoRedo = () => <Redo2 {...IC} />;
 const IcoClose = () => <X {...IC} />;
-// 贴图（pin to screen）：经典竖直图钉——圆头钉帽 + 竖直针杆 + 针尖
+// 贴图（pin to screen）：用户提供的实心贴图剪影一比一复刻（trace 自 PNG，
+// 单路径 24×24 viewBox 居中 2.4KB 矢量）
+import { PIN_ICON_PATH } from "./pin-path.const";
 const IcoPin = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="6.5" r="3.5" />
-    <path d="M12 10v8" />
-    <path d="M9.5 15.5 12 18.5l2.5-3" />
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d={PIN_ICON_PATH} />
   </svg>
 );
 const IcoSaveAs = () => <Download {...IC} />;
