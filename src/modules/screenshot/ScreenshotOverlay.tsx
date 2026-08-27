@@ -13,7 +13,7 @@ import {
 import { translateText } from "../../core/tauri";
 import { useConfigStore } from "../../stores/configStore";
 import { scrollBegin } from "../scrollshot/api";
-import { Circle, ArrowUpRight, Pencil, Undo2, Redo2, X, Pin, Save, Copy } from "lucide-react";
+import { Circle, ArrowUpRight, Pencil, Undo2, Redo2, X, Download, Copy } from "lucide-react";
 import "./screenshot.css";
 
 type Tool = "select"|"rect"|"ellipse"|"arrow"|"line"|"brush"|"mosaic"|"text"|"number";
@@ -64,8 +64,8 @@ const IcoEllipse = () => <Circle {...IC} />;
 // 矩形加 rx 与其他自绘图标保持一致的圆润观感；viewBox 24×24，几何稍外推
 const IcoShape = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="2.5" y="5" width="12" height="10" rx="3"/>
-    <circle cx="16.5" cy="16" r="5.5"/>
+    <rect x="2.5" y="4.5" width="14" height="11" rx="3.5"/>
+    <circle cx="17" cy="16.5" r="5"/>
   </svg>
 );
 const IcoArrow = () => <ArrowUpRight {...IC} />;
@@ -119,8 +119,14 @@ const IcoOcr = () => (
 );
 const IcoUndo = () => <Undo2 {...IC} />;const IcoRedo = () => <Redo2 {...IC} />;
 const IcoClose = () => <X {...IC} />;
-const IcoPin = () => <Pin {...IC} />;
-const IcoSaveAs = () => <Save {...IC} />;
+// 贴图（pin to screen）：圆头图钉 + 斜针，极简
+const IcoPin = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="9" cy="9" r="3.2" />
+    <line x1="11" y1="11" x2="19" y2="19" />
+  </svg>
+);
+const IcoSaveAs = () => <Download {...IC} />;
 const IcoCopy = () => <Copy {...IC} />;
 // 长截图：竖向长页面 + 一个向下箭头（表示继续往下滚动拼接）
 const IcoLongShot = () => (
