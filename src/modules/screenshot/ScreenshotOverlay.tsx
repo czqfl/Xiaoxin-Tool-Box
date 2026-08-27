@@ -13,7 +13,8 @@ import {
 import { translateText } from "../../core/tauri";
 import { useConfigStore } from "../../stores/configStore";
 import { scrollBegin } from "../scrollshot/api";
-import { ArrowUpRight, Pencil, Undo2, Redo2, X, Download, Copy } from "lucide-react";
+import { Pencil, Undo2, Redo2, X, Download, Copy } from "lucide-react";
+import { ARROW_ICON_PATH } from "./arrow-path.const";
 import "./screenshot.css";
 
 type Tool = "select"|"rect"|"ellipse"|"arrow"|"line"|"brush"|"mosaic"|"text"|"number";
@@ -73,7 +74,13 @@ const IcoShape = () => (
     <circle cx="17" cy="16.5" r="5"/>
   </svg>
 );
-const IcoArrow = () => <ArrowUpRight {...IC} />;
+// 箭头：翼形流线箭头（尾部窄、头部宽），来自用户提供的企微风格箭头 PNG；
+// trace 出来的水平 path 加 rotate(-45 12 12) 转到斜向上方向（粗端朝右上）
+const IcoArrow = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+    <path d={ARROW_ICON_PATH} transform="rotate(-45 12 12)" />
+  </svg>
+);
 // 直线：一条左下→右上的斜线（Lucide 无"纯直线"图标，TrendingUp 是折线+箭头，
 // 曾被误用作直线图标）。自绘与 Lucide 描线风格一致
 const IcoLine = () => (
