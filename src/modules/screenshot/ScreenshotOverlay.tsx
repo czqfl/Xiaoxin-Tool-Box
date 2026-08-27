@@ -55,11 +55,13 @@ const fmtCopy = (c: [number, number, number], fmt: ColorFmt) =>
 const IC = { size: 22, strokeWidth: 2, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
 const IcoRect = () => <Square {...IC} />;
 const IcoEllipse = () => <Circle {...IC} />;
-// 形状组图标：矩形 + 椭圆叠合（Snipaste 第一格）；组合图形内缩多，放大到 26px 保持视觉均衡
+// 形状组图标：矩形 + 椭圆叠合（Snipaste 第一格风格）。统一 22×22 与
+// 周围单工具图标对齐，去掉 rx 与圆角让两组图形几何感整齐，避免 26×26
+// 时显"超载"。viewBox 24×24，几何稍外推贴近画布边缘
 const IcoShape = () => (
-  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="3" y="5" width="12.5" height="10.5" rx="1.5"/>
-    <circle cx="15.5" cy="14" r="6"/>
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2.5" y="5" width="12" height="10"/>
+    <circle cx="16.5" cy="16" r="5.5"/>
   </svg>
 );
 const IcoArrow = () => <ArrowUpRight {...IC} />;
@@ -70,9 +72,10 @@ const IcoLine = () => (
     <line x1="4.5" y1="19.5" x2="19.5" y2="4.5" />
   </svg>
 );
-// 线组图标：折线+箭头叠合（Snipaste 第二格趋势线）；同 IcoShape 放大到 26px
+// 线组图标：折线+箭头叠合（Snipaste 第二格趋势线）。统一 22×22 与其他
+// 图标对齐，去掉超尺寸浮起感
 const IcoLineGroup = () => (
-  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="3 17 9 11 13 14 20 6"/>
     <polyline points="15 6 20 6 20 11"/>
   </svg>
@@ -1699,7 +1702,9 @@ export function ScreenshotOverlay() {
   const selectionKey = () => {
     const r = regRef.current;
     return [r.x, r.y, r.w, r.h, annos.length,
-      annos.map((a) => `${a.kind}:${a.x1},${a.y1},${a.x2},${a.y2},${a.points?.length ?? 0}:${a.num ?? ""}`).join("|"),
+      // 含 color/width：否则"改颜色/粗细后重画同轨迹笔迹"会命中过期缓存，
+      // 复制到的是旧标注的图（"画笔没复制上"的一种成因）
+      annos.map((a) => `${a.kind}:${a.x1},${a.y1},${a.x2},${a.y2},${a.points?.length ?? 0}:${a.num ?? ""}:${a.color}:${a.width}:${a.text ?? ""}`).join("|"),
     ].join("#");
   };
 
@@ -1802,8 +1807,8 @@ export function ScreenshotOverlay() {
           ]);
         } catch {}
       }
-      if ((!canCrop && !bgRef.current) || !geom) {
-        void diagLog(`[shot] output ${action} skipped: canCrop=${canCrop} bgRef=${!!bgRef.current} geom=${!!geom}`);
+      if ((!canCrop && (!bgRef.current || bgRef.current.width <= 0)) || !geom) {
+        void diagLog(`[shot] output ${action} skipped: canCrop=${canCrop} bgW=${bgRef.current?.width ?? -1} geom=${!!geom}`);
         return;
       }
       const r = regRef.current;
@@ -1816,6 +1821,12 @@ export function ScreenshotOverlay() {
       // 弹出的纯浪费。只有复制/另存/回退路径真正需要时才编码
       const key = selectionKey();
       let blob = pngCacheRef.current?.key === key ? pngCacheRef.current.blob : null;
+      // 复制链路诊断：标注摘要 + 缓存命中 + blob 魔数——定位"画笔没复制上"
+      // 时区分：标注没进 annos / 缓存过期 / PNG 编码异常
+      if (action === "copy" || annos.length > 0) {
+        void diagLog(`[shot] output ${action}: annos=[${annos.map((a) =>
+          `${a.kind}(${a.points?.length ?? 0}pts)`).join(",")}] cacheHit=${blob !== null} key=${key.slice(-160)}`);
+      }
       const ensureBlob = async (): Promise<Blob> => {
         if (blob) return blob;
         try {
