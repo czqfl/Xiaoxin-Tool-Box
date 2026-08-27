@@ -105,8 +105,9 @@ pub fn begin_select<R: Runtime>(app: &AppHandle<R>) {
     if crate::screenshot::shooting() {
         let _ = crate::screenshot::cancel_impl(app);
     }
-    // 已存在的旧选择窗先复用
+    // 已存在的旧选择窗先复用（重置鼠标穿透：上次录制可能置了 true）
     if let Some(w) = app.get_webview_window(SELECT_LABEL) {
+        let _ = w.set_ignore_cursor_events(false);
         let _ = w.show();
         let _ = w.set_focus();
         return;
@@ -580,6 +581,13 @@ pub fn recorder_start(
         w: w as f64 / sc, h: h as f64 / sc,
     });
     PENDING.store(false, Ordering::SeqCst);
+    // 录制中：选区窗退化为纯指示层——鼠标事件穿透到下层窗口（用户可正常操作屏幕），
+    // 并从屏幕采集中排除（遮罩/脉冲边框绝不进视频，视频只有录制区域内容）
+    let _ = window.set_ignore_cursor_events(true);
+    #[cfg(windows)]
+    if let Some(h) = crate::screenshot::hwnd_of_webview(&window) {
+        crate::acrylic::exclude_from_capture(h);
+    }
     ensure_bar(&app, mon, (rx, ry, rw, rh));
 
     let app2 = app.clone();

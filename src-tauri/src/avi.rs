@@ -51,7 +51,7 @@ impl<W: Write + Seek> AviWriter<W> {
         le32(0, &mut h);                      // dwTotalFrames（结束回填）
         le32(0, &mut h);                      // dwInitialFrames
         le32(1, &mut h);                      // dwStreams
-        let avih_suggest_buf_pos = (avih_body + 36) as u64;
+        let avih_suggest_buf_pos = (avih_body + 28) as u64;
         le32(0, &mut h);                      // dwSuggestedBufferSize（结束回填）
         le32(width, &mut h);                  // dwWidth
         le32(height, &mut h);                 // dwHeight

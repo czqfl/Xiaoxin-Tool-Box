@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Circle, RotateCcw, Film } from "lucide-react";
@@ -164,10 +164,45 @@ export function RecorderSelect() {
 
   // ---- 选区模式 ----
   const valid = rect != null && rect.w >= 24 && rect.h >= 24;
-  const PANEL_W_EST = 310;
-  const panelLeft = valid ? Math.max(8, Math.min(rect!.x + rect!.w - PANEL_W_EST, window.innerWidth - PANEL_W_EST - 8)) : 0;
-  const panelAbove = valid ? rect!.y + rect!.h + 118 > window.innerHeight : false;
-  const panelTop = valid ? (panelAbove ? rect!.y - 8 : rect!.y + rect!.h + 10) : 0;
+  // 面板位置（初始估算，layout effect 用真实尺寸精确夹回）：
+  // 优先放【非录制区域（遮罩）右下方】= 屏幕右下角；若该位置会压到录制区域
+  // （遮罩处放不下），则放到【录制区域右下方】= 选区内部右下角
+  const PANEL_W_EST = 320;
+  const PANEL_H_EST = 176;
+  let panelLeft = window.innerWidth - PANEL_W_EST - 8;
+  let panelTop = window.innerHeight - PANEL_H_EST - 8;
+  if (valid && rect) {
+    const overlaps = !(panelLeft + PANEL_W_EST <= rect.x || panelLeft >= rect.x + rect.w
+      || panelTop + PANEL_H_EST <= rect.y || panelTop >= rect.y + rect.h);
+    if (overlaps) {
+      panelLeft = rect.x + rect.w - PANEL_W_EST - 8;
+      panelTop = rect.y + rect.h - PANEL_H_EST - 8;
+      panelLeft = Math.max(rect.x + 4, panelLeft);
+      panelTop = Math.max(rect.y + 4, panelTop);
+    }
+    panelLeft = Math.max(4, Math.min(panelLeft, window.innerWidth - PANEL_W_EST - 4));
+    panelTop = Math.max(4, Math.min(panelTop, window.innerHeight - PANEL_H_EST - 4));
+  }
+
+  // 面板真实尺寸夹回：render 后量一次，避免估算偏差
+  const panelRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = panelRef.current;
+    if (!valid || !el || !rect) return;
+    const w = el.offsetWidth, h = el.offsetHeight;
+    let left = window.innerWidth - w - 8;
+    let top = window.innerHeight - h - 8;
+    const overlaps = !(left + w <= rect.x || left >= rect.x + rect.w
+      || top + h <= rect.y || top >= rect.y + rect.h);
+    if (overlaps) {
+      left = rect.x + rect.w - w - 8;
+      top = rect.y + rect.h - h - 8;
+      left = Math.max(rect.x + 4, left);
+      top = Math.max(rect.y + 4, top);
+    }
+    el.style.left = `${Math.max(4, Math.min(left, window.innerWidth - w - 4))}px`;
+    el.style.top = `${Math.max(4, Math.min(top, window.innerHeight - h - 4))}px`;
+  }, [rect, valid, dragging]);
 
   return (
     <div className="rec-select" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp}>
@@ -186,13 +221,19 @@ export function RecorderSelect() {
           </div>
           {!dragging && (
             <div
-              className={`rec-panel${panelAbove ? " rec-panel-above" : ""}`}
+              ref={panelRef}
+              className="rec-panel"
               style={{ left: panelLeft, top: panelTop }}
               onPointerDown={(e) => e.stopPropagation()}
               onDoubleClick={(e) => e.stopPropagation()}
             >
-              <div className="rec-row">
-                <span className="rec-label"><Film size={12} /> 格式</span>
+              <div className="rec-panel-head">
+                <span className="rec-panel-title"><Film size={13} /> 屏幕录制</span>
+                <span className="rec-panel-hint">Enter 开始 · Esc 取消</span>
+              </div>
+
+              <div className="rec-field">
+                <span className="rec-label">格式</span>
                 <div className="rec-seg">
                   <button className={opts.fmt === "avi" ? "active" : ""}
                     onClick={() => setOpts((o) => ({ ...o, fmt: "avi" }))}>视频 AVI</button>
@@ -200,8 +241,9 @@ export function RecorderSelect() {
                     onClick={() => setOpts((o) => ({ ...o, fmt: "gif" }))}>动图 GIF</button>
                 </div>
               </div>
-              <div className="rec-row">
-                <span className="rec-label">帧率</span>
+
+              <div className="rec-field">
+                <span className="rec-label">{opts.fmt === "gif" ? "帧率" : "画质"}</span>
                 {opts.fmt === "gif" ? (
                   <div className="rec-seg">
                     {[8, 12, 15, 20].map((f) => (
@@ -210,22 +252,21 @@ export function RecorderSelect() {
                     ))}
                   </div>
                 ) : (
-                  <span className="rec-value">30 帧/秒</span>
+                  <div className="rec-seg">
+                    {([0.5, 0.75, 1] as const).map((s) => (
+                      <button key={s} className={opts.scale === s ? "active" : ""}
+                        onClick={() => setOpts((o) => ({ ...o, scale: s }))}>{s * 100}%</button>
+                    ))}
+                  </div>
                 )}
-                <span className="rec-label">分辨率</span>
-                <div className="rec-seg">
-                  {([0.5, 0.75, 1] as const).map((s) => (
-                    <button key={s} className={opts.scale === s ? "active" : ""}
-                      onClick={() => setOpts((o) => ({ ...o, scale: s }))}>{s * 100}%</button>
-                  ))}
-                </div>
               </div>
+
               <div className="rec-actions">
-                <button className="rec-start" onClick={() => void start()}>
-                  <Circle size={11} fill="currentColor" stroke="none" /> 开始录制
-                </button>
                 <button onClick={() => setBoth(null)}>
                   <RotateCcw size={11} /> 重选
+                </button>
+                <button className="rec-start" onClick={() => void start()}>
+                  <Circle size={11} fill="currentColor" stroke="none" /> 开始录制
                 </button>
               </div>
             </div>

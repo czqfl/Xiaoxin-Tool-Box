@@ -98,65 +98,72 @@
 
 /* ---- 配置面板：恒深玻璃（与截图工具栏同一语言） ----
    选区窗浮在任意桌面内容上，必须保证文字在任何背景上清晰，
-   因此使用恒深玻璃（不跟随主题浅/深切换） */
+   因此使用恒深玻璃（不跟随主题浅/深切换）。
+   面板以自身 top-left 定位（JS 计算并夹回视口），不再用 translateX 锚定 hack */
 .rec-panel {
   position: absolute;
-  transform: translateX(-100%);
-  margin-top: 10px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px 14px;
+  gap: 12px;
+  padding: 13px 14px 12px;
   box-sizing: border-box;
-  min-width: 300px;
-  border-radius: 12px;
+  width: 300px;
+  border-radius: 14px;
   background:
-    linear-gradient(rgba(var(--accent-rgb), 0.12), rgba(var(--accent-rgb), 0.12)),
-    rgba(24, 26, 30, 0.92);
-  backdrop-filter: blur(14px) saturate(1.35);
-  -webkit-backdrop-filter: blur(14px) saturate(1.35);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.09);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
+    rgba(22, 24, 28, 0.94);
+  backdrop-filter: blur(16px) saturate(1.4);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.5),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08);
   color: #f2f4f7;
   font-size: 13px;
   user-select: none;
   pointer-events: auto;
   cursor: default;
-  animation: rec-panel-in 0.2s var(--ease-out);
+  animation: rec-panel-in 0.18s var(--ease-out);
 }
 @keyframes rec-panel-in {
-  from { opacity: 0; transform: translateX(-100%) translateY(6px); }
-  to   { opacity: 1; transform: translateX(-100%) translateY(0); }
-}
-/* 区域贴近视口底部：面板放到选区上方 */
-.rec-panel-above {
-  margin-top: 0;
-  transform: translate(-100%, -100%);
-  animation-name: rec-panel-in-above;
-}
-@keyframes rec-panel-in-above {
-  from { opacity: 0; transform: translate(-100%, calc(-100% + 6px)); }
-  to   { opacity: 1; transform: translate(-100%, -100%); }
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-/* ---- 配置面板行 ---- */
-.rec-row {
+/* ---- 面板标题栏 ---- */
+.rec-panel-head {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.rec-panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+}
+.rec-panel-hint {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  white-space: nowrap;
+}
+
+/* ---- 配置字段行 ---- */
+.rec-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 10px;
   white-space: nowrap;
 }
 .rec-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: rgba(255, 255, 255, 0.55);
+  color: rgba(255, 255, 255, 0.6);
   flex-shrink: 0;
   font-size: 12px;
   font-weight: 500;
-}
-.rec-value {
-  color: rgba(255, 255, 255, 0.55);
-  font-size: 12px;
 }
 
 /* ---- 分段选择器：与截图工具栏按钮同一语言 ---- */
@@ -334,40 +341,82 @@
   background: linear-gradient(180deg, rgba(229, 72, 77, 1), rgba(229, 72, 77, 0.9));
 }
 
-/* ---- 完成弹窗样式（.recb-toast） ---- */
+/* ---- 完成/停止 通知卡（.recb-toast） ---- */
 .recb-toast {
-  padding: 0 14px;
-  gap: 8px;
-  animation: recb-slide-in 0.25s var(--ease-out);
+  padding: 0 12px;
+  gap: 9px;
+  border-radius: var(--radius-panel);
+  animation: recb-slide-in 0.22s var(--ease-out);
 }
 @keyframes recb-slide-in {
-  from { opacity: 0; transform: translateY(12px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(14px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
-.recb-ok {
+
+/* 停止中：正在保存反馈 */
+.recb-saving {
+  color: var(--text-secondary);
+  font-size: var(--font-sm);
+  font-weight: 500;
   white-space: nowrap;
-  color: var(--success);
-  font-size: var(--font-xs);
+}
+
+/* 完成：图标 + 两行信息 + 操作按钮 */
+.recb-ic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  background: rgba(var(--accent-rgb), 0.16);
+  color: rgb(var(--accent-rgb));
+}
+.recb-info {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.recb-title {
+  color: var(--text-primary);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.recb-sub {
+  color: var(--text-secondary);
+  font-size: var(--font-xs);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .recb-err {
   color: var(--danger);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: var(--font-xs);
+  font-size: var(--font-sm);
 }
-.recb-action {
-  background: rgba(var(--accent-rgb), 0.15);
-  border-color: rgba(var(--accent-rgb), 0.3);
+/* 打开视频：品牌色强调（主操作） */
+.recb-open {
+  background: rgba(var(--accent-rgb), 0.16);
+  border-color: rgba(var(--accent-rgb), 0.32);
   color: rgb(var(--accent-rgb));
+  font-weight: 600;
 }
-.recb-action:hover {
-  background: rgba(var(--accent-rgb), 0.25);
+.recb-open:hover:not(:disabled) {
+  background: rgba(var(--accent-rgb), 0.28);
+}
+.recb-folder {
+  padding: 4px 8px;
 }
 .recb-close {
-  padding: 4px 6px;
+  padding: 4px 7px;
   border: none;
   background: transparent;
   color: var(--text-secondary);
