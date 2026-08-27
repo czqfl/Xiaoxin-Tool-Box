@@ -127,9 +127,15 @@ html[data-window="shot"] body { background: transparent; }
    深色主题黑底，不跟随主题强调色染色（去掉恒深玻璃的"彩色雾"观感）。
    图标颜色随之翻转，保证两种背景下都清晰可读。system 模式无 data-theme
    时由 prefers-color-scheme 媒体查询兜底。 */
-/* 工具栏主题令牌：纯白底深字 (light) / 纯黑底浅字 (dark) */
-html[data-theme="light"] {
-  --tb-bg: #ffffff;
+/* 工具栏主题令牌：浅色系默认（高级白底深字）——覆盖 light / mint / skyblue /
+   red / orange 全部浅色系主题与系统浅色；仅 data-theme="dark" 与系统深色
+   强制翻到深侧（#202021 近黑深灰，非纯黑）。
+   【关键】令牌只定义在 html 层级，绝不写在 .shot-toolbar-float 等子容器上——
+   否则子容器「直接写死」的值会通过继承遮蔽 html 的主题值，导致浅色主题下
+   工具栏仍为黑底（上一版的 bug 根因：.shot-toolbar 作为子元素永远读到父容器
+   的直接赋值而读不到 html 层）。 */
+html {
+  --tb-bg: #f5f5f7;            /* 高级白（非纯白，Apple 同款 off-white） */
   --tb-fg: #2b2f36;
   --tb-hover-bg: rgba(0, 0, 0, 0.07);
   --tb-line: rgba(0, 0, 0, 0.20);
@@ -137,7 +143,7 @@ html[data-theme="light"] {
   --tb-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
 }
 html[data-theme="dark"] {
-  --tb-bg: #000000;
+  --tb-bg: rgb(32, 32, 33);    /* #202021：近黑深灰，非纯黑 */
   --tb-fg: #e9eaec;
   --tb-hover-bg: rgba(255, 255, 255, 0.14);
   --tb-line: rgba(255, 255, 255, 0.28);
@@ -147,22 +153,20 @@ html[data-theme="dark"] {
 /* system 模式：html 无 data-theme，跟随系统配色 */
 @media (prefers-color-scheme: light) {
   html:not([data-theme]) {
-    --tb-bg: #ffffff; --tb-fg: #2b2f36; --tb-hover-bg: rgba(0, 0, 0, 0.07);
+    --tb-bg: #f5f5f7; --tb-fg: #2b2f36; --tb-hover-bg: rgba(0, 0, 0, 0.07);
     --tb-line: rgba(0, 0, 0, 0.20); --tb-border: rgba(0, 0, 0, 0.12); --tb-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
   }
 }
 @media (prefers-color-scheme: dark) {
   html:not([data-theme]) {
-    --tb-bg: #000000; --tb-fg: #e9eaec; --tb-hover-bg: rgba(255, 255, 255, 0.14);
+    --tb-bg: rgb(32, 32, 33); --tb-fg: #e9eaec; --tb-hover-bg: rgba(255, 255, 255, 0.14);
     --tb-line: rgba(255, 255, 255, 0.28); --tb-border: rgba(255, 255, 255, 0.10); --tb-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
   }
 }
 /* 浮层容器：不挂背景/投影（投影下移到圆角的 .shot-toolbar，避免方形光晕
    在圆角处露出「无圆角背景」的观感）；仅负责定位与层级。
-   以下为令牌默认值（深色调），被上面的主题规则按 specificity 覆盖 */
-.shot-toolbar-float { position: fixed; display: flex; flex-direction: column; align-items: flex-start; gap: 0; z-index: 200; max-width: calc(100vw - 16px);
-  --tb-bg: #000000; --tb-fg: #e9eaec; --tb-hover-bg: rgba(255, 255, 255, 0.14);
-  --tb-line: rgba(255, 255, 255, 0.28); --tb-border: rgba(255, 255, 255, 0.10); --tb-shadow: 0 8px 28px rgba(0, 0, 0, 0.5); }
+   注意：令牌 --tb-* 绝不在此处设置——放这里会被子元素继承遮蔽，见上方说明 */
+.shot-toolbar-float { position: fixed; display: flex; flex-direction: column; align-items: flex-start; gap: 0; z-index: 200; max-width: calc(100vw - 16px); }
 /* 工具栏贴近屏幕底缘时：把色板/粗细面板翻转到工具栏【上方】（旧版跑到屏幕外） */
 .shot-toolbar-float.panel-above { flex-direction: column-reverse; }
 /* 条体：纯白/纯黑实底（按主题令牌）+ 1px 细描边定义边缘 + 单层投影。
