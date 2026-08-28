@@ -17,6 +17,12 @@ import {
   IconSearch,
   IconTrash,
 } from "../../components/icons";
+import { Modal } from "../../components/Modal";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { EmptyState } from "../../components/EmptyState";
+import { Spinner } from "../../components/Spinner";
+import { ToastProvider, useToast } from "../../components/Toast";
+import { useEscLayer } from "../../hooks/useEscLayered";
 import "../../styles/panel.css";
 import "./credential.css";
 
@@ -41,9 +47,20 @@ function formatDate(ts: number): string {
 }
 
 export function CredentialPanel() {
+  return (
+    <ToastProvider>
+      <CredentialPanelInner />
+    </ToastProvider>
+  );
+}
+
+function CredentialPanelInner() {
   const config = useConfigStore((s) => s.config);
   const updateConfig = useConfigStore((s) => s.update);
+  const toast = useToast();
   usePanelCommon(config.credentials.always_on_top);
+  // Esc 关闭面板；表单/确认弹窗打开时由各自的模态层优先响应
+  useEscLayer(true, hideCurrentWindow);
 
   const showAll = config.credentials.show_passwords;
 
@@ -53,6 +70,7 @@ export function CredentialPanel() {
   const [editing, setEditing] = useState<Credential | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
+  const [deleteTarget, setDeleteTarget] = useState<Credential | null>(null);
 
   const { copiedId, mark } = useCopyFeedback();
 
@@ -94,15 +112,6 @@ export function CredentialPanel() {
     api.setPanelAlwaysOnTop(alwaysOnTop).catch(console.error);
   }, [alwaysOnTop]);
 
-  // Esc 隐藏
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") hideCurrentWindow();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return items;
@@ -119,7 +128,7 @@ export function CredentialPanel() {
     api
       .copyText(value)
       .then(() => mark(`${c.id}:${field}`))
-      .catch((err) => window.alert(String(err)));
+      .catch((err) => toast.show(String(err), "error"));
   };
 
   const toggleReveal = (id: string) => {
@@ -129,11 +138,6 @@ export function CredentialPanel() {
       else next.add(id);
       return next;
     });
-  };
-
-  const handleDelete = (c: Credential) => {
-    if (!window.confirm(`确定删除「${c.label}」？`)) return;
-    api.deleteCredential(c.id).then(refresh);
   };
 
   const toggleAlwaysOnTop = () => {
@@ -197,15 +201,18 @@ export function CredentialPanel() {
         </div>
 
         <div className="panel-body">
-          {!loaded && <div className="empty-state">加载中…</div>}
+          {!loaded && (
+            <EmptyState icon={<Spinner size="lg" />} title="加载中…" />
+          )}
           {loaded && items.length === 0 && (
-            <div className="empty-state">
-              <span className="empty-icon">🔑</span>
-              <span>点击右上角 + 添加第一个账号，添加后可一键复制账号/密码</span>
-            </div>
+            <EmptyState
+              icon="🔑"
+              title="点击右上角 + 添加第一个账号"
+              description="添加后可一键复制账号/密码"
+            />
           )}
           {loaded && items.length > 0 && filtered.length === 0 && (
-            <div className="empty-state">没有匹配的结果</div>
+            <EmptyState title="没有匹配的结果" />
           )}
 
           {filtered.length > 0 && (
@@ -221,7 +228,7 @@ export function CredentialPanel() {
                       </span>
                       <div className="cred-actions">
                         <button
-                          className="icon-btn sm"
+                          className="icon-btn"
                           title="编辑"
                           onClick={() => {
                             setEditing(c);
@@ -231,9 +238,9 @@ export function CredentialPanel() {
                           <IconEdit size={14} />
                         </button>
                         <button
-                          className="icon-btn sm danger"
+                          className="icon-btn icon-btn-danger"
                           title="删除"
-                          onClick={() => handleDelete(c)}
+                          onClick={() => setDeleteTarget(c)}
                         >
                           <IconTrash size={14} />
                         </button>
@@ -261,7 +268,7 @@ export function CredentialPanel() {
                       </span>
                       {!showAll && (
                         <button
-                          className="icon-btn sm"
+                          className="icon-btn"
                           title={isRevealed ? "隐藏密码" : "显示密码"}
                           onClick={() => toggleReveal(c.id)}
                         >
@@ -312,6 +319,21 @@ export function CredentialPanel() {
           }}
         />
       )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={async () => {
+          if (deleteTarget) {
+            await api.deleteCredential(deleteTarget.id);
+            refresh();
+          }
+        }}
+        title={`删除「${deleteTarget?.label ?? ""}」？`}
+        message="删除后账号密码无法找回。"
+        danger
+        confirmLabel="删除"
+      />
     </div>
   );
 }
@@ -322,7 +344,7 @@ interface FormProps {
   onSaved: () => void;
 }
 
-/** 添加 / 编辑弹窗：名称、账号、密码、备注 */
+/** 添加 / 编辑弹窗：名称、账号、密码、备注（共享 Modal 外壳，Esc 层叠关闭） */
 function CredentialForm({ initial, onClose, onSaved }: FormProps) {
   const [label, setLabel] = useState(initial?.label ?? "");
   const [account, setAccount] = useState(initial?.account ?? "");
@@ -355,73 +377,73 @@ function CredentialForm({ initial, onClose, onSaved }: FormProps) {
   };
 
   return (
-    <div className="cred-modal-mask" onClick={onClose}>
-      <div className="cred-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="cred-modal-title">
-          {initial ? "编辑账号" : "添加账号"}
-        </div>
-
-        <label className="cred-field">
-          <span>名称 / 用途</span>
-          <input
-            value={label}
-            placeholder="如 GitHub、公司邮箱"
-            onChange={(e) => setLabel(e.target.value)}
-            autoFocus
-          />
-        </label>
-
-        <label className="cred-field">
-          <span>账号</span>
-          <input
-            value={account}
-            placeholder="用户名 / 邮箱 / 手机号"
-            onChange={(e) => setAccount(e.target.value)}
-          />
-        </label>
-
-        <label className="cred-field">
-          <span>密码</span>
-          <div className="cred-pw-wrap">
-            <input
-              type={showPw ? "text" : "password"}
-              value={password}
-              placeholder="请输入密码"
-              onChange={(e) => setPassword(e.target.value)}
-            />
-            <button
-              type="button"
-              className="icon-btn sm"
-              title={showPw ? "隐藏" : "显示"}
-              onClick={() => setShowPw((v) => !v)}
-            >
-              {/* 状态导向：显示中=睁眼，隐藏中=闭眼 */}
-              {showPw ? <IconEye size={14} /> : <IconEyeOff size={14} />}
-            </button>
-          </div>
-        </label>
-
-        <label className="cred-field">
-          <span>备注（可选）</span>
-          <textarea
-            value={note}
-            placeholder="如安全问题、密保邮箱等"
-            rows={2}
-            onChange={(e) => setNote(e.target.value)}
-          />
-        </label>
-
-        {error && <div className="cred-form-error">{error}</div>}
-
-        <div className="cred-modal-actions">
-          <button className="btn btn-ghost" onClick={onClose}>
+    <Modal
+      open
+      onClose={onClose}
+      title={initial ? "编辑账号" : "添加账号"}
+      wide
+      actions={
+        <>
+          <button className="btn" onClick={onClose} disabled={saving}>
             取消
           </button>
           <button className="btn btn-primary" disabled={saving} onClick={() => void submit()}>
             {saving ? "保存中…" : "保存"}
           </button>
+        </>
+      }
+    >
+      <label className="cred-field">
+        <span>名称 / 用途</span>
+        <input
+          value={label}
+          placeholder="如 GitHub、公司邮箱"
+          onChange={(e) => setLabel(e.target.value)}
+          autoFocus
+        />
+      </label>
+
+      <label className="cred-field">
+        <span>账号</span>
+        <input
+          value={account}
+          placeholder="用户名 / 邮箱 / 手机号"
+          onChange={(e) => setAccount(e.target.value)}
+        />
+      </label>
+
+      <label className="cred-field">
+        <span>密码</span>
+        <div className="cred-pw-wrap">
+          <input
+            type={showPw ? "text" : "password"}
+            value={password}
+            placeholder="请输入密码"
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          <button
+            type="button"
+            className="icon-btn"
+            title={showPw ? "隐藏" : "显示"}
+            onClick={() => setShowPw((v) => !v)}
+          >
+            {/* 状态导向：显示中=睁眼，隐藏中=闭眼 */}
+            {showPw ? <IconEye size={14} /> : <IconEyeOff size={14} />}
+          </button>
         </div>
-      </div>
-    </div>
+      </label>
+
+      <label className="cred-field">
+        <span>备注（可选）</span>
+        <textarea
+          value={note}
+          placeholder="如安全问题、密保邮箱等"
+          rows={2}
+          onChange={(e) => setNote(e.target.value)}
+        />
+      </label>
+
+      {error && <div className="cred-form-error">{error}</div>}
+    </Modal>
   );
 }

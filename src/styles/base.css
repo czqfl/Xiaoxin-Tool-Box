@@ -202,6 +202,17 @@ button {
   background: var(--danger-soft);
   border-color: var(--danger);
 }
+.btn-ghost {
+  background: transparent;
+  border-color: var(--border-subtle);
+  color: var(--text-secondary);
+  box-shadow: none;
+}
+.btn-ghost:hover {
+  background: var(--bg-item-hover);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
 .btn-sm {
   height: 26px;
   padding: 0 10px;
