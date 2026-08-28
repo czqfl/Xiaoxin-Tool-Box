@@ -1,12 +1,13 @@
 /* ==========================================================================
    屏幕录制 — 与应用主题完全统一
    消费 theme.css 所有设计令牌，禁止硬编码色值/圆角/字号。
-   两个窗口共享一套玻璃语言：
-   - rec-select（选区窗）：整屏遮罩 + 选区边框 + 配置面板
-   - rec-bar（控制条）：录制中/完成/错误状态
+   - rec-select（选区窗）：透明 WebView2，【不加窗口级模糊】——
+     黑色半透明遮罩镂空选区，选区内画面保持清晰可见（用户要看清背后内容）；
+     配置面板自身用高不透明度深底 + 玻璃质感保证可读
+   - rec-bar（控制条）：小窗保留 SWCA 实时亚克力 + 半透明底
    ========================================================================== */
 
-/* ---- 选区窗（全屏透明，data-window="panel" 由 main.tsx 设置） ---- */
+/* ---- 选区窗（全屏透明，data-window="panel" 由组件设置） ---- */
 .rec-select {
   position: fixed;
   inset: 0;
@@ -14,72 +15,33 @@
   user-select: none;
   overflow: hidden;
 }
-/* 录制中：只显示遮罩+边框，禁止拖拽/面板交互 */
-.rec-select-recording {
-  pointer-events: none;
-  cursor: default;
-}
 
-/* ---- 遮罩层：半透明黑色，镂空选区 ---- */
+/* ---- 遮罩层：黑色半透明，镂空选区（选区内无遮罩=清晰，对比强烈） ---- */
 .rec-shade {
   position: absolute;
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(0, 0, 0, 0.38);
   pointer-events: none;
 }
 .rec-shade-full { inset: 0; }
 
-/* ---- 选区边框：品牌色发光描边 ---- */
+/* ---- 选区边框：品牌色细描边 + 四角 L 形加粗角标 ---- */
 .rec-frame {
   position: absolute;
-  border: 1.5px solid rgba(var(--accent-rgb), 0.95);
-  box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.3),
-    0 0 12px rgba(var(--accent-rgb), 0.45);
+  border: 1.5px solid rgba(var(--accent-rgb), 0.75);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
   pointer-events: none;
 }
-
-/* ---- 录制中边框：虚线脉冲（清晰标出录制区域边界） ---- */
-.rec-frame-recording {
-  border: 2px dashed rgba(var(--accent-rgb), 0.95);
-  box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.3),
-    0 0 22px rgba(var(--accent-rgb), 0.45),
-    inset 0 0 22px rgba(var(--accent-rgb), 0.06);
-  animation: rec-frame-pulse 1.6s ease-in-out infinite;
-}
-@keyframes rec-frame-pulse {
-  0%, 100% { border-color: rgba(var(--accent-rgb), 0.95); box-shadow: 0 0 0 1px rgba(0,0,0,0.3), 0 0 22px rgba(var(--accent-rgb), 0.45); }
-  50%      { border-color: rgba(var(--accent-rgb), 0.55); box-shadow: 0 0 0 1px rgba(0,0,0,0.18), 0 0 34px rgba(var(--accent-rgb), 0.28); }
-}
-
-/* ---- 录制中角标：选区左上角 "● 录制中" ---- */
-.rec-rec-badge {
+.rec-corner {
   position: absolute;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 9px;
-  border-radius: 8px;
-  background: rgba(24, 26, 30, 0.88);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  pointer-events: none;
-  white-space: nowrap;
+  width: 14px;
+  height: 14px;
+  border: 2.5px solid rgba(var(--accent-rgb), 1);
+  filter: drop-shadow(0 0 4px rgba(var(--accent-rgb), 0.55));
 }
-.rec-rec-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--danger);
-  box-shadow: 0 0 7px rgba(229, 72, 77, 0.9);
-  animation: rec-rec-dot-pulse 1.1s ease-in-out infinite;
-}
-@keyframes rec-rec-dot-pulse { 50% { opacity: 0.35; } }
+.rec-corner.tl { top: -2px; left: -2px; border-right: none; border-bottom: none; border-top-left-radius: 4px; }
+.rec-corner.tr { top: -2px; right: -2px; border-left: none; border-bottom: none; border-top-right-radius: 4px; }
+.rec-corner.bl { bottom: -2px; left: -2px; border-right: none; border-top: none; border-bottom-left-radius: 4px; }
+.rec-corner.br { bottom: -2px; right: -2px; border-left: none; border-top: none; border-bottom-right-radius: 4px; }
 
 /* ---- 尺寸标签：品牌色胶囊 ---- */
 .rec-size {
@@ -104,11 +66,14 @@
   top: 32px;
   left: 50%;
   transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   padding: 7px 18px;
   border-radius: 10px;
   background:
     linear-gradient(rgba(var(--accent-rgb), 0.08), rgba(var(--accent-rgb), 0.08)),
-    rgba(24, 26, 30, 0.88);
+    rgba(20, 22, 26, 0.95);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
@@ -118,16 +83,31 @@
   pointer-events: none;
   white-space: nowrap;
 }
+/* 键位胶囊：提示里的 Enter/Esc 等 */
+.rec-hint kbd,
+.rec-panel-hint kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-bottom-width: 2px;
+  color: rgba(255, 255, 255, 0.9);
+  font-family: var(--font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-shadow: none;
+}
 .rec-hint-error {
   top: 76px;
-  border-color: rgba(229, 72, 77, 0.35);
-  background: rgba(229, 72, 77, 0.15);
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
   color: var(--danger);
 }
 
-/* ---- 配置面板：亚克力 + 不透明度跟随通用设置（--bg-panel-rgb / --panel-opacity /
-   --panel-blur，与各面板外壳同源）。配色为中性玻璃（无蓝调、无主题色染色），
-   简洁优雅；面板以自身 top-left 定位（JS 计算并夹回视口） */
+/* ---- 配置面板：高不透明度深底（窗口无模糊，面板自己保可读），
+   backdrop-filter 对页面内遮罩层做轻磨砂，叠玻璃描边/高光成亚克力观感。 ---- */
 .rec-panel {
   position: absolute;
   display: flex;
@@ -138,19 +118,21 @@
   width: 320px;
   border-radius: 14px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.015) 45%, transparent 82%),
-    rgba(var(--bg-panel-rgb), var(--panel-opacity));
-  backdrop-filter: blur(var(--panel-blur, 18px)) saturate(1.4);
-  -webkit-backdrop-filter: blur(var(--panel-blur, 18px)) saturate(1.4);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02) 45%, transparent 82%),
+    rgba(15, 17, 23, 0.92);
+  backdrop-filter: blur(16px) saturate(1.35);
+  -webkit-backdrop-filter: blur(16px) saturate(1.35);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   box-shadow:
-    0 12px 34px rgba(0, 0, 0, 0.4),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+    0 12px 40px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(0, 0, 0, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
   color: var(--text-primary);
   font-size: 13px;
   user-select: none;
   pointer-events: auto;
   cursor: default;
-  animation: rec-panel-in 0.18s var(--ease-out);
+  animation: rec-panel-in var(--dur-base) var(--ease-out);
 }
 @keyframes rec-panel-in {
   from { opacity: 0; transform: translateY(6px) scale(0.98); }
@@ -163,7 +145,7 @@
   align-items: center;
   justify-content: space-between;
   padding-bottom: 10px;
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 .rec-panel-title {
   display: inline-flex;
@@ -171,11 +153,11 @@
   gap: 6px;
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: #fff;
 }
 .rec-panel-hint {
   font-size: 11px;
-  color: var(--text-tertiary);
+  color: rgba(255, 255, 255, 0.45);
   white-space: nowrap;
 }
 
@@ -188,7 +170,7 @@
   white-space: nowrap;
 }
 .rec-label {
-  color: var(--text-secondary);
+  color: rgba(255, 255, 255, 0.7);
   flex-shrink: 0;
   font-size: 12px;
   font-weight: 500;
@@ -200,25 +182,25 @@
   gap: 2px;
   padding: 3px;
   border-radius: 9px;
-  border: 1px solid var(--border-subtle);
-  background: rgba(127, 127, 127, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.2);
 }
 .rec-seg button {
   padding: 4px 12px;
   border-radius: 6px;
   border: none;
   background: transparent;
-  color: var(--text-secondary);
+  color: rgba(255, 255, 255, 0.65);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s var(--ease-out),
-    color 0.15s var(--ease-out),
-    box-shadow 0.15s var(--ease-out);
+  transition: background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
 }
 .rec-seg button:hover:not(.active) {
-  color: var(--text-primary);
-  background: rgba(127, 127, 127, 0.14);
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
 }
 .rec-seg button.active {
   background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.95), rgba(var(--accent-rgb), 0.82));
@@ -227,42 +209,46 @@
     inset 0 0 0 1px rgba(255, 255, 255, 0.12),
     0 1px 6px rgba(var(--accent-rgb), 0.4);
   font-weight: 600;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 .rec-seg button.active:hover {
   background: linear-gradient(180deg, rgba(var(--accent-rgb), 1), rgba(var(--accent-rgb), 0.9));
 }
 
-/* ---- 操作按钮区：中性主题玻璃 ---- */
+/* ---- 操作按钮区：主按钮铺满剩余宽度，层级一眼分明 ---- */
 .rec-actions {
   display: flex;
-  justify-content: flex-end;
+  align-items: stretch;
   gap: 8px;
   margin-top: 2px;
 }
 .rec-actions button {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 5px;
-  padding: 5px 14px;
+  padding: 6px 14px;
   border-radius: 8px;
-  border: 1px solid var(--border-subtle);
-  background: rgba(127, 127, 127, 0.12);
-  color: var(--text-primary);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s var(--ease-out),
-    box-shadow 0.15s var(--ease-out),
-    transform 0.12s var(--ease-out);
+  transition: background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
 }
 .rec-actions button:hover {
-  background: rgba(127, 127, 127, 0.2);
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
 }
 .rec-actions button:not(:disabled):active {
   transform: scale(0.96);
 }
-/* 开始录制：品牌色渐变（唯一强调色，不做蓝调染色） */
+/* 开始录制：品牌色渐变（唯一强调色，铺满剩余宽度） */
 .rec-actions .rec-start {
+  flex: 1 1 auto;
   background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.95), rgba(var(--accent-rgb), 0.82));
   border-color: transparent;
   color: var(--accent-text);
@@ -276,43 +262,46 @@
 }
 
 /* ==========================================================================
-   录制控制条（rec-bar）：两个阶段，两种形态
-   1. 录制中：顶部居中迷你条（红点 + 时间 + 停止按钮）  200×36
-   2. 完成后：右下角小弹窗（信息 + 打开 + 关闭），5秒自动消失
+   录制控制条（rec-bar）：两个阶段，两种形态（窗口级磨砂，底色半透明）
+   1. 录制中：顶部居中药丸条（红点 + REC + 时间 + 暂停/停止/取消） 312×36
+   2. 完成后：右下角通知卡（信息 + 打开 + 关闭），6 秒自动消失
    ========================================================================== */
 .recb-root {
   width: 100vw;
   height: 100vh;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 14px;
+  gap: 10px;
+  padding: 0 8px 0 14px;
   box-sizing: border-box;
   border-radius: var(--radius-panel);
-  border: 1px solid var(--border-subtle);
-  background: linear-gradient(
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  /* 窗口已有 SWCA 实时模糊：这里半透明深底 + 顶部高光 = 磨砂玻璃药丸 */
+  background:
+    linear-gradient(
       180deg,
-      rgba(var(--accent-rgb), 0.045),
-      rgba(var(--accent-rgb), 0.012) 42%,
-      transparent 78%
+      rgba(var(--accent-rgb), 0.05),
+      rgba(var(--accent-rgb), 0.015) 42%,
+      transparent 80%
     ),
-    rgba(var(--bg-panel-rgb), var(--panel-opacity));
-  backdrop-filter: blur(var(--panel-blur, 16px)) saturate(1.35);
-  box-shadow: var(--panel-highlight);
+    rgba(16, 18, 24, 0.52);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 6px 22px rgba(0, 0, 0, 0.35);
   color: var(--text-primary);
-  font-size: var(--font-sm);
+  font-size: 13px;
   user-select: none;
   overflow: hidden;
 }
 
-/* ---- 录制中指示灯 ---- */
+/* ---- 录制中指示灯：呼吸红点 ---- */
 .recb-dot {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   background: var(--danger);
-  box-shadow: 0 0 8px rgba(229, 72, 77, 0.9);
-  animation: recb-pulse 1.1s ease-in-out infinite;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--danger) 95%, transparent), 0 0 2px color-mix(in srgb, var(--danger) 70%, transparent);
+  animation: recb-pulse 1.2s ease-in-out infinite;
   flex-shrink: 0;
 }
 .recb-dot.off {
@@ -321,34 +310,50 @@
 }
 @keyframes recb-pulse { 50% { opacity: 0.3; } }
 
-/* ---- 时间 ---- */
+/* ---- 时间：药丸主视觉，大号等宽数字 ---- */
 .recb-time {
   font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  font-size: var(--font-sm);
-  letter-spacing: 0.03em;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.05em;
+  color: #fff;
+  flex: 1 1 auto;
+  text-align: left;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
 
-/* ---- REC 标识 ---- */
+/* ---- REC 标识：小号重字距红字 ---- */
 .recb-rec {
-  font-size: var(--font-xs);
+  font-size: 11px;
   font-weight: 800;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.16em;
   color: var(--danger);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--danger) 60%, transparent), 0 1px 2px rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+}
+/* 暂停态：琥珀色提示（与边框环暂停色呼应） */
+.recb-rec.paused {
+  color: var(--warning);
+  text-shadow: 0 0 8px rgba(240, 173, 62, 0.55), 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+/* 暂停时整条弱化：一眼区分"正在录"与"暂停中" */
+.recb-root.paused .recb-time {
+  color: rgba(255, 255, 255, 0.55);
 }
 
 /* ---- 通用按钮 ---- */
 .recb-btn {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  border-radius: var(--radius-sm);
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 13px;
+  border-radius: 999px;
   border: 1px solid var(--border-subtle);
   background: var(--bg-input-glass);
   color: var(--text-primary);
-  font-size: var(--font-xs);
-  font-weight: 500;
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
   transition: background var(--dur-fast) var(--ease-out),
@@ -366,36 +371,101 @@
   cursor: default;
 }
 
-/* 停止按钮：危险红 */
+/* 停止按钮：危险红实心药丸（唯一强调，一眼可点） */
 .recb-stop {
-  background: linear-gradient(180deg, rgba(229, 72, 77, 0.92), rgba(229, 72, 77, 0.82));
-  border-color: transparent;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--danger) 95%, transparent), color-mix(in srgb, var(--danger) 88%, black));
+  border-color: rgba(255, 255, 255, 0.16);
   color: #fff;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 2px 8px color-mix(in srgb, var(--danger) 35%, transparent);
 }
 .recb-stop:hover:not(:disabled) {
-  background: linear-gradient(180deg, rgba(229, 72, 77, 1), rgba(229, 72, 77, 0.9));
+  background: linear-gradient(180deg, rgba(238, 88, 94, 1), rgba(224, 62, 68, 0.95));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.32),
+    0 3px 12px color-mix(in srgb, var(--danger) 50%, transparent);
+}
+
+/* ---- 紧凑图标按钮（暂停 / 取消）：圆形玻璃 ---- */
+.recb-btn.recb-icon {
+  padding: 6px 8px;
+  gap: 0;
+  line-height: 0;
+}
+/* 暂停后变"继续"：品牌色强调，提示可恢复 */
+.recb-btn.recb-icon.recb-resume {
+  background: rgba(var(--accent-rgb), 0.2);
+  border-color: rgba(var(--accent-rgb), 0.4);
+  color: rgb(var(--accent-rgb));
+}
+.recb-btn.recb-icon.recb-resume:hover:not(:disabled) {
+  background: rgba(var(--accent-rgb), 0.32);
+}
+/* 取消：中性幽灵圆钮，hover 泛红示意"丢弃" */
+.recb-btn.recb-icon.recb-cancel {
+  color: var(--text-secondary);
+}
+.recb-btn.recb-icon.recb-cancel:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+  color: var(--danger);
+}
+/* Esc 提示：录制中 Esc = 停止并保存（丢弃走 ✕ 取消），避免误按丢录像 */
+.recb-esc-hint {
+  margin-left: 2px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  white-space: nowrap;
 }
 
 /* ---- 完成/停止 通知卡（.recb-toast） ---- */
 .recb-toast {
+  position: relative;
   padding: 0 12px;
   gap: 9px;
   border-radius: var(--radius-panel);
-  animation: recb-slide-in 0.22s var(--ease-out);
+  animation: recb-slide-in var(--dur-base) var(--ease-out);
 }
 @keyframes recb-slide-in {
   from { opacity: 0; transform: translateY(14px) scale(0.97); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
+/* 自动关闭倒计时：底部品牌色进度条，6 秒匀速收缩（与 autoClose 时长一致） */
+.recb-toast.recb-final::after {
+  content: "";
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 4px;
+  height: 2px;
+  border-radius: 1px;
+  background: rgba(var(--accent-rgb), 0.85);
+  transform-origin: left center;
+  animation: recb-countdown 6s linear forwards;
+}
+@keyframes recb-countdown {
+  from { transform: scaleX(1); opacity: 1; }
+  to   { transform: scaleX(0); opacity: 0.5; }
+}
 
-/* 停止中：正在保存反馈 */
+/* 停止中：正在保存反馈（旋转图标 + 文案） */
 .recb-saving {
   color: var(--text-secondary);
   font-size: var(--font-sm);
   font-weight: 500;
   white-space: nowrap;
 }
+.recb-spin {
+  flex-shrink: 0;
+  color: rgb(var(--accent-rgb));
+  animation: recb-rotate 0.8s linear infinite;
+}
+@keyframes recb-rotate { to { transform: rotate(360deg); } }
 
 /* 完成：图标 + 两行信息 + 操作按钮 */
 .recb-ic {

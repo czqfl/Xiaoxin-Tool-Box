@@ -1,8 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { Circle, RotateCcw, Film } from "lucide-react";
-import { recorderStart, recSelectCancel, EVT_REC_STARTED, type RecRect, type RecOptions } from "./api";
+import { recorderStart, recSelectCancel, type RecRect, type RecOptions } from "./api";
 import { GlassSelect } from "../../components/GlassSelect";
 import type { AppConfig } from "../../types";
 import "./recorder.css";
@@ -11,8 +10,8 @@ import "./recorder.css";
 type ResPreset = "raw" | "1080" | "720" | "360";
 const RES_HEIGHT: Record<ResPreset, number> = { raw: 0, "1080": 1080, "720": 720, "360": 360 };
 
-/** 录屏区域选择：呼出即全屏压暗，拖拽框选后弹出配置面板，确认后开始录制。
- *  录制中窗口不关闭——只显示遮罩 + 虚线边框（脉冲），直到录制结束自动关闭。 */
+/** 录屏区域选择：呼出即全屏磨砂（窗口级实时模糊），拖拽框选后弹出配置面板，
+ *  确认后开始录制——选区窗随即关闭，录制区域由原生边框环（Rust 侧）标示。 */
 export function RecorderSelect() {
   const [rect, setRect] = useState<RecRect | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -22,11 +21,8 @@ export function RecorderSelect() {
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
   // 录制参数：格式 / 帧率(GIF) / 画质；分辨率预设单独存（开始录制时换算 scale）
-  const [opts, setOpts] = useState<RecOptions>({ fmt: "avi", fps: 12, scale: 1, quality: "normal" });
+  const [opts, setOpts] = useState<RecOptions>({ fmt: "mp4", fps: 12, scale: 1, quality: "normal" });
   const [res, setRes] = useState<ResPreset>("raw");
-  // 录制中：只显示遮罩 + 边框
-  const [recording, setRecording] = useState(false);
-  const [recRegion, setRecRegion] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
   // 从配置读取默认帧率（设置页可调），面板选项覆盖之
   useEffect(() => {
@@ -34,15 +30,6 @@ export function RecorderSelect() {
       const fps = cfg.recorder?.fps ?? 12;
       setOpts((o) => ({ ...o, fps }));
     }).catch(() => {});
-  }, []);
-
-  // 监听 Rust 发来的 started 事件：切换到录制中模式（只显示边框）
-  useEffect(() => {
-    const un = listen<{ x: number; y: number; w: number; h: number }>(EVT_REC_STARTED, (e) => {
-      setRecording(true);
-      setRecRegion(e.payload);
-    });
-    return () => { void un.then((u) => u()); };
   }, []);
 
   // 双保险：确保 html 标记为面板级透明底
@@ -53,7 +40,7 @@ export function RecorderSelect() {
   const setBoth = (r: RecRect | null) => { rectRef.current = r; setRect(r); };
 
   const onDown = (e: React.PointerEvent) => {
-    if (e.button !== 0 || startingRef.current || recording) return;
+    if (e.button !== 0 || startingRef.current) return;
     if ((e.target as Element).closest(".rec-panel")) return;
     dragRef.current = { sx: e.clientX, sy: e.clientY };
     setDragging(true);
@@ -89,19 +76,14 @@ export function RecorderSelect() {
     // 分辨率预设 → 缩放比：按选区高度换算，目标高度超过选区则用原始尺寸
     const target = RES_HEIGHT[res];
     const scale = target > 0 ? Math.min(1, Math.max(0.25, target / r.h)) : 1;
-    // 【立即切录制模式】遮罩/虚线边框马上显示，不等 Rust IPC 往返（否则黑遮罩出现偏慢）
-    setRecording(true);
-    setRecRegion({ x: r.x, y: r.y, w: r.w, h: r.h });
     const sc = window.devicePixelRatio || 1;
+    // recorder_start 成功即由 Rust 关闭本窗口；失败则留在选区模式提示错误
     try {
       await recorderStart({
         x: Math.round(r.x * sc), y: Math.round(r.y * sc),
         w: Math.round(r.w * sc), h: Math.round(r.h * sc),
       }, { fmt: opts.fmt, fps: opts.fps, scale, quality: opts.quality });
     } catch (err) {
-      // 启动失败：退回选区模式
-      setRecording(false);
-      setRecRegion(null);
       console.error("recorder_start failed", err);
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -119,7 +101,7 @@ export function RecorderSelect() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (startingRef.current || recording) return;
+      if (startingRef.current) return;
       if (e.key === "Escape") {
         e.preventDefault();
         void recSelectCancel().catch(() => {});
@@ -130,13 +112,13 @@ export function RecorderSelect() {
     };
     const onContext = (e: MouseEvent) => {
       e.preventDefault();
-      if (startingRef.current || recording) return;
+      if (startingRef.current) return;
       if (rectRef.current) setBoth(null);
       else void recSelectCancel().catch(() => {});
     };
     let blurTimer: ReturnType<typeof setTimeout> | null = null;
     const onBlur = () => {
-      if (startingRef.current || recording) return;
+      if (startingRef.current) return;
       blurTimer = setTimeout(() => {
         if (!document.hasFocus()) {
           dragRef.current = null;
@@ -160,28 +142,6 @@ export function RecorderSelect() {
       if (blurTimer) clearTimeout(blurTimer);
     };
   });
-
-  // ---- 录制中模式：遮罩 + 虚线边框（鼠标穿透由 Rust 侧开启，可正常操作屏幕） ----
-  if (recording && recRegion) {
-    return (
-      <div className="rec-select rec-select-recording">
-        {/* 四向遮罩镂空选区 */}
-        <div className="rec-shade" style={{ left: 0, top: 0, width: "100%", height: recRegion.y }} />
-        <div className="rec-shade" style={{ left: 0, top: recRegion.y, width: recRegion.x, height: recRegion.h }} />
-        <div className="rec-shade" style={{ left: recRegion.x + recRegion.w, top: recRegion.y, right: 0, height: recRegion.h }} />
-        <div className="rec-shade" style={{ left: 0, top: recRegion.y + recRegion.h, width: "100%", bottom: 0 }} />
-        {/* 虚线脉冲边框：清晰标出录制区域 */}
-        <div
-          className="rec-frame rec-frame-recording"
-          style={{ left: recRegion.x, top: recRegion.y, width: recRegion.w, height: recRegion.h }}
-        />
-        {/* 录制中角标 */}
-        <div className="rec-rec-badge" style={{ left: recRegion.x + 8, top: recRegion.y + 8 }}>
-          <span className="rec-rec-dot" /> 录制中
-        </div>
-      </div>
-    );
-  }
 
   // ---- 选区模式 ----
   const valid = rect != null && rect.w >= 24 && rect.h >= 24;
@@ -241,6 +201,8 @@ export function RecorderSelect() {
             className="rec-frame"
             style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}
           >
+            <i className="rec-corner tl" /><i className="rec-corner tr" />
+            <i className="rec-corner bl" /><i className="rec-corner br" />
             <span className="rec-size">{Math.round(rect.w)} × {Math.round(rect.h)}</span>
           </div>
           {!dragging && (
@@ -253,7 +215,7 @@ export function RecorderSelect() {
             >
               <div className="rec-panel-head">
                 <span className="rec-panel-title"><Film size={13} /> 屏幕录制</span>
-                <span className="rec-panel-hint">Enter 开始 · Esc 取消</span>
+                <span className="rec-panel-hint"><kbd>Enter</kbd> 开始 · <kbd>Esc</kbd> 取消</span>
               </div>
 
               <div className="rec-field">
@@ -262,9 +224,8 @@ export function RecorderSelect() {
                   value={opts.fmt}
                   onChange={(v) => setOpts((o) => ({ ...o, fmt: v as RecOptions["fmt"] }))}
                   options={[
-                    { value: "gif", label: "动图 GIF" },
-                    { value: "avi", label: "视频 AVI" },
                     { value: "mp4", label: "视频 MP4" },
+                    { value: "gif", label: "动图 GIF" },
                   ]}
                   title="选择输出格式"
                 />
@@ -315,7 +276,9 @@ export function RecorderSelect() {
         </>
       )}
       {!valid && (
-        <div className="rec-hint">拖拽框选录制区域 · Enter 开始录制 · 右键 / Esc 取消</div>
+        <div className="rec-hint">
+          拖拽框选录制区域 <kbd>Enter</kbd> 开始 · <kbd>Esc</kbd> 取消
+        </div>
       )}
       {error && <div className="rec-hint rec-hint-error">启动失败：{error}</div>}
       {starting && <div className="rec-hint">正在启动录制…</div>}

@@ -23,8 +23,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 arboard = "3"
 enigo = "0.3"
-# png=截图/贴图主格式; bmp=贴图最快路径(零压缩直出); gif=剪贴板GIF贴图解码
-# jpeg=录屏 AVI 视频帧编码
+# png=截图/贴图主格式; bmp=贴图最快路径(零压缩直出); gif=剪贴板GIF贴图解码;
+# jpeg=截图 JPG 保存与贴图 JPG 解码
 image = { version = "0.25", default-features = false, features = ["png", "bmp", "gif", "jpeg"] }
 # 录屏 GIF 增量编码（逐帧写入文件流，内存占用恒定）
 gif = "0.13"
@@ -69,6 +69,8 @@ features = [
     "Win32_Storage_FileSystem",
     "Win32_NetworkManagement_IpHelper",
     "Wdk_System_Threading",
+    # 录屏 MP4：Media Foundation H.264 Sink Writer
+    "Win32_Media_MediaFoundation",
     # 截图 OCR（Windows.Media.Ocr 系统引擎）
     "Media_Ocr",
     "Graphics_Imaging",
@@ -86,3 +88,9 @@ codegen-units = 1
 lto = true
 opt-level = "s"
 strip = true
+
+# 开发构建优化第三方依赖：image/gif 的 JPEG 编码与 GIF NeuQuant 量化
+# 在未优化下慢一个数量级（录屏实测单帧 300~1600ms，20fps 掉到 ~1fps），
+# opt-level=2 后接近 release 速度。代价仅是首次编译依赖稍慢。
+[profile.dev.package."*"]
+opt-level = 2

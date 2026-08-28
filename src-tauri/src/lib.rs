@@ -1,7 +1,9 @@
 #[cfg(windows)]
 mod acrylic;
-mod avi;
-mod mp4;
+#[cfg(windows)]
+mod h264;
+#[cfg(windows)]
+mod recframe;
 mod dupl;
 mod ocr;
 mod screenshot;
@@ -458,6 +460,9 @@ pub fn run() {
             recorder::rec_select_cancel,
             recorder::recorder_start,
             recorder::recorder_stop,
+            recorder::recorder_pause,
+            recorder::recorder_resume,
+            recorder::recorder_cancel,
             recorder::recorder_bar_popup,
             recorder::rec_dismiss,
             recorder::recorder_open_dir,

@@ -3,10 +3,11 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize, PhysicalPosition } from "@tauri-apps/api/dpi";
-import { Square, Film, FolderOpen, X } from "lucide-react";
+import { Square, Film, FolderOpen, X, Pause, Play, LoaderCircle } from "lucide-react";
 import {
   EVT_REC_TICK, EVT_REC_DONE,
-  recorderStop, recDismiss, revealFile,
+  recorderStop, recorderPause, recorderResume, recorderCancel,
+  recDismiss, revealFile,
   type RecDonePayload,
 } from "./api";
 import "./recorder.css";
@@ -27,6 +28,7 @@ const fmtSize = (bytes: number) =>
 export function RecorderBar() {
   const [phase, setPhase] = useState<Phase>("recording");
   const [elapsed, setElapsed] = useState(0);
+  const [paused, setPaused] = useState(false);
   const [result, setResult] = useState<RecDonePayload | null>(null);
   const stoppingRef = useRef(false);
   const autoCloseRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -40,6 +42,11 @@ export function RecorderBar() {
       setElapsed(e.payload.elapsed_ms);
     });
     const un2 = listen<RecDonePayload>(EVT_REC_DONE, (e) => {
+      // 用户主动取消：不弹通知，直接收掉控制条
+      if (e.payload.canceled) {
+        void recDismiss().catch(() => {});
+        return;
+      }
       setResult(e.payload);
       setPhase(e.payload.ok ? "done" : "error");
     });
@@ -86,6 +93,21 @@ export function RecorderBar() {
     void recorderStop().catch(() => {});
   };
 
+  // 暂停/继续：暂停时不采集不写入，计时冻结；继续后视频时间线跳过暂停段
+  const togglePause = () => {
+    if (phase !== "recording") return;
+    const next = !paused;
+    setPaused(next);
+    void (next ? recorderPause() : recorderResume()).catch(() => {});
+  };
+
+  // 取消：丢弃本次录制（不保存）
+  const cancel = () => {
+    if (stoppingRef.current) return;
+    stoppingRef.current = true;
+    void recorderCancel().catch(() => {});
+  };
+
   // 用系统默认程序直接打开（播放）视频/动图；失败回退到打开所在文件夹
   const openVideo = (path: string) => {
     void invoke("quickfiles_open", { path, opener: null }).catch(() => {
@@ -108,28 +130,45 @@ export function RecorderBar() {
   const dismiss = () => void recDismiss().catch(() => {});
 
   return (
-    <div className={`recb-root${phase !== "recording" ? " recb-toast" : ""}`}>
-      {/* 录制中：顶部迷你条（红点 + REC + 时间 + 停止） */}
+    <div className={`recb-root${phase !== "recording" ? " recb-toast" : ""}${paused && phase === "recording" ? " paused" : ""}${phase === "done" || phase === "error" ? " recb-final" : ""}`}>
+      {/* 录制中：顶部迷你条（红点 + REC + 时间 + 暂停/停止/取消） */}
       {phase === "recording" && (
         <>
-          <span className="recb-dot" />
-          <span className="recb-rec">REC</span>
+          <span className={`recb-dot${paused ? " off" : ""}`} />
+          <span className={`recb-rec${paused ? " paused" : ""}`}>{paused ? "已暂停" : "REC"}</span>
           <span className="recb-time">{fmt(elapsed)}</span>
+          <button
+            className={`recb-btn recb-icon${paused ? " recb-resume" : ""}`}
+            onClick={togglePause}
+            title={paused ? "继续录制" : "暂停录制"}
+          >
+            {paused ? <Play size={12} fill="currentColor" stroke="none" /> : <Pause size={12} fill="currentColor" stroke="none" />}
+          </button>
           <button
             className="recb-btn recb-stop"
             onClick={stop}
-            title="停止录制 (Esc)"
+            title="停止并保存 (Esc)"
           >
             <Square size={10} fill="currentColor" stroke="none" />
             停止
           </button>
+          <button
+            className="recb-btn recb-icon recb-cancel"
+            onClick={cancel}
+            title="取消录制（不保存）"
+          >
+            <X size={12} />
+          </button>
+          <span className="recb-esc-hint" title="Esc = 停止并保存；丢弃请用 ✕ 取消">
+            Esc 停止并保存
+          </span>
         </>
       )}
 
-      {/* 停止中：即时给出反馈，消除"卡一下"的空窗期 */}
+      {/* 停止中：旋转反馈，消除"卡一下"的空窗期 */}
       {phase === "stopping" && (
         <>
-          <span className="recb-dot off" />
+          <LoaderCircle size={13} className="recb-spin" />
           <span className="recb-saving">正在保存…</span>
         </>
       )}
@@ -144,7 +183,7 @@ export function RecorderBar() {
                 <div className="recb-title">
                   已保存 {(() => {
                     const e = result.path!.split(".").pop()?.toLowerCase();
-                    return e === "gif" ? "GIF 动图" : e === "mp4" ? "MP4 视频" : "AVI 视频";
+                    return e === "gif" ? "GIF 动图" : "MP4 视频";
                   })()}
                 </div>
                 <div className="recb-sub">
