@@ -6,6 +6,8 @@ import { sortFolders, useFolderStore } from "../stores/folderStore";
 import * as api from "../modules/folder/api";
 import { Segmented, SettingGroup, SettingRow, Switch } from "./components";
 import { IconTrash } from "../components/icons";
+import { Modal } from "../components/Modal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ShortcutRow } from "./ShortcutRow";
 
 export function FolderPage() {
@@ -14,6 +16,11 @@ export function FolderPage() {
   const { folders, loaded, refresh, add, remove } = useFolderStore();
   const [newPath, setNewPath] = useState("");
   const [error, setError] = useState("");
+  /** 重命名弹窗目标（替代 window.prompt） */
+  const [renameTarget, setRenameTarget] = useState<{ id: string; name: string } | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  /** 删除二次确认目标 */
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
     if (!loaded) void refresh();
@@ -47,12 +54,19 @@ export function FolderPage() {
     }
   };
 
-  const handleRename = async (id: string, current: string) => {
-    const name = window.prompt("输入新名称：", current);
-    if (name && name !== current) {
-      await api.renameFolder(id, name);
+  const handleRename = (id: string, current: string) => {
+    setRenameTarget({ id, name: current });
+    setRenameValue(current);
+  };
+
+  const submitRename = async () => {
+    if (!renameTarget) return;
+    const name = renameValue.trim();
+    if (name && name !== renameTarget.name) {
+      await api.renameFolder(renameTarget.id, name);
       await refresh();
     }
+    setRenameTarget(null);
   };
 
   const { pinned } = sortFolders(folders);
@@ -116,7 +130,7 @@ export function FolderPage() {
               className="folder-name"
               style={{ color: "var(--text-primary)" }}
               title="点击重命名"
-              onClick={() => void handleRename(f.id, f.name)}
+              onClick={() => handleRename(f.id, f.name)}
             >
               {f.name}
             </button>
@@ -126,7 +140,7 @@ export function FolderPage() {
             <button
               className="icon-btn"
               title="删除"
-              onClick={() => void remove(f.id)}
+              onClick={() => setDeleteTarget({ id: f.id, name: f.name })}
             >
               <IconTrash size={14} />
             </button>
@@ -201,6 +215,53 @@ export function FolderPage() {
           />
         </SettingRow>
       </SettingGroup>
+
+      {/* 重命名弹窗（替代 window.prompt） */}
+      {renameTarget && (
+        <Modal
+          open
+          onClose={() => setRenameTarget(null)}
+          title={`重命名「${renameTarget.name}」`}
+          actions={
+            <>
+              <button className="btn" onClick={() => setRenameTarget(null)}>
+                取消
+              </button>
+              <button className="btn btn-primary" onClick={() => void submitRename()}>
+                确定
+              </button>
+            </>
+          }
+        >
+          <input
+            className="text-input"
+            value={renameValue}
+            autoFocus
+            placeholder="新名称"
+            onChange={(e) => setRenameValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void submitRename();
+              }
+            }}
+          />
+        </Modal>
+      )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={async () => {
+          if (deleteTarget) {
+            await remove(deleteTarget.id);
+          }
+        }}
+        title={`移除「${deleteTarget?.name ?? ""}」？`}
+        message="仅从固定列表移除，不会删除磁盘文件。"
+        danger
+        confirmLabel="移除"
+      />
     </div>
   );
 }
