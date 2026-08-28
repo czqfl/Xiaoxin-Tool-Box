@@ -15,7 +15,7 @@
   transition: background var(--dur-fast) var(--ease-out),
     border-color var(--dur-fast) var(--ease-out),
     opacity var(--dur-fast) var(--ease-out),
-    transform 0.18s var(--ease-out);
+    transform var(--dur-base) var(--ease-out);
 }
 .clip-item:hover {
   background: var(--bg-item-hover);
@@ -82,7 +82,7 @@
    入场时从略小淡入，简洁优雅 */
 .clip-drag-ghost {
   position: fixed;
-  z-index: 1000;
+  z-index: var(--z-toast);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -98,7 +98,7 @@
   /* 微旋转 + 微缩放，配合深阴影呈现“卡片被拎起”的立体感 */
   transform: rotate(1.5deg) scale(1.03);
   transform-origin: center;
-  animation: ghost-in 0.18s var(--ease-out);
+  animation: ghost-in var(--dur-base) var(--ease-out);
 }
 @keyframes ghost-in {
   from {

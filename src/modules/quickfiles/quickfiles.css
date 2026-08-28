@@ -102,7 +102,7 @@
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4);
   backdrop-filter: blur(18px) saturate(1.4);
   -webkit-backdrop-filter: blur(18px) saturate(1.4);
-  animation: qf-pop-in 0.14s var(--ease-out);
+  animation: qf-pop-in var(--dur-fast) var(--ease-out);
 }
 @keyframes qf-pop-in {
   from {
@@ -139,10 +139,10 @@
   color: var(--text-primary);
   font-size: 13px;
   cursor: pointer;
-  transition: border-color 0.15s var(--ease-out),
-    box-shadow 0.15s var(--ease-out),
-    background 0.15s var(--ease-out),
-    transform 0.15s var(--ease-out);
+  transition: border-color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
 }
 /* 类型色高亮层：用绝对定位伪元素叠类型色，悬浮时淡入——
    不依赖 color-mix，任何 WebView2 版本都能出效果 */
@@ -154,7 +154,7 @@
   background: var(--c);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.15s var(--ease-out);
+  transition: opacity var(--dur-fast) var(--ease-out);
 }
 .qf-type-chip > * {
   position: relative;
@@ -318,7 +318,7 @@
   font-size: 12px;
   background: var(--danger-soft);
   color: var(--danger);
-  animation: qf-pop-in 0.14s var(--ease-out);
+  animation: qf-pop-in var(--dur-fast) var(--ease-out);
 }
 
 /* 分组 */
@@ -414,7 +414,7 @@
   border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--c) 16%, transparent);
   background: color-mix(in srgb, var(--c) 4%, transparent);
-  transition: background 0.12s, border-color 0.12s;
+  transition: background var(--dur-fast), border-color var(--dur-fast);
 }
 .qf-item:hover {
   /* 悬浮直接加重类型色（不再叠中性底色——那会冲淡颜色，看着像"取消颜色"） */
@@ -493,9 +493,9 @@
   visibility: hidden;
   opacity: 0;
   transform: translateY(2px);
-  transition: opacity 0.12s var(--ease-out),
-    transform 0.12s var(--ease-out),
-    visibility 0.12s;
+  transition: opacity var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out),
+    visibility var(--dur-fast);
 }
 .qf-item:hover .qf-item-actions,
 .qf-item:focus-within .qf-item-actions {
@@ -514,7 +514,7 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  transition: border-color 0.12s, color 0.12s, background 0.12s;
+  transition: border-color var(--dur-fast), color var(--dur-fast), background var(--dur-fast);
 }
 .qf-act:hover {
   border-color: var(--accent);

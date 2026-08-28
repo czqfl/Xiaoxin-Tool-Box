@@ -39,11 +39,11 @@ const SIZE_PRESETS: Record<string, { btn: number; icon: number }> = {
 const GAP = 2;
 const PAD = 4;
 
-/** 纾佸惛鍙傛暟锛堝彲璋冿級锛氱壍寮曞己搴?/ 璺濈琛板噺 / 鏀惧ぇ寮哄害 */
-const PULL_STRENGTH = 5; // 鏈€澶т綅绉?px
+/** 磁吸参数（可调）：牵引强度 / 距离衰减 / 放大强度 */
+const PULL_STRENGTH = 5; // 最大位移 px
 const PULL_FALLOFF = 55; // 牵引随距离衰减的尺度（越小越"集中在鼠标附近"）
 const SCALE_STRENGTH = 0.3; // 最大放大倍率增量
-const SCALE_FALLOFF = 900; // 鏀惧ぇ闅忚窛绂诲钩鏂硅“鍑忥紙楂樻柉锛?
+const SCALE_FALLOFF = 900; // 放大随距离平方衰减（高斯）
 
 /** 工具定义：图标（含专属辨识色，收编为 theme.css 的 --tool-* 令牌，
  *  深色主题自动适配）+ 提示文案（顺序即设置页勾选顺序）。
@@ -122,8 +122,8 @@ const DRAG_THRESHOLD = 10;
 
 /** 贴边自动收起参数（参考桌面悬浮工具条靠边收起语义：
  *  事件驱动——鼠标离开窗口收起、悬停收起条弹出、弹出后鼠标不在窗口内自动再收起） */
-const SLIVER = 12; // 鏀惰捣鍚庨湶鍑虹殑绐楀彛鐪熷疄杈圭紭瀹藉害锛?2px锛氬瀹藉鏄剧溂锛岄厤鍝佺墝鑹蹭寒杞級
-const EDGE_MARGIN = 12; // 璺濆睆骞曡竟缂樺灏戝儚绱犲唴绠?璐磋竟"
+const SLIVER = 12; // 收起后露出的窗口真实边缘宽度（12px：够宽显眼，配品牌色亮轨）
+const EDGE_MARGIN = 12; // 距屏幕边缘多少像素内算"贴边"
 const HIDE_DELAY = 250; // 鼠标离开贴边工具栏后，延时收起（ms）
 const SLIDE_MS = 160; // 收起/弹出的滑动动画时长（ms，轻快不拖沓）
 /** 收起后：光标靠近屏幕边缘多少像素内自动弹出（物理像素）。
@@ -173,7 +173,7 @@ export function Toolbar() {
   const snappingRef = useRef(false); // 收起/弹出动画进行中
   const hideTimerRef = useRef<number | undefined>(undefined); // 收起延时
 
-  /** 鍒ゆ柇宸ュ叿鏍忔槸鍚﹁创鏄剧ず鍣ㄨ竟缂橈紙瀹瑰樊 EDGE_MARGIN锛?*/
+  /** 判断工具栏是否贴显示器边缘（容差 EDGE_MARGIN） */
   function detectEdge(g: ToolbarGeometry): Edge | null {
     if (Math.abs(g.win_x - g.mon_x) <= EDGE_MARGIN) return "left";
     if (Math.abs(g.win_x + g.win_w - (g.mon_x + g.mon_w)) <= EDGE_MARGIN) return "right";
@@ -196,7 +196,7 @@ export function Toolbar() {
     }
   }
 
-  // ---- 闈犺竟鏀惰捣/寮瑰嚭锛堟偓娴伐鍏锋潯璐磋竟鍚搁檮锛?---
+  // ---- 靠边收起/弹出（悬浮工具条贴边吸附） ----
   // 缓动：弹出用轻微回弹（easeOutBack），收起用缓入（被"吸入"边缘）
   const easeOutBackSoft = (t: number): number => {
     const c1 = 0.9;
@@ -233,7 +233,7 @@ export function Toolbar() {
     });
   }
 
-  /** 鏀惰捣锛氬钩婊戞粦鍑哄睆骞曪紝浠呴湶 SLIVER 鏉★紙璁板綍鍘熶綅 + 鎵€鍦ㄥ伐浣滃尯锛屼緵寮瑰嚭澶瑰彇锛?*/
+  /** 收起：平滑滑出屏幕，仅露 SLIVER 窄条（记录原位 + 所在工作区，供弹出夹取） */
   async function collapseToEdge() {
     const edge = pinnedEdgeRef.current;
     if (!edge || collapsedRef.current || snappingRef.current) return;
@@ -432,7 +432,7 @@ export function Toolbar() {
     }
   };
 
-  /** 榧犳爣杩涘叆绐楀彛锛堝惈鏀惰捣鏉★級锛氬浘鏍囩鍚告仮澶?+ 鏀惰捣鎬?鈫?鎮仠寮瑰嚭 */
+  /** 鼠标进入窗口（含收起条）：图标磁吸恢复 + 收起态 → 悬停弹出 */
   const handleEnter = () => {
     pointerInsideRef.current = true;
     if (hideTimerRef.current) {
@@ -565,7 +565,7 @@ export function Toolbar() {
           if (cursorNearEdge(geo, pinnedEdgeRef.current, EDGE_REVEAL)) {
             void expandFromEdge();
           }
-          return; // 宸叉敹璧凤細鏈疆涓嶅鐞?鍐嶆敹璧?
+          return; // 已收起：本轮不处理再收起
         }
         // 【修复"快速离开无法收起"】展开态下，除了事件驱动（handleLeave），
         // 再由轮询兜底检测：光标确实离开贴边方向（超出 EDGE_REVEAL）、且已不在
@@ -636,6 +636,8 @@ export function Toolbar() {
       onMouseUp={(e) => {
         const p = pressRef.current;
         pressRef.current = null;
+        // 仅左键：右键松开不视为点击（避免右键也呼出面板）
+        if (e.button !== 0) return;
         // 未拖动 = 点击：手动触发呼出（不走 click 事件，避免拖动误触/事件丢失）
         if (p && !p.dragged && p.key) {
           e.preventDefault();

@@ -92,7 +92,7 @@ export function ScrollShotBar() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  });
+  }, [phase, scrolling]);
 
   function dismiss() { void scrollDismiss().catch(() => {}); }
 

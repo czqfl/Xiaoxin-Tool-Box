@@ -52,7 +52,7 @@
   animation: ssb-pulse 1.2s ease-in-out infinite;
   flex-shrink: 0;
 }
-.ssb-dot.ok { background: #36b37e; box-shadow: 0 0 8px rgba(54, 179, 126, 0.9); animation: none; }
+.ssb-dot.ok { background: var(--success); box-shadow: 0 0 8px color-mix(in srgb, var(--success) 90%, transparent); animation: none; }
 .ssb-dot.err { background: var(--danger, #e5484d); box-shadow: none; animation: none; }
 
 @keyframes ssb-pulse {
@@ -99,16 +99,16 @@
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
-  transition: background 0.15s ease;
+  transition: background var(--dur-fast) var(--ease-out);
 }
 .ssb-btn:hover { background: rgba(var(--accent-rgb), 0.12); }
 
 .ssb-stop {
-  background: rgba(232, 76, 76, 0.88);
+  background: color-mix(in srgb, var(--danger) 88%, transparent);
   border-color: transparent;
   color: #fff;
 }
-.ssb-stop:hover { background: rgba(232, 76, 76, 1); }
+.ssb-stop:hover { background: var(--danger); }
 
 /* 开始按钮：主题色实心，与红色「结束」形成状态对比 */
 .ssb-go {
