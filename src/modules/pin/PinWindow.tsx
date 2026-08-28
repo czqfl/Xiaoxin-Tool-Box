@@ -387,36 +387,47 @@ export function PinWindow() {
     const el = e.currentTarget as HTMLElement;
     const win = getCurrentWindow();
     const dpr = window.devicePixelRatio || 1;
-    void win.outerPosition().then((p0) => {
-      let tx = p0.x, ty = p0.y;           // 目标位置（物理像素，浮点累积防丢精度）
-      let lx = e.screenX, ly = e.screenY; // 上次光标逻辑屏幕坐标
-      let raf = 0;
-      const apply = () => {
-        raf = 0;
-        void win.setPosition(new PhysicalPosition(Math.round(tx), Math.round(ty))).catch(() => {});
-      };
-      const onMove = (ev: PointerEvent) => {
-        tx += (ev.screenX - lx) * dpr;
-        ty += (ev.screenY - ly) * dpr;
-        lx = ev.screenX; ly = ev.screenY;
-        window.clearTimeout(dragClearRef.current);
-        dragClearRef.current = window.setTimeout(clearDragState, 800);
-        if (!raf) raf = requestAnimationFrame(apply);
-      };
-      const onUp = () => {
-        el.removeEventListener("pointermove", onMove);
-        el.removeEventListener("pointerup", onUp);
-        el.removeEventListener("pointercancel", onUp);
-        if (raf) { cancelAnimationFrame(raf); raf = 0; }
-        // 松手兜底一次最终落点（rAF 可能在最后一帧前被取消）
-        void win.setPosition(new PhysicalPosition(Math.round(tx), Math.round(ty))).catch(() => {});
-      };
-      el.addEventListener("pointermove", onMove);
-      el.addEventListener("pointerup", onUp);
-      el.addEventListener("pointercancel", onUp);
-      // 指针捕获：光标快速甩出窗口/屏幕外时事件仍送达本元素
-      try { el.setPointerCapture((e.nativeEvent as PointerEvent).pointerId); } catch {}
-    }).catch(() => {});
+    const pointerId = (e.nativeEvent as PointerEvent).pointerId;
+    // 指针捕获必须【同步】做在 mousedown 里：旧实现放进 outerPosition 的异步
+    // 回调，捕获时机晚于可能的首次释放，一旦捕获失败，pointerup 不再送达本元素，
+    // 拖拽监听永不移除——表现为"松手后贴图仍跟着鼠标走，要再点一下才取消"
+    try { el.setPointerCapture(pointerId); } catch {}
+    let tx = 0, ty = 0;              // 目标物理位置（outerPosition 到位后初始化）
+    let lx = e.screenX, ly = e.screenY; // 上次光标逻辑屏幕坐标（基准未就绪时持续刷新起点）
+    let ready = false;
+    let raf = 0;
+    const cleanup = () => {
+      el.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerup", onUp);
+      el.removeEventListener("pointercancel", onUp);
+      try { el.releasePointerCapture(pointerId); } catch {}
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
+      // 松手兜底一次最终落点（rAF 可能在最后一帧前被取消）
+      if (ready) void win.setPosition(new PhysicalPosition(Math.round(tx), Math.round(ty))).catch(() => {});
+      clearDragState();
+    };
+    const apply = () => {
+      raf = 0;
+      if (ready) void win.setPosition(new PhysicalPosition(Math.round(tx), Math.round(ty))).catch(() => {});
+    };
+    const onMove = (ev: PointerEvent) => {
+      // 无按键却收到移动 = 指针捕获丢失 / pointerup 丢失 ⇒ 用户已松手，立即收尾，
+      // 否则贴图会持续跟随鼠标（上述卡死的自愈出口，无需再点一下）
+      if (ev.buttons === 0) { cleanup(); return; }
+      if (!ready) { lx = ev.screenX; ly = ev.screenY; return; } // 基准未就绪：只同步起点，不产生位移
+      tx += (ev.screenX - lx) * dpr;
+      ty += (ev.screenY - ly) * dpr;
+      lx = ev.screenX; ly = ev.screenY;
+      window.clearTimeout(dragClearRef.current);
+      dragClearRef.current = window.setTimeout(clearDragState, 800);
+      if (!raf) raf = requestAnimationFrame(apply);
+    };
+    const onUp = () => cleanup();
+    // 监听同步挂载，不等 outerPosition 的 IPC 往返——否则首帧要等一次跨进程才跟手
+    el.addEventListener("pointermove", onMove);
+    el.addEventListener("pointerup", onUp);
+    el.addEventListener("pointercancel", onUp);
+    void win.outerPosition().then((p0) => { tx = p0.x; ty = p0.y; ready = true; }).catch(() => cleanup());
   };
 
   // 拖动中的位置持久化与拖拽态复位：onMoved 持续触发视为拖拽中，停稳

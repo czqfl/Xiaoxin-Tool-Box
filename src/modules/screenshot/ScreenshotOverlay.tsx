@@ -551,6 +551,9 @@ export function ScreenshotOverlay() {
     setRegion({x:0,y:0,w:0,h:0}); regRef.current = {x:0,y:0,w:0,h:0};
     setPhase("idle"); setSnap(null); setDragging(false); phaseRef.current = "idle";
     lastRectRef.current = null; snapRef.current = null; pngCacheRef.current = null;
+    snapChainRef.current = null; snapIdxRef.current = 0; setChainLen(0);
+    chainWinRef.current = null;
+    elemFailAtRef.current = 0;
     lastDiagRef.current = null;
     // 复位淡入：先摘掉动画类，稍后亮窗前重新挂上才会重放
     setDimFx(false);
@@ -737,6 +740,16 @@ export function ScreenshotOverlay() {
   // 遮罩窗被 Rust 复用时收到刷新事件 → 重载新画面（窗口不销毁，免去重建开销）
   useEffect(() => {
     const un = listen("shot-refresh", () => { loadSession(); });
+    return () => { un.then((f) => f()); };
+  }, []);
+  // Rust 周期性刷新的窗口 Z 序快照（350ms）：会话期间新弹出的弹窗/下拉即时
+  // 进入本地扫描表，悬停识别不再命中弹窗后面的窗口。同时作废窗口级缓存——
+  // 否则光标在旧窗口矩形内移动会被缓存吞掉，永远发现不了新弹窗
+  useEffect(() => {
+    const un = listen<{x:number;y:number;width:number;height:number}[]>("shot://cands", (e) => {
+      candsRef.current = e.payload;
+      lastRectRef.current = null;
+    });
     return () => { un.then((f) => f()); };
   }, []);
 
@@ -956,11 +969,27 @@ export function ScreenshotOverlay() {
   const detectPendingRef = useRef(false);
   const mouseGlobalRef = useRef<Pt>({x:0,y:0});
   const lastRectRef = useRef<{x:number;y:number;w:number;h:number}|null>(null);
+  // 元素级（UIA）查询最近一次失败的时刻：失败后同窗悬停仍按 ~350ms 节奏
+  // 重试（Chromium 首次激活可达秒级），成功后清零——否则窗口级缓存会把
+  // 后续所有重试吞掉，表现为"浏览器里永远只有窗口框"
+  const elemFailAtRef = useRef(0);
+  // 过期结果连续补查计数（防 provider 异常矩形导致无限重查；移动时重置）
+  const staleRefireCountRef = useRef(0);
   // 悬停识别诊断：上次记录的结果签名（变化才写 diag，避免刷屏）
   const lastDiagRef = useRef<string|null>(null);
   // 最近一次智能高亮矩形（本地坐标）。mousedown 会把可视 snap 清掉，
   // 但点击确认选区仍需它——松手时按此判定"点击采纳窗口"（Snipaste 行为）
   const snapRef = useRef<Rect|null>(null);
+  // UIA 元素【候选链】（本地 CSS 像素，内→外，链[0] 最精确）+ 滚轮当前层级：
+  // 悬停高亮链[idx]，滚轮在层级间切换（PixPin 式"按钮→工具条→面板→整窗"）。
+  // 链只在收到元素级识别结果时更新；idx 在每次新链落地/新会话时归零
+  const snapChainRef = useRef<Rect[]|null>(null);
+  const snapIdxRef = useRef(0);
+  // 当前高亮/链所属的【窗口矩形】（全局物理坐标）：
+  // 同窗口内的重查不重画窗口框（否则每次移动都"窗口框→元素框"闪一遍）
+  const chainWinRef = useRef<{x:number;y:number;width:number;height:number}|null>(null);
+  // 链长度的 state 镜像（仅驱动提示区"滚轮切换"行显隐；变更才重渲染）
+  const [chainLen, setChainLen] = useState(0);
 
   // ---- 截图历史（< > 翻页重截 / H 缩略图列表）----
   const [histOpen, setHistOpen] = useState(false);
@@ -1173,23 +1202,23 @@ export function ScreenshotOverlay() {
   };
 
   const querySmartRect = async () => {
-    if (detectBusyRef.current) { detectPendingRef.current = true; return; }
-    detectBusyRef.current = true;
     const mySession = sessionRef.current;
-    try {
-      const g = geom;
-      const mg = mouseGlobalRef.current;
-      if (!g) return;
+    const g = geom;
+    const mg = mouseGlobalRef.current;
+    if (!g) return;
       // 窗口级 + 元素级（UIA）两段式：窗口级查表零开销、【先到先画】；
       // 元素级随后择优细化（取更精细的命中）。
       // 【不能】用 Promise.all 等两者齐才画——元素级限时 250ms（Chromium 系
       // 应用首次被 UIA 查询会触发无障碍树激活、可达数秒），旧版悬停高亮
       // 总要陪它等满 250ms 才出现，表现为"智能选区出来慢"
       const wantElem = cfg.shot.smart_element !== false;
-      type WRect = { x: number; y: number; width: number; height: number } | null;
+      type GRect = { x: number; y: number; width: number; height: number };
+      type WRect = GRect | null;
       // best 是【全局物理像素】；高亮/选区层用本地 CSS 像素——减显示器原点再 ÷scale，
       // 否则 150% 下悬停高亮框比实际窗口大 1.5 倍、点击采纳的选区整体错位
       const sc = cssScale();
+      const toLocal = (r: { x: number; y: number; width: number; height: number }) =>
+        ({ x: (r.x - g.x) / sc, y: (r.y - g.y) / sc, w: r.width / sc, h: r.height / sc });
       let locked = false; // 元素级细化后锁定：迟到的窗口级结果不得回退覆盖
       const commit = (best: WRect) => {
         // 响应到达时已开始拖拽/缩放（或进入取色）：丢弃这份迟到的识别结果——
@@ -1198,7 +1227,7 @@ export function ScreenshotOverlay() {
         // 上一会话的在途响应：绝不画进本会话——否则呼出瞬间会闪现旧窗口高亮框
         if (mySession !== sessionRef.current) return;
         lastRectRef.current = best ? { x: best.x, y: best.y, w: best.width, h: best.height } : null;
-        const local = best ? { x: (best.x - g.x) / sc, y: (best.y - g.y) / sc, w: best.width / sc, h: best.height / sc } : null;
+        const local = best ? toLocal(best) : null;
         // 与当前高亮完全一致时不再 setState：悬停中的重复识别不触发重绘
         // （每次 setSnap 都会让选区层重绘一遍，重复绘制表现为高亮框"闪"）
         const cur = snapRef.current;
@@ -1213,38 +1242,186 @@ export function ScreenshotOverlay() {
       let wr: WRect = null;
       let wrDone: Promise<WRect | null> | null = null;
       const cands = candsRef.current;
+      // 窗口级命中没有元素链：滚轮层级切换随旧链一并失效
+      const clearChain = () => { snapChainRef.current = null; snapIdxRef.current = 0; setChainLen(0); chainWinRef.current = null; };
+      // 同窗口且已有可见高亮：跳过窗口框重画，保留当前元素高亮等 er 细化——
+      // 否则元素区内每次移动都"窗口框→元素框"闪一遍（移动中狂闪的根因）
+      const sameWinAsShown = (win: WRect) => {
+        const cw = chainWinRef.current;
+        return !!(cw && win && cw.x === win.x && cw.y === win.y
+          && cw.width === win.width && cw.height === win.height && snapRef.current);
+      };
       if (cands) {
         for (const c of cands) {
           if (mg.x >= c.x && mg.x < c.x + c.width && mg.y >= c.y && mg.y < c.y + c.height) { wr = c; break; }
         }
-        commit(wr);
+        if (!sameWinAsShown(wr)) {
+          clearChain();
+          commit(wr);
+          chainWinRef.current = wr;
+        }
       } else {
         const wrPromise = shotWindowRectAt(mg.x, mg.y).catch(() => null);
-        void wrPromise.then((r) => { if (!locked) commit(r); });
+        void wrPromise.then((r) => {
+          if (locked || sameWinAsShown(r)) return;
+          clearChain();
+          commit(r);
+          chainWinRef.current = r;
+        });
         wrDone = wrPromise;
       }
-      const erTimeout = new Promise<null>((res) => setTimeout(() => res(null), 250));
-      const er: WRect = wantElem
-        ? await Promise.race([shotUiRectAt(mg.x, mg.y).catch(() => null), erTimeout])
-        : null;
-      if (!er || !(er.width > 0 && er.height > 0)) return;
-      // 择优取【更精细】的命中：元素矩形显著小于窗口矩形（<98%）时采用——
-      // 悬停浏览器页面时能直接框选按钮组/输入框等组件；全屏级（≥90% 屏幕）
-      // 无意义剔除。元素缺失/异常自动保持窗口级
+      // —— 元素级：单飞门控，只挡本段 ——
+      // 窗口级高亮已在上方即时提交（悬停跟手由它保证）；元素级查一次 ~60-320ms，
+      // 在途时后来的请求只挂 pending、等本次结束在 finally 里补查最新位置。
+      // 【早退必须在 try/finally 之外】在 try 内早退会触发 finally：既误把别人
+      // 在途的锁释放掉，又因 pending 仍为真而立刻重入，形成自旋。
+      if (detectBusyRef.current) { detectPendingRef.current = true; return; }
+      detectBusyRef.current = true;
+      // 过期结果标记：提交后光标已离开结果矩形 → finally 里补查当前位置
+      let staleRefire = false;
+      try {
+      // 链落地：UIA 全局链 erArr +（与链最外层明显不同时）末尾补窗口矩形，
+      // 一次产出【本地 chain】与【全局 levels】两个严格等长的数组。
+      // 【必须成对维护】高亮提交只能按下标取 levels：改取 erArr[idx] 会在
+      // "补了窗口层"的链上越界拿到 undefined → 高亮被清空 → 下一帧整窗框复活
+      // → 再下一帧回到元素框，正是"鼠标在区域内移动、选区来回向上扩展再还原"
+      const landChain = (g0: GRect, erArr: GRect[], winRect: WRect) => {
+        const s0 = cssScale();
+        const lv: GRect[] = erArr.slice();
+        const ch: Rect[] = erArr.map((r) => ({
+          x: (r.x - g0.x) / s0, y: (r.y - g0.y) / s0, w: r.width / s0, h: r.height / s0,
+        }));
+        if (winRect) {
+          const wl: Rect = {
+            x: (winRect.x - g0.x) / s0, y: (winRect.y - g0.y) / s0,
+            w: winRect.width / s0, h: winRect.height / s0,
+          };
+          const last = ch[ch.length - 1];
+          if (Math.abs(last.x - wl.x) > 1 || Math.abs(last.y - wl.y) > 1 ||
+              Math.abs(last.w - wl.w) > 1 || Math.abs(last.h - wl.h) > 1) {
+            ch.push(wl);
+            lv.push(winRect);
+          }
+        }
+        return { ch, lv };
+      };
+      // 新链落地时决定滚轮档位：优先沿用"当前显示矩形正好对应的那一层"。
+      // 【不能只在整条链逐字节相等时保持】——窗口层补与不补会让链长差 1，
+      // 整链比对随即失败，把用户刚滚出来的档位拽回最内层。
+      // 【门禁：必须已有元素链】光标刚进新窗口时首绘画的是窗口框兜底
+      // （那一步 clearChain 过），它在窗口层进链后必然匹配到最外层——不拦就
+      // 永远停在整窗级、再也不向元素细化（智能选区"只认整窗"的由来）
+      const pickIdx = (ch: Rect[], fallback: number) => {
+        const cur = snapRef.current;
+        if (snapChainRef.current && cur) {
+          const i = ch.findIndex((r) => Math.abs(r.x - cur.x) <= 1 && Math.abs(r.y - cur.y) <= 1
+            && Math.abs(r.w - cur.w) <= 1 && Math.abs(r.h - cur.h) <= 1);
+          if (i >= 0) return i;
+        }
+        return Math.min(Math.max(fallback, 0), ch.length - 1);
+      };
+      // 竞速窗口必须 ≥ 命令侧 recv_timeout(300ms)：前端先于后端放弃时，worker
+      // 算好的整条链随接收端一起丢弃，只能靠"迟到采纳"接住，而每接一次就多一轮
+      // 清缓存→重画→重查。旧值 200ms 短于 Chrome 实测单趟（113~190ms 纯查询
+      // + 排队/IPC 开销），大量悬停白走超时路径——浏览器里高亮反复闪的放大器
+      const erTimeout = new Promise<null>((res) => setTimeout(() => res(null), 320));
+      // UIA 返回【候选链】（内→外，链[0] 最精确）：旧版只有单矩形，
+      // 滚轮层级切换（按钮→工具条→整窗）需要整条链
+      const erPromise: Promise<GRect[] | null> =
+        wantElem ? shotUiRectAt(mg.x, mg.y).catch(() => null) : Promise.resolve(null);
+      const er = wantElem
+        ? await Promise.race([erPromise, erTimeout])
+        : await erPromise;
+      // 竞速超时/未命中 ≠ 放弃：Chromium 首次激活无障碍树可达数秒，结果迟到时
+      // 只要光标没走远、没开始拖拽，照样把链画出来（"浏览器第一次永远没反应"的解药）
+      if (!er || er.length === 0 || !(er[0].width > 0 && er[0].height > 0)) {
+        elemFailAtRef.current = Date.now();
+        // 失败即清缓存：否则旧高亮框留在原地，光标在其内移动被缓存吞掉，
+        // 要等滑出旧框才重查——正是"高亮时有时无/卡在旧位置"的根因
+        lastRectRef.current = null;
+        void erPromise.then((late) => {
+          if (!late || late.length === 0 || !(late[0].width > 0 && late[0].height > 0)) return;
+          if (dragRef.current || resizeRef.current || pickerModeRef.current) return;
+          if (mySession !== sessionRef.current) return;
+          const g2 = geomRef.current;
+          if (!g2) return;
+          // 光标仍在这份结果【最内层矩形内】(±8px 容差)才采纳——迟到的结果
+          // 描的就是光标停留的位置；已离开说明在等别处的结果，丢弃让下次
+          // 移动重新查询。不能用固定距离判定：慢查询期间光标原地微动几像素
+          // 很正常，固定距离会把原地等待的结果也误杀（"有时触发不来"根因）
+          const mgi = mouseGlobalRef.current;
+          const inner = late[0];
+          const inside = mgi.x >= inner.x - 8 && mgi.x <= inner.x + inner.width + 8
+            && mgi.y >= inner.y - 8 && mgi.y <= inner.y + inner.height + 8;
+          if (!inside) return;
+          // 与正常路径同构：本地链与全局层级成对产出，档位按当前显示矩形匹配
+          // （旧写法硬置 idx=0，用户刚滚出来的层级会被一份迟到结果冲掉）
+          const { ch, lv } = landChain(g2, late, wr);
+          const idx = pickIdx(ch, 0);
+          snapChainRef.current = ch;
+          snapIdxRef.current = idx;
+          setChainLen(ch.length);
+          chainWinRef.current = wr;
+          lastRectRef.current = { x: lv[idx].x, y: lv[idx].y, w: lv[idx].width, h: lv[idx].height };
+          const r = ch[idx];
+          snapRef.current = r;
+          setSnap(r);
+          elemFailAtRef.current = 0;
+        });
+        return;
+      }
+      elemFailAtRef.current = 0;
+      // 择优取【更精细】的命中：链[0]（最精确元素）显著小于窗口矩形（<98%）
+      // 时采用——悬停浏览器页面时能直接框选按钮/输入框等组件；全屏级
+      // （≥90% 屏幕）无意义剔除。元素缺失/异常自动保持窗口级
       const wrFinal = wrDone ? await wrDone : wr;
-      let best: WRect = wrFinal;
-      const ea = er.width * er.height;
+      // 过期守卫：元素级查询要 ~60-320ms，落地时光标可能已划出这份结果所属的
+      // 窗口（窗口级高亮每次移动即时提交、早就跟过去了）。此时画旧窗口的元素框
+      // 会闪一下错误位置——直接丢弃，交给下方补查/下次移动重查当前位置
+      if (wrFinal) {
+        const mgn = mouseGlobalRef.current;
+        if (mgn.x < wrFinal.x || mgn.x > wrFinal.x + wrFinal.width ||
+            mgn.y < wrFinal.y || mgn.y > wrFinal.y + wrFinal.height) {
+          staleRefire = true;
+          return;
+        }
+      }
+      const er0 = er[0];
+      const { ch, lv } = landChain(g, er, wrFinal);
+      const ea = er0.width * er0.height;
       const wa = wrFinal ? wrFinal.width * wrFinal.height : Infinity;
       const screenArea = g.width * g.height;
-      if (ea < wa * 0.98 && ea < screenArea * 0.9) best = er;
+      const preferInner = ea < wa * 0.98 && ea < screenArea * 0.9;
+      // 档位判定：当前显示矩形能在新链里匹配到对应层就沿用该层（同元素内微动、
+      // 重查、以及窗口层补与不补导致的链长变化都不掉档）；匹配不上才回默认档——
+      // 元素显著小于窗口取最内层，否则落到最外层（= 窗口级）
+      const idx = pickIdx(ch, preferInner ? 0 : ch.length - 1);
+      snapChainRef.current = ch;
+      snapIdxRef.current = idx;
+      setChainLen(ch.length);
       locked = true;
-      commit(best);
+      commit(lv[idx]);
+      chainWinRef.current = wrFinal;
+      // 【过期结果补查】提交后光标已不在结果矩形内（查询按发起时的位置做的，
+      // 快速划动/结果迟到时光标早走了）：标记补查——在 finally 里立刻重查
+      // 当前位置，不依赖下一次 mousemove。否则鼠标一停，高亮就冻结在旧框上
+      //（"鼠标明明已经在外面了，框选区域还是没变"的根因）
+      const cb = lastRectRef.current;
+      const mgNow = mouseGlobalRef.current;
+      staleRefire = !!cb && (mgNow.x < cb.x - 8 || mgNow.x > cb.x + cb.w + 8
+        || mgNow.y < cb.y - 8 || mgNow.y > cb.y + cb.h + 8);
     } catch {} finally {
       // 先释放锁、再补查：查询期间光标又动了 → 立即补查最新位置。
       // 【绝不能在 try 里递归调用】——递归入口会看到 busy 仍为 true 而只把
       // 请求挂到 pending，若此时跳过本行释放，busy 永久为 true，
       // 后续所有悬停识别都被吞掉（"只有第一次识别生效"的根因）
       detectBusyRef.current = false;
+      if (staleRefire) {
+        // 防循环上限：provider 返回异常矩形（永远不含光标）时最多连补 3 次；
+        // 正常场景光标移动会重置计数
+        staleRefireCountRef.current += 1;
+        if (staleRefireCountRef.current <= 3) detectPendingRef.current = true;
+      }
       if (detectPendingRef.current && mySession === sessionRef.current &&
           !dragRef.current && !resizeRef.current && !pickerModeRef.current) {
         detectPendingRef.current = false;
@@ -1565,12 +1742,20 @@ export function ScreenshotOverlay() {
     }
     // 取色模式不做智能窗口识别（无选区概念），省掉悬停查询开销
     if (phase === "idle" && !dragRef.current && cfg.shot.smart_detect && geom && !pickerModeRef.current) {
+      staleRefireCountRef.current = 0;   // 光标在动：过期补查计数重置
       const mg = mouseGlobalRef.current;
       const lr = lastRectRef.current;
-      // 命中缓存：光标仍在识别过的窗口内，跳过查询（悬停零开销）。
-      // 全屏级矩形（桌面）不缓存——否则光标永远"在框内"，再移到窗口上也不会重新识别
+      // 命中缓存：仅【纯窗口级】结果（无元素链）可缓存——光标仍在识别过的窗口内
+      // 跳过查询（悬停零开销）。有元素链时不缓存：链[0] 是元素矩形（可能是
+      // 面板/工具条级别的大元素），光标在其内移动也必须重查，否则大元素内部
+      // 的小组件永远识别不出来（"大区域内部识别不出小区域"根因）。
+      // 全屏级矩形（桌面）同样不缓存——否则光标永远"在框内"
       const coversScreen = lr ? lr.w * lr.h >= geom.width * geom.height * 0.9 : false;
-      if (lr && !coversScreen && mg.x >= lr.x && mg.x < lr.x + lr.w && mg.y >= lr.y && mg.y < lr.y + lr.h) return;
+      const haveChain = snapChainRef.current !== null;
+      const retryDue = elemFailAtRef.current > 0 && Date.now() - elemFailAtRef.current > 350;
+      if (retryDue) elemFailAtRef.current = Date.now();
+      if (lr && !coversScreen && !haveChain && !retryDue
+          && mg.x >= lr.x && mg.x < lr.x + lr.w && mg.y >= lr.y && mg.y < lr.y + lr.h) return;
       void querySmartRect();
     }
   };
@@ -1979,6 +2164,23 @@ export function ScreenshotOverlay() {
   return (
     <div ref={rootRef} className="shot-overlay" style={{width:displayW,height:displayH,position:"fixed",top:0,left:0,overflow:"hidden",cursor:"crosshair"}}
       onWheel={(ev) => {
+        // 悬停阶段（idle 未拖拽、有可见高亮）：智能候选链滚轮切换层级——
+        // 上滚更精细（链内层），下滚更粗（外层，直至整窗），PixPin 式。
+        // 单击采纳的就是当前层级矩形（onDown/onUp 读 snapRef 天然生效）。
+        // 无高亮（snapRef 空）时不响应：拖拽失败回 idle 等场景不得复活旧链
+        if (phase === "idle" && !dragRef.current && !pickerModeRef.current && cfg.shot.smart_detect) {
+          const chain = snapChainRef.current;
+          if (chain && chain.length > 1 && snapRef.current) {
+            const ni = Math.min(chain.length - 1, Math.max(0, snapIdxRef.current + (ev.deltaY > 0 ? 1 : -1)));
+            if (ni !== snapIdxRef.current) {
+              snapIdxRef.current = ni;
+              const r = chain[ni];
+              snapRef.current = r;
+              setSnap(r); // 选区层 effect 随 snap 重绘高亮
+            }
+            return;
+          }
+        }
         // 选区阶段滚轮=无级调节画笔粗细（1~24px，一格 1px，与速度无关）；
         // 面板里的三挡位保留作为快捷预设
         if (phase !== "selected" || textEdit) return;
@@ -2272,6 +2474,7 @@ export function ScreenshotOverlay() {
                 <div className="shot-hint-row shot-hint-viewing"><span className="shot-hint-keys"><kbd>&lt;</kbd></span><span className="shot-hint-desc">正在查看历史截屏，按 &lt; 返回实时画面</span></div>
               )}
               {cfg.shot.smart_detect && <div className="shot-hint-row"><span className="shot-hint-keys"><kbd>左键点击</kbd></span><span className="shot-hint-desc">采纳识别的窗口</span></div>}
+              {cfg.shot.smart_detect && chainLen > 1 && <div className="shot-hint-row"><span className="shot-hint-keys"><kbd>滚轮</kbd></span><span className="shot-hint-desc">切换识别层级（元素⇄窗口）</span></div>}
               <div className="shot-hint-row"><span className="shot-hint-keys"><kbd>左键拖拽</kbd></span><span className="shot-hint-desc">自定义框选区域</span></div>
               {cfg.shot.history_enabled !== false && (
                 <>

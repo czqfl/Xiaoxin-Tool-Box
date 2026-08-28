@@ -350,9 +350,11 @@ export const shotCursorGlobal = () =>
 /** 智能窗口识别：返回全局物理坐标下鼠标处的窗口矩形 */
 export const shotWindowRectAt = (x: number, y: number) =>
   invoke<{ x: number; y: number; width: number; height: number } | null>("shot_window_rect_at", { x, y });
-/** 元素级智能识别（UIA）：返回鼠标处最合适界面组件（按钮/输入框等）的矩形 */
+/** 元素级智能识别（UIA）：返回鼠标处的元素【候选链】——内→外按面积升序，
+ *  链[0] 最精确（按钮/输入框等组件），越往后越粗（工具条/面板）。
+ *  前端悬停显示链[0]，滚轮在链层级间切换（PixPin 式）。全链被滤空时为 null */
 export const shotUiRectAt = (x: number, y: number) =>
-  invoke<{ x: number; y: number; width: number; height: number } | null>("shot_ui_rect_at", { x, y });
+  invoke<{ x: number; y: number; width: number; height: number }[] | null>("shot_ui_rect_at", { x, y });
 /** 获取上次记住的选区 */
 export const shotLastRegion = () =>
   invoke<number[] | null>("shot_last_region");

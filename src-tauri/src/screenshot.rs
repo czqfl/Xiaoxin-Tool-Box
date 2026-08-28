@@ -923,6 +923,39 @@ fn snapshot_windows<R: Runtime>(app: &AppHandle<R>) -> Vec<SnapWin> {
 #[cfg(not(windows))]
 fn snapshot_windows<R: Runtime>(_: &AppHandle<R>) -> Vec<SnapWin> { Vec::new() }
 
+/// 呼出后周期性刷新窗口 Z 序快照（350ms 节拍，会话结束自动退出）：
+/// 呼出瞬间拍的静态表覆盖不到【会话期间新弹出】的弹窗/下拉/tooltip——
+/// 悬停识别会命中弹窗【后面】的窗口（"有弹窗时识别的是弹窗后面的元素"根因）。
+/// EnumWindows 全程 1~3ms，常驻无感。快照变化（长度或任一 hwnd/rect 不同）
+/// 才写回 state 并广播 shot://cands，前端本地扫描表随之更新。
+#[cfg(windows)]
+fn spawn_cands_refresher<R: Runtime>(app: &AppHandle<R>) {
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        while SHOOTING.load(Ordering::SeqCst) {
+            std::thread::sleep(std::time::Duration::from_millis(350));
+            if !SHOOTING.load(Ordering::SeqCst) { break; }
+            let fresh = snapshot_windows(&app2);
+            let Some(state) = app2.try_state::<ShotState>() else { continue };
+            {
+                let mut cur = state.candidates.lock().unwrap();
+                let same = cur.len() == fresh.len()
+                    && cur.iter().zip(fresh.iter()).all(|(a, b)| {
+                        a.hwnd == b.hwnd && a.rect.x == b.rect.x && a.rect.y == b.rect.y
+                            && a.rect.width == b.rect.width && a.rect.height == b.rect.height
+                    });
+                if same { continue; }
+                *cur = fresh;
+            }
+            let rects: Vec<ShotRect> = state.candidates.lock().unwrap().iter().map(|w| w.rect.clone()).collect();
+            let _ = app2.emit("shot://cands", rects);
+        }
+    });
+}
+
+#[cfg(not(windows))]
+fn spawn_cands_refresher<R: Runtime>(_: &AppHandle<R>) {}
+
 // ---------- 截图历史 ----------
 // 每次呼出把各屏冻结帧落盘 PNG（后台线程，不阻塞会话）：
 // data/shot_history/{毫秒时间戳}_{屏索引}.png（+ .thumb.png 缩略图供列表 UI）。
@@ -1367,6 +1400,18 @@ pub(crate) fn begin_impl<R: Runtime>(app: AppHandle<R>, picker: bool) -> Result<
                 let snap = if smart_detect {
                     candidate_at(&cands, cursor.x as i32, cursor.y as i32)
                 } else { None };
+                // UIA 预热：对光标下窗口提前"敲一次门"，触发 Chromium 系
+                // provider 的无障碍树激活（首次激活可达秒级）——等用户看到
+                // 遮罩开始移动鼠标时树已就绪，首次悬停元素级识别即命中。
+                // fire-and-forget，失败与结果都无关紧要
+                if smart_detect {
+                    if let Some(w) = cands.iter().find(|w| {
+                        cursor.x >= w.rect.x as f64 && cursor.x < (w.rect.x + w.rect.width as i32) as f64
+                            && cursor.y >= w.rect.y as f64 && cursor.y < (w.rect.y + w.rect.height as i32) as f64
+                    }) {
+                        crate::uia_pick::warm(w.hwnd);
+                    }
+                }
                 // 记忆区域回退：仅当智能识别未命中且开关开启
                 let prefill = if snap.is_none() && remember_region {
                     *LAST_REGION.lock().unwrap()
@@ -1383,6 +1428,12 @@ pub(crate) fn begin_impl<R: Runtime>(app: AppHandle<R>, picker: bool) -> Result<
                     *state.candidates.lock().unwrap() = cands;
                     *state.initial_snap.lock().unwrap() = snap;
                     *state.prefill.lock().unwrap() = prefill;
+                }
+                // 会话期间窗口 Z 序会变（弹窗/下拉/tooltip 呼出后才出现）：
+                // 周期刷新快照表，悬停识别才能命中新弹窗（否则永远命中其后面
+                // 的窗口——静态快照根本不包含弹窗）
+                if smart_detect {
+                    spawn_cands_refresher(&app);
                 }
                 // 诊断：会话开始时的识别基础数据（候选窗口数/初始命中/光标显示器几何）。
                 // 悬停识别失效时对照：cands=0 → 快照失败；snap=None 且 cands>0 →
@@ -1761,11 +1812,20 @@ pub fn shot_window_rect_at(app: AppHandle, x: f64, y: f64) -> Option<ShotRect> {
     let sig = (x, y, hit.as_ref().map(|r| (r.x, r.y, r.width, r.height)), cands.len());
     let mut last = LAST.lock().unwrap();
     if last.map(|l| l.2 != sig.2 || l.3 != sig.3).unwrap_or(true) {
+        // 遮挡判定失真排查：把命中点所在的完整 Z 序快照 dump 出来（顶→底）。
+        // 若"被遮窗口仍被选中"，这里能看出遮挡窗是缺席还是 Z 序颠倒
+        let order: Vec<String> = cands
+            .iter()
+            .take(12)
+            .map(|w| format!("{:#x}:({},{},{},{})", w.hwnd as usize,
+                w.rect.x, w.rect.y, w.rect.width, w.rect.height))
+            .collect();
         diag_write(&format!(
-            "[shot] rect@({x},{y}) -> {} cands={}",
+            "[shot] rect@({x},{y}) -> {} cands={} z=[{}]",
             hit.as_ref().map(|r| format!("({},{},{},{})", r.x, r.y, r.width, r.height))
                 .unwrap_or_else(|| "None".into()),
             cands.len(),
+            order.join(" | "),
         ));
         *last = Some(sig);
     }
@@ -1773,28 +1833,29 @@ pub fn shot_window_rect_at(app: AppHandle, x: f64, y: f64) -> Option<ShotRect> {
     hit
 }
 
-/// 元素级智能识别（UIA）：返回全局物理坐标 (x,y) 处最合适 UI 元素的矩形。
+/// 元素级智能识别（UIA）：返回全局物理坐标 (x,y) 处的元素【候选链】
+/// （内→外有序，链[0] 最精确，末尾≈容器级）。
 ///
 /// 【为什么不能用 ElementFromPoint】遮罩窗是全屏置顶且接收鼠标输入的窗口，
 /// UIA 的 ElementFromPoint 与 WindowFromPoint 一样只会命中遮罩自己——
 /// 返回的"元素"是遮罩/其 WebView2 宿主，矩形≈全屏，什么都选不中。
 ///
-/// 正确路径：从呼出瞬间的 Z 序快照里查到光标下目标窗口的 HWND，
-/// 用 ElementFromHandle 直达【目标窗口】的 UIA 元素树逐层下钻到
-/// 「包含该点且面积最小」的子元素——能框选浏览器页面里的导航栏/按钮组/
-/// 输入框等细粒度组件。
+/// 正确路径：从呼出瞬间的 Z 序快照里查到光标下目标窗口的 HWND，用
+/// ElementFromHandle 直达【目标窗口】的 UIA 元素树（详见 uia_pick 模块头）。
 ///
-/// 实际查询在专用 UIA 工作线程完成（见 uia_pick 模块）：
-/// · CreateCacheRequest 批量缓存：每层下钻仅 1 次跨进程往返，Chromium
-///   数百节点网页树毫秒级完成（旧实现 N×2 次/层，动辄秒级）
-/// · 命中交互控件（按钮/链接/菜单项/输入框）即停——按"件"识别不钻文本碎片
-/// · 极小同型叶子组（≥3 兄弟）上浮父容器——工具条/列表按"组"可选
-/// · 160ms 层间自限 + latest-wins：慢 provider 不拖累后续悬停
+/// 实际查询在专用 UIA 工作线程完成：
+/// · 带回溯 DFS 逐层 FindAll(Children) 下钻，【只用于定位最内层命中】——
+///   Chromium 的 Children 列表是扁平的，下钻路径给不出中间层级
+/// · 层级 = 从最内层命中沿 raw 视图向上走父链（DOM 容器/面板/区块在这里才齐全）
+/// · 交互控件修正：链最内端是小 Text/Image 碎片时自动回退最近可交互祖先
+/// · 时限链条：DFS 130ms + 父链 25ms < 本命令 recv_timeout 300ms
+///   < 前端竞速窗口 320ms；latest-wins 排干积压请求，慢 provider 不拖累悬停
 ///
-/// 过小（<10px，噪点）与异常返回 None，前端自动回退窗口级识别。
+/// 过小/与窗口等大的矩形被剔除、越界的裁剪到窗口可见边界，
+/// 全链为空返回 None，前端自动回退窗口级识别。
 #[cfg(windows)]
 #[tauri::command]
-pub async fn shot_ui_rect_at(app: AppHandle, x: f64, y: f64) -> Option<ShotRect> {
+pub async fn shot_ui_rect_at(app: AppHandle, x: f64, y: f64) -> Option<Vec<ShotRect>> {
     let (x, y) = (x.round() as i32, y.round() as i32);
     // 快照查表拿到目标窗口 HWND+矩形后【立刻放锁】：UIA 查询可能阻塞数秒
     // （Chromium 无障碍树首次激活），锁被占住会卡死并行的窗口级查表
@@ -1807,7 +1868,11 @@ pub async fn shot_ui_rect_at(app: AppHandle, x: f64, y: f64) -> Option<ShotRect>
         }).map(|w| (w.hwnd, w.rect.clone()))?
     };
     let (hwnd, win) = target;
-    tauri::async_runtime::spawn_blocking(move || crate::uia_pick::pick(hwnd, win, x, y, 220))
+    // timeout 300 > DFS 软时限 130 + 父链 25 + 慢 provider 单次阻塞过冲：慢应用
+    // （Qt 系 200ms+）的结果也要送达。前端竞速窗口取 320ms > 本值，正常路径下
+    // 不会再"前端先放弃、后端算好的链随接收端一起丢弃"；极慢 provider（Chromium
+    // 首次激活无障碍树）仍会落到前端的迟到采纳分支兜住
+    tauri::async_runtime::spawn_blocking(move || crate::uia_pick::pick(hwnd, win, x, y, 300))
         .await
         .ok()
         .flatten()
@@ -1815,7 +1880,7 @@ pub async fn shot_ui_rect_at(app: AppHandle, x: f64, y: f64) -> Option<ShotRect>
 
 #[cfg(not(windows))]
 #[tauri::command]
-pub async fn shot_ui_rect_at(_app: AppHandle, _x: f64, _y: f64) -> Option<ShotRect> { None }
+pub async fn shot_ui_rect_at(_app: AppHandle, _x: f64, _y: f64) -> Option<Vec<ShotRect>> { None }
 
 #[tauri::command]
 pub fn shot_last_region() -> Option<[i32; 4]> {

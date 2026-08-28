@@ -1,12 +1,13 @@
-﻿# 小心工具箱 - 一键打包脚本（安装版 + 便携版）
+﻿# 小心工具箱 - 一键打包脚本（安装版）
 # 用法：
-#   npm run pack                                # 完整构建（前端 + Rust release + NSIS 安装包 + 便携版）
+#   npm run pack                                # 完整构建（前端 + Rust release + NSIS 安装包）
 #   .\scripts\build-release.ps1 -SkipBuild      # 仅打包（已执行过 tauri build 时）
 #
 # 产出（项目最顶层）：
 #   小心工具箱-安装版-v<版本>.exe    NSIS 安装包（双击安装）
-#   小心工具箱-便携版-v<版本>.zip    绿色便携版（解压即用，数据存 exe 同级 data\，可整体迁移）
 # 注：MSI 安装包（WiX）因 WiX 下载失败已停用，需要时可重新加 --bundles nsis,msi。
+#     便携版 zip 打包已按需求移除（2026-08-28），需要时从 git 历史找回本文件的
+#     "---- 3. 便携版"段落即可恢复。
 
 param(
     [switch]$SkipBuild
@@ -42,40 +43,9 @@ if ($nsisExe) {
     Write-Warning "未找到 NSIS 产物，跳过安装版 exe"
 }
 
-# ---- 3. 便携版（绿色 exe，可直接执行） ----
-$releaseExe = Join-Path $root "src-tauri\target\release\xiaoxin-toolbox.exe"
-if (Test-Path $releaseExe) {
-    $stage = Join-Path $root "stage\小心工具箱"
-    if (Test-Path (Split-Path $stage -Parent)) {
-        Remove-Item (Split-Path $stage -Parent) -Recurse -Force
-    }
-    New-Item -ItemType Directory -Path (Join-Path $stage "data") -Force | Out-Null
-    Copy-Item $releaseExe (Join-Path $stage "小心工具箱.exe")
-
-    # 说明文案（数组拼接，避开 here-string 结束符必须行首的缩进限制）
-    $readme = @(
-        "小心工具箱 · 便携版说明",
-        "========================",
-        "1. 解压到任意有读写权限的目录（避免 C:\Program Files）。",
-        "2. 双击「小心工具箱.exe」运行，程序常驻系统托盘。",
-        "3. 所有数据（配置、剪贴板历史、文件夹记录）保存在本目录下的 data\ 文件夹中，",
-        "   整体复制即可完成迁移。",
-        "4. 默认快捷键：Alt+C 呼出剪贴板面板，Alt+F 呼出文件夹面板，可在设置中修改。"
-    ) -join "`r`n"
-    $readme | Out-File -FilePath (Join-Path $stage "使用说明.txt") -Encoding utf8
-
-    $zip = Join-Path $root "小心工具箱-便携版-v$version.zip"
-    if (Test-Path $zip) { Remove-Item $zip -Force }
-    Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip -CompressionLevel Optimal
-    Remove-Item (Split-Path $stage -Parent) -Recurse -Force
-    Write-Host "  [便携版] $zip" -ForegroundColor Green
-} else {
-    Write-Warning "未找到 $releaseExe，无法生成便携版（请先执行 tauri build）"
-}
-
-# ---- 4. 汇总 ----
+# ---- 3. 汇总 ----
 Write-Host ""
 Write-Host "==> 打包完成，产物在项目根目录：" -ForegroundColor Cyan
-Get-ChildItem $root -File | Where-Object { $_.Name -like "小心工具箱-*" } | ForEach-Object {
+Get-ChildItem $root -File | Where-Object { $_.Name -like "小心工具箱-安装版-*" } | ForEach-Object {
     Write-Host ("    {0}  ({1:N2} MB)" -f $_.Name, ($_.Length / 1MB))
 }

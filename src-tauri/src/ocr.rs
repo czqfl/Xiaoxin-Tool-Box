@@ -167,10 +167,8 @@ pub fn recognize_png(png: &[u8]) -> Result<Vec<OcrLineResp>, String> {
     // 【速度】缩放后重编码用 BMP 而不是 PNG——BMP 几乎是内存直拷
     // 【坐标】pad/scale 全程记录：返回矩形统一 (c - pad) / scale 映射回
     //         原图像素坐标系，调用方（贴图选词高亮）按原图坐标做命中
-    let mut scale = 1f64;
-    let mut pad = 0f32;
     let png_owned;
-    let png: &[u8] = {
+    let (scale, pad, png): (f64, f32, &[u8]) = {
         let img = image::load_from_memory(png).map_err(|e| format!("decode: {e}"))?;
         let long = img.width().max(img.height());
         let k: f64 = if long < 1600 {
@@ -202,9 +200,7 @@ pub fn recognize_png(png: &[u8]) -> Result<Vec<OcrLineResp>, String> {
             .write_to(&mut out, image::ImageFormat::Bmp)
             .map_err(|e| format!("encode: {e}"))?;
         png_owned = out.into_inner();
-        scale = k;
-        pad = p as f32;
-        &png_owned[..]
+        (k, p as f32, &png_owned[..])
     };
 
     // ---- 图像字节 → 内存流 → SoftwareBitmap（BMP 或透传的原始 PNG）----

@@ -5,10 +5,9 @@ use crate::storage::{save_json, AppPaths};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
-use tauri::Emitter;
-use tauri::State;
+use tauri::{AppHandle, Emitter, Manager, Runtime, State, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
 
 /// 每个文件夹最多保留的访问历史时间戳数量
@@ -412,6 +411,75 @@ pub fn folder_git_run(path: String, commands: Vec<String>) -> Result<Vec<GitRunR
         }
     }
     Ok(results)
+}
+
+// ---------- Git 结果独立窗口 ----------
+// 结果不再嵌在文件夹面板里（面板是置顶悬浮窗，提交进行中会一直挡住屏幕且
+// 随面板生命周期），改为独立原生窗口：带标题栏可拖动/随时关闭，不置顶。
+
+/// 待执行任务（面板发起 → 窗口领取）。窗口晚于面板挂载（新建路径），
+/// 靠这个中转避免"事件先于监听"的竞态；后续同窗口复用走事件直推
+#[derive(Debug, Clone, Serialize)]
+pub struct GitTask {
+    pub folder: String,
+    pub path: String,
+    pub commands: Vec<String>,
+    pub seq: u64,
+}
+
+static GIT_TASK: Mutex<Option<GitTask>> = Mutex::new(None);
+static GIT_TASK_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// 打开/聚焦 Git 结果窗口并下达任务。
+///
+/// 窗口是普通层级（不置顶）+ 原生标题栏：拖动、× 关闭随时可用；执行期间
+/// 关窗只是丢弃视图，命令在后台线程继续跑完（folder_git_run 是同步命令，
+/// 与窗口生命周期无关），不会中断 git 操作本身。
+#[tauri::command]
+pub fn folder_git_window_open(
+    app: AppHandle,
+    folder: String,
+    path: String,
+    commands: Vec<String>,
+) -> Result<(), String> {
+    if !Path::new(&path).is_dir() {
+        return Err("文件夹不存在或已被移动".into());
+    }
+    let seq = GIT_TASK_SEQ.fetch_add(1, Ordering::SeqCst) + 1;
+    *GIT_TASK.lock().unwrap() = Some(GitTask { folder, path, commands, seq });
+    const LABEL: &str = "git-run";
+    if let Some(w) = app.get_webview_window(LABEL) {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+        let task = GIT_TASK.lock().unwrap().clone();
+        if let Some(t) = task {
+            let _ = app.emit_to(LABEL, "git://task", t);
+        }
+        return Ok(());
+    }
+    // 新建路径：主循环空闲时创建（同面板重建，避免重入挂死）。窗口挂载后
+    // 前端自行调 folder_git_task_take 领取任务，无需等事件
+    let app2 = app.clone();
+    crate::defer_to_main_loop(app, move || {
+        let url = crate::frontend_url(&app2);
+        let _ = WebviewWindowBuilder::new(&app2, "git-run", url)
+            .title("Git 执行结果")
+            .inner_size(540.0, 460.0)
+            .min_inner_size(380.0, 260.0)
+            .decorations(true)
+            .resizable(true)
+            .always_on_top(false)
+            .center()
+            .build();
+    });
+    Ok(())
+}
+
+/// 窗口挂载时领取当前任务（新建窗口与面板发起之间存在挂载竞态）
+#[tauri::command]
+pub fn folder_git_task_take() -> Option<GitTask> {
+    GIT_TASK.lock().unwrap().clone()
 }
 
 /// 拉起终端并执行命令：复用 open_in_shell 的壳，进入目录后追加命令。
