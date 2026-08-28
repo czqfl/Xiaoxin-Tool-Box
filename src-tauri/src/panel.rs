@@ -449,12 +449,21 @@ fn ensure_panel_window<R: Runtime>(
     }
     crate::storage::diag_write(&format!("panel window {label} missing, rebuilding"));
     let url = crate::frontend_url(app);
+    // 重建尺寸取 tauri.conf.json 中该窗口的声明值（写死 640x480 会让面板重建后错位）
+    let (w, h) = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|wc| wc.label == label)
+        .map(|wc| (wc.width, wc.height))
+        .unwrap_or((640.0, 480.0));
     let app2 = app.clone();
     let label2 = label.to_string();
     crate::defer_to_main_loop(app2.clone(), move || {
         let _ = WebviewWindowBuilder::new(&app2, label2.as_str(), url)
             .title(label2.clone())
-            .inner_size(640.0, 480.0)
+            .inner_size(w, h)
             .decorations(false)
             .transparent(false)
             .always_on_top(true)

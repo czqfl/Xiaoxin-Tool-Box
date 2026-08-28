@@ -18,6 +18,8 @@ pub struct AppPaths {
     pub images_dir: PathBuf,
     /// 常用语速贴数据文件
     pub snippets_file: PathBuf,
+    /// 命令面板用量统计（使用次数 / 最近使用时间）
+    pub palette_stats_file: PathBuf,
 }
 
 impl AppPaths {
@@ -50,6 +52,7 @@ impl AppPaths {
             folders_file: data_dir.join("folders.json"),
             creds_file: data_dir.join("credentials.json"),
             snippets_file: data_dir.join("snippets.json"),
+            palette_stats_file: data_dir.join("palette_stats.json"),
             images_dir,
             data_dir,
         }

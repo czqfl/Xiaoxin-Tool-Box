@@ -9,6 +9,7 @@ import type {
   FolderEntry,
   GitRunResult,
   InstalledApp,
+  PaletteStatEntry,
   PortProcess,
   QuickFileList,
   TranslateResult,
@@ -265,6 +266,19 @@ export const pickOpenerExecutable = async (): Promise<string | null> => {
 /** 枚举本机已安装应用（开始菜单 + App Paths），供「默认打开方式」下拉选择 */
 export const listInstalledApps = () =>
   safe(invoke<InstalledApp[]>("list_installed_apps"), []);
+
+// ---- 命令面板 ----
+/** 启动本机应用（app_launch）：入参为 listInstalledApps 返回的 exe 完整路径 */
+export const launchApp = (exe: string) => invoke<void>("app_launch", { exe });
+/** 把一段现算文本写入剪贴板并模拟粘贴到用户原应用（不进剪贴板历史） */
+export const pasteText = (text: string) =>
+  invoke<void>("clipboard_paste_text", { text });
+/** 命令面板用量统计（使用次数 / 最近使用时间），驱动排序加权与空态 */
+export const listPaletteStats = () =>
+  safe(invoke<PaletteStatEntry[]>("palette_stats_list"), [] as PaletteStatEntry[]);
+/** 记一次使用：执行成功后 fire-and-forget，失败不影响动作本身 */
+export const bumpPaletteStat = (key: string) =>
+  safe(invoke("palette_stat_bump", { key }), undefined);
 
 // ---- 快捷键 ----
 export const testShortcut = (shortcut: string) =>

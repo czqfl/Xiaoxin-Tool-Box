@@ -317,6 +317,29 @@ pub async fn list_installed_apps() -> Result<Vec<InstalledApp>, String> {
         .map_err(|e| format!("扫描本机应用失败：{e}"))
 }
 
+/// 启动一个本机应用（命令面板「搜应用直接开」用）。
+/// 直接 spawn 该 exe 并带 CREATE_NO_WINDOW：走 opener（内部 `cmd /c start`）
+/// 会从这个 GUI 进程闪出一个控制台窗口。
+#[tauri::command]
+pub fn app_launch(exe: String) -> Result<(), String> {
+    let path = Path::new(&exe);
+    if !path.is_file() {
+        return Err(format!("应用不存在：{exe}"));
+    }
+    let mut cmd = std::process::Command::new(path);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    if let Some(dir) = path.parent() {
+        cmd.current_dir(dir);
+    }
+    cmd.spawn()
+        .map_err(|e| format!("启动失败：{e}"))?;
+    Ok(())
+}
+
 /// 提取 exe 图标为 32×32 PNG data URL：
 /// ExtractIconExW 取小图标 → DrawIconEx 画到 32bpp DIB → 预乘 alpha 还原 →
 /// image crate 编码 PNG → base64。

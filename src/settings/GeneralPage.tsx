@@ -99,7 +99,7 @@ export function GeneralPage() {
         <ShortcutRow
           target="palette"
           title="全局命令面板"
-          desc="任意应用中按下快捷键呼出搜索框：搜便签/剪贴板/凭证/文件，或直接执行截图、换主题等动作"
+          desc="任意应用中按下快捷键呼出：可直接算式与进制/单位换算、JSON·Base64 编解码、时间戳转换、翻译、搜剪贴板/凭证/语速贴/文件夹/文件/本机应用并启动，常用项自动排前"
         />
       </SettingGroup>
 
