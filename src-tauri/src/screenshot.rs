@@ -142,6 +142,17 @@ pub(crate) fn disable_show_animation(hwnd: windows::Win32::Foundation::HWND) {
 // ---------- capture ----------
 
 fn capture_all<R: Runtime>(app: &AppHandle<R>, capture_cursor: bool) -> Result<Vec<MonitorShot>, String> {
+    // RAII：本次采集结束即释放本线程那份 DXGI 上下文。采集上下文已按线程隔离
+    // （D3D11 immediate context 不可跨线程复用），而本函数跑在每次截图新建的
+    // 线程里——不释放就会每截一次图残留一套 D3D11 设备，累积成 GPU 资源泄漏。
+    struct CapThreadGuard;
+    impl Drop for CapThreadGuard {
+        fn drop(&mut self) {
+            crate::dupl::win::release_thread();
+        }
+    }
+    let _cap_guard = CapThreadGuard;
+
     use windows::Win32::Graphics::Gdi::{
         BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject,
         GetDC, GetDIBits, ReleaseDC, SelectObject,

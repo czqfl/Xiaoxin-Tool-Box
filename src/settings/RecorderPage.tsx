@@ -1,8 +1,9 @@
-/** 屏幕录制（GIF / AVI / MP4）设置页：快捷键 / 帧率 / 编码质量 / 时长上限 / 保存目录 */
+/** 屏幕录制（MP4 / GIF）设置页：快捷键 / 默认格式 / 分辨率 / 帧率 / 编码质量 / 保存目录。
+ *  这里的取值即录制面板的默认值（面板只暴露「格式」供临时切换），两处共用同一套配置。 */
 import { useConfigStore } from "../stores/configStore";
 import { pickFolder } from "../core/tauri";
 import { invoke } from "@tauri-apps/api/core";
-import { Segmented, SettingGroup, SettingRow, Slider, Switch } from "./components";
+import { Segmented, SettingGroup, SettingRow, Slider } from "./components";
 import { ShortcutRow } from "./ShortcutRow";
 
 export function RecorderPage() {
@@ -19,7 +20,8 @@ export function RecorderPage() {
     <div className="settings-page">
       <h2>屏幕录制</h2>
       <p className="page-desc">
-        框选任意区域录制为 GIF 动图或 AVI / MP4 视频；托盘、悬浮工具栏或全局快捷键呼出
+        框选任意区域录制为 MP4 视频或 GIF 动图；托盘、悬浮工具栏或全局快捷键呼出。
+        本页的取值是录制时的默认值，录制面板可临时换格式（不影响这里的设置）
       </p>
 
       <SettingGroup>
@@ -30,11 +32,35 @@ export function RecorderPage() {
         />
       </SettingGroup>
 
+      {/* 以下均为【录制面板的默认值】：面板里只保留「格式」可临时切换，
+          分辨率 / 画质 / 帧率都沿用这里的设置，两处因此是同一套配置 */}
       <SettingGroup>
-        <SettingRow title="帧率" desc={`当前 ${config.recorder?.fps ?? 12} 帧/秒（越高越流畅，文件越大）`}>
+        <SettingRow title="默认格式" desc="录制面板可临时改，改这里才是持久默认">
+          <Segmented
+            value={config.recorder?.fmt ?? "mp4"}
+            options={[
+              { value: "mp4", label: "视频 MP4" },
+              { value: "gif", label: "动图 GIF" },
+            ]}
+            onChange={(v) => updateRec({ fmt: v })}
+          />
+        </SettingRow>
+        <SettingRow title="默认分辨率" desc="按选区高度换算缩放，不会放大超过原始尺寸">
+          <Segmented
+            value={config.recorder?.res ?? "raw"}
+            options={[
+              { value: "raw", label: "原始" },
+              { value: "1080", label: "1080p" },
+              { value: "720", label: "720p" },
+              { value: "360", label: "360p" },
+            ]}
+            onChange={(v) => updateRec({ res: v })}
+          />
+        </SettingRow>
+        <SettingRow title="帧率" desc={`当前 ${config.recorder?.fps ?? 12} 帧/秒（5–60，越高越流畅，文件越大）`}>
           <Slider
             min={5}
-            max={24}
+            max={60}
             value={config.recorder?.fps ?? 12}
             onChange={(v) => updateRec({ fps: Math.round(v) })}
           />
@@ -48,26 +74,6 @@ export function RecorderPage() {
               { value: "fast", label: "快速" },
             ]}
             onChange={(v) => updateRec({ quality: v })}
-          />
-        </SettingRow>
-        <SettingRow title="时长上限" desc="单次录制最长秒数，超时自动保存收尾；0 = 不限制">
-          <input
-            className="number-input"
-            type="number"
-            min={0}
-            max={3600}
-            step={10}
-            value={config.recorder?.max_duration_secs ?? 120}
-            onChange={(e) => {
-              const raw = e.target.value;
-              if (raw === "") return;
-              const v = Math.round(Number(raw));
-              if (Number.isFinite(v)) updateRec({ max_duration_secs: v });
-            }}
-            onBlur={(e) => {
-              const v = Math.round(Number(e.target.value));
-              if (Number.isFinite(v)) updateRec({ max_duration_secs: Math.min(3600, Math.max(0, v)) });
-            }}
           />
         </SettingRow>
       </SettingGroup>
@@ -98,9 +104,7 @@ export function RecorderPage() {
             )}
           </div>
         </SettingRow>
-        <SettingRow title="启用屏幕录制" desc="停用后快捷键注销，托盘/工具栏入口隐藏">
-          <Switch checked={config.recorder?.enabled !== false} onChange={(v) => updateRec({ enabled: v })} />
-        </SettingRow>
+        {/* 「启用/停用」统一由功能开关页管理，此处不再重复提供 */}
       </SettingGroup>
     </div>
   );

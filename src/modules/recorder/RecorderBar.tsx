@@ -131,11 +131,12 @@ export function RecorderBar() {
 
   return (
     <div className={`recb-root${phase !== "recording" ? " recb-toast" : ""}${paused && phase === "recording" ? " paused" : ""}${phase === "done" || phase === "error" ? " recb-final" : ""}`}>
-      {/* 录制中：顶部迷你条（红点 + REC + 时间 + 暂停/停止/取消） */}
+      {/* 录制中：顶部迷你条（红点 + 时间 + 暂停/停止/取消，全部纯图标 + 悬浮说明）。
+          窗口仅 312×36，此前还塞了「REC」与「Esc 停止并保存」兩段文字导致溢出错乱，
+          现一律改图标，语义靠 title 与按钮配色表达。 */}
       {phase === "recording" && (
         <>
           <span className={`recb-dot${paused ? " off" : ""}`} />
-          <span className={`recb-rec${paused ? " paused" : ""}`}>{paused ? "已暂停" : "REC"}</span>
           <span className="recb-time">{fmt(elapsed)}</span>
           <button
             className={`recb-btn recb-icon${paused ? " recb-resume" : ""}`}
@@ -145,12 +146,11 @@ export function RecorderBar() {
             {paused ? <Play size={12} fill="currentColor" stroke="none" /> : <Pause size={12} fill="currentColor" stroke="none" />}
           </button>
           <button
-            className="recb-btn recb-stop"
+            className="recb-btn recb-icon recb-stop"
             onClick={stop}
-            title="停止并保存 (Esc)"
+            title="停止并保存（Esc）"
           >
             <Square size={10} fill="currentColor" stroke="none" />
-            停止
           </button>
           <button
             className="recb-btn recb-icon recb-cancel"
@@ -159,9 +159,6 @@ export function RecorderBar() {
           >
             <X size={12} />
           </button>
-          <span className="recb-esc-hint" title="Esc = 停止并保存；丢弃请用 ✕ 取消">
-            Esc 停止并保存
-          </span>
         </>
       )}
 
@@ -190,17 +187,17 @@ export function RecorderBar() {
                   {fmt(result.duration_ms)} · {fmtSize(result.bytes)}
                 </div>
               </div>
-              <button className="recb-btn recb-open" onClick={() => openVideo(result.path!)} title="用默认程序打开/播放">
-                打开
+              <button className="recb-btn recb-icon recb-open" onClick={() => openVideo(result.path!)} title="打开 / 播放">
+                <Play size={12} fill="currentColor" stroke="none" />
               </button>
-              <button className="recb-btn recb-folder" onClick={() => void revealFile(result.path!).catch(() => {})} title="打开所在文件夹">
-                <FolderOpen size={13} />
+              <button className="recb-btn recb-icon recb-folder" onClick={() => void revealFile(result.path!).catch(() => {})} title="打开所在文件夹">
+                <FolderOpen size={12} />
               </button>
             </>
           ) : (
             <span className="recb-err">{result.error ?? "录制失败"}</span>
           )}
-          <button className="recb-btn recb-close" onClick={dismiss} title="关闭">
+          <button className="recb-btn recb-icon recb-close" onClick={dismiss} title="关闭">
             <X size={13} />
           </button>
         </>

@@ -106,16 +106,21 @@ export interface ShortcutsConfig {
   palette: string;
 }
 
-/** 屏幕录制配置 */
+/** 屏幕录制配置。
+ *  这些值即【录制面板的默认值】——面板里改动只影响当次录制，改这里才是持久默认。 */
 export interface RecorderConfig {
   /** 是否启用屏幕录制功能（关闭：快捷键不注册、托盘/工具栏/侧栏入口隐藏） */
   enabled: boolean;
-  /** 采集帧率（5-24） */
+  /** 默认输出格式："mp4" = 视频 | "gif" = 动图 */
+  fmt: string;
+  /** 默认分辨率预设："raw" = 原始 | "1080" | "720" | "360" */
+  res: string;
+  /** 采集帧率（5-60） */
   fps: number;
   /** 编码质量："high" | "normal" | "fast" */
   quality: string;
-  /** 单次录制时长上限（秒，0 = 不限） */
-  max_duration_secs: number;
+  /** 【已废弃】单次录制时长上限。保留仅兼容旧配置，录制不再自动掐断 */
+  max_duration_secs?: number;
   /** 录像保存目录；为空回退截图保存目录，再回退系统图片目录 */
   save_dir?: string | null;
 }

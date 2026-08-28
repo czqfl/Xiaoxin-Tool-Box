@@ -44,17 +44,8 @@ struct Done {
     canceled: bool,
 }
 
-/// 读录屏配置（缺省兜底）。画质已由面板逐次传入，这里只取时长上限
-struct RecCfg { max_secs: u32 }
-
-fn load_cfg<R: Runtime>(app: &AppHandle<R>) -> RecCfg {
-    let cfg = app.try_state::<crate::config::ConfigState>()
-        .map(|s| s.0.lock().unwrap().recorder.clone());
-    match cfg {
-        Some(c) => RecCfg { max_secs: c.max_duration_secs },
-        None => RecCfg { max_secs: 120 },
-    }
-}
+// 注：旧版的「单次时长上限」已移除——录制不再自动掐断，何时结束由用户自己决定。
+// （配置里的 max_duration_secs 字段保留仅为向后兼容，不再参与任何判断）
 
 // ---------- 入口 ----------
 
@@ -346,8 +337,10 @@ fn prepare_frame_bgra_into(bgra: &[u8], rw: i32, rh: i32, ow: u32, oh: u32, out:
     }
 }
 
-/// 视频固定帧率上限（MP4 请求帧率）
-const VIDEO_FPS: u32 = 30;
+/// 允许的请求帧率区间（设置页滑块与录制面板共用）。
+/// 实际落帧速度仍受采集/编码能力限制，达不到时按真实间隔写时间戳（视频不会快进）。
+pub const MIN_FPS: u32 = 5;
+pub const MAX_FPS: u32 = 60;
 
 fn run<R: Runtime + 'static>(
     app: AppHandle<R>,
@@ -364,8 +357,19 @@ fn run<R: Runtime + 'static>(
         let _ = app.emit(EVT_DONE, Done { ok, path, duration_ms: dur, frames, bytes, error: err, canceled });
     };
 
-    let cfg = load_cfg(&app);
-    let fps = if opts.fmt == RecFmt::Gif { opts.fps.clamp(5, 24) } else { VIDEO_FPS };
+    // RAII：本线程退出即释放自己那份 DXGI 采集上下文。D3D11 immediate context
+    // 不可跨线程复用，且 ThreadId 会被后续线程复用——不清理既泄漏设备，也可能
+    // 让下一轮录制拿到上一轮的陈旧 ctx（→ 访问违规崩溃）。
+    struct RecThreadGuard;
+    impl Drop for RecThreadGuard {
+        fn drop(&mut self) {
+            crate::dupl::win::release_thread();
+        }
+    }
+    let _rec_guard = RecThreadGuard;
+
+    // 帧率：MP4 与 GIF 一律采用用户在设置里选的帧率（5~60），不再硬编码 30
+    let fps = opts.fps.clamp(MIN_FPS, MAX_FPS);
     let scale = opts.scale.clamp(0.25, 1.0);
     // 输出尺寸取偶（视频编码器友好）
     let ow = (((rw as f32 * scale).round() as u32) / 2 * 2).max(2);
@@ -472,9 +476,6 @@ fn run<R: Runtime + 'static>(
             #[cfg(windows)]
             if let Some(ring) = frame_ring.as_ref() { ring.set_paused(false); }
         }
-        // 时长上限（0 = 不限；按已录制时长计，暂停段不计入）
-        if cfg.max_secs > 0 && dur_ms >= cfg.max_secs as u64 * 1000 { break; }
-
         let Some(f) = crate::dupl::win::capture_region((mx, my), mw, mh, rx, ry, rw, rh)
         else {
             fail_streak += 1;
@@ -643,7 +644,8 @@ pub fn rec_select_cancel(app: AppHandle) -> Result<(), String> {
 
 /// 开始录制。x/y/w/h 为【屏幕绝对 CSS 像素】——前端已乘 devicePixelRatio
 /// 转为物理像素，这里叠加选区窗自身物理像素位置得到全局坐标。
-/// fmt="gif"(动图，用 fps/scale) | "mp4"(H.264 视频 30fps)；scale 为分辨率缩放。
+/// fmt="gif"(动图) | "mp4"(H.264 视频)；两者都使用传入的 fps（内部夹到 5~60），
+/// scale 为分辨率缩放。达不到请求帧率时按真实间隔写时间戳，成品不会快进。
 #[tauri::command]
 pub fn recorder_start(
     app: AppHandle,

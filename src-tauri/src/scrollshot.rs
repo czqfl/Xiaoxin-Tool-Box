@@ -549,6 +549,16 @@ fn run<R: Runtime + 'static>(
     rx: i32, ry: i32, rw: i32, rh: i32,
     mon: (i32, i32, i32, i32),
 ) {
+    // RAII：本线程退出即释放自���那份 DXGI 采集上下文。D3D11 immediate context
+    // 不可跨线程复用；ThreadId 被后续线程复用时也不能拿到上一轮的陈旧 ctx。
+    struct ScrollThreadGuard;
+    impl Drop for ScrollThreadGuard {
+        fn drop(&mut self) {
+            crate::dupl::win::release_thread();
+        }
+    }
+    let _thread_guard = ScrollThreadGuard;
+
     let finish = |app: &AppHandle<R>, ok: bool, path: Option<String>, height: u32, err: Option<String>| {
         RUNNING.store(false, Ordering::SeqCst);
         close_frame(app);

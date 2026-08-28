@@ -15,6 +15,7 @@
 pub mod win {
     use std::collections::HashMap;
     use std::sync::Mutex;
+    use std::thread::ThreadId;
 
     use windows::core::Interface;
     use windows::Win32::Foundation::{HMODULE, RECT};
@@ -49,9 +50,12 @@ pub mod win {
         staging: Option<(ID3D11Texture2D, u32, u32)>,
     }
 
-    // COM 包装按「调用方串行化」使用：所有触达都在 begin 的截图线程内，
-    // 与 FREEZES 同一并发模型。按显示器坐标缓存各屏的复制上下文
-    static OUTPUTS: Mutex<Option<HashMap<(i32, i32), OutputCtx>>> = Mutex::new(None);
+    // 缓存 key = (线程 ID, 显示器原点)：D3D11 的 immediate device context
+    // 【不是线程安全的】，跨线程调用 Map/CopyResource 属未定义行为——截图线程
+    // 创建的 ctx 若被录屏线程复用，会在连续采集中触发 0xc0000005 访问违规
+    // （表现：录制开始、采到第一帧后整个进程静默退出）。因此每个采集线程
+    // 必须持有自己那份 device/context/duplication，绝不跨线程共享。
+    static OUTPUTS: Mutex<Option<HashMap<(ThreadId, i32, i32), OutputCtx>>> = Mutex::new(None);
 
     /// 枚举所有 DXGI 输出：（桌面坐标矩形, 适配器, 输出）
     fn factory_outputs() -> Option<Vec<(RECT, IDXGIAdapter1, IDXGIOutput)>> {
@@ -143,6 +147,12 @@ pub mod win {
             let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
             ctx.context.Map(tex, 0, D3D11_MAP_READ, 0, Some(&mut mapped)).ok()?;
             let stride = (w * 4) as usize;
+            // 防御：指针为空或行距小于紧凑行宽时放弃本次读取——继续拷就是越界访问。
+            // 必须 Unmap 后再返回，否则纹理一直挂 mapped 状态，后续采集会全部失败。
+            if mapped.pData.is_null() || (mapped.RowPitch as usize) < stride {
+                ctx.context.Unmap(tex, 0);
+                return None;
+            }
             let mut out = vec![0u8; stride * h as usize];
             let src = mapped.pData as *const u8;
             for row in 0..h as usize {
@@ -164,7 +174,8 @@ pub mod win {
         let (_, adapter, output) = outputs.into_iter()
             .find(|(r, _, _)| r.left == pos.0 && r.top == pos.1)?;
 
-        let key = pos;
+        // key 含当前线程：保证本线程独享 device/context（见 OUTPUTS 注释）
+        let key = (std::thread::current().id(), pos.0, pos.1);
         let w = expect_w.max(1) as u32;
         let h = expect_h.max(1) as u32;
         let mut map_guard = OUTPUTS.lock().unwrap();
@@ -234,6 +245,18 @@ pub mod win {
     #[allow(dead_code)]
     pub fn invalidate_all() {
         *OUTPUTS.lock().unwrap() = None;
+    }
+
+    /// 释放【当前线程】持有的全部采集上下文。采集线程（录屏 / 长截图）结束前调用：
+    /// 既释放 D3D11 设备与 Desktop Duplication，也避免 ThreadId 被后续线程复用时
+    /// 拿到上一轮遗留的陈旧 ctx。
+    pub fn release_thread() {
+        let tid = std::thread::current().id();
+        if let Ok(mut guard) = OUTPUTS.lock() {
+            if let Some(map) = guard.as_mut() {
+                map.retain(|(t, _, _), _| *t != tid);
+            }
+        }
     }
 
     // ---------- 区域采集（滚动长截图 / 录屏共用） ----------
@@ -311,4 +334,5 @@ pub mod win {
         _mon_pos: (i32, i32), _mon_w: i32, _mon_h: i32,
         _rx: i32, _ry: i32, _rw: i32, _rh: i32,
     ) -> Option<DuplFrame> { None }
+    pub fn release_thread() {}
 }

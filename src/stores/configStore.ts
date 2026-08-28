@@ -115,9 +115,11 @@ const defaultConfig: AppConfig = {
   },
   recorder: {
     enabled: true,
+    fmt: "mp4",
+    res: "raw",
     fps: 12,
     quality: "normal",
-    max_duration_secs: 120,
+    max_duration_secs: 0,
     save_dir: null,
   },
   pin: {

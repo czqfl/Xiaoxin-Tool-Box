@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Circle, RotateCcw, Film } from "lucide-react";
+import { Circle, RotateCcw } from "lucide-react";
 import { recorderStart, recSelectCancel, type RecRect, type RecOptions } from "./api";
 import { GlassSelect } from "../../components/GlassSelect";
 import type { AppConfig } from "../../types";
@@ -9,6 +9,11 @@ import "./recorder.css";
 /** 分辨率预设（按选区高度换算缩放比，不超过原始尺寸） */
 type ResPreset = "raw" | "1080" | "720" | "360";
 const RES_HEIGHT: Record<ResPreset, number> = { raw: 0, "1080": 1080, "720": 720, "360": 360 };
+const RES_LIST: ResPreset[] = ["raw", "1080", "720", "360"];
+
+/** 帧率允许区间（与 Rust 侧 recorder.rs 的 MIN_FPS/MAX_FPS 保持一致） */
+const MIN_FPS = 5;
+const MAX_FPS = 60;
 
 /** 录屏区域选择：呼出即全屏磨砂（窗口级实时模糊），拖拽框选后弹出配置面板，
  *  确认后开始录制——选区窗随即关闭，录制区域由原生边框环（Rust 侧）标示。 */
@@ -20,15 +25,24 @@ export function RecorderSelect() {
   const startingRef = useRef(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
-  // 录制参数：格式 / 帧率(GIF) / 画质；分辨率预设单独存（开始录制时换算 scale）
+  // 录制参数：格式 / 帧率 / 画质（默认值均取自设置页）；
+  // 分辨率预设单独存，开始录制时按选区高度换算成 scale
   const [opts, setOpts] = useState<RecOptions>({ fmt: "mp4", fps: 12, scale: 1, quality: "normal" });
   const [res, setRes] = useState<ResPreset>("raw");
 
-  // 从配置读取默认帧率（设置页可调），面板选项覆盖之
+  // 默认值全部来自设置页：录制面板只暴露最常用的「格式」，分辨率/画质/帧率沿用设置。
+  // 两处因此是同一套配置的两种用法——设置项 = 持久默认，面板改动只影响本次录制。
   useEffect(() => {
     invoke<AppConfig>("config_load").then((cfg) => {
-      const fps = cfg.recorder?.fps ?? 12;
-      setOpts((o) => ({ ...o, fps }));
+      const r = cfg.recorder;
+      if (!r) return;
+      const fmt: RecOptions["fmt"] = r.fmt === "gif" ? "gif" : "mp4";
+      const res = (RES_LIST.includes(r.res as ResPreset) ? r.res : "raw") as ResPreset;
+      const quality = (["high", "normal", "fast"].includes(r.quality)
+        ? r.quality : "normal") as RecOptions["quality"];
+      const fps = Math.min(MAX_FPS, Math.max(MIN_FPS, Math.round(r.fps ?? 12)));
+      setOpts((o) => ({ ...o, fmt, quality, fps }));
+      setRes(res);
     }).catch(() => {});
   }, []);
 
@@ -149,7 +163,8 @@ export function RecorderSelect() {
   // 若该处剩余空间放不下，回退到录制区【内部右下角】（面板右下角对齐选区右下角）。
   // 初始估算用固定尺寸，layout effect 用真实尺寸精确夹回。
   const PANEL_W_EST = 320;
-  const PANEL_H_EST = 214;
+  // 面板已简化为「格式一行 + 按钮一行」，比旧版矮不少
+  const PANEL_H_EST = 120;
   let panelLeft = 0, panelTop = 0;
   if (valid && rect) {
     // 外部右下角：正下方 + 右对齐选区右缘
@@ -213,11 +228,8 @@ export function RecorderSelect() {
               onPointerDown={(e) => e.stopPropagation()}
               onDoubleClick={(e) => e.stopPropagation()}
             >
-              <div className="rec-panel-head">
-                <span className="rec-panel-title"><Film size={13} /> 屏幕录制</span>
-                <span className="rec-panel-hint"><kbd>Enter</kbd> 开始 · <kbd>Esc</kbd> 取消</span>
-              </div>
-
+              {/* 面板只保留最常用的「格式」：分辨率 / 画质 / 帧率一律沿用设置页的默认值，
+                  避免每次录制都面对一堆选项（标题与快捷键提示也已移除） */}
               <div className="rec-field">
                 <span className="rec-label">格式</span>
                 <GlassSelect
@@ -230,38 +242,6 @@ export function RecorderSelect() {
                   title="选择输出格式"
                 />
               </div>
-
-              <div className="rec-field">
-                <span className="rec-label">分辨率</span>
-                <div className="rec-seg">
-                  {(["raw", "1080", "720", "360"] as ResPreset[]).map((p) => (
-                    <button key={p} className={res === p ? "active" : ""}
-                      onClick={() => setRes(p)}>{p === "raw" ? "原始" : `${p}p`}</button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="rec-field">
-                <span className="rec-label">画质</span>
-                <div className="rec-seg">
-                  {([["high", "高"], ["normal", "标准"], ["fast", "快速"]] as const).map(([v, l]) => (
-                    <button key={v} className={opts.quality === v ? "active" : ""}
-                      onClick={() => setOpts((o) => ({ ...o, quality: v }))}>{l}</button>
-                  ))}
-                </div>
-              </div>
-
-              {opts.fmt === "gif" && (
-                <div className="rec-field">
-                  <span className="rec-label">帧率</span>
-                  <div className="rec-seg">
-                    {[8, 12, 15, 20].map((f) => (
-                      <button key={f} className={opts.fps === f ? "active" : ""}
-                        onClick={() => setOpts((o) => ({ ...o, fps: f }))}>{f}</button>
-                    ))}
-                  </div>
-                </div>
-              )}
 
               <div className="rec-actions">
                 <button onClick={() => setBoth(null)}>

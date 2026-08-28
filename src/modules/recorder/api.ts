@@ -12,7 +12,7 @@ export const recSelectCancel = () => invoke<void>("rec_select_cancel");
 export interface RecOptions {
   /** "gif" = 动图；"mp4" = H.264 视频（Media Foundation 硬件/软件编码） */
   fmt: "gif" | "mp4";
-  /** 帧率（GIF 生效；MP4 固定 30fps） */
+  /** 帧率（5–60，GIF 与 MP4 均生效；达不到时按真实间隔写时间戳，视频不会快进） */
   fps: number;
   /** 分辨率缩放 0.25~1（由分辨率预设按选区高度换算） */
   scale: number;

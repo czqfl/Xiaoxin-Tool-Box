@@ -322,21 +322,8 @@
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
 
-/* ---- REC 标识：小号重字距红字 ---- */
-.recb-rec {
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.16em;
-  color: var(--danger);
-  text-shadow: 0 0 8px color-mix(in srgb, var(--danger) 60%, transparent), 0 1px 2px rgba(0, 0, 0, 0.5);
-  white-space: nowrap;
-}
-/* 暂停态：琥珀色提示（与边框环暂停色呼应） */
-.recb-rec.paused {
-  color: var(--warning);
-  text-shadow: 0 0 8px rgba(240, 173, 62, 0.55), 0 1px 2px rgba(0, 0, 0, 0.5);
-}
-/* 暂停时整条弱化：一眼区分"正在录"与"暂停中" */
+/* 暂停时整条弱化：一眼区分"正在录"与"暂停中"
+   （状态语义由红点熄灭 + 暂停钮变「继续」并高亮表达，不再用文字标识） */
 .recb-root.paused .recb-time {
   color: rgba(255, 255, 255, 0.55);
 }
@@ -387,11 +374,16 @@
     0 3px 12px color-mix(in srgb, var(--danger) 50%, transparent);
 }
 
-/* ---- 紧凑图标按钮（暂停 / 取消）：圆形玻璃 ---- */
+/* ---- 图标按钮（暂停 / 停止 / 取消 / 打开 / 文件夹）：统一 26px 圆形玻璃 ----
+   统一尺寸后整条只剩「红点 + 时间 + 3 圆钮」，312px 宽度充裕不再挤压错乱 */
 .recb-btn.recb-icon {
-  padding: 6px 8px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
   gap: 0;
   line-height: 0;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 /* 暂停后变"继续"：品牌色强调，提示可恢复 */
 .recb-btn.recb-icon.recb-resume {
@@ -411,18 +403,6 @@
   border-color: color-mix(in srgb, var(--danger) 35%, transparent);
   color: var(--danger);
 }
-/* Esc 提示：录制中 Esc = 停止并保存（丢弃走 ✕ 取消），避免误按丢录像 */
-.recb-esc-hint {
-  margin-left: 2px;
-  padding: 2px 7px;
-  border-radius: 5px;
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.7);
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  white-space: nowrap;
-}
-
 /* ---- 完成/停止 通知卡（.recb-toast） ---- */
 .recb-toast {
   position: relative;
@@ -518,11 +498,7 @@
 .recb-open:hover:not(:disabled) {
   background: rgba(var(--accent-rgb), 0.28);
 }
-.recb-folder {
-  padding: 4px 8px;
-}
 .recb-close {
-  padding: 4px 7px;
   border: none;
   background: transparent;
   color: var(--text-secondary);

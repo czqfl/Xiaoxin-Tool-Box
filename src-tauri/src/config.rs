@@ -178,18 +178,24 @@ impl Default for ShortcutsConfig {
     }
 }
 
-/// 屏幕录制（GIF）配置
+/// 屏幕录制（GIF / MP4）配置。
+/// 这些值即【录制面板的默认值】——面板里改动只影响当次录制，改这里才是持久默认。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RecorderConfig {
     /// 是否启用屏幕录制功能（关闭：快捷键不注册、托盘/工具栏/侧栏入口隐藏）
     #[serde(default = "default_true")]
     pub enabled: bool,
-    /// 采集帧率（5-24）
+    /// 默认输出格式："mp4" = 视频 | "gif" = 动图
+    pub fmt: String,
+    /// 默认分辨率预设："raw" = 原始 | "1080" | "720" | "360"
+    pub res: String,
+    /// 采集帧率（5-60）
     pub fps: u32,
     /// 编码质量："high" | "normal" | "fast"
     pub quality: String,
-    /// 单次录制时长上限（秒，0 = 不限）
+    /// 【已废弃】单次录制时长上限（秒，0 = 不限）。保留字段仅为兼容旧配置，
+    /// 录制不再自动掐断，结束与否由用户决定。
     pub max_duration_secs: u32,
     /// 录像保存目录；为空回退截图保存目录，再回退系统图片目录
     pub save_dir: Option<String>,
@@ -199,9 +205,11 @@ impl Default for RecorderConfig {
     fn default() -> Self {
         Self {
             enabled: true,
+            fmt: "mp4".into(),
+            res: "raw".into(),
             fps: 12,
             quality: "normal".into(),
-            max_duration_secs: 120,
+            max_duration_secs: 0,
             save_dir: None,
         }
     }
