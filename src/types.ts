@@ -300,6 +300,12 @@ export interface TranslateResult {
   provider: string;
 }
 
+/** 逐行翻译的一行结果：ok=false 表示该行未译成，out 回退为原文 */
+export interface TranslatedLine {
+  out: string;
+  ok: boolean;
+}
+
 /** 截图功能配置 */
 export interface ShotConfig {
   enabled: boolean;
@@ -320,6 +326,8 @@ export interface ShotConfig {
   history_max_count: number;
   /** 历史最多保留多少天 */
   history_max_days: number;
+  /** 文字识别模型档位 id（PP-OCR ONNX，见设置页「文字识别模型」） */
+  ocr_model: string;
 }
 
 /** 贴图配置 */

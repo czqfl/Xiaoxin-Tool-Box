@@ -13,9 +13,9 @@
   /* 边框用 strong 档：轮廓清晰，浅色/复杂壁纸上不至于隐形 */
   border: 1px solid var(--border-strong);
   background: rgba(var(--bg-panel-rgb), var(--panel-opacity));
-  /* 悬浮感三件套：明显投影（--shadow-toolbar）+ 顶部高光（strong 档），
-     让贴边的工具条在任意壁纸上都"浮起来" */
-  box-shadow: var(--shadow-toolbar), var(--panel-highlight-strong);
+  /* 无投影（用户要求去掉阴影）：靠清晰边框 + 顶部内高光维持轮廓，
+     贴边时在任意壁纸上都不会隐形 */
+  box-shadow: var(--panel-highlight-strong);
   transition: background var(--dur-fast) var(--ease-out);
   user-select: none;
   cursor: default;

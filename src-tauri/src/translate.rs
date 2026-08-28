@@ -11,7 +11,8 @@
 
 use crate::config::{ConfigState, TranslatorConfig};
 use serde::Serialize;
-use std::sync::Mutex;
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 /// 翻译结果事件（前端弹窗监听实时更新）
@@ -44,6 +45,179 @@ pub async fn translate(
     let from = from.unwrap_or_else(|| "auto".to_string());
     let to = to.unwrap_or(cfg.target_lang.clone());
     translate_text(&text, &from, &to, &cfg).await
+}
+
+/// 一行译文。`ok=false` 表示这行没译成，`out` 回退为原文（前端据此标灰）。
+#[derive(Debug, Clone, Serialize)]
+pub struct TranslatedLine {
+    pub out: String,
+    pub ok: bool,
+}
+
+/// 逐行翻译的单行结果事件（payload `{i,out,ok}`）——前端据此让译文逐行冒出来
+pub const EVT_TRANSLATE_LINE: &str = "translate://line";
+
+/// 一个请求块：相邻、同方向的若干行合并成一次请求
+struct Block { dir: &'static str, idxs: Vec<usize>, texts: Vec<String> }
+
+/// 每块最多合并几行。块越大请求越少，但服务商折叠换行的概率越高
+/// （行数对不上就退回逐行，所以块可以放宽一点）
+const LINE_BLOCK_MAX: usize = 8;
+
+/// 一次「翻译」最多发多少个请求。中英交替的整屏 OCR 会切成几十块，
+/// 串行请求会拖到十几秒；超出预算的行保持未译（面板回退显示原文并给脚注）
+const LINE_BLOCK_BUDGET: usize = 24;
+
+/// 同时在途的翻译请求数。两家服务商的免费额度都有 QPS 限制，4 路是
+/// "明显快过串行、又不至于撞限流"的位置（每块 ≤8 行时，4 路一轮覆盖 32 行）
+const TRANS_CONCURRENCY: usize = 4;
+
+async fn translate_one(text: &str, dir: &str, cfg: &TranslatorConfig) -> Result<TranslatedLine, String> {
+    let r = translate_text(text, "auto", dir, cfg).await?;
+    Ok(TranslatedLine { out: r.translation, ok: true })
+}
+
+/// 规划请求块：逐行判方向 → 相邻同方向合并（≤LINE_BLOCK_MAX 行）→ 按预算截断。
+/// 空白行不进入任何块（由调用方原样占位）。
+fn plan_blocks(lines: &[String]) -> Vec<Block> {
+    let mut blocks: Vec<Block> = Vec::new();
+    for (i, l) in lines.iter().enumerate() {
+        if l.trim().is_empty() {
+            continue;
+        }
+        let dir = if has_cjk(l) { "en" } else { "zh" };
+        match blocks.last_mut() {
+            Some(b) if b.dir == dir && b.idxs.len() < LINE_BLOCK_MAX => {
+                b.idxs.push(i);
+                b.texts.push(l.clone());
+            }
+            _ => blocks.push(Block { dir, idxs: vec![i], texts: vec![l.clone()] }),
+        }
+    }
+    // 请求数预算：超预算的块干脆不发（对应行保持未译，调用方回退原文）
+    blocks.truncate(LINE_BLOCK_BUDGET);
+    blocks
+}
+
+/// 逐行翻译（OCR 面板的原文/译文对照用）。
+///
+/// 为什么不整段一次请求：整段只有一组 from/to，中英混排时服务商按整段判方向，
+/// 本来就是目标语言的那行会原样返回（表现为"英文行不翻译"）；而且两家都会
+/// 折叠换行，多句并成一整段（表现为"译文对不上原文的行"）。
+///
+/// 做法：逐行判方向（含 CJK → en，否则 → zh）→ 相邻同方向的行合并成 ≤8 行的一块
+/// 压请求数 → **TRANS_CONCURRENCY 路并发**跑这些块（某块译文行数对不上就整块退回
+/// 逐行）→ **每译完一行立刻 emit 一行**，前端原文先铺满、译文逐行冒出来。
+#[tauri::command]
+pub async fn translate_lines(
+    app: AppHandle,
+    config: State<'_, ConfigState>,
+    lines: Vec<String>,
+) -> Result<Vec<TranslatedLine>, String> {
+    let cfg = config.0.lock().unwrap().translator.clone();
+    let n = lines.len();
+    if n == 0 {
+        return Ok(Vec::new());
+    }
+    let out: Arc<Mutex<Vec<Option<TranslatedLine>>>> =
+        Arc::new(Mutex::new((0..n).map(|_| None).collect()));
+    // 空白行不占请求，先按原样填上（保证行号一一对应）
+    let mut todo: Vec<usize> = Vec::with_capacity(n);
+    for (i, l) in lines.iter().enumerate() {
+        if l.trim().is_empty() {
+            out.lock().unwrap()[i] = Some(TranslatedLine { out: l.clone(), ok: true });
+        } else {
+            todo.push(i);
+        }
+    }
+
+    let jobs = Arc::new(Mutex::new(VecDeque::from(plan_blocks(&lines))));
+    let first_err: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let lines = Arc::new(lines);
+    let workers = TRANS_CONCURRENCY.min(jobs.lock().unwrap().len()).max(1);
+    let mut handles = Vec::with_capacity(workers);
+    for _ in 0..workers {
+        let (jobs, out, lines, cfg, app, first_err) =
+            (jobs.clone(), out.clone(), lines.clone(), cfg.clone(), app.clone(), first_err.clone());
+        handles.push(tauri::async_runtime::spawn(async move {
+            // 取任务时才上锁。必须用 let-else 单独一句取：`while let Some(b) =
+            // jobs.lock().pop_front()` 会让 MutexGuard 活过 await 点，
+            // future 就不再 Send，spawn 编译不过
+            loop {
+                let Some(block) = jobs.lock().unwrap().pop_front() else { break };
+                run_block(block, &lines, &cfg, &app, &out, &first_err).await;
+            }
+        }));
+    }
+    for h in handles {
+        let _ = h.await;
+    }
+
+    let mut filled: Vec<TranslatedLine> = Vec::with_capacity(n);
+    {
+        let mut guard = out.lock().unwrap();
+        for (i, o) in guard.iter_mut().enumerate() {
+            filled.push(o.take().unwrap_or_else(|| TranslatedLine { out: lines[i].clone(), ok: false }));
+        }
+    }
+    // 全军覆没（多半是没配 Key/Secret）时把真实错误抛给前端，而不是显示一排原文
+    if !todo.is_empty() && todo.iter().all(|i| !filled[*i].ok) {
+        return Err(first_err.lock().unwrap().clone().unwrap_or_else(|| "翻译失败".into()));
+    }
+    Ok(filled)
+}
+
+/// 处理一个请求块：整块一次请求，行数对不上就退回块内逐行
+async fn run_block(
+    block: Block,
+    lines: &[String],
+    cfg: &TranslatorConfig,
+    app: &AppHandle,
+    out: &Arc<Mutex<Vec<Option<TranslatedLine>>>>,
+    first_err: &Mutex<Option<String>>,
+) {
+    if block.idxs.len() > 1 {
+        let joined = block.texts.join("\n");
+        match translate_text(&joined, "auto", block.dir, cfg).await {
+            Ok(r) => {
+                let mut parts: Vec<String> = r.translation.split('\n').map(String::from).collect();
+                // 结尾空行是换行残留，不算内容差异
+                while parts.len() > block.texts.len() && parts.last().is_some_and(|s| s.trim().is_empty()) {
+                    parts.pop();
+                }
+                if parts.len() == block.texts.len() {
+                    for (k, i) in block.idxs.iter().enumerate() {
+                        put_line(app, out, *i, TranslatedLine { out: parts[k].clone(), ok: true });
+                    }
+                    return;
+                }
+            }
+            Err(e) => {
+                first_err.lock().unwrap().get_or_insert(e);
+            }
+        }
+    }
+    // 单行块，或整块请求失败/换行被折叠 → 逐行
+    for i in block.idxs {
+        match translate_one(&lines[i], block.dir, cfg).await {
+            Ok(v) => put_line(app, out, i, v),
+            Err(e) => {
+                first_err.lock().unwrap().get_or_insert(e);
+                put_line(app, out, i, TranslatedLine { out: lines[i].clone(), ok: false });
+            }
+        }
+    }
+}
+
+/// 写入一行结果并立刻推事件：前端据此让译文逐行"冒出来"，而不是等全部完成
+fn put_line(
+    app: &AppHandle,
+    out: &Arc<Mutex<Vec<Option<TranslatedLine>>>>,
+    i: usize,
+    v: TranslatedLine,
+) {
+    out.lock().unwrap()[i] = Some(v.clone());
+    let _ = app.emit(EVT_TRANSLATE_LINE, serde_json::json!({ "i": i, "out": v.out, "ok": v.ok }));
 }
 
 /// 弹窗挂载时拉取最近一次结果
@@ -409,6 +583,19 @@ fn get_hwnd<R: Runtime>(w: &tauri::WebviewWindow<R>) -> Option<windows::Win32::F
     None
 }
 
+/// 共享 HTTP 客户端：连接池 + keep-alive 复用。
+/// 逐行翻译（translate_lines）会连发多次请求，用 `Client::new()` 每次都是全新
+/// 连接池、要重做 DNS + TLS 握手；共享后只握手一次。12s 超时随客户端下发。
+fn http_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(12))
+            .build()
+            .unwrap_or_default()
+    })
+}
+
 /// 按服务商调用对应翻译 API
 async fn translate_text(
     text: &str,
@@ -461,9 +648,8 @@ async fn youdao_translate(
         ("signType", "v3".to_string()),
         ("curtime", curtime),
     ];
-    let resp: serde_json::Value = reqwest::Client::new()
+    let resp: serde_json::Value = http_client()
         .post("https://openapi.youdao.com/api")
-        .timeout(std::time::Duration::from_secs(12))
         .form(&params)
         .send()
         .await
@@ -525,9 +711,8 @@ async fn baidu_translate(
         ("salt", salt),
         ("sign", sign),
     ];
-    let resp: serde_json::Value = reqwest::Client::new()
+    let resp: serde_json::Value = http_client()
         .post("https://fanyi-api.baidu.com/api/trans/vip/translate")
-        .timeout(std::time::Duration::from_secs(12))
         .form(&params)
         .send()
         .await
@@ -562,16 +747,20 @@ async fn baidu_translate(
     })
 }
 
+/// 是否含中日韩统一表意文字（含扩展 A 与兼容表意区）
+fn has_cjk(text: &str) -> bool {
+    text.chars().any(|c| {
+        (c >= '\u{4E00}' && c <= '\u{9FFF}') // CJK 统一表意文字
+        || (c >= '\u{3400}' && c <= '\u{4DBF}') // 扩展 A
+        || (c >= '\u{F900}' && c <= '\u{FAFF}') // 兼容表意文字
+    })
+}
+
 /// 智能默认目标语言：源内容含中日韩统一表意文字（CJK）→ 翻译为英文；否则 → 中文。
 /// 用于划词触发（from=auto）的默认方向，符合"非中文翻中文、中文翻英文"的预期。
 /// 不含 CJK 的非中文（英文/日文/韩文/法文等）一律翻中文。
 fn target_for_text(text: &str) -> String {
-    let has_cjk = text.chars().any(|c| {
-        (c >= '\u{4E00}' && c <= '\u{9FFF}') // CJK 统一表意文字
-        || (c >= '\u{3400}' && c <= '\u{4DBF}') // 扩展 A
-        || (c >= '\u{F900}' && c <= '\u{FAFF}') // 兼容表意文字
-    });
-    if has_cjk {
+    if has_cjk(text) {
         "en".into()
     } else {
         "zh".into()
@@ -635,5 +824,46 @@ mod tests {
         assert_eq!(target_code("youdao", "fr"), "fr");
         assert_eq!(target_code("baidu", "fr"), "fra");
         assert_eq!(target_code("baidu", "zh"), "zh");
+    }
+
+    fn ls(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn plan_blocks_batches_adjacent_same_direction() {
+        let lines = ls(&["中文一", "中文二", "English one", "English two"]);
+        let b = plan_blocks(&lines);
+        // 中文块方向为 en，英文块方向为 zh；索引保持原文行号
+        assert_eq!(b.len(), 2);
+        assert_eq!((b[0].dir, b[0].idxs.as_slice()), ("en", &[0usize, 1][..]));
+        assert_eq!((b[1].dir, b[1].idxs.as_slice()), ("zh", &[2usize, 3][..]));
+    }
+
+    #[test]
+    fn plan_blocks_respects_block_size_cap() {
+        let lines: Vec<String> = (0..(LINE_BLOCK_MAX + 3)).map(|i| format!("第{i}行中文")).collect();
+        let b = plan_blocks(&lines);
+        assert_eq!(b.len(), 2);
+        assert_eq!(b[0].idxs.len(), LINE_BLOCK_MAX);
+        assert_eq!(b[1].idxs.len(), 3);
+        assert_eq!(b[1].idxs.first(), Some(&LINE_BLOCK_MAX));
+    }
+
+    #[test]
+    fn plan_blocks_skips_blank_without_shifting_indices() {
+        let b = plan_blocks(&ls(&["", "中文一", "  ", "English"]));
+        assert_eq!(b.len(), 2);
+        assert_eq!(b[0].idxs, vec![1]);
+        assert_eq!(b[1].idxs, vec![3]);
+    }
+
+    #[test]
+    fn plan_blocks_caps_request_budget() {
+        // 中英逐行交替：每次方向切换都开新块，块数会远超预算
+        let lines: Vec<String> = (0..LINE_BLOCK_BUDGET * 4)
+            .map(|i| if i % 2 == 0 { format!("中文{i}") } else { format!("english {i}") })
+            .collect();
+        assert_eq!(plan_blocks(&lines).len(), LINE_BLOCK_BUDGET);
     }
 }

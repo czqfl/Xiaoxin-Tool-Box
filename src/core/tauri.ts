@@ -13,6 +13,7 @@ import type {
   PortProcess,
   QuickFileList,
   TranslateResult,
+  TranslatedLine,
 } from "../types";
 
 /** 安全调用：Rust 侧异常转为友好文案，不抛出未处理错误 */
@@ -144,13 +145,17 @@ export const deleteCredential = (id: string) =>
 /** 翻译文本（走配置的服务商与凭据）；from/to 缺省用配置（源默认 auto 自动检测） */
 export const translateText = (text: string, from?: string, to?: string) =>
   invoke<TranslateResult>("translate", { text, from, to });
+/** 逐行翻译（OCR 面板对照展示）：每行独立判方向，返回与入参一一对齐的行结果 */
+export const translateLines = (lines: string[]) =>
+  invoke<TranslatedLine[]>("translate_lines", { lines });
 /** 弹窗挂载时拉取最近一次翻译结果 */
 export const lastTranslateResult = () =>
   safe(invoke<TranslateResult | null>("translate_last_result"), null);
 
-/** 复制任意文本到剪贴板（不触发监听重复记录，避免密码泄露到剪贴板历史） */
-export const copyText = (text: string) =>
-  invoke<void>("clipboard_copy_text", { text });
+/** 复制任意文本到剪贴板。默认不写进剪贴板历史（避免凭据/临时结果污染列表）；
+ *  record=true 时按一次普通外部复制处理，会出现在剪贴板面板里 */
+export const copyText = (text: string, record = false) =>
+  invoke<void>("clipboard_copy_text", { text, record });
 
 /** 关闭翻译弹窗：复位键盘钩子的"弹窗打开"标志并隐藏窗口（点 × / Esc / 失焦共用）。
  *  确保 TRANSLATE_POPUP_OPEN 不残留为 true，否则系统级 Esc 会一直被兜底逻辑拦截。 */
@@ -251,6 +256,46 @@ export const quickfilesReveal = (path: string) =>
 /** 删除文件 */
 export const quickfilesDelete = (path: string) =>
   safe(invoke("quickfiles_delete", { path }), undefined);
+
+// ---- 最近打开文件 ----
+export interface RecentFile {
+  path: string;
+  name: string;
+  ext: string;
+  count: number;
+  last_open: number;
+}
+/** 最近打开列表：sort="count" 按次数，其余（缺省）按最近打开时间 */
+export const recentFilesList = (sort: "time" | "count" = "time") =>
+  safe(invoke<RecentFile[]>("recent_files_list", { sort }), [] as RecentFile[]);
+/** 从最近列表移除一条（不删文件） */
+export const recentFilesRemove = (path: string) =>
+  invoke<void>("recent_files_remove", { path });
+export const recentFilesClear = () => invoke<void>("recent_files_clear");
+
+// ---- 全盘文件名索引（Everything 式秒查） ----
+export interface FsIndexStatus {
+  entries: number;
+  dirs: number;
+  built_at: number;
+  roots: string[];
+  building: boolean;
+  stale: boolean;
+}
+export interface FsHit {
+  path: string;
+  name: string;
+  is_dir: boolean;
+}
+export const fsIndexStatus = () =>
+  safe(invoke<FsIndexStatus>("fs_index_status"), {
+    entries: 0, dirs: 0, built_at: 0, roots: [], building: false, stale: false,
+  } as FsIndexStatus);
+/** 后台建立/重建索引；进度经 fsindex://progress 事件推送 */
+export const fsIndexRebuild = () => invoke<void>("fs_index_rebuild");
+/** 搜索文件名/目录名（错误信息需原样透出给面板，如"尚未建立索引"） */
+export const fsIndexSearch = (query: string) =>
+  invoke<FsHit[]>("fs_index_search", { query });
 
 /** 调起系统文件选择器定位"默认打开程序"可执行文件，取消时返回 null */
 export const pickOpenerExecutable = async (): Promise<string | null> => {
@@ -480,7 +525,7 @@ export interface ShotOcrLine {
   x: number; y: number; w: number; h: number;
   words: ShotOcrWord[];
 }
-/** OCR 调用统一超时兜底：首次识别可能要初始化引擎/装语言包，给足 20s */
+/** OCR 调用统一超时兜底：首次识别可能还在建 ONNX session / 兜底拉取模型，给足 20s */
 const ocrWithTimeout = <T>(p: Promise<T>): Promise<T> => {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, rej) => {
@@ -488,9 +533,26 @@ const ocrWithTimeout = <T>(p: Promise<T>): Promise<T> => {
   });
   return Promise.race([p, timeout]).finally(() => timer && clearTimeout(timer));
 };
-/** 选区 PNG 原始字节 → Windows.Media.Ocr 逐行识别结果 */
+/** 选区 PNG 原始字节 → PP-OCR（ONNX）逐行识别结果 */
 export const shotOcrPost = (png: Blob): Promise<ShotOcrLine[]> =>
   png.arrayBuffer().then((buf) => ocrWithTimeout(invoke<ShotOcrLine[]>("shot_ocr", buf)));
+
+// ---- OCR 模型档位（PP-OCR ONNX，设置页用） ----
+export interface OcrModelInfo {
+  id: string;
+  name: string;
+  desc: string;
+  /** 模型体积（MB，约）：det + rec + 字典 */
+  size_mb: number;
+  /** 已在某个模型目录就位，可直接启用 */
+  ready: boolean;
+  active: boolean;
+}
+export const ocrModelStatus = (): Promise<OcrModelInfo[]> =>
+  invoke<OcrModelInfo[]>("ocr_model_status");
+/** 下载档位模型到数据目录；返回下载后的最新状态列表 */
+export const ocrModelDownload = (model: string): Promise<OcrModelInfo[]> =>
+  invoke<OcrModelInfo[]>("ocr_model_download", { model });
 
 // ---- 贴图 ----
 /** 创建贴图（PNG data URL, 屏幕坐标） */

@@ -20,6 +20,10 @@ pub struct AppPaths {
     pub snippets_file: PathBuf,
     /// 命令面板用量统计（使用次数 / 最近使用时间）
     pub palette_stats_file: PathBuf,
+    /// 最近打开文件（quickfiles / 全盘搜索的打开动作累计）
+    pub recent_files_file: PathBuf,
+    /// 全盘文件名索引的磁盘缓存（紧凑二进制，启动时秒加载）
+    pub fs_index_file: PathBuf,
 }
 
 impl AppPaths {
@@ -53,6 +57,8 @@ impl AppPaths {
             creds_file: data_dir.join("credentials.json"),
             snippets_file: data_dir.join("snippets.json"),
             palette_stats_file: data_dir.join("palette_stats.json"),
+            recent_files_file: data_dir.join("recent_files.json"),
+            fs_index_file: data_dir.join("file_index.bin"),
             images_dir,
             data_dir,
         }

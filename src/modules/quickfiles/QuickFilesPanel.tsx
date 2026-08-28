@@ -13,16 +13,30 @@ import type {
   QuickFile,
 } from "../../types";
 import { hideCurrentWindow, usePanelCommon } from "../../core/usePanel";
-import { EVT_PANEL_VISIBILITY, onEvent } from "../../core/events";
+import {
+  EVT_PANEL_VISIBILITY,
+  EVT_FSINDEX_PROGRESS,
+  EVT_FSINDEX_DONE,
+  onEvent,
+} from "../../core/events";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useConfigStore } from "../../stores/configStore";
 import {
+  fsIndexRebuild,
+  fsIndexSearch,
+  fsIndexStatus,
   quickfilesCreate,
   quickfilesDelete,
   quickfilesList,
   quickfilesOpen,
   quickfilesReveal,
+  recentFilesClear,
+  recentFilesList,
+  recentFilesRemove,
   setPanelAlwaysOnTop,
+  type FsHit,
+  type FsIndexStatus,
+  type RecentFile,
 } from "../../core/tauri";
 import {
   IconClose,
@@ -35,6 +49,7 @@ import {
   IconLocate,
   IconPin,
   IconPlus,
+  IconSearch,
   IconSortName,
   IconSortTime,
   IconTrash,
@@ -140,6 +155,330 @@ function FileItem({
   );
 }
 
+/** 相对时间标签：刚刚 / N 分钟前 / N 小时前 / 昨天 / 复用 dateLabel 的日期格式 */
+function agoLabel(ts: number): string {
+  if (!ts) return "";
+  const diff = Date.now() - ts;
+  const MIN = 60_000, HOUR = 3_600_000, DAY = 86_400_000;
+  if (diff < MIN) return "刚刚";
+  if (diff < HOUR) return `${Math.floor(diff / MIN)} 分钟前`;
+  if (diff < DAY) return `${Math.floor(diff / HOUR)} 小时前`;
+  if (diff < 2 * DAY) return "昨天";
+  return dateLabel(ts);
+}
+
+/** 去掉路径尾部反斜杠，取所在目录用于次级文案 */
+function parentLabel(path: string): string {
+  const i = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
+  return i > 0 ? path.slice(0, i) : path;
+}
+
+/** 最近打开：默认按最近打开时间排序，可切「按次数」；双击再次打开 */
+function RecentTab({
+  fileTypes,
+  onToast,
+}: {
+  fileTypes: FileTypeDef[];
+  onToast: (msg: string, kind?: "success" | "error") => void;
+}) {
+  const [sort, setSort] = useState<"time" | "count">("time");
+  const [items, setItems] = useState<RecentFile[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    recentFilesList(sort).then((v) => {
+      if (alive) {
+        setItems(v);
+        setLoaded(true);
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, [sort]);
+
+  const open = (r: RecentFile) => {
+    const t = fileTypes.find((x) => x.ext.toLowerCase() === r.ext.toLowerCase());
+    quickfilesOpen(r.path, t?.opener).catch((e) => onToast(`打开失败：${String(e)}`, "error"));
+  };
+  const remove = (r: RecentFile) => {
+    recentFilesRemove(r.path).catch(() => undefined);
+    setItems((prev) => prev.filter((x) => x.path !== r.path));
+  };
+
+  return (
+    <>
+      <div className="qf-controls">
+        <span className="qf-loc-text">
+          共 {items.length} 条 · 自动记录你在本面板打开过的文件
+        </span>
+        <div className="qf-controls-right">
+          <div className="segmented">
+            <button className={sort === "time" ? "active" : ""} onClick={() => setSort("time")}>
+              最近打开
+            </button>
+            <button className={sort === "count" ? "active" : ""} onClick={() => setSort("count")}>
+              按次数
+            </button>
+          </div>
+          {items.length > 0 && (
+            <button
+              className="btn btn-sm"
+              onClick={() => {
+                recentFilesClear()
+                  .then(() => setItems([]))
+                  .catch(() => undefined);
+              }}
+            >
+              清空
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="panel-body qf-body">
+        {loaded && items.length === 0 && (
+          <EmptyState
+            icon={<IconFiles size={22} />}
+            title="还没有打开记录"
+            description="在「常用文件」或「全盘搜索」里双击打开文件，这里会自动累积"
+          />
+        )}
+        <div className="qf-rows">
+          {items.map((r) => (
+            <div
+              key={r.path}
+              className="qf-row"
+              title={`${r.path}\n双击再次打开`}
+              onDoubleClick={() => open(r)}
+            >
+              <span className="qf-ext-badge" style={{ ["--c" as string]: typeColor(fileTypes, r.ext) }}>
+                {r.ext ? r.ext.toUpperCase().slice(0, 4) : "文件"}
+              </span>
+              <span className="qf-row-main">
+                <span className="qf-row-name">{r.name}</span>
+                <span className="qf-row-meta">
+                  {parentLabel(r.path)}
+                  {sort === "count" && r.count > 1 ? ` · 打开 ${r.count} 次` : ""}
+                </span>
+              </span>
+              <span className="qf-row-time">{agoLabel(r.last_open)}</span>
+              <span className="qf-row-actions" onClick={(e) => e.stopPropagation()}>
+                <button
+                  className="qf-act"
+                  title="打开文件"
+                  onClick={() => open(r)}
+                >
+                  打开
+                </button>
+                <button
+                  className="qf-act"
+                  title="在资源管理器中定位"
+                  onClick={() => quickfilesReveal(r.path).catch(() => undefined)}
+                >
+                  定位
+                </button>
+                <button className="qf-act danger" title="从最近列表移除（不删除文件）" onClick={() => remove(r)}>
+                  移除
+                </button>
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/** 全盘文件名搜索（Everything 式）：索引状态 + 输入即搜 */
+function SearchTab({
+  fileTypes,
+  onToast,
+}: {
+  fileTypes: FileTypeDef[];
+  onToast: (msg: string, kind?: "success" | "error") => void;
+}) {
+  const [status, setStatus] = useState<FsIndexStatus | null>(null);
+  const [scanned, setScanned] = useState(0);
+  const [q, setQ] = useState("");
+  const [hits, setHits] = useState<FsHit[]>([]);
+  const [err, setErr] = useState("");
+  const [searching, setSearching] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const refresh = () => fsIndexStatus().then(setStatus);
+
+  useEffect(() => {
+    void refresh();
+    inputRef.current?.focus();
+    let un1: (() => void) | undefined;
+    let un2: (() => void) | undefined;
+    let dead = false;
+    onEvent<{ entries: number }>(EVT_FSINDEX_PROGRESS, (p) => {
+      setScanned(p.entries);
+    }).then((u) => { if (dead) u(); else un1 = u; });
+    onEvent<{ ok: boolean }>(EVT_FSINDEX_DONE, () => {
+      setScanned(0);
+      void refresh();
+    }).then((u) => { if (dead) u(); else un2 = u; });
+    return () => {
+      dead = true;
+      un1?.();
+      un2?.();
+    };
+  }, []);
+
+  // 输入防抖：中文输入法连续上屏时不要每个字符打一次后端
+  useEffect(() => {
+    const key = q.trim();
+    if ([...key].length < 2) {
+      setHits([]);
+      setErr("");
+      return;
+    }
+    const t = window.setTimeout(() => {
+      setSearching(true);
+      fsIndexSearch(key)
+        .then((v) => {
+          setHits(v);
+          setErr("");
+        })
+        .catch((e) => {
+          setHits([]);
+          setErr(String(e).replace(/^(Error: |invoke error: )/i, ""));
+        })
+        .finally(() => setSearching(false));
+    }, 180);
+    return () => window.clearTimeout(t);
+  }, [q]);
+
+  const building = !!status?.building;
+  const open = (h: FsHit) => {
+    const ext = h.is_dir ? "" : h.name.split(".").pop()?.toLowerCase() ?? "";
+    const t = fileTypes.find((x) => x.ext.toLowerCase() === ext);
+    quickfilesOpen(h.path, t?.opener).catch((e) => onToast(`打开失败：${String(e)}`, "error"));
+  };
+
+  return (
+    <>
+      <div className="qf-controls qf-controls-search">
+        <span className="qf-search-wrap">
+          <IconSearch size={13} />
+          <input
+            ref={inputRef}
+            className="qf-search"
+            placeholder="全盘搜索文件/文件夹名（至少 2 个字符，含 \\ 时按路径匹配）"
+            value={q}
+            spellCheck={false}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && hits.length) open(hits[0]);
+            }}
+          />
+        </span>
+        <div className="qf-controls-right">
+          <span className="qf-index-meta">
+            {building
+              ? `正在扫描 ${scanned.toLocaleString()} 条…`
+              : status && status.entries > 0
+                ? `索引 ${status.entries.toLocaleString()} 条 · ${status.roots.join(" ")} · ${agoLabel(status.built_at / 1000)}更新`
+                : "尚未建立索引"}
+          </span>
+          {!building && (
+            <button
+              className="btn btn-sm"
+              onClick={() => {
+                fsIndexRebuild()
+                  .then(() => setStatus((s) => (s ? { ...s, building: true } : s)))
+                  .catch((e) => onToast(String(e), "error"));
+              }}
+            >
+              {status && status.entries > 0 ? "更新索引" : "建立索引"}
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="panel-body qf-body">
+        {err && <div className="qf-error">{err}</div>}
+        {building && (
+          <EmptyState
+            icon={<Spinner size="lg" />}
+            title="正在建立全盘索引"
+            description={`已扫描 ${scanned.toLocaleString()} 条。首次扫描需要十几秒到几分钟，期间可继续使用其他页签。`}
+          />
+        )}
+        {!building && status && status.entries === 0 && !err && (
+          <EmptyState
+            icon={<IconSearch size={22} />}
+            title="还没有索引，搜不了"
+            description="索引只记录文件名与所在目录，不含文件内容；建立后缓存在本地，之后每次打开面板即刻可用。"
+            action={
+              <button
+                className="btn btn-primary btn-sm qf-empty-btn"
+                onClick={() => {
+                  fsIndexRebuild()
+                    .then(() => setStatus((s) => (s ? { ...s, building: true } : s)))
+                    .catch((e) => onToast(String(e), "error"));
+                }}
+              >
+                建立索引
+              </button>
+            }
+          />
+        )}
+        {!building && status && status.entries > 0 && q.trim().length < 2 && (
+          <EmptyState icon={<IconSearch size={22} />} title="输入要查找的文件名" description="例如 report、.rs、src-tauri\ocr" />
+        )}
+        {!building && hits.length > 0 && (
+          <div className="qf-rows">
+            {hits.map((h) => (
+              <div
+                key={h.path}
+                className="qf-row"
+                title={`${h.path}\n双击打开`}
+                onDoubleClick={() => open(h)}
+              >
+                <span
+                  className={`qf-ext-badge qf-hit-badge${h.is_dir ? " dir" : ""}`}
+                  style={{ ["--c" as string]: h.is_dir ? "#e0a33e" : typeColor(fileTypes, h.name.split(".").pop() ?? "") }}
+                >
+                  {h.is_dir ? "目录" : (h.name.split(".").pop() ?? "文件").toUpperCase().slice(0, 4)}
+                </span>
+                <span className="qf-row-main">
+                  <span className="qf-row-name">{h.name}</span>
+                  <span className="qf-row-meta">{parentLabel(h.path)}</span>
+                </span>
+                <span className="qf-row-actions" onClick={(e) => e.stopPropagation()}>
+                  <button className="qf-act" title="打开" onClick={() => open(h)}>
+                    打开
+                  </button>
+                  {!h.is_dir && (
+                    <button
+                      className="qf-act"
+                      title="在资源管理器中定位"
+                      onClick={() => quickfilesReveal(h.path).catch(() => undefined)}
+                    >
+                      定位
+                    </button>
+                  )}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        {!building && !searching && status && status.entries > 0 && q.trim().length >= 2 && !err && hits.length === 0 && (
+          <div className="qf-hit-empty">没有匹配「{q.trim()}」的文件名</div>
+        )}
+      </div>
+    </>
+  );
+}
+
+/** 按扩展名取类型强调色（新页签与主列表用同一套颜色语义） */
+function typeColor(fileTypes: FileTypeDef[], ext: string): string {
+  const e = (ext || "").toLowerCase();
+  return fileTypes.find((t) => t.ext.toLowerCase() === e)?.color ?? "#8a94a6";
+}
+
 export function QuickFilesPanel() {
   return (
     <ToastProvider>
@@ -157,6 +496,8 @@ function QuickFilesPanelInner() {
   useEscLayer(true, hideCurrentWindow);
 
   const [files, setFiles] = useState<QuickFile[]>([]);
+  // 页签：常用文件（原有视图）/ 最近打开 / 全盘搜索
+  const [tab, setTab] = useState<"files" | "recent" | "search">("files");
   const [location, setLocation] = useState("");
   const [loading, setLoading] = useState(true);
   const [group, setGroup] = useState<FilesGroupMode>(config.files.default_group);
@@ -378,6 +719,22 @@ function QuickFilesPanelInner() {
             快速文件
           </span>
 
+          {/* 页签：绝对居中挂在头部中间（复用面板通用 .segmented）。
+              Tauri 拖拽脚本对 button 默认不接管，所以放在 drag-region 里照样可点 */}
+          <div className="qf-tabs">
+            <div className="segmented">
+              <button className={tab === "files" ? "active" : ""} onClick={() => setTab("files")}>
+                常用文件
+              </button>
+              <button className={tab === "recent" ? "active" : ""} onClick={() => setTab("recent")}>
+                最近打开
+              </button>
+              <button className={tab === "search" ? "active" : ""} onClick={() => setTab("search")}>
+                全盘搜索
+              </button>
+            </div>
+          </div>
+
           <div className="qf-new-wrap" ref={newWrapRef}>
             <button
               className={`qf-new-btn${newOpen ? " open" : ""}`}
@@ -443,6 +800,8 @@ function QuickFilesPanelInner() {
           </button>
         </div>
 
+        {tab === "files" && (
+          <>
         {/* 控制条：保存位置靠左；分组/排序/布局改为纯图标按钮组（参考文件夹面板
             的布局切换按钮组）——不再写"分组/排序/布局"文字标签与选项汉字名，
             每个控件是一个独立的图标按钮胶囊，靠 icon + tooltip + active 高亮表达。 */}
@@ -615,11 +974,23 @@ function QuickFilesPanelInner() {
               </div>
             ))}
         </div>
+          </>
+        )}
+
+        {tab === "recent" && <RecentTab fileTypes={fileTypes} onToast={toast.show} />}
+        {tab === "search" && <SearchTab fileTypes={fileTypes} onToast={toast.show} />}
 
         <div className="panel-footer">
-          <span>快速文件 · 统一位置新建与管理</span>
+          <span>
+            {tab === "files"
+              ? "快速文件 · 统一位置新建与管理"
+              : tab === "recent"
+                ? "最近打开 · 记录在本面板打开过的文件"
+                : "全盘搜索 · 只索引文件名，数据不出本机"}
+          </span>
           <span>
             <span className="kbd">Esc</span> 关闭 · 双击打开
+            {tab === "search" ? " · 回车打开首条" : ""}
           </span>
         </div>
       </div>

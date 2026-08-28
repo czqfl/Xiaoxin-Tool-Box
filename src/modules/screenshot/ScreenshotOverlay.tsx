@@ -10,7 +10,8 @@ import {
   shotHistoryDelete, shotHistoryClear,
   shotOcrPost, ShotOcrLine,
 } from "../../core/tauri";
-import { translateText } from "../../core/tauri";
+import { translateLines } from "../../core/tauri";
+import { EVT_TRANSLATE_LINE } from "../../core/events";
 import { useConfigStore } from "../../stores/configStore";
 import { scrollBegin } from "../scrollshot/api";
 import { Pencil, Undo2, Redo2, X, Download, Copy } from "lucide-react";
@@ -796,9 +797,15 @@ export function ScreenshotOverlay() {
       }
       else if (e.key === "Enter" && phase === "selected") { e.preventDefault(); if (!e.repeat) void doOutput("copy"); }
       // 字母键用 e.code 判定：中文输入法激活时 e.key 可能是 "Process"，e.code 始终是物理键
-      // OCR 框选了文字时 Ctrl+C = 复制所选文字（优先于复制整张截图）
-      // OCR 面板内划选的文字由浏览器原生 Ctrl+C 复制（面板文本可选中）
-      else if (e.code === "KeyC" && e.ctrlKey && phase === "selected") { e.preventDefault(); if (!e.repeat) void doOutput("copy"); }
+      // OCR 面板内划选的文字由浏览器原生 Ctrl+C 复制（面板文本可选中）：
+      // 有划选时【必须原样放行】——这条分支原本无条件 preventDefault + doOutput("copy")，
+      // 结果是"复制没生效、截图会话还结束了"，表现为一按复制整个界面就关掉
+      else if (e.code === "KeyC" && e.ctrlKey && phase === "selected") {
+        const sel = ocrActiveRef.current ? (window.getSelection?.()?.toString() ?? "") : "";
+        if (sel.trim()) return;
+        e.preventDefault();
+        if (!e.repeat) void doOutput("copy");
+      }
       // 贴图不再用内置 Ctrl+T/F8：全局「显示/隐藏贴图」热键（用户可在快捷键页
       // 自定义，如 F8）在截图会话中由 Rust 转发 shot://pin-hotkey 事件触发贴图
       // Ctrl+1~6 直达工具条按钮；重复按同键在组内循环（仅矩形?椭圆/直线?箭头成组，
@@ -1145,7 +1152,12 @@ export function ScreenshotOverlay() {
   const [ocrError, setOcrError] = useState("");
   const ocrBusyRef = useRef(false);
   const [ocrTranslating, setOcrTranslating] = useState(false);
-  const [ocrTrans, setOcrTrans] = useState<{ src: string; out: string } | null>(null);
+  // 逐行对照结果：pairs 与送译的原文行一一对齐。点「翻译」时先把原文整列铺出来，
+  // 译文按后端事件逐行回填（pending 的行先显示占位骨架）
+  const [ocrTrans, setOcrTrans] = useState<{
+    pairs: { src: string; out: string; ok: boolean; pending: boolean }[];
+    err: string;
+  } | null>(null);
   // keydown effect 闭包不依赖 ocrPhase：经此 ref 读「OCR 是否激活」
   const ocrActiveRef = useRef(false);
   useEffect(() => { ocrActiveRef.current = ocrPhase !== "idle"; }, [ocrPhase]);
@@ -1155,7 +1167,21 @@ export function ScreenshotOverlay() {
     setOcrTrans(null); setOcrTranslating(false);
   };
 
-  /** 识别整个选定区域：裁剪原始冻结帧（不含标注）→ PNG → 系统引擎 */
+  // 译文逐行回填：Rust 每译完一行推一行（并发请求，完成顺序不定，按行号对上）
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    listen<{ i: number; out: string; ok: boolean }>(EVT_TRANSLATE_LINE, (e) => {
+      const { i, out, ok } = e.payload;
+      setOcrTrans((prev) =>
+        !prev || i >= prev.pairs.length
+          ? prev
+          : { ...prev, pairs: prev.pairs.map((p, k) => (k === i ? { ...p, out, ok, pending: false } : p)) },
+      );
+    }).then((f) => { un = f; });
+    return () => { un?.(); };
+  }, []);
+
+  /** 识别整个选定区域：裁剪原始冻结帧（不含标注）→ PNG → 内置 PP-OCR 引擎 */
   const runOcr = async () => {
     if (ocrBusyRef.current) return;
     const bg = bgRef.current;
@@ -1181,24 +1207,46 @@ export function ScreenshotOverlay() {
     } finally { ocrBusyRef.current = false; }
   };
 
-  /** 翻译当前框选的文字（结果展示在 OCR 面板内） */
+  /** 翻译当前框选的文字（逐行对照展示在 OCR 面板内）。
+   *  逐行送译而不是整段一次：整段只有一组方向，中英混排时英文行会被原样返回，
+   *  而且服务商会折叠换行导致译文与原文行号对不上。
+   *  点下即铺出原文 + 译文占位，后端每译完一行推事件回填一行；返回值仅作最终校准。 */
   const doTranslate = async () => {
     const sel = window.getSelection?.()?.toString().trim() || "";
-    const t = sel || ocrLines.map((l) => l.text).join("\n");
-    if (!t) return;
+    const srcs = (sel || ocrLines.map((l) => l.text).join("\n"))
+      .split("\n").map((s) => s.trim()).filter(Boolean);
+    if (!srcs.length) return;
     setOcrTranslating(true);
+    setOcrTrans({
+      err: "",
+      pairs: srcs.map((s) => ({ src: s, out: "", ok: true, pending: true })),
+    });
     try {
-      const res = await translateText(t);
-      setOcrTrans({ src: res.text ?? t, out: res.translation });
+      const res = await translateLines(srcs);
+      setOcrTrans({
+        err: "",
+        pairs: srcs.map((s, i) => ({
+          src: s, out: res[i]?.out ?? s, ok: res[i]?.ok !== false, pending: false,
+        })),
+      });
     } catch (err) {
-      setOcrTrans({ src: t, out: "翻译失败：" + (err instanceof Error ? err.message : "") });
-    } finally { setOcrTranslating(false); }
+      setOcrTrans({ pairs: [], err: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setOcrTranslating(false);
+    }
   };
 
-  /** 复制全部识别文本 */
+  /** 复制全部识别文本：与面板内 DOM 划选的 Ctrl+C 一致，正常记入剪贴板历史 */
   const copyAllOcr = () => {
     const all = ocrLines.map((l) => l.text).join("\n");
-    if (all) void copyText(all);
+    if (all) void copyText(all, true);
+  };
+
+  /** 复制译文（按行重拼；还没译出的行跳过，避免粘出一堆空行） */
+  const copyTransOut = () => {
+    if (!ocrTrans?.pairs.length) return;
+    const all = ocrTrans.pairs.filter((p) => !p.pending).map((p) => p.out).join("\n");
+    if (all) void copyText(all, true);
   };
 
   const querySmartRect = async () => {
@@ -2549,11 +2597,15 @@ export function ScreenshotOverlay() {
       )}
 
       {/* OCR 结果面板：贴在选区右侧；放不下翻到左侧。
-          识别文本【可直接划选】（像普通文本一样拖动选中 → Ctrl+C 复制），
-          头部提供 复制全部 / 翻译；翻译结果就地展示 */}
+          识别文本【可直接划选】（像普通文本一样拖动选中 → Ctrl+C 复制）。
+          翻译态换成宽面板 + 原文/译文两列对照，避免"译文出来了原文被挤没" */}
       {ocrPhase !== "idle" && (() => {
         const vw = window.innerWidth, vh = window.innerHeight;
-        const pw = 320, phMax = Math.min(380, vh - 16);
+        const transMode = !!ocrTrans || ocrTranslating;
+        const pw = transMode ? Math.min(560, vw - 16) : 320;
+        const phMax = Math.min(transMode ? 520 : 380, vh - 16);
+        const tTotal = ocrTrans?.pairs.length ?? 0;
+        const tDone = ocrTrans?.pairs.filter((p) => !p.pending).length ?? 0;
         let px2 = region.x + region.w + 10;
         if (px2 + pw > vw - 8) px2 = Math.max(8, region.x - pw - 10);
         const py2 = Math.max(8, Math.min(region.y, vh - phMax - 8));
@@ -2565,8 +2617,11 @@ export function ScreenshotOverlay() {
               <span style={{ flex: 1 }} />
               {ocrPhase === "done" && ocrLines.length > 0 && (
                 <>
-                  <button onClick={copyAllOcr}>复制全部</button>
-                  <button onClick={() => void doTranslate()}>翻译</button>
+                  {ocrTrans && <button onClick={() => setOcrTrans(null)}>返回原文</button>}
+                  {ocrTrans
+                    ? (tDone > 0 && <button onClick={copyTransOut}>复制译文</button>)
+                    : <button onClick={copyAllOcr}>复制全部</button>}
+                  {!ocrTrans && <button onClick={() => void doTranslate()}>翻译</button>}
                 </>
               )}
               <button onClick={resetOcr}>关闭</button>
@@ -2574,13 +2629,30 @@ export function ScreenshotOverlay() {
             {ocrPhase === "loading" && <div className="shot-ocr-body shot-ocr-muted">识别中…</div>}
             {ocrPhase === "error" && <div className="shot-ocr-body shot-ocr-err">{ocrError}</div>}
             {ocrPhase === "done" && (
-              ocrTranslating ? <div className="shot-ocr-body shot-ocr-muted">翻译中…</div> :
               ocrTrans ? (
-                <div className="shot-ocr-body">
-                  <div className="shot-ocr-src">{ocrTrans.src}</div>
-                  <div className="shot-ocr-out">{ocrTrans.out}</div>
-                  <button className="shot-ocr-back" onClick={() => setOcrTrans(null)}>返回识别结果</button>
-                </div>
+                ocrTrans.err ? <div className="shot-ocr-body shot-ocr-err">翻译失败：{ocrTrans.err}</div> : (
+                  <div className="shot-ocr-trans">
+                    <div className="shot-ocr-thead">
+                      <span>原文</span>
+                      <span>{ocrTranslating ? `译文 ${tDone}/${tTotal}…` : "译文"}</span>
+                    </div>
+                    <div className="shot-ocr-pairs">
+                      {ocrTrans.pairs.map((p, i) => (
+                        <div key={i} className="shot-ocr-pair">
+                          <div className="shot-ocr-pcell">{p.src}</div>
+                          {p.pending ? (
+                            <div className="shot-ocr-pcell"><i className="shot-ocr-pwait" /></div>
+                          ) : (
+                            <div className={`shot-ocr-pcell shot-ocr-pout${p.ok ? "" : " shot-ocr-pfail"}`}>{p.out}</div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    {!ocrTranslating && ocrTrans.pairs.some((p) => !p.ok) && (
+                      <div className="shot-ocr-note">部分行未翻译（网络/配额或行数超出上限），已回退显示原文</div>
+                    )}
+                  </div>
+                )
               ) : (
                 <div className="shot-ocr-lines">
                   {ocrLines.length === 0 && <div className="shot-ocr-body shot-ocr-muted">未识别到文字（可调整选区后重新点击识别）</div>}
@@ -2591,7 +2663,9 @@ export function ScreenshotOverlay() {
               )
             )}
             {ocrPhase === "done" && ocrLines.length > 0 && (
-              <div className="shot-ocr-selbar">划选文字后 Ctrl+C 复制，或点上方「复制全部」</div>
+              <div className="shot-ocr-selbar">
+                {ocrTrans ? "划选任一列文字后 Ctrl+C 复制，或点上方「复制译文」" : "划选文字后 Ctrl+C 复制，或点上方「复制全部」"}
+              </div>
             )}
           </div>
         );

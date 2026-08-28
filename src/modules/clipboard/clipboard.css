@@ -250,9 +250,15 @@
 .clip-preview {
   font-size: var(--font-base);
   color: var(--text-primary);
-  white-space: nowrap;
+  /* 最多 3 行 + 末尾裁切：原先单行 nowrap+ellipsis 时，一段长文在面板里只看得见
+     第一句，容易被误判成"复制只复制了前面一句"（全文一直在 entry.text 里，
+     粘贴/编辑/tooltip 用的都是它） */
+  white-space: normal;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 .clip-meta {
   display: flex;

@@ -14,6 +14,12 @@ export const EVT_FOLDER_CHANGED = "folder://changed";
 /** 面板显隐变化（后端在各显隐变化点广播；payload: { label, visible }，
  *  工具栏据此给当前打开的面板图标加高亮标志） */
 export const EVT_PANEL_VISIBILITY = "panel://visibility-changed";
+/** 全盘文件名索引构建进度（payload: { entries }） */
+export const EVT_FSINDEX_PROGRESS = "fsindex://progress";
+/** 全盘文件名索引构建结束（payload: { ok }） */
+export const EVT_FSINDEX_DONE = "fsindex://done";
+/** 逐行翻译的单行结果（payload: { i, out, ok }）：译文逐行冒出来用 */
+export const EVT_TRANSLATE_LINE = "translate://line";
 
 export function broadcastConfigChanged(config: unknown): Promise<void> {
   return emit(EVT_CONFIG_CHANGED, config);

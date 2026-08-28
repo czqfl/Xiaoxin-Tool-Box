@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
-use tauri::{AppHandle, Emitter, Manager, Runtime, State, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
 
 /// 每个文件夹最多保留的访问历史时间戳数量
@@ -416,9 +416,13 @@ pub fn folder_git_run(path: String, commands: Vec<String>) -> Result<Vec<GitRunR
 // ---------- Git 结果独立窗口 ----------
 // 结果不再嵌在文件夹面板里（面板是置顶悬浮窗，提交进行中会一直挡住屏幕且
 // 随面板生命周期），改为独立原生窗口：带标题栏可拖动/随时关闭，不置顶。
-
+//
+// 【暂未接线】这一段的后端已就绪，但前端还没有 git-run 窗体与调用方
+// （tauri.ts 只用到 folder_git_exec / folder_git_run / folder_git_branches），
+// 故整体 allow(dead_code) 保留待用；决定不做时就删掉。
 /// 待执行任务（面板发起 → 窗口领取）。窗口晚于面板挂载（新建路径），
 /// 靠这个中转避免"事件先于监听"的竞态；后续同窗口复用走事件直推
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize)]
 pub struct GitTask {
     pub folder: String,
@@ -427,7 +431,9 @@ pub struct GitTask {
     pub seq: u64,
 }
 
+#[allow(dead_code)]
 static GIT_TASK: Mutex<Option<GitTask>> = Mutex::new(None);
+#[allow(dead_code)]
 static GIT_TASK_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// 打开/聚焦 Git 结果窗口并下达任务。
@@ -435,6 +441,7 @@ static GIT_TASK_SEQ: AtomicU64 = AtomicU64::new(0);
 /// 窗口是普通层级（不置顶）+ 原生标题栏：拖动、× 关闭随时可用；执行期间
 /// 关窗只是丢弃视图，命令在后台线程继续跑完（folder_git_run 是同步命令，
 /// 与窗口生命周期无关），不会中断 git 操作本身。
+#[allow(dead_code)]
 #[tauri::command]
 pub fn folder_git_window_open(
     app: AppHandle,
@@ -477,6 +484,7 @@ pub fn folder_git_window_open(
 }
 
 /// 窗口挂载时领取当前任务（新建窗口与面板发起之间存在挂载竞态）
+#[allow(dead_code)]
 #[tauri::command]
 pub fn folder_git_task_take() -> Option<GitTask> {
     GIT_TASK.lock().unwrap().clone()

@@ -158,8 +158,15 @@ pub fn quickfiles_create(
 
 /// 打开文件：opener 为某类型配置的默认打开程序（exe 路径或命令）。
 /// 为空时使用系统默认程序打开。
+///
+/// 这里是所有"打开一个文件"的唯一出口（面板双击、命令面板、全盘搜索结果都走它），
+/// 所以「最近打开」的打点放在后端这一处，任何入口都不会漏记（同 folder.rs 的理由）
 #[tauri::command]
-pub fn quickfiles_open(path: String, opener: Option<String>) -> Result<(), String> {
+pub fn quickfiles_open(
+    path: String,
+    opener: Option<String>,
+    paths: State<'_, AppPaths>,
+) -> Result<(), String> {
     if let Some(op) = opener.filter(|s| !s.trim().is_empty()) {
         std::process::Command::new(&op)
             .arg(&path)
@@ -171,6 +178,7 @@ pub fn quickfiles_open(path: String, opener: Option<String>) -> Result<(), Strin
             .spawn()
             .map_err(|e| format!("打开失败：{e}"))?;
     }
+    crate::recentfiles::record_open(&path, &paths);
     Ok(())
 }
 

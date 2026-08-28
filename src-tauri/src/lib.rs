@@ -5,7 +5,7 @@ mod h264;
 #[cfg(windows)]
 mod recframe;
 mod dupl;
-mod ocr;
+pub mod ocr;
 mod screenshot;
 mod pin;
 mod scrollshot;
@@ -15,6 +15,8 @@ mod config;
 #[cfg(windows)]
 mod explorer;
 mod folder;
+pub mod fsindex;
+mod recentfiles;
 mod credentials;
 #[cfg(windows)]
 mod keyhook;
@@ -222,6 +224,8 @@ pub fn run() {
         storage::load_json(&paths.folders_file, vec![]);
     let creds: Vec<credentials::Credential> =
         storage::load_json(&paths.creds_file, vec![]);
+    // OCR 档位先于任何识别调用就位（识别本身在 spawn_blocking 里读这个全局）
+    ocr::set_model(&config.shot.ocr_model);
 
     tauri::Builder::default()
         // 单实例保护：重复启动时新实例退出并唤起已有实例的设置窗口——
@@ -291,6 +295,14 @@ pub fn run() {
             #[cfg(windows)]
             keyhook::start(handle.clone());
             shortcut::register_initial(&handle, &config);
+            // OCR 引擎后台预热（ONNX session 构建约 100ms + 模型校验），
+            // 否则用户第一次点「识别」才付这笔钱
+            ocr::warm_up();
+            // 全盘文件名索引缓存后台读回（几十万条目解析约几十毫秒，别压在 IPC 线程上）
+            {
+                let p = handle.state::<storage::AppPaths>().inner().clone();
+                std::thread::spawn(move || fsindex::load_from_disk(&p));
+            }
             // 顺序粘贴（FIFO/LIFO）是会话内临时模式：启动即复位为普通粘贴，
             // 覆盖"上次退出时面板未关、配置残留 FIFO"的场景——下次打开面板
             // 默认普通模式，Ctrl+V 不会被接管（register_initial 已按残留配置
@@ -357,6 +369,7 @@ pub fn run() {
             clipboard::clipboard_rollback,
             clipboard::clipboard_enqueue,
             translate::translate,
+            translate::translate_lines,
             translate::translate_last_result,
             translate::translate_popup_close,
             clipboard::clipboard_move,
@@ -409,6 +422,14 @@ pub fn run() {
             quickfiles::quickfiles_delete,
             quickfiles::list_installed_apps,
             quickfiles::app_launch,
+            // 最近打开文件（quickfiles_open 内打点，面板/命令面板/全盘搜索共用）
+            recentfiles::recent_files_list,
+            recentfiles::recent_files_remove,
+            recentfiles::recent_files_clear,
+            // 全盘文件名索引（Everything 式秒查）
+            fsindex::fs_index_status,
+            fsindex::fs_index_rebuild,
+            fsindex::fs_index_search,
             snippets::snippets_list,
             snippets::snippets_create,
             snippets::snippets_update,
@@ -429,8 +450,10 @@ pub fn run() {
             // 元素级智能识别（UIA）：与窗口级并行，前端择优取更精细矩形
             screenshot::shot_ui_rect_at,
             screenshot::shot_last_region,
-            // 选区文字识别（Windows.Media.Ocr）
+            // 选区文字识别（PP-OCR ONNX）+ 模型档位状态/下载
             screenshot::shot_ocr,
+            ocr::ocr_model_status,
+            ocr::ocr_model_download,
             // 截图历史：列表 / 翻页重截 / 记录某帧的框选范围 / 删除与清空
             screenshot::shot_history_list,
             screenshot::shot_history_step,

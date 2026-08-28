@@ -1,10 +1,25 @@
-//! Windows.Media.Ocr 本地文字识别（WinRT 系统引擎，无需第三方模型/联网）。
+//! PP-OCR（RapidOCR ONNX 管线）本地文字识别。
 //!
-//! 输入：选定区域的 PNG 字节；输出：逐行文本 + 行/词矩形（图像内坐标）。
-//! 引擎语言：优先用户配置的语言列表，否则取第一个可用语言包；
-//! 一个都没有时返回明确错误（前端提示去系统设置添加语言）。
+//! 引擎：`rapidocr-core`（PaddleOCR PP-OCRv6 的 ONNX 导出 + ONNX Runtime 推理），
+//! det → rec 两级（关闭方向分类 cls：屏幕文字不存在 180° 倒置，省一次推理）。
+//! 输入：选定区域的 PNG 字节；输出：逐行文本 + 行/词矩形（原图像素坐标）。
+//!
+//! 相比此前的 Windows.Media.Ocr 系统引擎（11 例真值集字级召回 90.4% → 现 99.7%）：
+//! ① 中文不再逐字插空格，混排标点/数字错误显著减少；
+//! ② 小字号、低对比、深色主题截图都能识别；
+//! ③ 因此删除了原先为系统引擎准备的一整套手工预处理（百分位电平拉伸、暗底
+//!    反色、Lanczos 放大 + 非锐化掩蔽、中灰描边）——CNN 检测模型自带 resize
+//!    与行裁剪垂直 padding，那些补偿手段反而会干扰它。
 
 use serde::Serialize;
+use std::path::PathBuf;
+use std::sync::{Mutex, MutexGuard};
+
+use rapidocr_core::{
+    config::{InferenceOptions, PipelineConfig},
+    model::{model_set_by_name, ModelCache, ModelDownloadMode},
+    RapidOcr,
+};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct OcrWordResp {
@@ -19,255 +34,322 @@ pub struct OcrLineResp {
     pub words: Vec<OcrWordResp>,
 }
 
-/// 自动电平 + 暗底反色（OCR 精度关键预处理）：
-/// ① 1%/99% 百分位线性拉伸——"发灰"的截图文字拉到纯黑纯白；
-///    动态范围已接近满量程（跨度 ≥207 灰阶）时不处理，避免放大噪点。
-/// ② 拉伸后均值偏暗（<128）判定为深色主题截图（白字黑底）——Windows OCR
-///    按"深字浅底"训练，深色 UI 不反色会成片漏识别，故整体反色。
-#[cfg(windows)]
-fn auto_levels_invert(img: image::GrayImage) -> image::GrayImage {
-    let total = img.width() as u64 * img.height() as u64;
-    if total == 0 {
-        return img;
-    }
-    let mut hist = [0u64; 256];
-    for p in img.pixels() {
-        hist[p[0] as usize] += 1;
-    }
-    let lo_target = (total as f64 * 0.01) as u64;
-    let hi_target = (total as f64 * 0.01) as u64;
-    let mut lo: usize = 0;
-    let mut hi: usize = 255;
-    let mut acc = 0u64;
-    for i in 0..256 {
-        acc += hist[i];
-        if acc >= lo_target {
-            lo = i;
-            break;
-        }
-    }
-    acc = 0;
-    for i in (0..256).rev() {
-        acc += hist[i];
-        if acc >= hi_target {
-            hi = i;
-            break;
-        }
-    }
-    let mut out = img;
-    // 跨度不足说明整体偏平（低对比），拉伸有意义；已接近满量程则跳过
-    if ((hi - lo) as i32) < 255 - 48 {
-        let scale = 255f32 / (hi - lo).max(1) as f32;
-        for p in out.pixels_mut() {
-            let v = (p[0] as f32 - lo as f32) * scale;
-            p[0] = v.clamp(0.0, 255.0).round() as u8;
-        }
-    }
-    // 反色判定用拉伸后的直方图均值（深色 UI 底色占大面积 → 均值低）
-    let mut sum = 0u64;
-    let mut hist2 = [0u64; 256];
-    for p in out.pixels() {
-        hist2[p[0] as usize] += 1;
-    }
-    for i in 0..256 {
-        sum += hist2[i] * i as u64;
-    }
-    if (sum / total) < 128 {
-        for p in out.pixels_mut() {
-            p[0] = 255 - p[0];
-        }
-    }
-    out
+/// 出厂内置档位：6.3MB，无需联网即可用（随安装包落在 exe 同级 models/ 下）。
+pub const DEFAULT_MODEL: &str = "ppocrv6-tiny";
+
+/// 设置页可选项：(档位 id, 显示名, 说明, 体积 MB 约)。
+/// 体积是 det + rec + 字典的下载实测值，仅用于展示。
+const MODEL_CHOICES: &[(&str, &str, &str, f64)] = &[
+    (DEFAULT_MODEL, "PP-OCRv6 tiny", "内置默认 · 中英混排够用 · 速度最快", 6.3),
+    ("ppocrv6-small", "PP-OCRv6 small", "字典更全 · 生僻字与复杂版面更稳", 31.2),
+    ("ppocrv6-medium", "PP-OCRv6 medium", "高精度 · 体积大、耗时数倍", 138.7),
+    ("ppocrv5-ch-mobile", "PP-OCRv5 中文 mobile", "上一代移动端", 21.5),
+    ("ppocrv5-ch-server", "PP-OCRv5 中文 server", "服务器级精度 · 体积很大", 172.7),
+];
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OcrModelInfo {
+    pub id: String,
+    pub name: String,
+    pub desc: String,
+    pub size_mb: f64,
+    /// 模型文件已在某个可读目录就位（无需下载）
+    pub ready: bool,
+    pub active: bool,
 }
 
-/// 轻度非锐化掩蔽：out = c + amount*(c - 3x3均值)，抵消 Lanczos 放大的软化。
-/// 仅在放大发生（k≠1）时调用，此时边长上限 ~2600，全图卷积开销可控。
-#[cfg(windows)]
-fn unsharp(img: &image::GrayImage, amount: f32) -> image::GrayImage {
-    let (w, h) = img.dimensions();
-    let mut out = image::GrayImage::new(w, h);
-    for y in 0..h {
-        for x in 0..w {
-            let c = img.get_pixel(x, y)[0] as f32;
-            let mut sum = 0f32;
-            let mut n = 0f32;
-            for dy in -1..=1i32 {
-                for dx in -1..=1i32 {
-                    let xx = (x as i32 + dx).clamp(0, w as i32 - 1) as u32;
-                    let yy = (y as i32 + dy).clamp(0, h as i32 - 1) as u32;
-                    sum += img.get_pixel(xx, yy)[0] as f32;
-                    n += 1.0;
-                }
-            }
-            let v = c + amount * (c - sum / n);
-            out.get_pixel_mut(x, y)[0] = v.clamp(0.0, 255.0).round() as u8;
-        }
-    }
-    out
+struct Engine {
+    set: String,
+    ocr: RapidOcr,
 }
 
-#[cfg(windows)]
-pub fn recognize_png(png: &[u8]) -> Result<Vec<OcrLineResp>, String> {
-    use windows::Globalization::Language;
-    use windows::Graphics::Imaging::BitmapDecoder;
-    use windows::Media::Ocr::OcrEngine;
-    use windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
-    use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
+// ONNX Runtime session 执行要求 &mut self（run_image），且整条管线持有 session，
+// 因此引擎整体挂在 Mutex 后面串行使用；OCR 是用户触发的低频操作，串行不构成瓶颈。
+static ENGINE: Mutex<Option<Engine>> = Mutex::new(None);
+static MODEL: Mutex<Option<String>> = Mutex::new(None);
 
-    // WinRT 初始化：本函数跑在专用线程上（调用方保证），MTA 模式
-    unsafe { let _ = RoInitialize(RO_INIT_MULTITHREADED); }
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
 
-    // ---- 引擎：按【线程】缓存（spawn_blocking 线程池复用线程，命中率高）----
-    // 每次命令调用都 TryCreate 引擎要付出语言匹配 + 引擎初始化的开销；
-    // thread_local 存储，绕开 WinRT 包装类型的 Send 约束。失败不缓存，
-    // 下次调用自动重试（如系统正在补装语言包）。
-    // 【已知取舍】成功后引擎永不失效——用户新增 OCR 语言包需重启应用才
-    // 会被新起的识别线程用到；语言包变更属极低频操作，不值得为此在每次
-    // 调用上加失效检测
-    thread_local! {
-        static OCR_ENGINE: std::cell::RefCell<Option<OcrEngine>> =
-            const { std::cell::RefCell::new(None) };
+fn pipeline() -> PipelineConfig {
+    PipelineConfig::without_cls()
+}
+
+/// 当前生效档位：未由配置注入过（启动早期/独立工具）时用出厂默认。
+pub fn current_model() -> String {
+    lock(&MODEL).clone().unwrap_or_else(|| DEFAULT_MODEL.to_string())
+}
+
+/// 切换档位：只记名字并丢弃已缓存引擎，下次识别时按需重建（热生效，无需重启）。
+pub fn set_model(name: &str) {
+    let name = name.to_string();
+    let mut m = lock(&MODEL);
+    if m.as_deref() == Some(name.as_str()) {
+        return;
     }
-    let cached = OCR_ENGINE.with(|c| c.borrow().clone());
-    let engine = match cached {
-        Some(e) => e,
-        None => {
-            let created = OcrEngine::TryCreateFromUserProfileLanguages().ok().or_else(|| {
-                let langs = OcrEngine::AvailableRecognizerLanguages().ok()?;
-                let Ok(n) = langs.Size() else { return None };
-                for i in 0..n {
-                    let Ok(lang) = langs.GetAt(i) else { continue };
-                    let Ok(tag) = lang.LanguageTag() else { continue };
-                    if let Ok(l2) = Language::CreateLanguage(&tag) {
-                        if let Ok(e) = OcrEngine::TryCreateFromLanguage(&l2) {
-                            return Some(e);
-                        }
-                    }
-                }
-                None
-            }).ok_or_else(|| "本机没有可用的 OCR 语言包：请在 Windows 设置 → 时间和语言 → 语言 中添加中文或英文".to_string())?;
-            OCR_ENGINE.with(|c| *c.borrow_mut() = Some(created.clone()));
-            created
+    *m = Some(name);
+    drop(m);
+    *lock(&ENGINE) = None;
+}
+
+/// ONNX Runtime 线程数。实测（i5-1155G7）2~4 线程最优、8 线程反而变慢，
+/// 上限取物理核数量级，避免贴图批量 OCR 把整机 CPU 吃满导致界面卡顿。
+fn intra_threads() -> usize {
+    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2).clamp(1, 4)
+}
+
+/// 模型搜索目录（按优先级）：exe 同级（安装包把 resources 平铺在这里）→
+/// exe/models（手工放置）→ 源码目录（开发期）→ 可写数据目录（下载落点）。
+fn model_dirs() -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = Vec::with_capacity(4);
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            dirs.push(parent.to_path_buf());
+            dirs.push(parent.join("models"));
         }
-    };
+    }
+    dirs.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ocr-models"));
+    dirs.push(crate::storage::AppPaths::resolve().data_dir.join("models"));
+    dirs
+}
 
-    // ---- 预处理（精度优先，统一管线）----
-    // 【精度】① 小图 Lanczos 放大（Windows OCR 对小字号/低分辨率识别率差；
-    //         上限 6x：工具栏/状态栏级别的极小截图放大更足才够认）；
-    //         ② 自动电平：1%/99% 百分位对比度拉伸——浅灰底淡字、拍照/压缩
-    //         截图的"发灰"文字拉到纯黑纯白，识别率显著改善；
-    //         ③ 暗底反色：均值偏暗判定为深色主题截图（白字黑底），整体反色
-    //         ——Windows OCR 按"深字浅底"训练，不反色时深色 UI 成片漏识别；
-    //         ④ 放大后轻度锐化，抵消 Lanczos 的软化；
-    //         ⑤ 四周加中灰(#808080)描边——文字贴边时引擎经常整行漏识别；
-    //         透明底先合成到白底再灰度化，防"透明底深色字"被灰度成全黑。
-    //         所有尺寸统一走该管线：原先 1600-4096 直出分支跳过了 ②③⑤，
-    //         同一张图不同尺寸精度不一致；且 has_alpha 判定本就要全图解码，
-    //         直出省下的解码在这里重编码里会赚回来
-    // 【速度】缩放后重编码用 BMP 而不是 PNG——BMP 几乎是内存直拷
-    // 【坐标】pad/scale 全程记录：返回矩形统一 (c - pad) / scale 映射回
-    //         原图像素坐标系，调用方（贴图选词高亮）按原图坐标做命中
-    let png_owned;
-    let (scale, pad, png): (f64, f32, &[u8]) = {
-        let img = image::load_from_memory(png).map_err(|e| format!("decode: {e}"))?;
-        let long = img.width().max(img.height());
-        let k: f64 = if long < 1600 {
-            (2200f64 / long as f64).min(6.0)
-        } else if long > 4096 {
-            4096f64 / long as f64
-        } else {
-            1.0
-        };
-        // 透明底合成到白底（防透明 PNG 灰度化后内容全黑）
-        let mut flat = image::RgbaImage::from_pixel(img.width(), img.height(), image::Rgba([255u8, 255, 255, 255]));
-        image::imageops::overlay(&mut flat, &img.to_rgba8(), 0, 0);
-        let gray = image::imageops::grayscale(&flat);
-        let mut gray = auto_levels_invert(gray);
-        let nw = ((img.width() as f64) * k).round().max(1.0) as u32;
-        let nh = ((img.height() as f64) * k).round().max(1.0) as u32;
-        // k=1 时跳过等尺寸重采样（也就不做锐化——原尺寸本就清晰）
-        if k != 1.0 {
-            let resized = image::imageops::resize(&gray, nw, nh, image::imageops::FilterType::Lanczos3);
-            gray = unsharp(&resized, 0.35);
+/// 该档位是否已在某个候选目录就位（含 SHA256 校验，只读探测、不下载）。
+fn ready_set(id: &str) -> bool {
+    let Some(spec) = model_set_by_name(id) else { return false };
+    model_dirs().iter().any(|dir| {
+        ModelCache::new(dir)
+            .ensure_model_set_for_pipeline(spec, pipeline(), ModelDownloadMode::Never)
+            .is_ok()
+    })
+}
+
+pub fn model_status() -> Vec<OcrModelInfo> {
+    let active = current_model();
+    MODEL_CHOICES
+        .iter()
+        .map(|(id, name, desc, size)| OcrModelInfo {
+            id: (*id).to_string(),
+            name: (*name).to_string(),
+            desc: (*desc).to_string(),
+            size_mb: *size,
+            ready: ready_set(id),
+            active: *id == active,
+        })
+        .collect()
+}
+
+/// 取引擎：内置目录命中直接用；都没命中时下载进可写数据目录（首次联网一次）。
+fn build_engine(set_name: &str) -> Result<Engine, String> {
+    let spec = model_set_by_name(set_name).ok_or_else(|| format!("未知的 OCR 模型档位：{set_name}"))?;
+    let make = |cache: &ModelCache| {
+        let mut cfg = cache
+            .config_for(spec)
+            .with_pipeline(pipeline())
+            .with_inference_options(InferenceOptions {
+                intra_threads: intra_threads(),
+                inter_threads: intra_threads(),
+                ..Default::default()
+            });
+        // 检测端 min-side 由默认 736 降到 320：截图选区多是"宽而扁"的窄条，
+        // 默认值会把它整幅放大 5 倍再检测，白烧卷积。实测 11 例真值集精度不变
+        // （99.7%），单行/双行选区 835ms → 259ms（3.2x）；全屏图耗时不受影响
+        // （那条路径的开销主要在各行的识别上）。
+        if let Some(d) = cfg.det.as_mut() {
+            d.limit_side_len = 320;
         }
-        // 中灰描边：给贴边文字留出引擎需要的呼吸空间
-        let p = (((nw.max(nh)) as f64) * 0.02).round().clamp(12.0, 48.0) as u32;
-        let mut canvas = image::GrayImage::from_pixel(nw + p * 2, nh + p * 2, image::Luma([128u8]));
-        image::imageops::replace(&mut canvas, &gray, p as i64, p as i64);
-        // 转 RGB 再编码：BMP 编码器对 Rgb8 的支持最有保证
-        let mut out = std::io::Cursor::new(Vec::new());
-        image::DynamicImage::ImageRgb8(image::DynamicImage::ImageLuma8(canvas).to_rgb8())
-            .write_to(&mut out, image::ImageFormat::Bmp)
-            .map_err(|e| format!("encode: {e}"))?;
-        png_owned = out.into_inner();
-        (k, p as f32, &png_owned[..])
+        RapidOcr::from_config(cfg)
+            .map(|ocr| Engine { set: set_name.to_string(), ocr })
+            .map_err(|e| format!("OCR 模型加载失败：{e}"))
     };
+    // Never 模式：文件齐且 SHA256 通过才算就位（内置目录只读，用下载模式只会白试）
+    for dir in model_dirs() {
+        let cache = ModelCache::new(&dir);
+        if cache
+            .ensure_model_set_for_pipeline(spec, pipeline(), ModelDownloadMode::Never)
+            .is_ok()
+        {
+            return make(&cache);
+        }
+    }
+    // 兜底：往可写数据目录下载（用户选了未内置的档位，或开发期源码目录缺文件）
+    let dir = crate::storage::AppPaths::resolve().data_dir.join("models");
+    let cache = ModelCache::new(&dir);
+    cache
+        .ensure_model_set_for_pipeline(spec, pipeline(), ModelDownloadMode::Missing)
+        .map_err(|e| format!(
+            "OCR 模型 {set_name} 未就位且下载失败（需要联网，或手动把模型放到 {}）：{e}",
+            dir.display()
+        ))?;
+    make(&cache)
+}
 
-    // ---- 图像字节 → 内存流 → SoftwareBitmap（BMP 或透传的原始 PNG）----
-    let stream = InMemoryRandomAccessStream::new().map_err(|e| format!("stream: {e}"))?;
-    let writer = DataWriter::CreateDataWriter(&stream).map_err(|e| format!("writer: {e}"))?;
-    writer.WriteBytes(png).map_err(|e| format!("write: {e}"))?;
-    writer.StoreAsync().and_then(|op| op.get()).map_err(|e| format!("store: {e}"))?;
-    writer.FlushAsync().and_then(|op| op.get()).ok();
-    writer.DetachStream().map_err(|e| format!("detach: {e}"))?;
-    drop(writer);
-    let decoder = BitmapDecoder::CreateAsync(&stream)
-        .and_then(|op| op.get()).map_err(|e| format!("decode: {e}"))?;
-    let bmp = decoder.GetSoftwareBitmapAsync()
-        .and_then(|op| op.get()).map_err(|e| format!("bitmap: {e}"))?;
-
-    // ---- 识别 ----
-    let result = engine.RecognizeAsync(&bmp)
-        .and_then(|op| op.get()).map_err(|e| format!("recognize: {e}"))?;
-
-    let lines = result.Lines().map_err(|e| format!("lines: {e}"))?;
-    let Ok(n) = lines.Size() else { return Ok(Vec::new()) };
-    let mut out = Vec::with_capacity(n as usize);
-    for i in 0..n {
-        let Ok(line) = lines.GetAt(i) else { continue };
-        let Ok(text) = line.Text() else { continue };
-        let text = text.to_string();
-        if text.trim().is_empty() { continue; }
-        // 行矩形由词矩形并集推导（OcrLine 不提供 BoundingRect）
-        let mut words_out: Vec<OcrWordResp> = Vec::new();
-        let mut lx = f32::MAX; let mut ly = f32::MAX; let mut lr = f32::MIN; let mut lb = f32::MIN;
-        if let Ok(words) = line.Words() {
-            if let Ok(wn) = words.Size() {
-                for j in 0..wn {
-                    let Ok(w) = words.GetAt(j) else { continue };
-                    let wr = w.BoundingRect().unwrap_or_default();
-                    let t = w.Text().map(|s| s.to_string()).unwrap_or_default();
-                    lx = lx.min(wr.X); ly = ly.min(wr.Y);
-                    lr = lr.max(wr.X + wr.Width); lb = lb.max(wr.Y + wr.Height);
-                    words_out.push(OcrWordResp { t: t.to_string(), x: wr.X, y: wr.Y, w: wr.Width, h: wr.Height });
+/// 预热：启动后台线程把引擎（含 session 构建）先建好并缓存，避免首次识别
+/// 才付这笔钱。识别本身是 spawn_blocking 上的重活，这里同样用独立线程。
+/// 预热失败只落诊断日志（不打扰用户），真正识别时才给出明确原因。
+pub fn warm_up() {
+    std::thread::spawn(|| {
+        let set = current_model();
+        match build_engine(&set) {
+            Ok(engine) => {
+                crate::storage::diag_write(&format!("[ocr] warm_up {set} ok"));
+                let mut guard = lock(&ENGINE);
+                // 预热期间用户可能已改档位：档位不一致就别把旧引擎塞回去
+                if guard.is_none() && current_model() == set {
+                    *guard = Some(engine);
                 }
             }
+            Err(e) => crate::storage::diag_write(&format!("[ocr] warm_up {set} failed: {e}")),
         }
-        let (rx, ry, rw, rh) = if lx < lr { (lx, ly, lr - lx, lb - ly) } else { (0.0, 0.0, 0.0, 0.0) };
-        out.push(OcrLineResp {
-            text,
-            x: rx, y: ry, w: rw, h: rh,
-            words: words_out,
+    });
+}
+
+/// 单字显示宽度权重：中日韩全角字≈1，半角字母数字≈0.55，其余≈0.5，空格≈0.35。
+/// 用于把行矩形按字符宽度比例切成词——PP-OCR 只给行级 quad，词框得自己推。
+fn char_weight(c: char) -> f32 {
+    if c == ' ' {
+        0.35
+    } else if matches!(c as u32,
+        0x1100..0x1160            // 韩文初声
+        | 0x2E80..0xA4D0          // CJK 符号标点 / 假名 / 汉字 / 彝文
+        | 0xAC00..0xD7A4          // 韩文音节
+        | 0xF900..0xFB00          // 兼容表意文字
+        | 0xFE10..0xFE70          // 竖排与小形式变体
+        | 0xFF00..0xFF61          // 全角标点与字母
+        | 0xFFE0..0xFFE7          // 全角货币符号
+        | 0x20000..0x2FA20)       // 扩展 B 及以后
+    {
+        1.0
+    } else if c.is_alphanumeric() {
+        0.55
+    } else {
+        0.5
+    }
+}
+
+/// 由行 quad（左上、右上、右下、左下）+ 文本推导词级矩形。
+/// 词切分：全角字符逐字成词（贴图划选要落到单字），连续的半字母数字合并成词；
+/// 空间分配按字符权重累加，并沿 quad 上下两边线性插值——轻微倾斜的行也能贴住文字。
+fn split_words(text: &str, pts: &[[f32; 2]; 4]) -> Vec<OcrWordResp> {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.is_empty() {
+        return Vec::new();
+    }
+    let total: f32 = chars.iter().map(|c| char_weight(*c)).sum();
+    if total <= 0.0 {
+        return Vec::new();
+    }
+    // 先算出每个词的 [起点, 字符数)
+    let mut groups: Vec<(usize, usize)> = Vec::new();
+    let mut i = 0usize;
+    while i < chars.len() {
+        if chars[i] == ' ' {
+            i += 1;
+            continue;
+        }
+        let wide = char_weight(chars[i]) >= 1.0;
+        let start = i;
+        i += 1;
+        // 全角字逐字切；半角一直吃到下一个空格或全角字
+        if !wide {
+            while i < chars.len() && chars[i] != ' ' && char_weight(chars[i]) < 1.0 {
+                i += 1;
+            }
+        }
+        groups.push((start, i));
+    }
+    let (tl, tr, br, bl) = (pts[0], pts[1], pts[2], pts[3]);
+    let mut words = Vec::with_capacity(groups.len());
+    for (start, end) in groups {
+        let w0: f32 = chars[..start].iter().map(|c| char_weight(*c)).sum();
+        let w1: f32 = chars[..end].iter().map(|c| char_weight(*c)).sum();
+        let (t0, t1) = (w0 / total, w1 / total);
+        let lerp = |a: [f32; 2], b: [f32; 2], t: f32| [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+        let corners = [
+            lerp(tl, tr, t0), lerp(tl, tr, t1),
+            lerp(bl, br, t1), lerp(bl, br, t0),
+        ];
+        let minx = corners.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min);
+        let maxx = corners.iter().map(|p| p[0]).fold(f32::MIN, f32::max);
+        let miny = corners.iter().map(|p| p[1]).fold(f32::INFINITY, f32::min);
+        let maxy = corners.iter().map(|p| p[1]).fold(f32::MIN, f32::max);
+        words.push(OcrWordResp {
+            t: chars[start..end].iter().collect(),
+            x: minx, y: miny,
+            w: (maxx - minx).max(1.0), h: (maxy - miny).max(1.0),
         });
     }
-    // 【坐标还原回原图】预处理做了 pad 描边 + 缩放：OCR 矩形在
-    // "pad 后缩放图"坐标系，统一 (c - pad) / scale 映射回原图像素坐标系。
-    // 不还原的话前端高亮会整体偏移放大数倍（"底纹和文本对不上"的根因）
-    if scale != 1.0 || pad > 0.0 {
-        let inv = 1.0f32 / scale as f32;
-        for l in &mut out {
-            l.x = (l.x - pad) * inv; l.y = (l.y - pad) * inv;
-            l.w *= inv; l.h *= inv;
-            for w in &mut l.words {
-                w.x = (w.x - pad) * inv; w.y = (w.y - pad) * inv;
-                w.w *= inv; w.h *= inv;
-            }
-        }
-    }
-    Ok(out)
+    words
 }
 
-#[cfg(not(windows))]
-pub fn recognize_png(_png: &[u8]) -> Result<Vec<OcrLineResp>, String> {
-    Err("仅支持 Windows".into())
+pub fn recognize_png(png: &[u8]) -> Result<Vec<OcrLineResp>, String> {
+    let want = current_model();
+
+    // 透明底先合成到白底：PP-OCR 只接受 RGB，直接灰度化会把透明区变成纯黑块
+    let decoded = image::load_from_memory(png).map_err(|e| format!("decode: {e}"))?;
+    let rgb = if decoded.color().has_alpha() {
+        let rgba = decoded.to_rgba8();
+        let mut flat = image::RgbaImage::from_pixel(rgba.width(), rgba.height(), image::Rgba([255, 255, 255, 255]));
+        image::imageops::overlay(&mut flat, &rgba, 0, 0);
+        image::DynamicImage::ImageRgba8(flat).into_rgb8()
+    } else {
+        decoded.to_rgb8()
+    };
+
+    let mut guard = lock(&ENGINE);
+    if guard.as_ref().map(|e| e.set.as_str()) != Some(want.as_str()) {
+        *guard = Some(build_engine(&want)?);
+    }
+    let engine = guard.as_mut().ok_or_else(|| "OCR 引擎未就位".to_string())?;
+    let out = engine.ocr.run_image(&rgb).map_err(|e| format!("recognize: {e}"))?;
+    drop(guard);
+
+    let mut lines: Vec<OcrLineResp> = Vec::with_capacity(out.lines.len());
+    for l in out.lines {
+        if l.text.trim().is_empty() {
+            continue;
+        }
+        let minx = l.bbox.points.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min);
+        let maxx = l.bbox.points.iter().map(|p| p[0]).fold(f32::MIN, f32::max);
+        let miny = l.bbox.points.iter().map(|p| p[1]).fold(f32::INFINITY, f32::min);
+        let maxy = l.bbox.points.iter().map(|p| p[1]).fold(f32::MIN, f32::max);
+        let words = split_words(&l.text, &l.bbox.points);
+        lines.push(OcrLineResp {
+            text: l.text,
+            x: minx, y: miny,
+            w: (maxx - minx).max(1.0), h: (maxy - miny).max(1.0),
+            words,
+        });
+    }
+    Ok(lines)
+}
+
+/// 下载指定档位模型到可写数据目录（设置页「下载」按钮）。
+/// 同步阻塞（6~170MB，走 ModelScope 国内源），调用方放 spawn_blocking。
+pub fn download_model(id: &str) -> Result<(), String> {
+    let spec = model_set_by_name(id).ok_or_else(|| format!("未知的 OCR 模型档位：{id}"))?;
+    if ready_set(id) {
+        return Ok(());
+    }
+    let dir = crate::storage::AppPaths::resolve().data_dir.join("models");
+    ModelCache::new(&dir)
+        .ensure_model_set_for_pipeline(spec, pipeline(), ModelDownloadMode::Missing)
+        .map_err(|e| format!("模型下载失败：{e}"))
+}
+
+#[tauri::command]
+pub fn ocr_model_status() -> Vec<OcrModelInfo> {
+    model_status()
+}
+
+/// 下载档位模型（6~170MB，ModelScope 国内源）。整段放阻塞线程池，
+/// 完成后直接回一份最新状态列表，设置页不必再发一次查询。
+#[tauri::command]
+pub async fn ocr_model_download(model: String) -> Result<Vec<OcrModelInfo>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        download_model(&model)?;
+        Ok(model_status())
+    })
+    .await
+    .map_err(|e| format!("join: {e}"))?
 }

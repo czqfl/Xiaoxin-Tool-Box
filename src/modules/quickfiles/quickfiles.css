@@ -2,11 +2,21 @@
 
 /* 头部 */
 .qf-header {
+  position: relative; /* 页签绝对居中的定位基准 */
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 12px 14px;
   border-bottom: 1px solid var(--border-subtle);
+}
+/* 页签：绝对居中嵌在头部正中，不再独占一行。用 left:50% + translate 而不是
+   flex 居中——左侧标题与右侧按钮宽度不等，flex 只能做到"剩余空间"居中 */
+.qf-tabs {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
 }
 /* 拖拽区：data-tauri-drag-region 只放在 .qf-header 上（与剪贴板/文件夹/账号密码
    面板一致），子元素不再重复标记。无需在按钮上加 -webkit-app-region: no-drag——
@@ -561,4 +571,116 @@
 .qf-modal-warn {
   font-size: 12px;
   color: var(--danger);
+}
+
+/* ---------- 最近打开 / 全盘搜索的紧凑行 ---------- */
+/* 紧凑单行列表：与 .qf-item 同源的类型色语义（--c + color-mix），
+   但压成一行——长列表（搜索动辄上百条）用卡片式会撑不满视线 */
+.qf-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 2px 6px;
+}
+.qf-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--c) 14%, transparent);
+  background: color-mix(in srgb, var(--c) 4%, transparent);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+.qf-row:hover {
+  background: color-mix(in srgb, var(--c) 13%, transparent);
+  border-color: color-mix(in srgb, var(--c) 34%, transparent);
+}
+/* 徽标在紧凑行里改为静态流式（.qf-ext-badge 原为绝对定位，服务卡片布局） */
+.qf-row .qf-ext-badge {
+  position: static;
+  flex: none;
+}
+.qf-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.qf-row-name {
+  font-size: 13px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.qf-row-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl; /* 长路径优先显示尾部（更能区分同名文件所在目录） */
+}
+.qf-row-time {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+/* 悬停才露操作按钮，平时列表保持干净（与 .qf-item 的操作区同策略） */
+.qf-row-actions {
+  flex: none;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.qf-row:hover .qf-row-actions {
+  opacity: 1;
+}
+/* 搜索框：图标 + 无边框输入，聚焦时描边转强调色（与 .number-input 一致） */
+/* 搜索页的控制条不要强调色底带：那圈淡色带会把整行也画成一个"框"，
+   和真正的输入框叠在一起，看着像两个搜索框重合 */
+.qf-controls-search {
+  background: none;
+}
+.qf-search-wrap {
+  flex: 1;
+  min-width: 200px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-input-glass);
+  color: var(--text-tertiary);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.qf-search-wrap:focus-within {
+  border-color: var(--accent);
+}
+.qf-search {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  padding: 7px 0;
+}
+.qf-index-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+.qf-hit-empty {
+  padding: 20px 10px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-tertiary);
 }

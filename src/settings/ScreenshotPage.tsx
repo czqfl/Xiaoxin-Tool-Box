@@ -1,7 +1,7 @@
 /** Screenshot & Pin settings page with sub-tabs */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useConfigStore } from "../stores/configStore";
-import { shotHistoryClear } from "../core/tauri";
+import { ocrModelDownload, ocrModelStatus, shotHistoryClear, type OcrModelInfo } from "../core/tauri";
 import { Segmented, SettingGroup, SettingRow, Slider, Switch } from "./components";
 import { ShortcutRow } from "./ShortcutRow";
 
@@ -25,6 +25,61 @@ function ClearHistoryRow() {
         {confirming ? "确认清空" : done ? "已清空" : "清空"}
       </button>
     </SettingRow>
+  );
+}
+
+/** 文字识别模型档位：切档即时生效；未下载的档位先下载、成功后再启用 */
+function OcrModelRows() {
+  const config = useConfigStore((s) => s.config);
+  const update = useConfigStore((s) => s.update);
+  const [models, setModels] = useState<OcrModelInfo[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    ocrModelStatus().then(setModels).catch(() => setModels([]));
+  }, []);
+
+  const pick = async (m: OcrModelInfo) => {
+    if (m.active || busy) return;
+    setErr("");
+    if (!m.ready) {
+      setBusy(m.id);
+      try {
+        setModels(await ocrModelDownload(m.id));
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : String(e));
+        setBusy(null);
+        return;
+      }
+      setBusy(null);
+    }
+    void update({ ...config, shot: { ...config.shot, ocr_model: m.id } });
+  };
+
+  if (!models) return null;
+  return (
+    <SettingGroup>
+      <SettingRow
+        title="文字识别模型"
+        desc={err ? `模型下载失败：${err}` : "离线识别，切换后立即生效；档位越高越准，但体积更大、识别更慢"}
+      />
+      {models.map((m) => (
+        <SettingRow
+          key={m.id}
+          title={m.active ? `${m.name}（使用中）` : m.name}
+          desc={`${m.desc} · 约 ${m.size_mb}MB${m.ready ? "" : " · 未下载"}`}
+        >
+          <button
+            className="btn btn-sm"
+            disabled={m.active || busy !== null}
+            onClick={() => void pick(m)}
+          >
+            {m.active ? "使用中" : busy === m.id ? "下载中…" : m.ready ? "启用" : "下载并启用"}
+          </button>
+        </SettingRow>
+      ))}
+    </SettingGroup>
   );
 }
 
@@ -164,6 +219,7 @@ export function ScreenshotPage() {
               </SettingRow>
             )}
           </SettingGroup>
+          <OcrModelRows />
         </>
       )}
 

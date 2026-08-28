@@ -532,6 +532,11 @@ fn html_has_formatting(html: &str) -> bool {
     .any(|tag| lower.contains(tag))
 }
 
+/// 条目预览保留的字符数。全文始终存在 `entry.text` 里（粘贴/编辑/tooltip 都用
+/// 它），preview 只用于面板列表显示——100 字时一段长文只能看见第一句，
+/// 用户会误判成"复制只复制了前面一句"。
+const PREVIEW_CHARS: usize = 400;
+
 fn build_entry(snap: &Snapshot, hash: u64, images_dir: &std::path::Path) -> Option<ClipEntry> {
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp_millis();
@@ -539,7 +544,7 @@ fn build_entry(snap: &Snapshot, hash: u64, images_dir: &std::path::Path) -> Opti
 
     let (kind, preview, text, image_path, image_thumb_path, files) = match snap {
         Snapshot::Text(t) => {
-            let preview: String = t.chars().take(100).collect();
+            let preview: String = t.chars().take(PREVIEW_CHARS).collect();
             // 文本类型细分：链接 > 富文本（剪贴板带格式 HTML）> 普通文本
             (classify_text_kind(t), preview, Some(t.clone()), None, None, None)
         }
@@ -893,7 +898,7 @@ pub fn clipboard_paste(
 /// 这些结果是临时产物，不进剪贴板历史，故复用 clipboard_copy_text 的抑制监听写入。
 #[tauri::command]
 pub fn clipboard_paste_text(text: String) -> Result<(), String> {
-    clipboard_copy_text(text)?;
+    clipboard_copy_text(text, None)?;
     std::thread::spawn(|| {
         std::thread::sleep(Duration::from_millis(80));
         let _ = simulate_paste();
@@ -901,14 +906,24 @@ pub fn clipboard_paste_text(text: String) -> Result<(), String> {
     Ok(())
 }
 
-/// 直接写入一段文本到系统剪贴板（不触发监听重复记录）。
-/// 供账号密码面板使用：复制账号/密码时不污染剪贴板历史，避免凭据泄露。
+/// 直接写入一段文本到系统剪贴板。
+///
+/// `record` 决定这次写入要不要进剪贴板历史：
+/// - 默认（None / Some(false)）抑制监听记录——账号密码、常用语速贴、命令面板
+///   临时结果都属于应用自写，记进历史既污染列表也可能泄露凭据；
+/// - Some(true) 不抑制，等同用户在别处按了一次 Ctrl+C，会正常出现在剪贴板面板
+///   （贴图 OCR 划选复制走这条：用户抓这段文本就是为了复用）。
 #[tauri::command]
-pub fn clipboard_copy_text(text: String) -> Result<(), String> {
+pub fn clipboard_copy_text(text: String, record: Option<bool>) -> Result<(), String> {
     let mut cb = Clipboard::new().map_err(|e| format!("访问剪贴板失败：{e}"))?;
-    SUPPRESS_WATCH.store(true, Ordering::SeqCst);
+    let suppress = record != Some(true);
+    if suppress {
+        SUPPRESS_WATCH.store(true, Ordering::SeqCst);
+    }
     if let Err(e) = cb.set_text(text) {
-        SUPPRESS_WATCH.store(false, Ordering::SeqCst);
+        if suppress {
+            SUPPRESS_WATCH.store(false, Ordering::SeqCst);
+        }
         return Err(format!("复制失败：{e}"));
     }
     Ok(())
@@ -1263,7 +1278,7 @@ pub fn clipboard_update_text(
     ) {
         return Err("仅文本记录可编辑".into());
     }
-    let preview: String = text.chars().take(100).collect();
+    let preview: String = text.chars().take(PREVIEW_CHARS).collect();
     // 编辑后按新内容重分类（链接判定；富文本判定依赖剪贴板现场，编辑时不做）
     entry.kind = if is_link(text.trim()) {
         EntryKind::Link
@@ -1318,7 +1333,7 @@ pub fn clipboard_insert_text(
             .ok_or_else(|| "目标记录不存在".to_string())?;
         created_at_at(&mut entries, &order, t, mode == PasteMode::Fifo)
     };
-    let preview: String = text.chars().take(100).collect();
+    let preview: String = text.chars().take(PREVIEW_CHARS).collect();
     let mut h = DefaultHasher::new();
     "text".hash(&mut h);
     text.hash(&mut h);

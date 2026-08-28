@@ -39,6 +39,12 @@ if (Test-Path (Split-Path $stage -Parent)) {
 New-Item -ItemType Directory -Path (Join-Path $stage "data") -Force | Out-Null
 Copy-Item $releaseExe (Join-Path $stage "小心工具箱.exe")
 
+# OCR 模型必须与 exe 同级：应用按「exe 同级 → exe\models → data\models」找模型，
+# 便携版缺了就得联网下载才能识别，破坏"解压即用"
+$ocrModels = Join-Path $root "src-tauri\ocr-models"
+if (-not (Test-Path $ocrModels)) { throw "缺少 OCR 模型目录：$ocrModels" }
+Copy-Item (Join-Path $ocrModels "*") $stage -Force
+
 # 附带便携版说明
 @'
 小心工具箱 · 便携版说明

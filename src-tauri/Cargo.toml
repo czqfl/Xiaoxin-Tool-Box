@@ -39,6 +39,8 @@ md-5 = "0.10"
 hex = "0.4"
 # 便签背景图 base64 编解码
 base64 = "0.22"
+rapidocr-core = { version = "0.2.2", default-features = false, features = ["model-download"] }
+ignore = "0.4.33"
 
 [target.'cfg(windows)'.dependencies.windows]
 version = "0.61"
@@ -65,18 +67,12 @@ features = [
     "Win32_System_LibraryLoader",
     "Win32_System_Registry",
     "Win32_System_Com_StructuredStorage",
-    "Win32_System_WinRT",
     "Win32_Storage_FileSystem",
     "Win32_NetworkManagement_IpHelper",
     "Wdk_System_Threading",
     # 录屏 MP4：Media Foundation H.264 Sink Writer
     "Win32_Media_MediaFoundation",
-    # 截图 OCR（Windows.Media.Ocr 系统引擎）
-    "Media_Ocr",
-    "Graphics_Imaging",
-    "Storage_Streams",
-    "Globalization",
-    "Foundation",
+    # 文字识别已改走 rapidocr-core（PP-OCR ONNX），不再需要 WinRT OCR 相关接口
 ]
 
 [target.'cfg(windows)'.dependencies.webview2-com]

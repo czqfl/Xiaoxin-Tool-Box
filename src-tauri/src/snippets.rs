@@ -126,7 +126,7 @@ pub fn snippets_paste(id: String, paths: State<AppPaths>) -> Result<(), String> 
         .find(|s| s.id == id)
         .ok_or("片段不存在")?;
     // 复用剪贴板模块的写剪贴板（SUPPRESS_WATCH 抑制监听，不污染剪贴板历史）
-    crate::clipboard::clipboard_copy_text(sn.content.clone())?;
+    crate::clipboard::clipboard_copy_text(sn.content.clone(), None)?;
     // 延迟注入 Ctrl+V：等待前端隐藏面板、焦点回到用户原窗口
     std::thread::spawn(|| {
         std::thread::sleep(std::time::Duration::from_millis(80));

@@ -1,5 +1,5 @@
-/** 贴图 OCR 划选：贴图图片加载后后台自动识别文字（Windows.Media.Ocr，
- *  复用截图遮罩的 shot_ocr 命令），结果静默缓存；单击 Alt 切换"文字选择
+/** 贴图 OCR 划选：贴图图片加载后后台自动识别文字（PP-OCR ONNX 本地引擎，
+ *  走 pin_ocr 命令由 Rust 直读贴图文件），结果静默缓存；单击 Alt 切换"文字选择
  *  模式"（再按一次退出），模式内左键划选文字 → 半透明蓝色高亮保持，
  *  Ctrl+C 手动复制选中文本。本窗无键盘焦点时按的 Alt 收不到 keydown，
  *  mousedown 侧用系统修饰键 e.altKey 兜底，保证划选始终可用。
@@ -15,6 +15,7 @@
  *    显示尺寸——贴图任意缩放后高亮仍精确贴合文字
  */
 import { useEffect, useRef, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { copyText, pinOcr, type ShotOcrLine } from "../../core/tauri";
 
 /** 显示坐标系（CSS 像素、相对视口）中的高亮矩形 */
@@ -146,12 +147,15 @@ export function usePinOcrSelect({ autoRun, interactive, id, src, imgRef, onFeedb
       exitMode();
       return true;
     }
-    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey
+    // 注意：这里【不】要求 !e.altKey——进文字模式的姿势就是"按住 Alt 拖选"，
+    // 要求松开 Alt 再按 Ctrl+C 会让这一路组合彻底静默（本分支和 PinWindow 的
+    // "复制为图片"分支都带 !e.altKey，谁都不消费 → 无角标、剪贴板也没内容）
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey
       && (e.key === "c" || e.key === "C") && hasSelectionRef.current) {
       e.preventDefault();
       const text = buildText(pickedRef.current);
       if (text) {
-        copyText(text)
+        copyText(text, true)
           .then(() => feedbackRef.current(`已复制 ${text.length} 字`, 1200, "copied"))
           .catch(() => feedbackRef.current("复制失败", 1500, "failed"));
       }
@@ -265,6 +269,10 @@ export function usePinOcrSelect({ autoRun, interactive, id, src, imgRef, onFeedb
     const g = computeGeom();
     if (!g) return false;
     e.preventDefault();
+    // 划选靠 mousedown（有 e.altKey 兜底，无需焦点），但 Ctrl+C 是 keydown——本窗
+    // 没有键盘焦点时按键根本送不进来，表现就是"高亮有了、复制没反应"。
+    // 接管这次按下的同时把焦点要过来（setFocus 可能因他窗持有前台而失败，忽略）
+    void getCurrentWindow().setFocus().catch(() => {});
     teardownRef.current?.(); // 防御：拆掉可能残留的上一场手势
     hasSelectionRef.current = true;
     const a = toOrig(e.clientX, e.clientY, g);

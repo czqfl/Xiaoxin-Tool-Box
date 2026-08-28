@@ -401,6 +401,8 @@ pub struct ShotConfig {
     pub history_max_count: u32,
     /// 历史最多保留多少天（超期自动清理）
     pub history_max_days: u32,
+    /// 文字识别模型档位（rapidocr-core 的模型集 id，见 ocr.rs::MODEL_CHOICES）
+    pub ocr_model: String,
 }
 
 impl Default for ShotConfig {
@@ -419,6 +421,7 @@ impl Default for ShotConfig {
             history_enabled: true,
             history_max_count: 20,
             history_max_days: 7,
+            ocr_model: crate::ocr::DEFAULT_MODEL.into(),
         }
     }
 }
@@ -665,6 +668,8 @@ pub fn config_save(
     let old_toolbar_enabled = state.0.lock().unwrap().toolbar.enabled;
     save_json(&paths.config_file, &config).map_err(|e| format!("保存配置失败：{e}"))?;
     *state.0.lock().unwrap() = config.clone();
+    // OCR 档位切换即时生效（set_model 内部比对，未变化时不重建引擎）
+    crate::ocr::set_model(&config.shot.ocr_model);
     // 工具栏启用开关变化时立即显隐（功能开关页切工具栏开关即时反馈；
     // 原设置页开关的 setToolbarVisible 行为迁移至此）
     if config.toolbar.enabled != old_toolbar_enabled {

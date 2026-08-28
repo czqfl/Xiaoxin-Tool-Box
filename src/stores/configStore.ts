@@ -111,6 +111,7 @@ const defaultConfig: AppConfig = {
     history_enabled: true,
     history_max_count: 20,
     history_max_days: 7,
+    ocr_model: "ppocrv6-tiny",
   },
   recorder: {
     enabled: true,
