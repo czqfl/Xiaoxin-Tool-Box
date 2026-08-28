@@ -1,7 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Circle, Image, Video } from "lucide-react";
-import { recorderStart, recSelectCancel, type RecRect, type RecOptions } from "./api";
+import { listen } from "@tauri-apps/api/event";
+import { Circle } from "lucide-react";
+import {
+  recorderStart, recorderStop, recSelectCancel,
+  EVT_REC_DONE, type RecDonePayload,
+  type RecRect, type RecOptions,
+} from "./api";
 import type { AppConfig } from "../../types";
 import "./recorder.css";
 
@@ -28,6 +33,9 @@ export function RecorderSelect() {
   // 分辨率预设单独存，开始录制时按选区高度换算成 scale
   const [opts, setOpts] = useState<RecOptions>({ fmt: "mp4", fps: 12, scale: 1, quality: "normal" });
   const [res, setRes] = useState<ResPreset>("raw");
+  // 录制中遮罩模式：Rust 不再销毁选区窗，而是让它转入"黑遮罩镂空录制区"
+  // （鼠标已在窗口级穿透），与选区阶段视觉统一
+  const [masking, setMasking] = useState(false);
 
   // 默认值全部来自设置页：录制面板只暴露最常用的「格式」，分辨率/画质/帧率沿用设置。
   // 两处因此是同一套配置的两种用法——设置项 = 持久默认，面板改动只影响本次录制。
@@ -48,6 +56,30 @@ export function RecorderSelect() {
   // 双保险：确保 html 标记为面板级透明底
   useEffect(() => {
     document.documentElement.dataset.window = "panel";
+  }, []);
+
+  // Rust 侧驱动的状态迁移：
+  // select-reset —— 窗口被复用呼出（只 hide 不销毁），清空回到选区模式；
+  // mask         —— recorder_start 成功，转入录制遮罩模式（窗口已鼠标穿透）；
+  // done         —— 录制结束（Rust 会 hide 本窗），这里同步退出遮罩兜底
+  useEffect(() => {
+    const un1 = listen("recorder://select-reset", () => {
+      startingRef.current = false;
+      setStarting(false);
+      setError("");
+      setMasking(false);
+      setBoth(null);
+    });
+    const un2 = listen("recorder://mask", () => {
+      setStarting(false);
+      setMasking(true);
+    });
+    const un3 = listen<RecDonePayload>(EVT_REC_DONE, () => setMasking(false));
+    return () => {
+      void un1.then((u) => u());
+      void un2.then((u) => u());
+      void un3.then((u) => u());
+    };
   }, []);
 
   const setBoth = (r: RecRect | null) => { rectRef.current = r; setRect(r); };
@@ -117,9 +149,16 @@ export function RecorderSelect() {
       if (startingRef.current) return;
       if (e.key === "Escape") {
         e.preventDefault();
+        // 录制中（遮罩模式）：Esc = 停止并保存。控制条已移除，
+        // 这是除"再按一次录制快捷键"之外的兜底停止入口（焦点还在本窗时可用）
+        if (masking) {
+          void recorderStop().catch(() => {});
+          return;
+        }
         void recSelectCancel().catch(() => {});
       } else if (e.key === "Enter") {
         e.preventDefault();
+        if (masking) return; // 录制中忽略 Enter，避免重复触发 recorder_start
         void start();
       }
     };
@@ -219,7 +258,7 @@ export function RecorderSelect() {
             <i className="rec-corner bl" /><i className="rec-corner br" />
             <span className="rec-size">{Math.round(rect.w)} × {Math.round(rect.h)}</span>
           </div>
-          {!dragging && (
+          {!dragging && !masking && (
             <div
               ref={panelRef}
               className="rec-panel"
@@ -227,8 +266,8 @@ export function RecorderSelect() {
               onPointerDown={(e) => e.stopPropagation()}
               onDoubleClick={(e) => e.stopPropagation()}
             >
-              {/* 一行搞定：格式直接平铺成按钮（取消下拉框，一步点选），与「开始录制」同排。
-                  去掉「重选」按钮——右键即可清空选区重新框选，功能不丢 */}
+              {/* 一行搞定：格式平铺点选（纯文字，去图标），与「开始录制」同排。
+                  开始录制也是纯图标（红色录制点）；右键可清空选区重新框选 */}
               <div className="rec-quick-row">
                 {(["mp4", "gif"] as const).map((v) => (
                   <button
@@ -237,24 +276,19 @@ export function RecorderSelect() {
                     onClick={() => setOpts((o) => ({ ...o, fmt: v }))}
                     title={v === "mp4" ? "视频 MP4" : "动图 GIF"}
                   >
-                    {v === "mp4" ? <Video size={13} /> : <Image size={13} />}
                     {v === "mp4" ? "MP4" : "GIF"}
                   </button>
                 ))}
                 <i className="rec-quick-sep" />
                 <button className="rec-start" onClick={() => void start()} title="开始录制（Enter）">
-                  <Circle size={11} fill="currentColor" stroke="none" /> 开始录制
+                  <Circle size={12} fill="currentColor" stroke="none" />
                 </button>
               </div>
             </div>
           )}
         </>
       )}
-      {!valid && (
-        <div className="rec-hint">
-          拖拽框选录制区域 <kbd>Enter</kbd> 开始 · <kbd>Esc</kbd> 取消
-        </div>
-      )}
+      {!valid && <div className="rec-hint">拖拽框选录制区域</div>}
       {error && <div className="rec-hint rec-hint-error">启动失败：{error}</div>}
       {starting && <div className="rec-hint">正在启动录制…</div>}
     </div>

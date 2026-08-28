@@ -73,13 +73,17 @@ impl H264Writer {
                 init(r)
             };
 
-            // Sink Writer 属性：允许硬件编码器 + 不做写入节流（录制实时性优先）
+            // Sink Writer 属性：不做写入节流（录制实时性优先）。
+            // 【刻意不启用 MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS】：GPU 硬件编码 MFT
+            // 在连续快速提交 BGRA 帧时会驱动级崩溃（0xc0000005，且发生在 native 内部、
+            // Rust 无法捕获——实测第 1 帧成功、第 2 帧即死；GIF 路径同采集却完全正常，
+            // 可锁定为编码器而非采集）。软件编码器（Microsoft H.264 Encoder MFT）
+            // 对屏幕录制这种分辨率/帧率毫无压力，稳定性远高于各厂商驱动。
             let mut attrs_opt: Option<IMFAttributes> = None;
-            if let Err(e) = MFCreateAttributes(&mut attrs_opt, 2) {
+            if let Err(e) = MFCreateAttributes(&mut attrs_opt, 1) {
                 return unwind(Err(hr_err("MFCreateAttributes", e)));
             }
             let Some(attrs) = attrs_opt else { return unwind(Err("MFCreateAttributes 返回空".into())) };
-            let _ = attrs.SetUINT32(&MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, 1);
             let _ = attrs.SetUINT32(&MF_SINK_WRITER_DISABLE_THROTTLING, 1);
 
             let mut url: Vec<u16> = path

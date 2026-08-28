@@ -49,16 +49,6 @@ struct Done {
 
 // ---------- 入口 ----------
 
-/// 选区窗取消全屏 SWCA 模糊（用户要看清选区后面的内容，只需黑色遮罩镂空）；
-/// 仅控制条（rec-bar）小窗保留真亚克力。
-#[cfg(windows)]
-fn apply_select_blur<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
-    if let Some(h) = crate::screenshot::hwnd_of_webview(window) {
-        let light = crate::window_theme_is_light(window);
-        let _ = crate::acrylic::apply_blur(h, light);
-    }
-}
-
 fn monitor_at<R: Runtime>(app: &AppHandle<R>, x: i32, y: i32) -> Option<(i32, i32, i32, i32)> {
     app.available_monitors().ok()?.into_iter()
         .map(|m| (m.position().x, m.position().y, m.size().width as i32, m.size().height as i32))
@@ -79,6 +69,8 @@ fn cursor_pos() -> Option<(i32, i32)> {
 }
 
 /// 呼出录屏区域选择窗（托盘/工具栏/快捷键入口共用）。功能停用则静默忽略。
+/// 【正在录制时再按 = 停止录制并保存】——控制条已按需求移除，
+/// 这是录制中唯一的"停止"入口（遮罩窗内按 Esc 也可，但焦点可能已不在）。
 pub fn begin_select<R: Runtime>(app: &AppHandle<R>) {
     if !app.try_state::<crate::config::ConfigState>()
         .map(|s| s.0.lock().unwrap().recorder.enabled)
@@ -87,20 +79,26 @@ pub fn begin_select<R: Runtime>(app: &AppHandle<R>) {
         crate::storage::diag_write("[recorder] begin_select ignored: feature disabled");
         return;
     }
-    if ACTIVE.load(Ordering::SeqCst) || PENDING.swap(true, Ordering::SeqCst) {
-        crate::storage::diag_write(&format!(
-            "[recorder] begin_select ignored: active={} pending=true", ACTIVE.load(Ordering::SeqCst)));
+    if ACTIVE.load(Ordering::SeqCst) {
+        crate::storage::diag_write("[recorder] begin_select while active -> STOP");
+        STOP.store(true, Ordering::SeqCst);
+        return;
+    }
+    if PENDING.swap(true, Ordering::SeqCst) {
+        crate::storage::diag_write("[recorder] begin_select ignored: pending=true");
         return;
     }
     // 截图会话进行中：先收掉遮罩，避免两个全屏置顶窗互相叠盖抢输入
     if crate::screenshot::shooting() {
         let _ = crate::screenshot::cancel_impl(app);
     }
-    // 已存在的旧选择窗先复用（重置鼠标穿透：上次录制可能置了 true）
+    // 已存在的旧选择窗直接复用（窗口只 hide 不销毁——重建 WebView 要一两秒，
+    // 复用后二次呼出即时）。重置鼠标穿透（上次录制可能置了 true）并通知前端清空状态
     if let Some(w) = app.get_webview_window(SELECT_LABEL) {
         let _ = w.set_ignore_cursor_events(false);
         let _ = w.show();
         let _ = w.set_focus();
+        let _ = app.emit("recorder://select-reset", ());
         return;
     }
     let Some((mx, my, mw, mh)) = cursor_pos().and_then(|(x, y)| monitor_at(app, x, y)) else {
@@ -148,88 +146,25 @@ pub fn on_select_destroyed<R: Runtime>(_app: &AppHandle<R>) {
 /// 杜绝"隐形选区窗滞留吃掉整屏输入"的互相卡死。
 pub fn dismiss_select_if_open<R: Runtime>(app: &AppHandle<R>) {
     if let Some(w) = app.get_webview_window(SELECT_LABEL) {
-        let _ = w.close();
+        let _ = w.set_ignore_cursor_events(false);
+        let _ = w.hide();
         PENDING.store(false, Ordering::SeqCst);
     }
 }
 
 pub fn on_bar_destroyed<R: Runtime>(app: &AppHandle<R>) {
     STOP.store(true, Ordering::SeqCst);
-    // 控制条关闭 = 录制结束，同时关掉选区窗边框
+    // 控制条关闭 = 录制结束，选区窗遮罩一并收掉（hide 复用）
     if let Some(w) = app.get_webview_window(SELECT_LABEL) {
-        let _ = w.close();
+        let _ = w.set_ignore_cursor_events(false);
+        let _ = w.hide();
     }
     PENDING.store(false, Ordering::SeqCst);
 }
 
-// ---------- 控制条 ----------
-
-const BAR_W: i32 = 312;
-const BAR_H: i32 = 36;
-
-/// 控制条物理尺寸 = CSS 设计尺寸 × 目标显示器缩放系数。
-/// 此前直接按物理常量 200×36 定窗口，高 DPI 缩放屏（150% 等）下 webview
-/// 视口只剩 ~133×24 CSS px，内容被裁剪——即"录制条样式错乱看不全"。
-fn bar_phys_size(scale: f64) -> (i32, i32) {
-    (
-        (BAR_W as f64 * scale).round() as i32,
-        (BAR_H as f64 * scale).round() as i32,
-    )
-}
-
-fn ensure_bar<R: Runtime>(app: &AppHandle<R>, mon: (i32, i32, i32, i32), _region: (i32, i32, i32, i32)) {
-    let (mx, my, mw, _mh) = mon;
-    // 以录制所在显示器的缩放系数换算物理尺寸（多显示器混合 DPI 场景各自正确）
-    let sc = app
-        .available_monitors()
-        .ok()
-        .and_then(|ms| {
-            ms.into_iter()
-                .find(|m| m.position().x == mx && m.position().y == my)
-                .map(|m| m.scale_factor())
-        })
-        .unwrap_or(1.0);
-    let (bw, bh) = bar_phys_size(sc);
-    // 控制条固定在显示器顶部居中（不随录制区域浮动，避免出现在屏幕中间）
-    let bx = mx + (mw - bw) / 2;
-    let by = my + 12;
-    if let Some(w) = app.get_webview_window(BAR_LABEL) {
-        let _ = w.set_size(tauri::PhysicalSize::new(bw.max(1) as u32, bh.max(1) as u32));
-        let _ = w.set_position(tauri::PhysicalPosition::new(bx, by));
-        let _ = w.show();
-        return;
-    }
-    let url = crate::frontend_url(app);
-    let app2 = app.clone();
-    crate::defer_to_main_loop(app.clone(), move || {
-        if app2.get_webview_window(BAR_LABEL).is_some() { return; }
-        if let Ok(win) = WebviewWindowBuilder::new(&app2, BAR_LABEL, url)
-            .title("录制控制")
-            .decorations(false)
-            .transparent(true)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .resizable(false)
-            .shadow(false)
-            .visible(false)
-            .focused(false)
-            .build()
-        {
-            let _ = win.set_position(tauri::PhysicalPosition::new(bx, by));
-            let _ = win.set_size(tauri::PhysicalSize::new(bw.max(1) as u32, bh.max(1) as u32));
-            crate::make_webview_transparent(&win);
-            // 控制条从屏幕采集中排除：即使区域调整后盖到它也不会被录进视频
-            #[cfg(windows)]
-            if let Some(h) = crate::screenshot::hwnd_of_webview(&win) {
-                crate::acrylic::exclude_from_capture(h);
-            }
-            // 真亚克力：SWCA 实时模糊 + 前端半透明底
-            #[cfg(windows)]
-            apply_select_blur(&win);
-            let _ = win.show();
-        }
-    });
-}
+// 注：录制中的顶部控制条（rec-bar）已按需求移除——录制画面保持干净。
+// 「停止」入口：再次触发录制的快捷键/托盘/工具栏（begin_select 对 ACTIVE 的处理），
+// 或遮罩窗仍持有焦点时按 Esc。BAR_LABEL 仍保留给 rec_dismiss 做兜底清理。
 
 // ---------- 保存路径 ----------
 
@@ -354,6 +289,11 @@ fn run<R: Runtime + 'static>(
             .map(|m| m.len())
             .unwrap_or(0);
         ACTIVE.store(false, Ordering::SeqCst);
+        // 收掉选区窗的遮罩模式：hide（不销毁，下次呼出复用）并恢复鼠标事件
+        if let Some(w) = app.get_webview_window(SELECT_LABEL) {
+            let _ = w.set_ignore_cursor_events(false);
+            let _ = w.hide();
+        }
         let _ = app.emit(EVT_DONE, Done { ok, path, duration_ms: dur, frames, bytes, error: err, canceled });
     };
 
@@ -649,8 +589,11 @@ pub fn rec_begin(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn rec_select_cancel(app: AppHandle) -> Result<(), String> {
+    // hide 而非 close：选区窗复用（重建 WebView 需一两秒），前端状态由
+    // begin_select 复用分支广播的 select-reset 事件清空
     if let Some(w) = app.get_webview_window(SELECT_LABEL) {
-        let _ = w.close();
+        let _ = w.set_ignore_cursor_events(false);
+        let _ = w.hide();
     }
     PENDING.store(false, Ordering::SeqCst);
     Ok(())
@@ -716,11 +659,12 @@ pub fn recorder_start(
     let rw = w.min(mw);
     let rh = h.min(mh);
 
-    // 选区窗使命完成：录制区域指示交给原生边框环（recframe.rs，Win32 直绘，
-    // 不受透明 webview 渲染影响），选区窗整窗关闭最干净
+    // 选区窗不销毁，转入【遮罩模式】：黑色遮罩镂空录制区（视觉与选区阶段一致），
+    // 鼠标穿透（set_ignore_cursor_events）不挡用户操作桌面；录制区域描边由
+    // 原生边框环负责。录制结束由 run() 的 finish 统一 hide（窗口复用，二次呼出零等待）
     PENDING.store(false, Ordering::SeqCst);
-    let _ = window.close();
-    ensure_bar(&app, mon, (rx, ry, rw, rh));
+    let _ = window.set_ignore_cursor_events(true);
+    let _ = app.emit("recorder://mask", ());
 
     let app2 = app.clone();
     std::thread::spawn(move || run(app2, mon, rx, ry, rw, rh, opts));
@@ -790,7 +734,8 @@ pub fn rec_dismiss(app: AppHandle) -> Result<(), String> {
         let _ = w.close();
     }
     if let Some(w) = app.get_webview_window(SELECT_LABEL) {
-        let _ = w.close();
+        let _ = w.set_ignore_cursor_events(false);
+        let _ = w.hide();
     }
     PENDING.store(false, Ordering::SeqCst);
     Ok(())

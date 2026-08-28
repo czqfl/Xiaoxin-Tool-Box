@@ -24,10 +24,11 @@
 }
 .rec-shade-full { inset: 0; }
 
-/* ---- 选区边框：品牌色细描边 + 四角 L 形加粗角标 ---- */
+/* ---- 选区边框：虚线 + 四角实线角标，与录制中的原生边框环（recframe.rs，
+   6px 实 / 4px 空密集虚线）保持同一视觉语言 ---- */
 .rec-frame {
   position: absolute;
-  border: 1.5px solid rgba(var(--accent-rgb), 0.75);
+  border: 1.5px dashed rgba(var(--accent-rgb), 0.85);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
   pointer-events: none;
 }
@@ -36,7 +37,6 @@
   width: 14px;
   height: 14px;
   border: 2.5px solid rgba(var(--accent-rgb), 1);
-  filter: drop-shadow(0 0 4px rgba(var(--accent-rgb), 0.55));
 }
 .rec-corner.tl { top: -2px; left: -2px; border-right: none; border-bottom: none; border-top-left-radius: 4px; }
 .rec-corner.tr { top: -2px; right: -2px; border-left: none; border-bottom: none; border-top-right-radius: 4px; }
@@ -248,11 +248,11 @@
   transform: scale(0.96);
 }
 
-/* 格式按钮：未选中=中性玻璃，选中=品牌色实底，当前格式一眼可辨 */
+/* 格式按钮：纯文字、更轻的内边距与底色（图标已去掉，避免臃肿） */
 .rec-quick-row .rec-fmt-btn {
-  padding: 6px 11px;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.72);
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.68);
 }
 .rec-quick-row .rec-fmt-btn:hover:not(.active) {
   background: rgba(255, 255, 255, 0.13);
@@ -276,19 +276,30 @@
   flex-shrink: 0;
 }
 
-/* 开始录制：品牌色渐变，整行唯一的强调色 */
+/* 开始录制：红色圆形录制点（纯图标），整行唯一的动作按钮，一眼可点 */
 .rec-quick-row .rec-start {
-  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.95), rgba(var(--accent-rgb), 0.82));
-  border-color: transparent;
-  color: var(--accent-text);
-  font-weight: 600;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25),
-    0 1px 6px rgba(var(--accent-rgb), 0.4);
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--danger) 96%, transparent),
+    color-mix(in srgb, var(--danger) 82%, black)
+  );
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 2px 8px color-mix(in srgb, var(--danger) 40%, transparent);
 }
 .rec-quick-row .rec-start:hover {
-  background: linear-gradient(180deg, rgba(var(--accent-rgb), 1), rgba(var(--accent-rgb), 0.9));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3),
-    0 2px 10px rgba(var(--accent-rgb), 0.5);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--danger) 100%, transparent),
+    color-mix(in srgb, var(--danger) 92%, black)
+  );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.32),
+    0 3px 12px color-mix(in srgb, var(--danger) 55%, transparent);
 }
 
 /* ==========================================================================

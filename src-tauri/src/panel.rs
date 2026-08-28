@@ -397,6 +397,25 @@ pub fn show_toolbar_initial<R: Runtime>(app: &AppHandle<R>) {
     if !restore_toolbar_position(app, &window) {
         position_toolbar_bottom_right(app, &window);
     }
+    // 【彻底禁用 DWM 阴影/非客户区渲染】conf 里的 shadow:false 在无边框窗口上
+    // 并不总是干净（贴边收起用 SetWindowRgn 裁剪窗口，收起/弹出的往返会让系统
+    // 阴影行为飘忽）。用户要求工具栏干脆利落无阴影，在 DWM 层直接关掉作双保险。
+    #[cfg(windows)]
+    if let Some(hwnd) = hwnd_of(&window) {
+        use windows::Win32::Graphics::Dwm::{
+            DwmSetWindowAttribute, DWMWA_NCRENDERING_POLICY, DWMNCRENDERINGPOLICY,
+        };
+        unsafe {
+            // DWMNCRP_DISABLED = 1：禁用非客户区渲染，阴影随之消失
+            let policy = DWMNCRENDERINGPOLICY(1);
+            let _ = DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_NCRENDERING_POLICY,
+                &policy as *const DWMNCRENDERINGPOLICY as *const core::ffi::c_void,
+                std::mem::size_of::<DWMNCRENDERINGPOLICY>() as u32,
+            );
+        }
+    }
     let _ = window.show();
 }
 
