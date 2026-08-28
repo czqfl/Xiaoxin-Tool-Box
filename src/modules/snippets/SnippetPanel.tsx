@@ -28,6 +28,10 @@ import {
   IconText,
   IconTrash,
 } from "../../components/icons";
+import { Modal } from "../../components/Modal";
+import { EmptyState } from "../../components/EmptyState";
+import { Spinner } from "../../components/Spinner";
+import { useEscLayer } from "../../hooks/useEscLayered";
 import "../../styles/panel.css";
 import "./snippets.css";
 
@@ -47,6 +51,8 @@ export function SnippetPanel() {
   const updateConfig = useConfigStore((s) => s.update);
   // 置顶开启时面板常驻：失焦不再自动隐藏
   usePanelCommon(config.snippets.always_on_top);
+  // Esc 关闭面板；编辑模态打开时由模态层优先响应
+  useEscLayer(true, hideCurrentWindow);
 
   const [items, setItems] = useState<Snippet[]>([]);
   const [keyword, setKeyword] = useState("");
@@ -206,23 +212,6 @@ export function SnippetPanel() {
     }
   };
 
-  // 全局键盘：Esc 关闭（先关模态）/ Enter 保存模态
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        if (edit) closeEdit();
-        else hideCurrentWindow();
-      } else if (e.key === "Enter" && edit && !e.shiftKey) {
-        e.preventDefault();
-        void saveEdit();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [edit, saving]);
-
   return (
     <div className="panel">
       <div
@@ -286,22 +275,22 @@ export function SnippetPanel() {
         )}
 
         <div className="panel-body">
-          {error && <div className="snip-empty snip-error">{error}</div>}
+          {error && <div className="snip-error">{error}</div>}
           {!loading && !error && items.length === 0 && (
-            <div className="snip-empty">
-              <span className="snip-empty-icon">
-                <IconSnippet size={28} />
-              </span>
-              <span>还没有语速贴</span>
-              <button className="btn btn-primary btn-sm" onClick={() => openEdit()}>
-                新建第一条
-              </button>
-            </div>
+            <EmptyState
+              icon={<IconSnippet size={28} />}
+              title="还没有语速贴"
+              action={
+                <button className="btn btn-primary btn-sm" onClick={() => openEdit()}>
+                  新建第一条
+                </button>
+              }
+            />
           )}
           {!loading && !error && items.length > 0 && visible.length === 0 && (
-            <div className="snip-empty">没有匹配的语速贴</div>
+            <EmptyState title="没有匹配的语速贴" />
           )}
-          {loading && <div className="snip-empty">加载中…</div>}
+          {loading && <EmptyState icon={<Spinner size="lg" />} title="加载中…" />}
           {visible.map((sn) => (
             <div
               className="snip-item"
@@ -363,24 +352,41 @@ export function SnippetPanel() {
         </div>
       </div>
 
-      {/* 新增/编辑模态 */}
+      {/* 新增/编辑模态（共享 Modal：Esc 层叠关闭，Enter 保存仅模态内生效） */}
       {edit && (
-        <div
-          className="snip-modal-mask"
-          onMouseDown={(e) => {
-            if (e.target === e.currentTarget) closeEdit();
-          }}
+        <Modal
+          open
+          onClose={closeEdit}
+          title={edit.id === null ? "新建语速贴" : "编辑语速贴"}
+          wide
+          actions={
+            <>
+              <button className="btn" disabled={saving} onClick={closeEdit}>
+                取消
+              </button>
+              <button className="btn btn-primary" disabled={saving} onClick={() => void saveEdit()}>
+                {saving ? "保存中…" : "保存"}
+              </button>
+            </>
+          }
         >
-          <div className="snip-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="snip-modal-title">
-              {edit.id === null ? "新建语速贴" : "编辑语速贴"}
-            </div>
+          {/* Enter 保存仅响应模态内部按键（焦点在搜索框等外部时不触发）；
+              Shift+Enter 保留换行语义（内容区为多行文本） */}
+          <div
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void saveEdit();
+              }
+            }}
+          >
             <label className="snip-field">
               <span>标题</span>
               <input
                 ref={titleRef}
                 value={edit.title}
                 placeholder="如：今日日报、常用问候"
+                autoFocus
                 onChange={(e) => setEdit({ ...edit, title: e.target.value })}
               />
             </label>
@@ -401,16 +407,8 @@ export function SnippetPanel() {
                 onChange={(e) => setEdit({ ...edit, content: e.target.value })}
               />
             </label>
-            <div className="snip-modal-actions">
-              <button className="btn btn-ghost" disabled={saving} onClick={closeEdit}>
-                取消
-              </button>
-              <button className="btn btn-primary" disabled={saving} onClick={() => void saveEdit()}>
-                {saving ? "保存中…" : "保存"}
-              </button>
-            </div>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

@@ -8,6 +8,7 @@ import { copyText, closeTranslatePopup, diagLog, lastTranslateResult, translateT
 import { useConfigStore } from "../../stores/configStore";
 import { IconCheck, IconClose, IconCopy, IconPin } from "../../components/icons";
 import { GlassSelect } from "../../components/GlassSelect";
+import { useEscLayer } from "../../hooks/useEscLayered";
 import { LANG_OPTIONS } from "./langs";
 import "../../styles/panel.css";
 import "./translate.css";
@@ -39,6 +40,17 @@ export function TranslatePopup() {
   const [statusType, setStatusType] = useState<"ok" | "err">("ok");
   const [loading, setLoading] = useState(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const dstRef = useRef<HTMLTextAreaElement>(null);
+  // 渐进式 Esc：焦点在原文/译文输入框时，第一次 Esc 仅退出编辑（内容保留），
+  // 再按一次才关闭弹窗——避免编辑到一半误按 Esc 直接丢失内容
+  useEscLayer(true, () => {
+    const ae = document.activeElement;
+    if (ae === inputRef.current || ae === dstRef.current) {
+      (ae as HTMLElement).blur();
+      return;
+    }
+    closePopup();
+  });
   /** loading 镜像（供事件回调读取最新值，避免闭包捕获旧值） */
   const loadingRef = useRef(true);
   /** 拖动区按下守卫：点击/拖动 data-tauri-drag-region 头部会触发原生窗口拖动，
@@ -60,12 +72,21 @@ export function TranslatePopup() {
     });
   };
 
-  /** 底部临时提示，2s 后自动清除；type 决定样式（ok=成功绿 / err=失败红） */
+  /** 底部临时提示，2s 后自动清除；type 决定样式（ok=成功绿 / err=失败红）。
+   *  持有计时引用：连续提示重置计时，卸载时清理（防卸载后 setState） */
+  const statusTimerRef = useRef<number | null>(null);
   const flashStatus = (msg: string, type: "ok" | "err" = "ok") => {
     setStatusType(type);
     setStatusMsg(msg);
-    window.setTimeout(() => setStatusMsg(""), 2000);
+    if (statusTimerRef.current != null) window.clearTimeout(statusTimerRef.current);
+    statusTimerRef.current = window.setTimeout(() => setStatusMsg(""), 2000);
   };
+  useEffect(
+    () => () => {
+      if (statusTimerRef.current != null) window.clearTimeout(statusTimerRef.current);
+    },
+    []
+  );
 
   // 划词触发的结果：填充原文与译文（保留用户已选的源/目标语言，仅更新内容）
   const applyResult = (r: TranslateResult) => {
@@ -195,15 +216,6 @@ export function TranslatePopup() {
     };
     document.addEventListener("mouseup", onDocMouseUp);
     cleanup.push(() => document.removeEventListener("mouseup", onDocMouseUp));
-    // Esc 关闭（窗口有焦点后生效）
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        closePopup();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    cleanup.push(() => window.removeEventListener("keydown", onKey));
     return () => {
       disposed = true;
       cleanup.forEach((fn) => fn());
@@ -405,6 +417,7 @@ export function TranslatePopup() {
             </div>
           ) : (
             <textarea
+              ref={dstRef}
               className="translate-dst-input"
               value={dst}
               placeholder="译文，可编辑…（Enter 反向翻译）"

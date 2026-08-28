@@ -21,6 +21,7 @@ import {
 import { shouldTranslate, type TranslationState } from "./tools";
 import type { PaletteItem } from "./types";
 import { IconSearch } from "../../components/icons";
+import { useEscLayer } from "../../hooks/useEscLayered";
 import "../../styles/panel.css";
 import "./palette.css";
 
@@ -34,6 +35,7 @@ export function CommandPalette() {
   const config = useConfigStore((s) => s.config);
   // 失焦自动隐藏（与各面板一致；Esc 亦关）
   usePanelCommon(false);
+  useEscLayer(true, hideCurrentWindow);
 
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<PaletteItem[]>([]);
@@ -45,6 +47,9 @@ export function CommandPalette() {
   const [appsReady, setAppsReady] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  /** 键盘导航后短暂屏蔽鼠标悬停抢焦点：光标停在列表上时用 ↑↓ 选条目，
+   *  onMouseEnter 不应把 active 抢回鼠标位置（Raycast/VS Code 同款处理） */
+  const kbNavUntilRef = useRef(0);
 
   // 数据失效订阅 + 应用列表后台预热
   useEffect(() => {
@@ -167,19 +172,18 @@ export function CommandPalette() {
     }
   }, []);
 
-  // 全局键盘：↑↓ 移动 / Enter 执行 / Ctrl+Enter 仅复制 / Esc 关闭
+  // 全局键盘：↑↓ 移动 / Enter 执行 / Ctrl+Enter 仅复制（Esc 由 useEscLayer 接管）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // 输入法组合期间（选词、按 Enter 确认候选词）不劫持按键，否则会误执行当前条目
       if (e.isComposing || e.keyCode === 229) return;
-      if (e.key === "Escape") {
+      if (e.key === "ArrowDown") {
         e.preventDefault();
-        hideCurrentWindow();
-      } else if (e.key === "ArrowDown") {
-        e.preventDefault();
+        kbNavUntilRef.current = Date.now() + 200;
         setActive((i) => (items.length ? (i + 1) % items.length : 0));
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
+        kbNavUntilRef.current = Date.now() + 200;
         setActive((i) => (items.length ? (i - 1 + items.length) % items.length : 0));
       } else if (e.key === "Enter") {
         e.preventDefault();
@@ -237,7 +241,9 @@ export function CommandPalette() {
                   className={`palette-item${i === active ? " active" : ""}${
                     item.loading ? " loading" : ""
                   }`}
-                  onMouseEnter={() => setActive(i)}
+                  onMouseEnter={() => {
+                    if (Date.now() > kbNavUntilRef.current) setActive(i);
+                  }}
                   onClick={() => void run(item, false)}
                 >
                   <span className="palette-item-icon">

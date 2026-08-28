@@ -123,75 +123,25 @@
   color: var(--danger) !important;
 }
 
-/* 空状态 / 错误提示 */
-.snip-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding: 48px 16px;
-  color: var(--text-tertiary);
-  font-size: var(--font-sm);
-  text-align: center;
-}
-.snip-empty-icon {
-  color: var(--text-tertiary);
-  opacity: 0.6;
-}
+/* 错误提示条 */
 .snip-error {
+  margin: 8px 2px;
+  padding: 8px 12px;
+  border-radius: 9px;
+  background: var(--danger-soft);
   color: var(--danger);
   font-size: var(--font-sm);
 }
 
-/* 新增/编辑模态：居中浮层，遮罩点击关闭 */
-.snip-modal-mask {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.32);
-  z-index: 50;
-  animation: snip-fade var(--dur-base) var(--ease-out);
-}
-@keyframes snip-fade {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-.snip-modal {
-  width: min(400px, calc(100vw - 48px));
-  padding: 18px;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border-strong);
-  background: var(--bg-elevated);
-  box-shadow: var(--shadow-menu);
-  animation: snip-pop var(--dur-base) var(--ease-out);
-}
-@keyframes snip-pop {
-  from {
-    opacity: 0;
-    transform: translateY(6px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-.snip-modal-title {
-  margin-bottom: 14px;
-  font-size: var(--font-base);
-  font-weight: 700;
-  color: var(--text-primary);
-}
+/* 新增/编辑表单（外壳由共享 Modal 提供） */
 .snip-field {
   display: flex;
   flex-direction: column;
   gap: 6px;
   margin-bottom: 12px;
+}
+.snip-field:last-child {
+  margin-bottom: 0;
 }
 .snip-field > span {
   font-size: var(--font-xs);
@@ -203,7 +153,7 @@
   padding: 8px 10px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-subtle);
-  background: var(--bg-input-glass);
+  background: var(--bg-input);
   color: var(--text-primary);
   font-size: var(--font-sm);
   resize: vertical;
@@ -219,10 +169,4 @@
 .snip-field textarea {
   font-family: var(--font-mono);
   line-height: 1.5;
-}
-.snip-modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 4px;
 }
