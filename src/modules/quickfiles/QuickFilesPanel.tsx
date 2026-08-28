@@ -39,6 +39,12 @@ import {
   IconSortTime,
   IconTrash,
 } from "../../components/icons";
+import { Modal } from "../../components/Modal";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { EmptyState } from "../../components/EmptyState";
+import { Spinner } from "../../components/Spinner";
+import { ToastProvider, useToast } from "../../components/Toast";
+import { useEscLayer } from "../../hooks/useEscLayered";
 import "../../styles/panel.css";
 import "./quickfiles.css";
 
@@ -135,9 +141,20 @@ function FileItem({
 }
 
 export function QuickFilesPanel() {
+  return (
+    <ToastProvider>
+      <QuickFilesPanelInner />
+    </ToastProvider>
+  );
+}
+
+function QuickFilesPanelInner() {
   const config = useConfigStore((s) => s.config);
   const updateConfig = useConfigStore((s) => s.update);
+  const toast = useToast();
   usePanelCommon(config.files.always_on_top);
+  // Esc 关闭面板；新建/删除弹窗打开时由各自的模态层优先响应
+  useEscLayer(true, hideCurrentWindow);
 
   const [files, setFiles] = useState<QuickFile[]>([]);
   const [location, setLocation] = useState("");
@@ -150,7 +167,7 @@ export function QuickFilesPanel() {
   const [newOpen, setNewOpen] = useState(false);
   const [creatingType, setCreatingType] = useState<FileTypeDef | null>(null);
   const [newName, setNewName] = useState("");
-  const [feedback, setFeedback] = useState("");
+  const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<QuickFile | null>(null);
   const newInputRef = useRef<HTMLInputElement>(null);
@@ -198,18 +215,8 @@ export function QuickFilesPanel() {
     setPanelAlwaysOnTop(alwaysOnTop).catch(console.error);
   }, [alwaysOnTop]);
 
-  // Esc 隐藏（与其它面板完全一致：不做任何弹窗拦截，Esc 必达 hideCurrentWindow）
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") hideCurrentWindow();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
   // 面板再次显示时重置弹窗状态：若上次关闭时新建/删除弹窗仍开着，状态会残留，
-  // 再次打开时弹窗遮罩（inset:0, z-index 50）会挡住头部按钮并吞掉 Esc——
-  // 表现为"关闭按钮不生效"。显示时统一清空，保证头部始终可交互。
+  // 再次打开时弹窗会挡住头部按钮——显示时统一清空，保证头部始终可交互。
   useEffect(() => {
     let cleanup: (() => void) | undefined;
     let disposed = false;
@@ -294,7 +301,7 @@ export function QuickFilesPanel() {
   }, [files, group, sort, fileTypes]);
 
   const doCreate = async () => {
-    if (!creatingType) return;
+    if (!creatingType || creating) return;
     const raw = newName.trim();
     if (!raw) {
       setError("请输入文件名");
@@ -304,17 +311,24 @@ export function QuickFilesPanel() {
     const base = raw.replace(/\.[^.]+$/, "");
     const filename = `${base}.${creatingType.ext}`;
     setError("");
+    setCreating(true);
     try {
       const path = await quickfilesCreate(config.files.location ?? "", filename);
-      setFeedback(`已创建 ${filename}`);
       setCreatingType(null);
       setNewName("");
       setNewOpen(false);
+      toast.show(`已创建 ${filename}`, "success");
       await load();
-      // 创建后用该类型的默认打开方式打开
-      await quickfilesOpen(path, creatingType.opener);
+      // 创建后用该类型的默认打开方式打开（打开失败单独提示，不吞掉创建成功）
+      try {
+        await quickfilesOpen(path, creatingType.opener);
+      } catch (e) {
+        toast.show(`打开失败：${String(e)}`, "error");
+      }
     } catch (e) {
       setError(String(e));
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -331,11 +345,10 @@ export function QuickFilesPanel() {
     if (!deleteTarget) return;
     try {
       await quickfilesDelete(deleteTarget.path);
-      setFeedback(`已删除 ${deleteTarget.name}`);
-      setDeleteTarget(null);
+      toast.show(`已删除 ${deleteTarget.name}`, "success");
       await load();
     } catch (e) {
-      setError(String(e));
+      toast.show(String(e), "error");
     }
   };
 
@@ -515,20 +528,23 @@ export function QuickFilesPanel() {
 
         {/* 列表 */}
         <div className="panel-body qf-body">
-          {feedback && <div className="qf-feedback">{feedback}</div>}
           {error && <div className="qf-error">{error}</div>}
-          {loading && <div className="qf-empty">正在读取文件…</div>}
+          {loading && (
+            <EmptyState icon={<Spinner size="lg" />} title="正在读取文件…" />
+          )}
           {!loading && files.length === 0 && !error && (
-            <div className="qf-empty">
-              <span className="empty-icon">📄</span>
-              <span>该位置暂无已配置文件类型的文件，点「新建」创建一个吧</span>
-              <button
-                className="btn btn-primary btn-sm qf-empty-btn"
-                onClick={() => setNewOpen((v) => !v)}
-              >
-                <IconPlus size={13} /> 新建文件
-              </button>
-            </div>
+            <EmptyState
+              icon="📄"
+              title="该位置暂无已配置文件类型的文件"
+              action={
+                <button
+                  className="btn btn-primary btn-sm qf-empty-btn"
+                  onClick={() => setNewOpen((v) => !v)}
+                >
+                  <IconPlus size={13} /> 新建文件
+                </button>
+              }
+            />
           )}
           {!loading &&
             (layout === "horizontal" && group !== "none" ? (
@@ -608,40 +624,27 @@ export function QuickFilesPanel() {
         </div>
       </div>
 
-      {/* 新建：文件名输入弹窗 */}
+      {/* 新建：文件名输入弹窗（共享 Modal，Esc 层叠关闭） */}
       {creatingType && (
-        <div className="qf-modal-mask" onMouseDown={(e) => {
-          if (e.target === e.currentTarget) {
-            setCreatingType(null);
-            setNewName("");
-          }
-        }}>
-          <div className="qf-modal" onMouseDown={(e) => e.stopPropagation()}>
-            <div className="qf-modal-title">
+        <Modal
+          open
+          onClose={() => {
+            if (!creating) {
+              setCreatingType(null);
+              setNewName("");
+            }
+          }}
+          title={
+            <>
               <span className="qf-type-dot" style={{ background: creatingType.color }} />
               新建{creatingType.label}文件
-            </div>
-            <div className="qf-modal-sub">
-              将保存到：<span className="qf-modal-loc">
-                {location || "默认位置"}
-                {creatingType ? `\\${creatingType.ext}` : ""}
-              </span>
-            </div>
-            <input
-              ref={newInputRef}
-              className="qf-modal-input"
-              placeholder={`文件名（不含扩展名），如 note`}
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void doCreate();
-              }}
-            />
-            <div className="qf-modal-hint">保存为：{newName.trim().replace(/\.[^.]+$/, "")}.{creatingType.ext}</div>
-            {error && <div className="qf-error">{error}</div>}
-            <div className="qf-modal-actions">
+            </>
+          }
+          actions={
+            <>
               <button
-                className="btn btn-ghost"
+                className="btn"
+                disabled={creating}
                 onClick={() => {
                   setCreatingType(null);
                   setNewName("");
@@ -649,34 +652,59 @@ export function QuickFilesPanel() {
               >
                 取消
               </button>
-              <button className="btn btn-primary" onClick={() => void doCreate()}>
+              <button
+                className="btn btn-primary"
+                disabled={creating}
+                onClick={() => void doCreate()}
+              >
+                {creating && <Spinner size="sm" />}
                 创建并打开
               </button>
-            </div>
+            </>
+          }
+        >
+          <div className="qf-modal-sub">
+            将保存到：<span className="qf-modal-loc">
+              {location || "默认位置"}
+              {creatingType ? `\\${creatingType.ext}` : ""}
+            </span>
           </div>
-        </div>
+          <input
+            ref={newInputRef}
+            className="qf-modal-input"
+            placeholder="文件名（不含扩展名），如 note"
+            value={newName}
+            autoFocus
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void doCreate();
+              }
+            }}
+          />
+          <div className="qf-modal-hint">
+            保存为：{newName.trim().replace(/\.[^.]+$/, "")}.{creatingType.ext}
+          </div>
+          {error && <div className="qf-error">{error}</div>}
+        </Modal>
       )}
 
-      {/* 删除确认 */}
-      {deleteTarget && (
-        <div className="qf-modal-mask" onMouseDown={(e) => {
-          if (e.target === e.currentTarget) setDeleteTarget(null);
-        }}>
-          <div className="qf-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="qf-modal-title">确认删除文件？</div>
-            <div className="qf-modal-sub">{deleteTarget.name}</div>
+      {/* 删除确认（共享 ConfirmDialog） */}
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={doDelete}
+        title="确认删除文件？"
+        message={
+          <>
+            <div className="qf-modal-sub">{deleteTarget?.name}</div>
             <div className="qf-modal-warn">文件将被永久删除，无法撤销。</div>
-            <div className="qf-modal-actions">
-              <button className="btn btn-ghost" onClick={() => setDeleteTarget(null)}>
-                取消
-              </button>
-              <button className="btn btn-danger" onClick={() => void doDelete()}>
-                确认删除
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          </>
+        }
+        danger
+        confirmLabel="确认删除"
+      />
     </div>
   );
 }
