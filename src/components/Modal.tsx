@@ -33,9 +33,11 @@ export function Modal({
   useEscLayer(open, onClose);
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  // 打开时聚焦弹窗本体（可接收键盘事件），关闭时不做事
+  // 打开时聚焦：内部已有 autoFocus 元素拿到焦点则不抢，否则聚焦对话框本体
   useEffect(() => {
-    if (open) dialogRef.current?.focus();
+    const d = dialogRef.current;
+    if (!d || !open) return;
+    if (!d.contains(document.activeElement)) d.focus();
   }, [open]);
 
   // Tab 焦点圈定：循环在弹窗内部可聚焦元素之间
