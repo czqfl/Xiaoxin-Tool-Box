@@ -30,6 +30,11 @@ import {
   IconTree,
 } from "../../components/icons";
 import { FOLDER_COLORS } from "./colors";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { EmptyState } from "../../components/EmptyState";
+import { Spinner } from "../../components/Spinner";
+import { ToastProvider, useToast } from "../../components/Toast";
+import { useEscLayer } from "../../hooks/useEscLayered";
 import "../../styles/panel.css";
 import "./folder.css";
 
@@ -129,12 +134,23 @@ function ZonePager({
 }
 
 export function FolderPanel() {
+  return (
+    <ToastProvider>
+      <FolderPanelInner />
+    </ToastProvider>
+  );
+}
+
+function FolderPanelInner() {
   const { folders, loaded, refresh, add, remove, togglePin, moveToTop, reorder, setColor } =
     useFolderStore();
   const config = useConfigStore((s) => s.config);
   const updateConfig = useConfigStore((s) => s.update);
+  const toast = useToast();
   // 置顶开启时面板常驻：失焦不再自动隐藏
   usePanelCommon(config.folder.always_on_top);
+  // Esc 层叠：Git 结果浮层/右键菜单打开时优先关闭它们，否则关闭面板
+  useEscLayer(true, hideCurrentWindow);
 
   const [query, setQuery] = useState("");
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -154,6 +170,10 @@ export function FolderPanel() {
     results: GitRunResult[];
     running: boolean;
   } | null>(null);
+  /** 待删除确认的文件夹（null = 无确认弹窗） */
+  const [deleteTarget, setDeleteTarget] = useState<FolderEntry | null>(null);
+  // Git 结果浮层打开时，Esc 优先关闭浮层而非面板（后激活的层在上）
+  useEscLayer(gitRun !== null, () => setGitRun(null));
 
   // 列表变化时批量读取 Git 分支（读 .git/HEAD，毫秒级）
   useEffect(() => {
@@ -209,7 +229,7 @@ export function FolderPanel() {
           setExternalDrag(false);
           for (const path of p.paths) {
             void add(path).then((err) => {
-              if (err) window.alert(err);
+              if (err) toast.show(err, "error");
             });
           }
         }
@@ -230,15 +250,6 @@ export function FolderPanel() {
   useEffect(() => {
     api.setPanelAlwaysOnTop(alwaysOnTop).catch(console.error);
   }, [alwaysOnTop]);
-
-  // Esc 隐藏
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") hideCurrentWindow();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -275,12 +286,12 @@ export function FolderPanel() {
   );
 
   const openFolderItem = async (folder: FolderEntry) => {
-    hideCurrentWindow();
-    // 访问计数由后端在打开时统一记录
+    // 访问计数由后端在打开时统一记录；成功后再收起面板，失败时保持可见可提示
     try {
       await api.openFolder(folder.path);
+      hideCurrentWindow();
     } catch (err) {
-      window.alert(String(err));
+      toast.show(String(err), "error");
     }
   };
 
@@ -290,9 +301,9 @@ export function FolderPanel() {
       const path = await withNativeDialog(() => api.pickFolder());
       if (!path) return;
       const err = await add(path);
-      if (err) window.alert(err);
+      if (err) toast.show(err, "error");
     } catch (err) {
-      window.alert(String(err));
+      toast.show(String(err), "error");
     }
   };
 
@@ -332,8 +343,10 @@ export function FolderPanel() {
 
   /** 在指定终端中打开（wt / cmd / powershell） */
   const openInTerminal = (folder: FolderEntry, shell: "wt" | "cmd" | "powershell") => {
-    hideCurrentWindow();
-    api.openFolderInTerminalWith(folder.path, shell).catch((e) => window.alert(String(e)));
+    api
+      .openFolderInTerminalWith(folder.path, shell)
+      .then(() => hideCurrentWindow())
+      .catch((e) => toast.show(String(e), "error"));
   };
 
   /** 自动检测已安装的编辑器（毫秒级磁盘探测，菜单打开前刷新） */
@@ -347,21 +360,24 @@ export function FolderPanel() {
   /** 在指定编辑器中打开（code / qoder / qodercn / idea / webstorm）。
    *  VS Code 自动探测失败时引导用户手动选择 Code.exe，记住路径后自动重试一次。 */
   const openInEditor = async (folder: FolderEntry, editor: string) => {
-    hideCurrentWindow();
     try {
       await api.openFolderInEditor(folder.path, editor);
+      hideCurrentWindow();
     } catch (err) {
       const msg = String(err);
       if (editor === "code" && msg.includes("VSCodeNotFound")) {
         const exe = await withNativeDialog(() => api.pickVscodeExecutable());
         if (!exe) return;
         await api.setVscodePath(exe);
-        await api
-          .openFolderInEditor(folder.path, "code")
-          .catch((e2) => window.alert(String(e2)));
+        try {
+          await api.openFolderInEditor(folder.path, "code");
+          hideCurrentWindow();
+        } catch (e2) {
+          toast.show(String(e2), "error");
+        }
         return;
       }
-      window.alert(msg);
+      toast.show(msg, "error");
     }
   };
 
@@ -440,7 +456,7 @@ export function FolderPanel() {
       label: "复制路径",
       icon: <IconCopy size={14} />,
       onClick: () => {
-        api.copyFolderPath(folder.path).catch((e) => window.alert(String(e)));
+        api.copyFolderPath(folder.path).catch((e) => toast.show(String(e), "error"));
       },
     },
     {
@@ -474,7 +490,7 @@ export function FolderPanel() {
       label: "删除",
       icon: <IconTrash size={14} />,
       danger: true,
-      onClick: () => void remove(folder.id),
+      onClick: () => setDeleteTarget(folder),
     },
   ];
 
@@ -645,15 +661,16 @@ export function FolderPanel() {
         </div>
 
         <div className="panel-body">
-          {!loaded && <div className="empty-state">加载中…</div>}
+          {!loaded && <EmptyState icon={<Spinner size="lg" />} title="加载中…" />}
           {loaded && folders.length === 0 && (
-            <div className="empty-state">
-              <span className="empty-icon">📁</span>
-              <span>从资源管理器拖拽文件夹到此处，或点击右上角 + 添加</span>
-            </div>
+            <EmptyState
+              icon="📁"
+              title="从资源管理器拖拽文件夹到此处"
+              description="或点击右上角 + 添加"
+            />
           )}
           {loaded && folders.length > 0 && filtered.length === 0 && (
-            <div className="empty-state">没有匹配的文件夹</div>
+            <EmptyState title="没有匹配的文件夹" />
           )}
 
           {loaded && filtered.length > 0 && (
@@ -736,6 +753,19 @@ export function FolderPanel() {
           />
         )}
       </div>
+
+      {/* 删除二次确认（替代直接删除，防误触） */}
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={async () => {
+          if (deleteTarget) await remove(deleteTarget.id);
+        }}
+        title={`删除「${deleteTarget?.name ?? ""}」？`}
+        message="仅从面板移除，不会删除磁盘上的文件夹。"
+        danger
+        confirmLabel="删除"
+      />
     </div>
   );
 }

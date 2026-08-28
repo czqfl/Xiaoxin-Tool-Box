@@ -194,6 +194,13 @@ html[data-window="panel"] body {
   font-weight: 600;
 }
 
+/* 右键菜单的透明捕获遮罩：点击菜单外任意处关闭 */
+.context-menu-mask {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-context-menu) - 1);
+}
+
 /* 右键菜单 */
 .context-menu {
   position: fixed;

@@ -402,7 +402,7 @@
   color: var(--accent);
   font-size: 14px;
   pointer-events: none;
-  z-index: 10;
+  z-index: var(--z-sticky);
 }
 
 /* 右键菜单中的颜色选项色块 */
@@ -423,14 +423,14 @@
 
 /* ---- Git 命令执行结果浮层（面板内展示，逐条友好呈现） ---- */
 .git-run-overlay {
-  position: absolute;
+  position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: var(--z-modal-backdrop);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background: rgba(15, 23, 42, 0.32);
+  background: light-dark(rgba(22, 24, 28, 0.32), rgba(0, 0, 0, 0.55));
   border-radius: var(--radius-panel);
   animation: panel-in var(--dur-base) var(--ease-out);
 }

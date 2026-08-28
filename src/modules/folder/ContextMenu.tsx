@@ -1,5 +1,8 @@
-/** 通用右键菜单：fixed 定位 + 点击外部关闭 */
-import { useEffect, type ReactNode } from "react";
+/** 通用右键菜单：portal 到 body（逃逸父容器 overflow 裁切）+ 实测尺寸防溢出 +
+ *  Esc 层叠关闭（菜单打开时 Esc 只关菜单，不连带关闭面板） */
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { useEscLayer } from "../../hooks/useEscLayered";
 
 export interface MenuItem {
   label: string;
@@ -20,34 +23,34 @@ interface Props {
 }
 
 export function ContextMenu({ x, y, items, onClose }: Props) {
-  // 视口边界防溢出：菜单本体不超出右下角
-  const menuW = 180;
-  const menuH = items.length * 36 + 20;
-  const menuLeft = Math.min(x, window.innerWidth - menuW);
-  const menuTop = Math.min(y, window.innerHeight - menuH);
-  // 子菜单展开方向的估算：向右约 210px、向下约 300px；
-  // 空间不足时反向展开，避免子菜单伸出面板窗口被裁剪（悬停看不到内容）
-  const flipX = menuLeft + menuW + 210 > window.innerWidth;
-  const flipY = menuTop + menuH + 300 > window.innerHeight;
-  const style = {
-    left: menuLeft,
-    top: menuTop,
-  };
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ left: x, top: y });
+  const [flip, setFlip] = useState({ x: false, y: false });
+  useEscLayer(true, onClose);
+
+  // 视口边界防溢出：用实测宽高替代 items.length*36 估算（含子菜单/分割线时
+  // 估算不准会溢出视口底部）。useLayoutEffect 在绘制前执行，收拢无闪烁
+  useLayoutEffect(() => {
+    const menuW = menuRef.current?.offsetWidth ?? 180;
+    const menuH = menuRef.current?.offsetHeight ?? items.length * 36 + 20;
+    const left = Math.max(8, Math.min(x, window.innerWidth - menuW - 8));
+    const top = Math.max(8, Math.min(y, window.innerHeight - menuH - 8));
+    setPos({ left, top });
+    // 子菜单展开方向的估算：向右约 210px、向下约 300px；
+    // 空间不足时反向展开，避免子菜单伸出视口被裁剪（悬停看不到内容）
+    setFlip({
+      x: left + menuW + 210 > window.innerWidth,
+      y: top + menuH + 300 > window.innerHeight,
+    });
+  }, [x, y, items]);
+
   const cls = [
     "context-menu",
-    flipX ? "submenu-left" : "",
-    flipY ? "submenu-top" : "",
+    flip.x ? "submenu-left" : "",
+    flip.y ? "submenu-top" : "",
   ]
     .filter(Boolean)
     .join(" ");
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   const renderItem = (item: MenuItem) => {
     if (item.children?.length) {
@@ -88,11 +91,12 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
     );
   };
 
-  return (
+  return createPortal(
     <>
-      {/* 透明遮罩捕获外部点击；阻止冒泡：菜单可能挂在带 onClick 的条目内部 */}
+      {/* 透明遮罩捕获外部点击；阻止冒泡：菜单可能挂在带 onClick 的条目内部
+          （portal 后 React 合成事件仍沿虚拟树冒泡） */}
       <div
-        style={{ position: "fixed", inset: 0, zIndex: 999 }}
+        className="context-menu-mask"
         onClick={(e) => {
           e.stopPropagation();
           onClose();
@@ -103,8 +107,9 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
         }}
       />
       <div
+        ref={menuRef}
         className={cls}
-        style={style}
+        style={pos}
         onClick={(e) => e.stopPropagation()}
       >
         {items.map((item) => (
@@ -114,6 +119,7 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
           </div>
         ))}
       </div>
-    </>
+    </>,
+    document.body
   );
 }
