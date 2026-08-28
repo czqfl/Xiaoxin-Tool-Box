@@ -5,6 +5,7 @@ import type { ClipEntry } from "../../types";
 import { relativeTime } from "../../core/format";
 import { copyText } from "../../core/tauri";
 import { useClipboardStore } from "../../stores/clipboardStore";
+import { useToast } from "../../components/Toast";
 import { ContextMenu, type MenuItem } from "../folder/ContextMenu";
 import { detectActions, type TransformAction } from "./transform";
 import {
@@ -110,6 +111,7 @@ export function ClipboardItem({
 }: Props) {
   const { remove, toggleFavorite, togglePin, replaceText, updateText } =
     useClipboardStore();
+  const toast = useToast();
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   /** 顺序模式下按钮组精简：只保留队列操作 + 复制/删除 */
   const sequential = !!onMove;
@@ -118,6 +120,13 @@ export function ClipboardItem({
   /** 内联编辑状态：编辑框替换预览区，保存/取消退出 */
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  /** 删除两步确认：首次点击进入确认态（短暂窗口内再次点击才真删） */
+  const [confirmDel, setConfirmDel] = useState(false);
+  useEffect(() => {
+    if (!confirmDel) return;
+    const id = window.setTimeout(() => setConfirmDel(false), 2500);
+    return () => window.clearTimeout(id);
+  }, [confirmDel]);
   /** 仅文本类（普通文本/富文本/链接）可编辑 */
   const editable =
     entry.kind === "text" || entry.kind === "richtext" || entry.kind === "link";
@@ -125,7 +134,10 @@ export function ClipboardItem({
   /** 保存编辑内容（后端持久化，乐观更新） */
   const saveEdit = async () => {
     const t = draft.trim();
-    if (!t) return;
+    if (!t) {
+      toast.show("内容不能为空", "error");
+      return;
+    }
     setEditing(false);
     await updateText(entry.id, t);
   };
@@ -138,9 +150,9 @@ export function ClipboardItem({
       await copyText(result);
       replaceText(entry.id, result);
     } catch (err) {
-      // 转换失败静默降级（各检测函数自带容错，正常不会走到这里）；
       // 不用 alert：WebView2 透明置顶窗口弹原生对话框有崩溃风险
       console.error("智能转换失败", err);
+      toast.show(`转换失败：${String(err)}`, "error");
     }
   };
 
@@ -205,7 +217,7 @@ export function ClipboardItem({
 
       <div className="clip-main">
         {editing ? (
-          <div className="clip-edit-box" onClick={(e) => e.stopPropagation()}>
+          <div className="clip-edit-box" data-esc-local onClick={(e) => e.stopPropagation()}>
             <textarea
               className="clip-edit-input"
               value={draft}
@@ -327,11 +339,14 @@ export function ClipboardItem({
             <IconCopy size={14} />
           </button>
           <button
-            className="icon-btn icon-btn-danger"
-            title="删除"
-            onClick={() => remove(entry.id)}
+            className={`icon-btn icon-btn-danger${confirmDel ? " confirming" : ""}`}
+            title={confirmDel ? "再次点击确认删除" : "删除"}
+            onClick={() => {
+              if (confirmDel) remove(entry.id);
+              else setConfirmDel(true);
+            }}
           >
-            <IconTrash size={14} />
+            {confirmDel ? "确认?" : <IconTrash size={14} />}
           </button>
         </div>
       )}

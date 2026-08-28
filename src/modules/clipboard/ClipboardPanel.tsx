@@ -37,18 +37,36 @@ import {
   IconText,
   IconTrash,
 } from "../../components/icons";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { EmptyState } from "../../components/EmptyState";
+import { Spinner } from "../../components/Spinner";
+import { ToastProvider, useToast } from "../../components/Toast";
+import { useEscLayer } from "../../hooks/useEscLayered";
 import "../../styles/panel.css";
 import "./clipboard.css";
 
 export function ClipboardPanel() {
+  return (
+    <ToastProvider>
+      <ClipboardPanelInner />
+    </ToastProvider>
+  );
+}
+
+function ClipboardPanelInner() {
   const { entries, loaded, refresh, clearAll } = useClipboardStore();
   const config = useConfigStore((s) => s.config);
   const updateConfig = useConfigStore((s) => s.update);
+  const toast = useToast();
+  // Esc 关闭面板；右键菜单/清空确认打开时由各自的层优先响应
+  useEscLayer(true, hideCurrentWindow);
 
   const [query, setQuery] = useState("");
   const [selectedIdx, setSelectedIdx] = useState(0);
   /** 只看收藏过滤 */
   const [favOnly, setFavOnly] = useState(false);
+  /** 清空全部二次确认 */
+  const [confirmClear, setConfirmClear] = useState(false);
   /** 顺序模式手动新增粘贴数据：输入条展开时存目标条目 id（插入到它上方） */
   const [insertTargetId, setInsertTargetId] = useState<string | null>(null);
   const [insertText, setInsertText] = useState("");
@@ -171,6 +189,7 @@ export function ClipboardPanel() {
         await pasteEntry(entry.id);
       } catch (err) {
         console.error("粘贴失败：", err);
+        toast.show(`粘贴失败：${String(err)}`, "error");
       }
       // 顺序模式：消耗已粘贴条目（收藏项也会被消耗走，后端保留数据并标记
       // consumed 退出队列，普通模式仍可见）；下一条自动成为队首。
@@ -190,15 +209,16 @@ export function ClipboardPanel() {
     // 事件广播会触发 refresh，这里不再手动刷新
   };
 
-  // 全局键盘：Esc / 方向键导航 / Enter 粘贴
+  // 全局键盘：方向键导航 / Enter 粘贴（Esc 由 useEscLayer 层叠栈接管）。
+  // 输入框内按键规则：搜索框内方向键仅导航列表（阻止光标跳动）、Enter 粘贴；
+  // 其他输入框（插入条/编辑框，各自有本地 Enter/Esc 语义）一律不接管
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        hideCurrentWindow();
-        return;
-      }
+      const t = e.target as HTMLElement | null;
+      const inSearch = t === inputRef.current;
+      const inEditable = !!t?.closest?.("input, textarea");
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        if (inEditable && !inSearch) return;
         e.preventDefault();
         if (flat.length === 0) return;
         setSelectedIdx((i) => {
@@ -211,6 +231,7 @@ export function ClipboardPanel() {
         return;
       }
       if (e.key === "Enter") {
+        if (inEditable && !inSearch) return;
         e.preventDefault();
         // 顺序模式永远粘贴队首（下一条）
         const target = sequential ? queue[0] : flat[selectedIdx];
@@ -222,11 +243,7 @@ export function ClipboardPanel() {
     return () => window.removeEventListener("keydown", onKey);
   }, [flat, queue, sequential, selectedIdx, doPaste]);
 
-  const handleClear = () => {
-    if (window.confirm("确定清空全部剪贴板历史吗？（收藏项将保留）")) {
-      void clearAll();
-    }
-  };
+  const handleClear = () => setConfirmClear(true);
 
   /** 切换面板置顶（持久化到配置） */
   const toggleAlwaysOnTop = () => {
@@ -361,7 +378,7 @@ export function ClipboardPanel() {
   /** 手动新增粘贴数据的输入条：渲染在目标条目的正上方（见列表 map） */
   const insertBar =
     sequential && insertTargetId ? (
-      <div className="clip-insert-bar">
+      <div className="clip-insert-bar" data-esc-local>
         <input
           autoFocus
           value={insertText}
@@ -550,18 +567,25 @@ export function ClipboardPanel() {
             }
           }}
         >
-          {!loaded && <div className="empty-state">加载中…</div>}
+          {!loaded && <EmptyState icon={<Spinner size="lg" />} title="加载中…" />}
           {loaded && displayList.length === 0 && (
-            <div className="empty-state">
-              <span className="empty-icon">📋</span>
-              <span>
-                {query
+            <EmptyState
+              icon="📋"
+              title={
+                query
                   ? "没有匹配的记录"
                   : favOnly
-                    ? "暂无收藏记录，点击条目的星标可收藏"
-                    : "暂无剪贴板历史，复制内容后自动记录"}
-              </span>
-            </div>
+                    ? "暂无收藏记录"
+                    : "暂无剪贴板历史"
+              }
+              description={
+                query
+                  ? undefined
+                  : favOnly
+                    ? "点击条目的星标可收藏"
+                    : "复制内容后自动记录"
+              }
+            />
           )}
 
           {sequential ? (
@@ -670,7 +694,7 @@ export function ClipboardPanel() {
                   className="next-hint"
                   title={queue[0]?.text ?? queue[0]?.preview ?? ""}
                 >
-                  下一条：{(queue[0]?.preview ?? "无").slice(0, 16)}
+                  下一条：{(queue[0]?.preview ?? "无").slice(0, 32)}
                 </span>
                 <span className="kbd" style={{ marginLeft: 8 }}>Ctrl+V</span> 带出
                 <button
@@ -688,6 +712,19 @@ export function ClipboardPanel() {
           </span>
         </div>
       </div>
+
+      {/* 清空全部二次确认（替代 Tauri 透明窗口下不可靠的 window.confirm） */}
+      <ConfirmDialog
+        open={confirmClear}
+        onClose={() => setConfirmClear(false)}
+        onConfirm={async () => {
+          await clearAll();
+        }}
+        title="清空全部剪贴板历史？"
+        message="收藏项将保留，其余记录将被删除。"
+        danger
+        confirmLabel="清空"
+      />
     </div>
   );
 }

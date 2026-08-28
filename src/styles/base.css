@@ -263,6 +263,15 @@ button {
   color: var(--danger);
   background: var(--danger-soft);
 }
+/* 危险操作两步确认态：按钮变"确认?"红色胶囊，短暂窗口后自动还原 */
+.icon-btn.confirming {
+  width: auto;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--danger);
+  background: var(--danger-soft);
+}
 
 /* 输入框 */
 .text-input {

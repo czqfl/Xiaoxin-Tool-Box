@@ -15,6 +15,9 @@ let installed = false;
 
 function dispatch(e: KeyboardEvent) {
   if (e.key !== "Escape") return;
+  // 「本地 Esc 域」：元素自带 Esc 语义（如编辑框退出编辑）时标记
+  // data-esc-local，层叠栈不接管，避免连带关闭面板
+  if ((e.target as HTMLElement | null)?.closest?.("[data-esc-local]")) return;
   const top = layers[layers.length - 1];
   if (!top) return;
   e.preventDefault();
