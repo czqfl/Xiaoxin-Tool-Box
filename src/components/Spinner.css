@@ -1,0 +1,28 @@
+/* 统一 spinner：环形描边 + 品牌色弧段旋转 */
+
+.spinner {
+  display: inline-block;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  animation: spinner-rotate 0.7s linear infinite;
+  flex-shrink: 0;
+}
+.spinner-sm {
+  width: 14px;
+  height: 14px;
+}
+.spinner-md {
+  width: 20px;
+  height: 20px;
+}
+.spinner-lg {
+  width: 28px;
+  height: 28px;
+  border-width: 3px;
+}
+@keyframes spinner-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -1,0 +1,73 @@
+/* 统一模态：遮罩铺满视口（fixed），本体消费全局令牌。
+   层级消费 --z-modal-backdrop / --z-modal，禁止硬编码 */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal-backdrop);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: light-dark(rgba(22, 24, 28, 0.32), rgba(0, 0, 0, 0.55));
+  animation: modal-backdrop-in var(--dur-base) var(--ease-out);
+}
+@keyframes modal-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.modal {
+  width: min(400px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  padding: 18px;
+  gap: 12px;
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  box-shadow: var(--panel-highlight), var(--shadow-menu);
+  outline: none;
+  animation: modal-in var(--dur-base) var(--ease-out);
+}
+.modal-wide {
+  width: min(480px, calc(100vw - 32px));
+}
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.modal-title {
+  font-size: var(--font-title);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.modal-title.danger {
+  color: var(--danger);
+}
+
+.modal-body {
+  font-size: var(--font-base);
+  color: var(--text-secondary);
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+}

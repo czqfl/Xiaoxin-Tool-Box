@@ -355,3 +355,13 @@ button {
   border: 1px solid var(--border-subtle);
   box-shadow: var(--shadow-item);
 }
+.empty-state .empty-title {
+  font-size: var(--font-base);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.empty-state .empty-desc {
+  font-size: var(--font-sm);
+  color: var(--text-tertiary);
+  margin-top: -6px;
+}

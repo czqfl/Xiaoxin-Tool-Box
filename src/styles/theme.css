@@ -156,6 +156,15 @@
   /* 尺寸 */
   --header-height: 52px;
 
+  /* z-index 分层：所有浮层/遮罩必须消费令牌，禁止硬编码数字。
+     层级语义：内容 < 下拉 < 吸顶条 < 模态遮罩 < 模态 < 右键菜单 < Toast */
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-modal-backdrop: 500;
+  --z-modal: 600;
+  --z-context-menu: 700;
+  --z-toast: 800;
+
   /* 双侧可用：未设置 data-theme 时跟随系统；手动模式由下方规则强制单侧 */
   color-scheme: light dark;
 }
