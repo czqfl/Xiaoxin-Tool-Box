@@ -14,6 +14,8 @@ import { SnippetPanel } from "./modules/snippets/SnippetPanel";
 import { CommandPalette } from "./modules/palette/CommandPalette";
 import { TranslatePopup } from "./modules/translate/TranslatePopup";
 import { Toolbar } from "./modules/toolbar/Toolbar";
+import { ToolbarTip } from "./modules/toolbar/ToolbarTip";
+import { TIP_WINDOW } from "./modules/toolbar/tip";
 import { ScreenshotOverlay } from "./modules/screenshot/ScreenshotOverlay";
 import { PinWindow } from "./modules/pin/PinWindow";
 import PinMenu from "./modules/pin/PinMenu";
@@ -99,6 +101,9 @@ export default function App() {
   }
   if (label === "toolbar") {
     return <Toolbar />;
+  }
+  if (label === TIP_WINDOW) {
+    return <ToolbarTip />;
   }
   if (label.startsWith("shot-overlay")) {
     return <ScreenshotOverlay />;

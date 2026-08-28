@@ -538,6 +538,7 @@ fn run<R: Runtime + 'static>(
             .unwrap_or(10_000_000 / fps.max(1) as i64);
 
         let frame_written;
+        let mut write_err: Option<String> = None;
         match opts.fmt {
             RecFmt::Gif => {
                 let Some(enc) = gif_enc.as_mut() else { unreachable!() };
@@ -562,17 +563,30 @@ fn run<R: Runtime + 'static>(
             RecFmt::Mp4 => {
                 let Some(wr) = h264.as_mut() else { unreachable!() };
                 // 不缩放直接喂采集原始 BGRA；缩放走最近邻
-                if ow == rw as u32 && oh == rh as u32 {
-                    frame_written = wr.write_bgra(&f.bgra, gap_100ns).is_ok();
+                let r = if ow == rw as u32 && oh == rh as u32 {
+                    wr.write_bgra(&f.bgra, gap_100ns)
                 } else {
                     prepare_frame_bgra_into(&f.bgra, rw, rh, ow, oh, &mut bgra_buf);
-                    frame_written = wr.write_bgra(&bgra_buf, gap_100ns).is_ok();
+                    wr.write_bgra(&bgra_buf, gap_100ns)
+                };
+                match r {
+                    Ok(()) => frame_written = true,
+                    Err(e) => { write_err = Some(e); frame_written = false; }
                 }
             }
         }
-        if !frame_written { break; }
+        if !frame_written {
+            crate::storage::diag_write(&format!(
+                "[recorder] write frame FAILED after {frames} frames: {}",
+                write_err.unwrap_or_else(|| "未知错误".into())));
+            break;
+        }
         frames += 1;
         dur_ms += gap_ms as u64;
+        // 前几帧各记一条：一旦再崩溃，日志能明确停在「采集后」还是「编码后」
+        if frames <= 3 {
+            crate::storage::diag_write(&format!("[recorder] frame {frames} encoded"));
+        }
 
         let spent = tick_start.elapsed();
         let spent_ms = spent.as_millis() as u64;

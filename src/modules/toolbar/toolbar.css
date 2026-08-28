@@ -99,16 +99,14 @@
 .toolbar.edge-collapsed.edge-bottom {
   border-bottom: 8px solid var(--accent);
 }
+/* 呼吸只动亮轨【颜色】，不再用 box-shadow 柔光——外发光/投影会让边缘发虚，
+   与"干脆利落"的要求相悖。保留明暗变化是为了维持收起态的可发现性。 */
 @keyframes toolbar-edge-breathe {
   0%,
   100% {
-    box-shadow:
-      0 0 0 2px rgba(var(--accent-rgb), 0.5),
-      0 0 10px rgba(var(--accent-rgb), 0.3);
+    border-color: rgba(var(--accent-rgb), 0.5);
   }
   50% {
-    box-shadow:
-      0 0 0 2px rgba(var(--accent-rgb), 0.85),
-      0 0 22px rgba(var(--accent-rgb), 0.65);
+    border-color: rgba(var(--accent-rgb), 1);
   }
 }

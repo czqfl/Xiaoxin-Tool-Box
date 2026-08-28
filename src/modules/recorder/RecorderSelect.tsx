@@ -1,8 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Circle, RotateCcw } from "lucide-react";
+import { Circle, Image, Video } from "lucide-react";
 import { recorderStart, recSelectCancel, type RecRect, type RecOptions } from "./api";
-import { GlassSelect } from "../../components/GlassSelect";
 import type { AppConfig } from "../../types";
 import "./recorder.css";
 
@@ -162,9 +161,9 @@ export function RecorderSelect() {
   // 面板位置：紧挨录制区【外部右下角】——在选区正下方、右缘对齐选区右缘；
   // 若该处剩余空间放不下，回退到录制区【内部右下角】（面板右下角对齐选区右下角）。
   // 初始估算用固定尺寸，layout effect 用真实尺寸精确夹回。
-  const PANEL_W_EST = 320;
-  // 面板已简化为「格式一行 + 按钮一行」，比旧版矮不少
-  const PANEL_H_EST = 120;
+  // 面板已简化为单行（格式平铺 + 开始录制），宽高都按内容自适应
+  const PANEL_W_EST = 250;
+  const PANEL_H_EST = 62;
   let panelLeft = 0, panelTop = 0;
   if (valid && rect) {
     // 外部右下角：正下方 + 右对齐选区右缘
@@ -228,26 +227,22 @@ export function RecorderSelect() {
               onPointerDown={(e) => e.stopPropagation()}
               onDoubleClick={(e) => e.stopPropagation()}
             >
-              {/* 面板只保留最常用的「格式」：分辨率 / 画质 / 帧率一律沿用设置页的默认值，
-                  避免每次录制都面对一堆选项（标题与快捷键提示也已移除） */}
-              <div className="rec-field">
-                <span className="rec-label">格式</span>
-                <GlassSelect
-                  value={opts.fmt}
-                  onChange={(v) => setOpts((o) => ({ ...o, fmt: v as RecOptions["fmt"] }))}
-                  options={[
-                    { value: "mp4", label: "视频 MP4" },
-                    { value: "gif", label: "动图 GIF" },
-                  ]}
-                  title="选择输出格式"
-                />
-              </div>
-
-              <div className="rec-actions">
-                <button onClick={() => setBoth(null)}>
-                  <RotateCcw size={11} /> 重选
-                </button>
-                <button className="rec-start" onClick={() => void start()}>
+              {/* 一行搞定：格式直接平铺成按钮（取消下拉框，一步点选），与「开始录制」同排。
+                  去掉「重选」按钮——右键即可清空选区重新框选，功能不丢 */}
+              <div className="rec-quick-row">
+                {(["mp4", "gif"] as const).map((v) => (
+                  <button
+                    key={v}
+                    className={`rec-fmt-btn${opts.fmt === v ? " active" : ""}`}
+                    onClick={() => setOpts((o) => ({ ...o, fmt: v }))}
+                    title={v === "mp4" ? "视频 MP4" : "动图 GIF"}
+                  >
+                    {v === "mp4" ? <Video size={13} /> : <Image size={13} />}
+                    {v === "mp4" ? "MP4" : "GIF"}
+                  </button>
+                ))}
+                <i className="rec-quick-sep" />
+                <button className="rec-start" onClick={() => void start()} title="开始录制（Enter）">
                   <Circle size={11} fill="currentColor" stroke="none" /> 开始录制
                 </button>
               </div>

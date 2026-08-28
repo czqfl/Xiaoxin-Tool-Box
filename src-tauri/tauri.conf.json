@@ -160,6 +160,22 @@
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "visible": false
+      },
+      {
+        "label": "toolbar-tip",
+        "title": "悬浮提示",
+        "width": 200,
+        "height": 32,
+        "resizable": false,
+        "fullscreen": false,
+        "maximized": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "focus": false
       }
     ],
     "security": {

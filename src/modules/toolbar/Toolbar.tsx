@@ -16,6 +16,7 @@ import { EVT_CONFIG_CHANGED, EVT_PANEL_VISIBILITY, onEvent } from "../../core/ev
 import { diagLog } from "../../core/tauri";
 import { useConfigStore } from "../../stores/configStore";
 import { featureEnabled } from "../../settings/FeaturePage";
+import { showTip } from "./tip";
 import {
   IconClipboard,
   IconFiles,
@@ -318,6 +319,30 @@ export function Toolbar() {
    *  故用集合而非单个 key（后打开的覆盖前一个的旧实现已移除）。 */
   const [activeKeys, setActiveKeys] = useState<ReadonlySet<ToolKey>>(new Set());
 
+  /** 悬浮提示：把按钮中心的【屏幕坐标】发给独立提示窗口（见 tip.ts 说明）。
+   *  提示是增强项，任何失败都不应影响工具栏本身，故全部吞掉异常。 */
+  const showTipAt = async (label: string, index: number) => {
+    try {
+      const win = getCurrentWindow();
+      const pos = await win.outerPosition(); // 物理像素
+      const scale = (await win.scaleFactor().catch(() => 1)) || 1;
+      // 沿排列方向的中心 / 垂直于排列方向的中心（都是 CSS 像素、相对窗口）
+      const along = PAD + index * (BTN + GAP) + BTN / 2;
+      const across = (BTN + PAD * 2) / 2;
+      await showTip({
+        label,
+        x: pos.x / scale + (isVertical ? across : along),
+        y: pos.y / scale + (isVertical ? along : across),
+        vertical: isVertical,
+      });
+    } catch {
+      /* 忽略 */
+    }
+  };
+  const hideTip = () => {
+    void showTip(null).catch(() => {});
+  };
+
   /** 刷新高亮：全量查询当前可见面板（比增量维护事件状态更可靠，杜绝漂移） */
   const refreshActive = async () => {
     const labels = await panelActive();
@@ -504,6 +529,9 @@ export function Toolbar() {
     if (!validTools.length) return;
     const main = validTools.length * (BTN + GAP) + PAD * 2;
     const cross = BTN + PAD * 2;
+    // 窗口尺寸 = 工具条本身，不再为提示预留空间：
+    // 贴边收起是"把窗口滑出屏幕只露一条边"，窗口一旦大于工具条，
+    // 露出的就会是透明的预留区而不是工具条。提示改由独立置顶窗口承载。
     getCurrentWindow()
       .setSize(new LogicalSize(isVertical ? cross : main, isVertical ? main : cross))
       .catch(() => undefined);
@@ -543,6 +571,7 @@ export function Toolbar() {
     const probe = async () => {
       try {
         const geo = await invoke<ToolbarGeometry>("toolbar_geometry");
+        // 窗口尺寸即工具条，直接用窗口矩形判定即可
         const inside =
           geo.cursor_x >= geo.win_x &&
           geo.cursor_x <= geo.win_x + geo.win_w &&
@@ -659,7 +688,9 @@ export function Toolbar() {
             type="button"
             className={`toolbar-btn${active ? " active" : ""}`}
             data-key={key}
-            title={active ? `${tool.label}（面板已打开）` : tool.label}
+            onMouseEnter={() =>
+              void showTipAt(active ? `${tool.label}（面板已打开）` : tool.label, i)}
+            onMouseLeave={hideTip}
             style={{
               width: BTN,
               height: BTN,

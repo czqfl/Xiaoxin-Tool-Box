@@ -144,6 +144,8 @@ impl H264Writer {
             }
 
             let frame_bytes = (w as usize) * (h as usize) * 4;
+            // 下面这一对仅作【初始化探测】：提前暴露内存不足等环境问题。
+            // 真正写帧时 write_bgra 会每帧新建 sample + buffer（不可复用）。
             let buffer = match MFCreateMemoryBuffer(frame_bytes as u32) {
                 Ok(b) => b,
                 Err(e) => return unwind(Err(hr_err("MFCreateMemoryBuffer", e))),
@@ -171,29 +173,41 @@ impl H264Writer {
 
     /// 写入一帧（BGRA，自顶向下，长度 ≥ w*h*4）。
     /// gap_100ns：距上一已写帧的真实间隔（首帧传名义间隔），决定本帧时间戳。
+    ///
+    /// 【为什么每帧新建 sample + buffer】SinkWriter 对已提交 sample 是异步消费的，
+    /// 复用同一个 IMFMediaBuffer 会在编码器仍在读取上一帧时就覆写其内容——
+    /// 典型症状就是录到第一帧后整个进程 0xc0000005 访问违规。
     pub fn write_bgra(&mut self, bgra: &[u8], gap_100ns: i64) -> Result<(), String> {
         let dur = gap_100ns.max(1);
-        let (Some(writer), Some(sample), Some(buffer)) =
-            (self.writer.as_ref(), self.sample.as_ref(), self.buffer.as_ref())
-        else {
+        let Some(writer) = self.writer.as_ref() else {
             return Err("编码器已释放".into());
         };
         if bgra.len() < self.frame_bytes {
             return Err(format!("帧数据不足: {} < {}", bgra.len(), self.frame_bytes));
         }
         unsafe {
+            let buffer = MFCreateMemoryBuffer(self.frame_bytes as u32)
+                .map_err(|e| hr_err("MFCreateMemoryBuffer", e))?;
+
             let mut p: *mut u8 = std::ptr::null_mut();
+            let mut max_len: u32 = 0;
             buffer
-                .Lock(&mut p, None, None)
+                .Lock(&mut p, Some(&mut max_len), None)
                 .map_err(|e| hr_err("Lock", e))?;
-            std::ptr::copy_nonoverlapping(bgra.as_ptr(), p, self.frame_bytes);
-            let unlock = buffer.Unlock();
-            if unlock.is_err() {
-                return Err(hr_err("Unlock", unlock.unwrap_err()));
+            // 防御：指针为空或缓冲区不足时放弃写入——继续拷就是越界访问。
+            // 必须 Unlock 后再返回，否则 buffer 一直挂锁定状态。
+            if p.is_null() || (max_len as usize) < self.frame_bytes {
+                let _ = buffer.Unlock();
+                return Err(format!("编码缓冲区不足: {max_len} < {}", self.frame_bytes));
             }
+            std::ptr::copy_nonoverlapping(bgra.as_ptr(), p, self.frame_bytes);
+            buffer.Unlock().map_err(|e| hr_err("Unlock", e))?;
             buffer
                 .SetCurrentLength(self.frame_bytes as u32)
                 .map_err(|e| hr_err("SetCurrentLength", e))?;
+
+            let sample = MFCreateSample().map_err(|e| hr_err("MFCreateSample", e))?;
+            sample.AddBuffer(&buffer).map_err(|e| hr_err("AddBuffer", e))?;
             sample
                 .SetSampleTime(self.next_ts)
                 .map_err(|e| hr_err("SetSampleTime", e))?;
@@ -201,7 +215,7 @@ impl H264Writer {
                 .SetSampleDuration(dur)
                 .map_err(|e| hr_err("SetSampleDuration", e))?;
             writer
-                .WriteSample(self.stream, sample)
+                .WriteSample(self.stream, &sample)
                 .map_err(|e| hr_err("WriteSample", e))?;
         }
         self.next_ts += dur;
