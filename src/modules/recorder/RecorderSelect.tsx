@@ -200,9 +200,10 @@ export function RecorderSelect() {
   // 面板位置：紧挨录制区【外部右下角】——在选区正下方、右缘对齐选区右缘；
   // 若该处剩余空间放不下，回退到录制区【内部右下角】（面板右下角对齐选区右下角）。
   // 初始估算用固定尺寸，layout effect 用真实尺寸精确夹回。
-  // 面板已简化为单行（格式平铺 + 开始录制），宽高都按内容自适应
+  // 面板已简化为单行（格式平铺 + 开始录制），宽高都按内容自适应；
+  // 内边距对齐截图工具栏（8px 10px）后整体更矮
   const PANEL_W_EST = 250;
-  const PANEL_H_EST = 62;
+  const PANEL_H_EST = 52;
   let panelLeft = 0, panelTop = 0;
   if (valid && rect) {
     // 外部右下角：正下方 + 右对齐选区右缘
@@ -250,14 +251,18 @@ export function RecorderSelect() {
           <div className="rec-shade" style={{ left: 0, top: rect.y, width: rect.x, height: rect.h }} />
           <div className="rec-shade" style={{ left: rect.x + rect.w, top: rect.y, right: 0, height: rect.h }} />
           <div className="rec-shade" style={{ left: 0, top: rect.y + rect.h, width: "100%", bottom: 0 }} />
-          <div
-            className="rec-frame"
-            style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}
-          >
-            <i className="rec-corner tl" /><i className="rec-corner tr" />
-            <i className="rec-corner bl" /><i className="rec-corner br" />
-            <span className="rec-size">{Math.round(rect.w)} × {Math.round(rect.h)}</span>
-          </div>
+          {/* 遮罩模式（录制中）只保留黑遮罩：描边交给原生边框环（recframe.rs），
+              前端不再画框——否则两套虚线重叠，且尺寸标签会一直挂在录制区上 */}
+          {!masking && (
+            <div
+              className="rec-frame"
+              style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}
+            >
+              <i className="rec-corner tl" /><i className="rec-corner tr" />
+              <i className="rec-corner bl" /><i className="rec-corner br" />
+              <span className="rec-size">{Math.round(rect.w)} × {Math.round(rect.h)}</span>
+            </div>
+          )}
           {!dragging && !masking && (
             <div
               ref={panelRef}

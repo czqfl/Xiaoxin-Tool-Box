@@ -106,29 +106,26 @@
   color: var(--danger);
 }
 
-/* ---- 配置面板：高不透明度深底（窗口无模糊，面板自己保可读），
-   backdrop-filter 对页面内遮罩层做轻磨砂，叠玻璃描边/高光成亚克力观感。 ---- */
+/* ---- 配置面板：改用截图工具栏同一套令牌（--tb-*，见 screenshot.css 的 html 层），
+   与截图右下角工具栏完全同一视觉语言；底色半透明，由 backdrop-filter 对页面内
+   黑色遮罩做磨砂（选区窗是透明窗，CSS 模糊采的是页面内元素，不是桌面）。 ---- */
 .rec-panel {
   position: absolute;
   display: flex;
   flex-direction: column;
   gap: 11px;
-  padding: 13px 14px 12px;
+  /* 与 .shot-toolbar-panel 对齐（8px 10px） */
+  padding: 8px 10px;
   box-sizing: border-box;
   /* 内容已简化为单行，宽度由内容撑开（面板位置由 JS 按真实 offsetWidth 夹回） */
   width: auto;
-  border-radius: 14px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02) 45%, transparent 82%),
-    rgba(15, 17, 23, 0.92);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--tb-bg) 82%, transparent);
   backdrop-filter: blur(16px) saturate(1.35);
   -webkit-backdrop-filter: blur(16px) saturate(1.35);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow:
-    0 12px 40px rgba(0, 0, 0, 0.5),
-    0 0 0 1px rgba(0, 0, 0, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12);
-  color: var(--text-primary);
+  border: 1px solid var(--tb-border);
+  box-shadow: var(--tb-shadow);
+  color: var(--tb-fg);
   font-size: 13px;
   user-select: none;
   pointer-events: auto;
@@ -230,9 +227,9 @@
   gap: 5px;
   padding: 6px 12px;
   border-radius: 9px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.85);
+  border: 1px solid var(--tb-border);
+  background: transparent;
+  color: var(--tb-fg);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
@@ -241,8 +238,8 @@
     transform var(--dur-fast) var(--ease-out);
 }
 .rec-quick-row button:hover {
-  background: rgba(255, 255, 255, 0.15);
-  color: #fff;
+  background: var(--tb-hover-bg);
+  color: var(--tb-fg);
 }
 .rec-quick-row button:not(:disabled):active {
   transform: scale(0.96);
@@ -251,12 +248,12 @@
 /* 格式按钮：纯文字、更轻的内边距与底色（图标已去掉，避免臃肿） */
 .rec-quick-row .rec-fmt-btn {
   padding: 4px 10px;
-  background: rgba(255, 255, 255, 0.05);
-  color: rgba(255, 255, 255, 0.68);
+  background: transparent;
+  color: color-mix(in srgb, var(--tb-fg) 70%, transparent);
 }
 .rec-quick-row .rec-fmt-btn:hover:not(.active) {
-  background: rgba(255, 255, 255, 0.13);
-  color: #fff;
+  background: var(--tb-hover-bg);
+  color: var(--tb-fg);
 }
 .rec-quick-row .rec-fmt-btn.active {
   background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.95), rgba(var(--accent-rgb), 0.8));
@@ -272,7 +269,7 @@
   width: 1px;
   align-self: stretch;
   margin: 3px 4px;
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--tb-line, rgba(255, 255, 255, 0.14));
   flex-shrink: 0;
 }
 
@@ -315,21 +312,13 @@
   gap: 10px;
   padding: 0 8px 0 14px;
   box-sizing: border-box;
-  border-radius: var(--radius-panel);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  /* 窗口已有 SWCA 实时模糊：这里半透明深底 + 顶部高光 = 磨砂玻璃药丸 */
-  background:
-    linear-gradient(
-      180deg,
-      rgba(var(--accent-rgb), 0.05),
-      rgba(var(--accent-rgb), 0.015) 42%,
-      transparent 80%
-    ),
-    rgba(16, 18, 24, 0.52);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.14),
-    0 6px 22px rgba(0, 0, 0, 0.35);
-  color: var(--text-primary);
+  /* 与截图工具栏同一套令牌（--tb-*，定义在 screenshot.css 的 html 层级）；
+     底色半透明化，透出窗口的 SWCA 系统级实时模糊——观感与通用设置/截图工具栏一致 */
+  border-radius: 12px;
+  border: 1px solid var(--tb-border);
+  background: color-mix(in srgb, var(--tb-bg) 76%, transparent);
+  box-shadow: var(--tb-shadow);
+  color: var(--tb-fg);
   font-size: 13px;
   user-select: none;
   overflow: hidden;
@@ -357,16 +346,15 @@
   font-weight: 700;
   font-size: 15px;
   letter-spacing: 0.05em;
-  color: #fff;
+  color: var(--tb-fg);
   flex: 1 1 auto;
   text-align: left;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
 
 /* 暂停时整条弱化：一眼区分"正在录"与"暂停中"
    （状态语义由红点熄灭 + 暂停钮变「继续」并高亮表达，不再用文字标识） */
 .recb-root.paused .recb-time {
-  color: rgba(255, 255, 255, 0.55);
+  color: color-mix(in srgb, var(--tb-fg) 55%, transparent);
 }
 
 /* ---- 通用按钮 ---- */
@@ -377,9 +365,9 @@
   gap: 5px;
   padding: 6px 13px;
   border-radius: 999px;
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-input-glass);
-  color: var(--text-primary);
+  border: 1px solid var(--tb-border);
+  background: transparent;
+  color: var(--tb-fg);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -389,7 +377,7 @@
     transform var(--dur-fast) var(--ease-out);
 }
 .recb-btn:hover:not(:disabled) {
-  background: var(--accent-soft);
+  background: var(--tb-hover-bg);
 }
 .recb-btn:not(:disabled):active {
   transform: scale(0.96);
@@ -437,7 +425,7 @@
 }
 /* 取消：中性幽灵圆钮，hover 泛红示意"丢弃" */
 .recb-btn.recb-icon.recb-cancel {
-  color: var(--text-secondary);
+  color: color-mix(in srgb, var(--tb-fg) 68%, transparent);
 }
 .recb-btn.recb-icon.recb-cancel:hover:not(:disabled) {
   background: color-mix(in srgb, var(--danger) 18%, transparent);
@@ -449,7 +437,7 @@
   position: relative;
   padding: 0 12px;
   gap: 9px;
-  border-radius: var(--radius-panel);
+  border-radius: 12px;
   animation: recb-slide-in var(--dur-base) var(--ease-out);
 }
 @keyframes recb-slide-in {
@@ -476,7 +464,7 @@
 
 /* 停止中：正在保存反馈（旋转图标 + 文案） */
 .recb-saving {
-  color: var(--text-secondary);
+  color: color-mix(in srgb, var(--tb-fg) 70%, transparent);
   font-size: var(--font-sm);
   font-weight: 500;
   white-space: nowrap;
@@ -509,7 +497,7 @@
   flex: 1 1 auto;
 }
 .recb-title {
-  color: var(--text-primary);
+  color: var(--tb-fg);
   font-size: var(--font-sm);
   font-weight: 600;
   white-space: nowrap;
@@ -517,7 +505,7 @@
   text-overflow: ellipsis;
 }
 .recb-sub {
-  color: var(--text-secondary);
+  color: color-mix(in srgb, var(--tb-fg) 62%, transparent);
   font-size: var(--font-xs);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
@@ -542,9 +530,9 @@
 .recb-close {
   border: none;
   background: transparent;
-  color: var(--text-secondary);
+  color: color-mix(in srgb, var(--tb-fg) 68%, transparent);
 }
 .recb-close:hover {
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.08);
+  color: var(--tb-fg);
+  background: var(--tb-hover-bg);
 }
