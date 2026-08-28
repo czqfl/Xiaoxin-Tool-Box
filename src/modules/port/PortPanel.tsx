@@ -8,6 +8,11 @@ import { hideCurrentWindow, usePanelCommon } from "../../core/usePanel";
 import { useConfigStore } from "../../stores/configStore";
 import { killPort, portSearch, setPanelAlwaysOnTop } from "../../core/tauri";
 import { IconClose, IconPin, IconSearch } from "../../components/icons";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { EmptyState } from "../../components/EmptyState";
+import { Spinner } from "../../components/Spinner";
+import { ToastProvider, useToast } from "../../components/Toast";
+import { useEscLayer } from "../../hooks/useEscLayered";
 import "../../styles/panel.css";
 import "./port.css";
 
@@ -41,16 +46,26 @@ const SENSITIVE_PORTS = new Set<number>([
 ]);
 
 export function PortPanel() {
+  return (
+    <ToastProvider>
+      <PortPanelInner />
+    </ToastProvider>
+  );
+}
+
+function PortPanelInner() {
   const config = useConfigStore((s) => s.config);
   const updateConfig = useConfigStore((s) => s.update);
+  const toast = useToast();
   // 置顶开启时面板常驻：失焦不再自动隐藏
   usePanelCommon(config.port.always_on_top);
+  // Esc 关闭面板（确认弹窗打开时由弹窗层优先响应）
+  useEscLayer(true, hideCurrentWindow);
 
   const [keyword, setKeyword] = useState("");
   const [items, setItems] = useState<PortProcess[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [feedback, setFeedback] = useState("");
   const [killing, setKilling] = useState<number | null>(null);
   // 终止确认弹窗：命中"终止"按钮后置为待确认进程；null 表示无弹窗
   const [confirmTarget, setConfirmTarget] = useState<PortProcess | null>(null);
@@ -80,9 +95,15 @@ export function PortPanel() {
       setError("请输入端口号或应用名");
       return;
     }
+    if (/^\d+$/.test(q)) {
+      const port = Number(q);
+      if (port < 1 || port > 65535) {
+        setError("端口号需在 1-65535 之间");
+        return;
+      }
+    }
     setLoading(true);
     setError("");
-    setFeedback("");
     try {
       const list = await portSearch(q);
       setItems(list);
@@ -104,16 +125,14 @@ export function PortPanel() {
 
   // 真正的终止逻辑（确认后调用）
   const doKill = async (proc: PortProcess) => {
-    setConfirmTarget(null);
     setKilling(proc.pid);
     setError("");
     try {
       await killPort(proc.pid);
-      // 结束后自动重新查询，刷新结果（runQuery 会先清空 feedback，故反馈在其后写入）
+      // 结束后自动重新查询，刷新结果
       const q = keyword.trim();
       if (q) await runQuery(q);
-      // 关闭端口成功反馈：绿色横幅，与错误提示区分
-      setFeedback(`已成功终止进程「${proc.name}」（PID ${proc.pid}）`);
+      toast.show(`已成功终止进程「${proc.name}」（PID ${proc.pid}）`, "success");
     } catch (err) {
       setError(String(err));
     } finally {
@@ -135,9 +154,9 @@ export function PortPanel() {
         onMouseDown={(e) => {
           // JS 拖动手柄：覆盖 data-tauri-drag-region 在本面板不生效的情况，
           // 同时保留该属性供 usePanel 拖拽守卫识别（拖拽时避免失焦自动隐藏）。
-          // 命中可交互元素（按钮/输入框/结果条目/确认弹窗）时不触发拖动。
+          // 命中可交互元素（按钮/输入框/结果条目）时不触发拖动。
           const t = e.target as HTMLElement;
-          if (t.closest("button, input, select, textarea, .port-item, .port-confirm")) return;
+          if (t.closest("button, input, select, textarea, .port-item")) return;
           getCurrentWindow().startDragging().catch(() => undefined);
         }}
       >
@@ -153,7 +172,12 @@ export function PortPanel() {
               value={keyword}
               placeholder="端口号或应用名，如 8080 / node"
               onChange={(e) => setKeyword(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleQuery()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleQuery();
+                }
+              }}
             />
           </div>
           <button
@@ -180,17 +204,15 @@ export function PortPanel() {
         </div>
 
         <div className="panel-body">
-          {feedback && <div className="port-feedback">{feedback}</div>}
-          {error && !feedback && <div className="port-empty">{error}</div>}
-          {items.length === 0 && !error && !feedback && !loading && (
-            <div className="port-empty">
-              <span className="empty-icon">🔌</span>
-              <span>输入端口号或应用名查询占用进程</span>
+          {error && <div className="port-empty">{error}</div>}
+          {items.length === 0 && !error && !loading && (
+            <div className="port-fill">
+              <EmptyState icon="🔌" title="输入端口号或应用名查询占用进程" />
             </div>
           )}
           {loading && (
             <div className="port-loading">
-              <span className="port-spinner" />
+              <Spinner size="lg" />
               <span>正在查询端口占用…</span>
             </div>
           )}
@@ -268,13 +290,18 @@ export function PortPanel() {
       </div>
 
       {/* 终止二次确认弹窗（应用内模态，替代 Tauri 默认不生效的 window.confirm） */}
-      {confirmTarget && (
-        <div className="port-confirm-mask" onMouseDown={(e) => {
-          if (e.target === e.currentTarget) setConfirmTarget(null);
-        }}>
-          <div className="port-confirm" onClick={(e) => e.stopPropagation()}>
-            <div className="port-confirm-title">确认终止进程？</div>
-            <div className="port-confirm-body">
+      <ConfirmDialog
+        open={confirmTarget !== null}
+        onClose={() => setConfirmTarget(null)}
+        onConfirm={async () => {
+          if (confirmTarget) await doKill(confirmTarget);
+        }}
+        title="确认终止进程？"
+        danger
+        confirmLabel="确认终止"
+        message={
+          confirmTarget && (
+            <>
               <div className="port-confirm-row">
                 <span className="port-confirm-key">进程</span>
                 <span className="port-confirm-val">{confirmTarget.name}</span>
@@ -292,22 +319,10 @@ export function PortPanel() {
               <div className="port-confirm-warn">
                 该进程打开的窗口与未保存数据可能丢失，且无法撤销。
               </div>
-            </div>
-            <div className="port-confirm-actions">
-              <button className="btn btn-ghost" onClick={() => setConfirmTarget(null)}>
-                取消
-              </button>
-              <button
-                className="btn btn-danger"
-                disabled={killing === confirmTarget.pid}
-                onClick={() => void doKill(confirmTarget)}
-              >
-                {killing === confirmTarget.pid ? "终止中…" : "确认终止"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+            </>
+          )
+        }
+      />
     </div>
   );
 }

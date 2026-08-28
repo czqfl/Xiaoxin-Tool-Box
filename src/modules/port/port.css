@@ -43,37 +43,27 @@
   white-space: nowrap;
 }
 
+/* 错误/提示文字（居中弱化显示） */
 .port-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  height: 100%;
   padding: 24px;
   text-align: center;
   font-size: 13px;
   color: var(--text-tertiary);
 }
-/* 操作成功反馈横幅（如关闭端口后）：绿色，与错误提示区分 */
-.port-feedback {
+/* 空状态垂直居中容器（消费共享 EmptyState） */
+.port-fill {
+  height: 100%;
   display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-  padding: 9px 12px;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--success);
-  background: var(--success-soft);
-  color: var(--success);
-  font-size: 13px;
-  font-weight: 600;
-}
-.port-empty .empty-icon {
-  font-size: 28px;
+  flex-direction: column;
+  justify-content: center;
 }
 
-/* 查询中加载态：旋转指示器 + 提示，pointer-events:none 不阻挡窗口拖动 */
+/* 查询中加载态：共享 Spinner + 提示，pointer-events:none 不阻挡窗口拖动 */
 .port-loading {
   display: flex;
   flex-direction: column;
@@ -86,53 +76,8 @@
   color: var(--text-tertiary);
   pointer-events: none;
 }
-.port-spinner {
-  display: inline-block;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  border: 3px solid var(--border-strong);
-  border-top-color: var(--accent);
-  box-sizing: border-box;
-  will-change: transform;
-  animation: port-spin 0.7s linear infinite;
-}
-@keyframes port-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
 
-/* 终止二次确认弹窗 */
-.port-confirm-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 1100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.35);
-  animation: panel-in var(--dur-fast) var(--ease-out);
-}
-.port-confirm {
-  width: 320px;
-  max-width: calc(100vw - 32px);
-  padding: 18px;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-elevated);
-  box-shadow: var(--shadow-menu);
-}
-.port-confirm-title {
-  font-size: var(--font-title);
-  font-weight: 600;
-  color: var(--text-primary);
-  margin-bottom: 12px;
-}
-.port-confirm-body {
-  font-size: 13px;
-  color: var(--text-secondary);
-}
+/* 终止确认弹窗内容：进程信息行 + 警告块（外壳由共享 Modal 提供） */
 .port-confirm-row {
   display: flex;
   gap: 10px;
@@ -157,12 +102,6 @@
   font-size: 12px;
   line-height: 1.5;
 }
-.port-confirm-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 16px;
-}
 
 /* 系统进程徽标：受保护不可终止 */
 .port-protected {
@@ -183,12 +122,12 @@
   color: var(--warning);
   background: var(--warning-soft);
 }
-/* 文字"终止"按钮（替代图标，语义更明确） */
+/* 文字"终止"按钮（替代图标，语义更明确）：危险色一律消费语义令牌 */
 .port-kill-btn {
   flex-shrink: 0;
   padding: 3px 10px;
   border-radius: 6px;
-  border: 1px solid rgba(229, 72, 77, 0.35);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
   background: var(--danger-soft);
   color: var(--danger);
   font-size: 12px;
@@ -198,7 +137,7 @@
 }
 .port-kill-btn:hover {
   border-color: var(--danger);
-  background: rgba(229, 72, 77, 0.2);
+  background: color-mix(in srgb, var(--danger) 20%, transparent);
 }
 .port-kill-btn:disabled {
   opacity: 0.5;
