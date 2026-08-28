@@ -1,6 +1,6 @@
 /** 快捷键行组件：录入组合键 + 冲突检测 + 保存即注册（原独立快捷键页的
  *  核心逻辑组件化——快捷键设置分拆到各功能模块页复用） */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useConfigStore } from "../stores/configStore";
 import {
   applyShortcut,
@@ -26,6 +26,23 @@ export type ShortcutTarget =
   | "picker"
   | "recorder"
   | "palette";
+
+/** 模块级保存锁：同一时刻只允许一行在执行 applyShortcut。
+ *  两行并发保存会各自基于旧快照注册，后完成者覆盖先完成者的结果 */
+let savingTarget: ShortcutTarget | null = null;
+const saveLockListeners = new Set<() => void>();
+function notifySaveLock() {
+  saveLockListeners.forEach((l) => l());
+}
+function subscribeSaveLock(cb: () => void) {
+  saveLockListeners.add(cb);
+  return () => {
+    saveLockListeners.delete(cb);
+  };
+}
+function getSavingTarget() {
+  return savingTarget;
+}
 
 /** 将键盘事件转换为 global-shortcut 可解析的组合键字符串，如 "Ctrl+Alt+C"。
  *  F1~F12 不与文本输入冲突，允许不搭配修饰键单独使用（Snipaste 即默认 F1 截图） */
@@ -164,15 +181,24 @@ export function ShortcutRow({
   const [error, setError] = useState("");
   const [ok, setOk] = useState(false);
   const [saving, setSaving] = useState(false);
+  /** 草稿是否被用户改过且尚未保存。脏草稿不跟随外部配置同步——
+   *  否则保存快捷键 A 触发的全量广播会把 B 行刚录入的草稿重置回旧值，
+   *  造成"同时改两个快捷键，保存完一个另一个丢失" */
+  const dirtyRef = useRef(false);
+  const lockedBy = useSyncExternalStore(subscribeSaveLock, getSavingTarget);
+  const lockedByOther = lockedBy !== null && lockedBy !== target;
   // 运行时绑定变化后刷新（其他行保存会改变冲突判定基准）
   const [, bumpRuntime] = useState(0);
   useEffect(() => {
     shortcutRuntimeBindings().then(() => bumpRuntime((n) => n + 1)).catch(() => {});
   }, []);
-  // 配置被其他窗口/保存流程更新时跟随（如 resync 回滚）
-  useEffect(() => { setDraft(config.shortcuts[target]); }, [config.shortcuts, target]);
+  // 配置被其他窗口/保存流程更新时跟随（如 resync 回滚）；脏草稿例外
+  useEffect(() => {
+    if (!dirtyRef.current) setDraft(config.shortcuts[target]);
+  }, [config.shortcuts, target]);
 
   const save = async () => {
+    if (lockedBy) return; // 其他行正在保存，等它完成
     const combo = draft;
     const others = (Object.keys(config.shortcuts) as ShortcutTarget[]).filter((t) => t !== target);
     if (others.some((t) => combo === config.shortcuts[t])) {
@@ -185,10 +211,13 @@ export function ShortcutRow({
       setOk(false);
       return;
     }
+    savingTarget = target;
+    notifySaveLock();
     setSaving(true);
     try {
       await testShortcut(combo); // 冲突时抛出
       const fresh = await applyShortcut(target, combo);
+      dirtyRef.current = false; // 保存成功：允许后续外部同步覆盖草稿
       if (fresh && typeof fresh === "object" && (fresh as { shortcuts?: unknown }).shortcuts) {
         sync(fresh);
         setDraft((fresh as unknown as { shortcuts: Record<string, string> }).shortcuts[target]);
@@ -200,6 +229,8 @@ export function ShortcutRow({
       setError(err instanceof Error ? err.message : "保存失败，请重试");
       setOk(false);
     } finally {
+      savingTarget = null;
+      notifySaveLock();
       setSaving(false);
     }
   };
@@ -211,11 +242,11 @@ export function ShortcutRow({
           <ShortcutInput
             value={draft}
             conflict={!!error}
-            onChange={(combo) => { setDraft(combo); setError(""); setOk(false); }}
+            onChange={(combo) => { setDraft(combo); dirtyRef.current = true; setError(""); setOk(false); }}
           />
           <button
             className="btn btn-primary btn-sm"
-            disabled={saving || draft === config.shortcuts[target]}
+            disabled={saving || lockedByOther || draft === config.shortcuts[target]}
             onClick={() => void save()}
           >
             {saving ? "保存中…" : "保存"}
