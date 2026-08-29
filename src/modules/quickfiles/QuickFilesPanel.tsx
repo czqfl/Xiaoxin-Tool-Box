@@ -382,7 +382,13 @@ function SearchTab({
             {building
               ? `正在扫描 ${scanned.toLocaleString()} 条…`
               : status && status.entries > 0
-                ? `索引 ${status.entries.toLocaleString()} 条 · ${status.roots.join(" ")} · ${agoLabel(status.built_at / 1000)}更新`
+                ? (
+                  <>
+                    索引{" "}
+                    <span className="qf-index-count">{status.entries.toLocaleString()}</span>{" "}
+                    条 · {agoLabel(status.built_at)}更新
+                  </>
+                )
                 : "尚未建立索引"}
           </span>
           {!building && (

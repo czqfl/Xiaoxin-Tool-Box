@@ -684,6 +684,12 @@
   color: var(--text-tertiary);
   white-space: nowrap;
 }
+/* 索引条数：主题色强调（用户要求） */
+.qf-index-count {
+  color: var(--accent);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
 .qf-hit-empty {
   padding: 20px 10px;
   text-align: center;
