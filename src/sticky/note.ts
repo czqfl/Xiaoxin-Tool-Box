@@ -53,7 +53,7 @@ export function mountNoteApp(noteId: string, preset = "") {
         </div>
         <div class="titlebar-grip" id="drag-grip" title="拖动便签"><span class="grip-dots"></span></div>
         <div class="titlebar-right">
-          <button class="icon-btn" id="btn-toolbar-toggle" title="显示/隐藏格式工具栏" aria-pressed="true">
+          <button class="icon-btn" id="btn-toolbar-toggle" title="显示/隐藏格式工具栏" aria-pressed="false">
             <span class="tb-toggle-ico" aria-hidden="true">Aa</span>
           </button>
           <button class="icon-btn" id="btn-pin" title="置顶" aria-pressed="true">
@@ -69,7 +69,8 @@ export function mountNoteApp(noteId: string, preset = "") {
           <button class="icon-btn close" id="btn-close" title="关闭">&#10005;</button>
         </div>
       </div>
-      <div class="toolbar">
+      {/* 新建便签默认隐藏格式工具栏（display:none 兜底，避免首帧闪现；加载后按设置恢复） */}
+      <div class="toolbar" style="display:none">
         <div class="tool-color wps" id="tool-fg-wrap" title="字体颜色">
           <button type="button" class="cc-main" id="tool-fg-apply" title="应用当前字体颜色">
             <span class="cc-letter">A</span>
@@ -386,11 +387,12 @@ export function mountNoteApp(noteId: string, preset = "") {
         editor.innerHTML = loaded.content || "";
         titleInput.value = loaded.title || "";
         updatePin(loaded.pinned, false);
-        // 应用每便签的格式工具栏显隐配置（undefined → 默认显示）
-        applyToolbarVisible(loaded.toolbar_visible ?? true);
+        // 应用每便签的格式工具栏显隐配置（未记录 → 默认隐藏）
+        applyToolbarVisible(loaded.toolbar_visible ?? false);
       } else {
         updatePin(true, false);
-        applyToolbarVisible(true);
+        // 新建便签：默认隐藏格式工具栏
+        applyToolbarVisible(false);
       }
       // 全局快捷速记带过来的预填文本（仅新建便签时生效）：直接写入编辑器并保存
       if (preset && !loaded) {

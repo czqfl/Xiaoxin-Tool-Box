@@ -388,8 +388,10 @@ body,
   height: 120px;
   margin: 8px 0 2px;
   border-radius: 10px;
-  background-size: cover;
+  /* contain：完整展示整张壁纸（cover 会裁切，用户反馈"不能完全展示壁纸"） */
+  background-size: contain;
   background-position: center;
+  background-repeat: no-repeat;
   border: 1px solid color-mix(in srgb, var(--bg-bar) 60%, #000 8%);
   position: relative;
   overflow: hidden;

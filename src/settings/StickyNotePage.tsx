@@ -174,6 +174,11 @@ export function StickyNotePage() {
     try {
       const s = (await Promise.race([invoke<StickySettings>("load_settings"), guard])) ?? DEFAULT;
       if (s) {
+        // 透明主题已移除（工具箱自带亚克力）：存量 transparent 归入浅色并回写
+        if (s.theme === "transparent") {
+          s.theme = "light";
+          void invoke("save_settings", { settings: s }).catch(() => {});
+        }
         const sc = s.shortcuts ?? {};
         setSettings({ ...DEFAULT, ...s, shortcuts: sc });
         setStickySaved(sc);
@@ -287,12 +292,11 @@ export function StickyNotePage() {
 
       {/* ===== 主题与窗口 ===== */}
       <SettingGroup>
-        <SettingRow title="主题" desc="浅色暖白 / 透明高斯模糊 / 深色石墨">
-          <Segmented<"light" | "transparent" | "dark">
-            value={settings.theme as "light" | "transparent" | "dark"}
+        <SettingRow title="主题" desc="浅色暖白 / 深色石墨（透明主题已移除，工具箱自带不透明度 + 亚克力）">
+          <Segmented<"light" | "dark">
+            value={(settings.theme === "transparent" ? "light" : settings.theme) as "light" | "dark"}
             options={[
               { value: "light", label: "浅色" },
-              { value: "transparent", label: "透明" },
               { value: "dark", label: "深色" },
             ]}
             onChange={(v) => patch({ theme: v })}

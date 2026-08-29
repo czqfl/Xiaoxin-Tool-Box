@@ -166,6 +166,15 @@ export async function getSettings(): Promise<Settings> {
         console.error("迁移透明设置失败:", e);
       }
     }
+    // 迁移：透明主题已移除（工具箱自带不透明度 + 亚克力），存量 transparent 归入浅色
+    if (raw.theme === "transparent") {
+      raw.theme = "light";
+      try {
+        await saveSettings(raw as Settings);
+      } catch (e) {
+        console.error("迁移透明主题失败:", e);
+      }
+    }
     cached = raw as Settings;
   }
   return cached;
@@ -708,10 +717,8 @@ export async function openSettingsModal(): Promise<void> {
       label: "浅色",
       items: [{ value: "light", label: "浅色（暖白）" }],
     },
-    {
-      label: "透明",
-      items: [{ value: "transparent", label: "透明（高斯模糊）" }],
-    },
+    // 「透明」主题已按用户要求移除：工具箱本身就有不透明度 + 亚克力效果，
+    // 便签不再单独提供透明主题（存量 transparent 设置在 load 时迁移为浅色）
     {
       label: "深色",
       items: [{ value: "dark", label: "深色（石墨）" }],
