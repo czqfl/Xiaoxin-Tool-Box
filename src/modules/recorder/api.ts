@@ -8,6 +8,9 @@ export const recBegin = () => invoke<void>("rec_begin");
 
 export const recSelectCancel = () => invoke<void>("rec_select_cancel");
 
+/** 音源：off = 不录音 / mic = 麦克风 / system = 系统声音 / mix = 两者 */
+export type AudioSource = "off" | "mic" | "system" | "mix";
+
 /** 录制参数：格式与画质 */
 export interface RecOptions {
   /** "gif" = 动图；"mp4" = H.264 视频（Media Foundation 硬件/软件编码） */
@@ -18,13 +21,25 @@ export interface RecOptions {
   scale: number;
   /** 画质：high / normal / fast */
   quality: "high" | "normal" | "fast";
+  /** 音源；仅 MP4 生效（GIF 容器不支持音频） */
+  audio: AudioSource;
 }
 
 export const recorderStart = (rect: RecRect, o: RecOptions) =>
   invoke<void>("recorder_start", {
     x: rect.x, y: rect.y, w: rect.w, h: rect.h,
     fmt: o.fmt, fps: o.fps, scale: o.scale, quality: o.quality,
+    audio: o.audio,
   });
+
+/** 录制中切换静音。静音=写零帧、不断流，因此不会音画脱同步。
+ *  返回切换后的静音状态。 */
+export const recorderAudioMute = (on: boolean) =>
+  invoke<boolean>("recorder_audio_mute", { on });
+
+/** 查询音频子系统状态：[音频是否可用, 当前是否静音] */
+export const recorderAudioState = () =>
+  invoke<[boolean, boolean]>("recorder_audio_state");
 
 export const recorderStop = () => invoke<void>("recorder_stop");
 

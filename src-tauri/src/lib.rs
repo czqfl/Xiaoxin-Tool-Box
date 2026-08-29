@@ -1,7 +1,7 @@
 #[cfg(windows)]
 mod acrylic;
 #[cfg(windows)]
-mod h264;
+pub mod h264;
 #[cfg(windows)]
 mod recframe;
 mod dupl;
@@ -9,7 +9,9 @@ pub mod ocr;
 mod screenshot;
 mod pin;
 mod scrollshot;
-mod recorder;
+pub mod recorder;
+#[cfg(windows)]
+mod recaudio;
 mod clipboard;
 mod config;
 #[cfg(windows)]
@@ -26,6 +28,8 @@ mod quickfiles;
 mod shortcut;
 mod snippets;
 mod palette_stats;
+#[cfg(windows)]
+mod taskbar;
 mod storage;
 mod translate;
 mod tray;
@@ -320,6 +324,10 @@ pub fn run() {
             }
             // 恢复上次的贴图
             crate::pin::restore_pins(&handle);
+            // 任务栏透明守护线程：explorer 重启/系统重置外观后自动重施样式；
+            // 首轮 tick 也会把启动时已启用的配置施加上（签名 None → 必然触发）
+            #[cfg(windows)]
+            crate::taskbar::start_watcher(handle.clone());
             // 预建隐藏的复用贴图窗：贴图时直接装图秒显，免临时建 WebView2 窗口
             crate::pin::ensure_staging(&handle);
             // 工具栏保持置顶（盖过任务栏等系统级置顶窗口，300ms 周期顶置）
@@ -489,6 +497,9 @@ pub fn run() {
             recorder::recorder_bar_popup,
             recorder::rec_dismiss,
             recorder::recorder_open_dir,
+            // 录屏音频：录制中静音开关 + 音频子系统状态查询
+            recaudio::recorder_audio_mute,
+            recaudio::recorder_audio_state,
             pin::pin_create,
             pin::pin_from_clipboard,
             pin::pin_list,

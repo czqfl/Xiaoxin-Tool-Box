@@ -1,11 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Circle } from "lucide-react";
+import { Play } from "lucide-react";
 import {
   recorderStart, recorderStop, recSelectCancel,
   EVT_REC_DONE, type RecDonePayload,
-  type RecRect, type RecOptions,
+  type RecRect, type RecOptions, type AudioSource,
 } from "./api";
 import type { AppConfig } from "../../types";
 import "./recorder.css";
@@ -19,6 +19,16 @@ const RES_LIST: ResPreset[] = ["raw", "1080", "720", "360"];
 const MIN_FPS = 5;
 const MAX_FPS = 60;
 
+/** 音源：短标签（面板空间有限）+ 完整名称（tooltip） */
+const AUDIO_LIST: AudioSource[] = ["off", "mic", "system", "mix"];
+const AUDIO_SHORT: Record<AudioSource, string> = { off: "关", mic: "麦", system: "系", mix: "混" };
+const AUDIO_LABEL: Record<AudioSource, string> = {
+  off: "不录音",
+  mic: "麦克风",
+  system: "系统声音",
+  mix: "麦克风 + 系统声音",
+};
+
 /** 录屏区域选择：呼出即全屏磨砂（窗口级实时模糊），拖拽框选后弹出配置面板，
  *  确认后开始录制——选区窗随即关闭，录制区域由原生边框环（Rust 侧）标示。 */
 export function RecorderSelect() {
@@ -31,7 +41,7 @@ export function RecorderSelect() {
   const [error, setError] = useState("");
   // 录制参数：格式 / 帧率 / 画质（默认值均取自设置页）；
   // 分辨率预设单独存，开始录制时按选区高度换算成 scale
-  const [opts, setOpts] = useState<RecOptions>({ fmt: "mp4", fps: 12, scale: 1, quality: "normal" });
+  const [opts, setOpts] = useState<RecOptions>({ fmt: "mp4", fps: 12, scale: 1, quality: "normal", audio: "off" });
   const [res, setRes] = useState<ResPreset>("raw");
   // 录制中遮罩模式：Rust 不再销毁选区窗，而是让它转入"黑遮罩镂空录制区"
   // （鼠标已在窗口级穿透），与选区阶段视觉统一
@@ -48,7 +58,9 @@ export function RecorderSelect() {
       const quality = (["high", "normal", "fast"].includes(r.quality)
         ? r.quality : "normal") as RecOptions["quality"];
       const fps = Math.min(MAX_FPS, Math.max(MIN_FPS, Math.round(r.fps ?? 12)));
-      setOpts((o) => ({ ...o, fmt, quality, fps }));
+      const audio = (AUDIO_LIST.includes(r.audio as AudioSource)
+        ? r.audio : "off") as AudioSource;
+      setOpts((o) => ({ ...o, fmt, quality, fps, audio }));
       setRes(res);
     }).catch(() => {});
   }, []);
@@ -127,7 +139,11 @@ export function RecorderSelect() {
       await recorderStart({
         x: Math.round(r.x * sc), y: Math.round(r.y * sc),
         w: Math.round(r.w * sc), h: Math.round(r.h * sc),
-      }, { fmt: opts.fmt, fps: opts.fps, scale, quality: opts.quality });
+      }, {
+        fmt: opts.fmt, fps: opts.fps, scale, quality: opts.quality,
+        // GIF 容器不支持音频，强制关掉（Rust 侧也会忽略，这里先兜住避免误解）
+        audio: opts.fmt === "mp4" ? opts.audio : "off",
+      });
     } catch (err) {
       console.error("recorder_start failed", err);
       setError(err instanceof Error ? err.message : String(err));
@@ -202,8 +218,9 @@ export function RecorderSelect() {
   // 初始估算用固定尺寸，layout effect 用真实尺寸精确夹回。
   // 面板已简化为单行（格式平铺 + 开始录制），宽高都按内容自适应；
   // 内边距对齐截图工具栏（8px 10px）后整体更矮
-  const PANEL_W_EST = 250;
-  const PANEL_H_EST = 52;
+  // MP4 时面板多一排音源按钮，估算宽度相应加宽（真实宽度由 layout effect 夹回）
+  const PANEL_W_EST = opts.fmt === "mp4" ? 268 : 172;
+  const PANEL_H_EST = 34;
   let panelLeft = 0, panelTop = 0;
   if (valid && rect) {
     // 外部右下角：正下方 + 右对齐选区右缘
@@ -284,9 +301,26 @@ export function RecorderSelect() {
                     {v === "mp4" ? "MP4" : "GIF"}
                   </button>
                 ))}
+                {/* 音源：仅 MP4 显示（GIF 容器不支持音频）。
+                    设置页的 audio 是持久默认值，这里的改动只影响本次录制。 */}
+                {opts.fmt === "mp4" && (
+                  <>
+                    <i className="rec-quick-sep" />
+                    {AUDIO_LIST.map((v) => (
+                      <button
+                        key={v}
+                        className={`rec-fmt-btn rec-audio-btn${opts.audio === v ? " active" : ""}`}
+                        onClick={() => setOpts((o) => ({ ...o, audio: v }))}
+                        title={`音源：${AUDIO_LABEL[v]}`}
+                      >
+                        {AUDIO_SHORT[v]}
+                      </button>
+                    ))}
+                  </>
+                )}
                 <i className="rec-quick-sep" />
                 <button className="rec-start" onClick={() => void start()} title="开始录制（Enter）">
-                  <Circle size={12} fill="currentColor" stroke="none" />
+                  <Play size={13} fill="currentColor" stroke="none" />
                 </button>
               </div>
             </div>

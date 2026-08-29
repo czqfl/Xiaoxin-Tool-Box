@@ -22,6 +22,7 @@ export const FEATURES: Array<{
   { key: "screenshot", label: "截图贴图", desc: "截图 / 标注 / 贴图钉屏 / 屏幕取色", page: "screenshot" },
   { key: "recorder", label: "屏幕录制", desc: "框选区域录制视频 (AVI) 或 GIF 动图", page: "recorder" },
   { key: "toolbar", label: "悬浮工具栏", desc: "桌面常驻小工具条", page: "toolbar" },
+  { key: "taskbar", label: "任务栏透明", desc: "自定义 Windows 任务栏背景透明度与毛玻璃", page: "taskbar" },
 ];
 
 /** 读取某功能的启用状态（未知 key 视为启用） */
@@ -37,6 +38,7 @@ export function featureEnabled(config: ReturnType<typeof useConfigStore.getState
     screenshot: config.shot?.enabled,
     recorder: config.recorder?.enabled,
     toolbar: config.toolbar?.enabled,
+    taskbar: config.taskbar?.enabled,
   };
   return map[key] ?? true;
 }
@@ -58,6 +60,7 @@ export function FeaturePage({ onNavigate }: { onNavigate: (p: Page) => void }) {
       case "screenshot": next.shot = { ...config.shot, enabled: on }; break;
       case "recorder": next.recorder = { ...config.recorder, enabled: on }; break;
       case "toolbar": next.toolbar = { ...config.toolbar, enabled: on }; break;
+      case "taskbar": next.taskbar = { ...config.taskbar, enabled: on }; break;
     }
     void update(next);
   };

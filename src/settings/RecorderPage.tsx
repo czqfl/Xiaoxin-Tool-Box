@@ -76,6 +76,21 @@ export function RecorderPage() {
             onChange={(v) => updateRec({ quality: v })}
           />
         </SettingRow>
+        <SettingRow
+          title="音源"
+          desc="录制同时收录声音；录制中可在控制条随时静音/取消静音。仅 MP4 生效（GIF 不支持音频）"
+        >
+          <Segmented
+            value={config.recorder?.audio ?? "off"}
+            options={[
+              { value: "off", label: "不录音" },
+              { value: "mic", label: "麦克风" },
+              { value: "system", label: "系统声音" },
+              { value: "mix", label: "两者" },
+            ]}
+            onChange={(v) => updateRec({ audio: v })}
+          />
+        </SettingRow>
       </SettingGroup>
 
       <SettingGroup>

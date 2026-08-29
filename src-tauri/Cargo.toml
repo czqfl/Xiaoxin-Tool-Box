@@ -72,6 +72,9 @@ features = [
     "Wdk_System_Threading",
     # 录屏 MP4：Media Foundation H.264 Sink Writer
     "Win32_Media_MediaFoundation",
+    # 录屏音频：WASAPI 采集（麦克风 / 系统声音环回）
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
     # 文字识别已改走 rapidocr-core（PP-OCR ONNX），不再需要 WinRT OCR 相关接口
 ]
 

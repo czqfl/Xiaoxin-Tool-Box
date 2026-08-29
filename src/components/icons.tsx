@@ -256,6 +256,17 @@ export const IconPalette = (p: IconProps) => (
   </svg>
 );
 
+/** 任务栏透明：底部任务栏条 + 其上的应用图标（三个小方块） */
+export const IconTaskbar = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="2.5" y="14.5" width="19" height="7" rx="2" />
+    <rect x="6" y="17" width="3" height="2" rx="0.5" />
+    <rect x="10.5" y="17" width="3" height="2" rx="0.5" />
+    <rect x="15" y="17" width="3" height="2" rx="0.5" />
+  </svg>
+);
+
+
 export const IconKey = (p: IconProps) => (
   <svg {...base(p)}>
     <circle cx="7.5" cy="15.5" r="4" />

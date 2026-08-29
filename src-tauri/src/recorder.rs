@@ -173,7 +173,9 @@ pub fn on_bar_destroyed<R: Runtime>(app: &AppHandle<R>) {
 
 // ---------- 控制条 ----------
 
-const BAR_W: i32 = 312;
+// 312 → 356：为录制中的「静音」按钮预留位置（仅在带音轨时出现，
+// 但窗口宽度固定，未录音时留白比按钮挤出去更好）
+const BAR_W: i32 = 356;
 const BAR_H: i32 = 36;
 
 /// 控制条物理尺寸 = CSS 设计尺寸 × 目标显示器缩放系数。
@@ -293,6 +295,9 @@ pub struct RecOpts {
     /// 输出分辨率缩放（0.25~1.0），1.0 = 原始选区尺寸
     pub scale: f32,
     pub quality: RecQuality,
+    /// 音源：Off=无音轨 / Mic=麦克风 / System=系统声音环回 / Mix=两者混合。
+    /// 仅 MP4 生效（GIF 容器不支持音频）。
+    pub audio: crate::recaudio::AudioSource,
 }
 
 /// BGRA → RGB 转缩放（最近邻）；写入预分配的 rgb_buf，返回切片
@@ -432,18 +437,76 @@ fn run<R: Runtime + 'static>(
             Err(e) => { finish(&app, false, None, 0, 0, Some(format!("GIF 初始化失败: {e}")), false); return; }
         }
     }
-    // MP4：Media Foundation H.264 Sink Writer（硬件优先，真 MP4 容器）
+    // MP4：Media Foundation H.264 Sink Writer（软件编码器，真 MP4 容器）
     let bitrate = crate::h264::bitrate_for(ow, oh, fps, opts.quality);
-    let mut h264: Option<crate::h264::H264Writer> = if opts.fmt == RecFmt::Mp4 {
-        match crate::h264::H264Writer::new(&path, ow, oh, fps, bitrate) {
-            Ok(h) => Some(h),
-            Err(e) => {
-                let _ = std::fs::remove_file(&path);
-                finish(&app, false, None, 0, 0, Some(e), false);
-                return;
+    // ---- 音频引擎（仅 MP4；GIF 容器不支持音频）----
+    // 采集跑在独立线程、只产 PCM 包；录制线程每帧写完后 drain 混音写入。
+    // 任何一步失败都降级为「无音轨」，绝不阻断录制。
+    let mut audio_eng: Option<crate::recaudio::AudioEngine> = None;
+    let mut audio_cfg: Option<crate::h264::AudioCfg> = None;
+    if opts.audio != crate::recaudio::AudioSource::Off {
+        if opts.fmt != RecFmt::Mp4 {
+            crate::storage::diag_write("[recorder] GIF 不支持音频，本次录制无音轨");
+        } else {
+            match crate::recaudio::AudioEngine::start(opts.audio) {
+                Ok(Some(eng)) => {
+                    audio_cfg = Some(crate::h264::AudioCfg {
+                        sample_rate: 48000,
+                        channels: 2,
+                        bitrate: 128_000,
+                    });
+                    audio_eng = Some(eng);
+                }
+                Ok(None) => {
+                    crate::storage::diag_write("[recorder] 音频端点不可用，本次录制无音轨")
+                }
+                Err(e) => crate::storage::diag_write(&format!(
+                    "[recorder] 音频启动失败，降级为无音轨：{e}"
+                )),
             }
         }
-    } else { None };
+    }
+    let mut h264: Option<crate::h264::H264Writer> = if opts.fmt == RecFmt::Mp4 {
+        // 先试带音轨；音频侧（如系统缺 AAC 编码器）失败 → 回退重建无音轨 writer
+        match crate::h264::H264Writer::new_ex(
+            &path,
+            ow,
+            oh,
+            fps,
+            bitrate,
+            opts.quality,
+            crate::h264::EncTuning::Tuned,
+            audio_cfg,
+        ) {
+            Ok(h) => Some(h),
+            Err(e) => {
+                crate::storage::diag_write(&format!(
+                    "[recorder] 带音轨 writer 创建失败，回退无音轨：{e}"
+                ));
+                if let Some(mut eng) = audio_eng.take() {
+                    eng.finish();
+                }
+                match crate::h264::H264Writer::new(
+                    &path,
+                    ow,
+                    oh,
+                    fps,
+                    bitrate,
+                    opts.quality,
+                    crate::h264::EncTuning::Tuned,
+                ) {
+                    Ok(h) => Some(h),
+                    Err(e2) => {
+                        let _ = std::fs::remove_file(&path);
+                        finish(&app, false, None, 0, 0, Some(e2), false);
+                        return;
+                    }
+                }
+            }
+        }
+    } else {
+        None
+    };
 
     let mut prev_bgra_hash: u64 = 0;
     // 复用缓冲区：避免每帧分配/释放 6~8MB
@@ -475,6 +538,9 @@ fn run<R: Runtime + 'static>(
         if PAUSE.load(Ordering::SeqCst) {
             if !was_paused {
                 was_paused = true;
+                // 暂停：丢弃在途音频包且不推进音频时间线，与视频侧
+                // prev_cap_at = None 的语义对齐（暂停段不计入音画时间线）
+                if let Some(eng) = audio_eng.as_mut() { eng.discard(); }
                 #[cfg(windows)]
                 if let Some(ring) = frame_ring.as_ref() { ring.set_paused(true); }
                 let _ = app.emit(EVT_TICK, Tick { elapsed_ms: dur_ms, frames });
@@ -596,6 +662,14 @@ fn run<R: Runtime + 'static>(
         }
         frames += 1;
         dur_ms += gap_ms as u64;
+        // 音频：视频帧写成功后把在途 PCM 混音并写入 AAC。
+        // 必须在同一线程（录制线程）调——IMFSinkWriter 要求串行化，
+        // 采集线程绝不碰它。静音时 drain 写零帧，时间线不断。
+        if let (Some(eng), Some(wr)) = (audio_eng.as_mut(), h264.as_mut()) {
+            let video_ts = wr.video_ts();
+            let muted = crate::recaudio::AUDIO_MUTE.load(Ordering::SeqCst);
+            eng.drain(wr, video_ts, muted);
+        }
         // 前几帧各记一条：一旦再崩溃，日志能明确停在「采集后」还是「编码后」
         if frames <= 3 {
             crate::storage::diag_write(&format!("[recorder] frame {frames} encoded"));
@@ -623,6 +697,7 @@ fn run<R: Runtime + 'static>(
     // 用户取消：不落盘，直接删临时文件并通知前端关掉控制条（不弹完成通知）
     if CANCEL.load(Ordering::SeqCst) {
         drop(gif_enc.take());
+        if let Some(mut eng) = audio_eng.take() { eng.finish(); }
         drop(h264.take());
         let _ = std::fs::remove_file(&path);
         crate::storage::diag_write("[recorder] canceled by user, temp file removed");
@@ -630,8 +705,10 @@ fn run<R: Runtime + 'static>(
         return;
     }
 
-    // 收尾：GIF Encoder drop 即写终止块；H.264 Finalize 写出 moov 元数据
+    // 收尾：GIF Encoder drop 即写终止块；H.264 Finalize 写出 moov 元数据。
+    // 音频必须先停采集并 join，再 finalize——保证最后一段 PCM 已提交。
     drop(gif_enc.take());
+    if let Some(mut eng) = audio_eng.take() { eng.finish(); }
     if let Some(mut h) = h264.take() {
         if let Err(e) = h.finalize() {
             crate::storage::diag_write(&format!("[recorder] mp4 finalize: {e}"));
@@ -688,6 +765,8 @@ pub fn recorder_start(
     fps: Option<u32>,
     scale: Option<f64>,
     quality: Option<String>,
+    // 音源："off" / "mic" / "system" / "mix"；None 视为 off
+    audio: Option<String>,
 ) -> Result<(), String> {
     let fmt = match fmt.as_deref() {
         // "avi" 为历史值：统一落 MP4（MJPEG-AVI 已废弃）
@@ -699,11 +778,13 @@ pub fn recorder_start(
         Some("fast") => RecQuality::Fast,
         _ => RecQuality::Normal,
     };
+    let audio = crate::recaudio::AudioSource::from_str(audio.as_deref().unwrap_or("off"));
     let opts = RecOpts {
         fmt,
         fps: fps.unwrap_or(12),
         scale: scale.unwrap_or(1.0) as f32,
         quality,
+        audio,
     };
     if ACTIVE.swap(true, Ordering::SeqCst) {
         crate::storage::diag_write("[recorder] start REJECTED: already active");

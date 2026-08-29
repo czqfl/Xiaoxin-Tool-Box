@@ -3,11 +3,11 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize, PhysicalPosition } from "@tauri-apps/api/dpi";
-import { Square, Film, FolderOpen, X, Pause, Play, LoaderCircle } from "lucide-react";
+import { Square, Film, FolderOpen, X, Pause, Play, LoaderCircle, Mic, MicOff } from "lucide-react";
 import {
   EVT_REC_TICK, EVT_REC_DONE,
   recorderStop, recorderPause, recorderResume, recorderCancel,
-  recDismiss, revealFile,
+  recDismiss, revealFile, recorderAudioMute, recorderAudioState,
   type RecDonePayload,
 } from "./api";
 import "./recorder.css";
@@ -30,8 +30,18 @@ export function RecorderBar() {
   const [elapsed, setElapsed] = useState(0);
   const [paused, setPaused] = useState(false);
   const [result, setResult] = useState<RecDonePayload | null>(null);
+  // 音频：本次录制是否带音轨（决定静音按钮显隐）+ 当前静音状态。
+  // 未录音（GIF / 音源关 / 端点不可用）时按钮不出现，避免摆一个点不动的死按钮。
+  const [audioOn, setAudioOn] = useState(false);
+  const [muted, setMuted] = useState(false);
   const stoppingRef = useRef(false);
   const autoCloseRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    void recorderAudioState()
+      .then(([available, m]) => { setAudioOn(available); setMuted(m); })
+      .catch(() => setAudioOn(false));
+  }, []);
 
   useEffect(() => {
     document.documentElement.dataset.window = "panel";
@@ -101,6 +111,16 @@ export function RecorderBar() {
     void (next ? recorderPause() : recorderResume()).catch(() => {});
   };
 
+  // 静音：写零帧而不是停流，因此音画时间线不中断，取消静音可无缝接回。
+  // 以 Rust 返回的真实状态为准（命令失败时回滚本地状态）
+  const toggleMute = () => {
+    const next = !muted;
+    setMuted(next);
+    void recorderAudioMute(next)
+      .then((v) => setMuted(v))
+      .catch(() => setMuted(!next));
+  };
+
   // 取消：丢弃本次录制（不保存）
   const cancel = () => {
     if (stoppingRef.current) return;
@@ -138,6 +158,15 @@ export function RecorderBar() {
         <>
           <span className={`recb-dot${paused ? " off" : ""}`} />
           <span className="recb-time">{fmt(elapsed)}</span>
+          {audioOn && (
+            <button
+              className={`recb-btn recb-icon${muted ? " recb-muted" : ""}`}
+              onClick={toggleMute}
+              title={muted ? "取消静音" : "静音（不中断录制，可随时切回）"}
+            >
+              {muted ? <MicOff size={12} /> : <Mic size={12} />}
+            </button>
+          )}
           <button
             className={`recb-btn recb-icon${paused ? " recb-resume" : ""}`}
             onClick={togglePause}

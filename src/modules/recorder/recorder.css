@@ -106,27 +106,24 @@
   color: var(--danger);
 }
 
-/* ---- 配置面板：改用截图工具栏同一套令牌（--tb-*，见 screenshot.css 的 html 层），
-   与截图右下角工具栏完全同一视觉语言；底色半透明，由 backdrop-filter 对页面内
-   黑色遮罩做磨砂（选区窗是透明窗，CSS 模糊采的是页面内元素，不是桌面）。 ---- */
+/* ---- 配置面板：与截图右下角工具栏【完全同一套样式】——
+   同一 --tb-bg 实心底、同一 --tb-fg 字色、同圆角/描边/投影。
+   不再用 color-mix 半透明 + backdrop-filter：那层模糊采的是页面内的黑色遮罩，
+   只会把底色冲灰，观感明显低于截图工具栏 ---- */
 .rec-panel {
   position: absolute;
   display: flex;
   flex-direction: column;
-  gap: 11px;
-  /* 与 .shot-toolbar-panel 对齐（8px 10px） */
-  padding: 8px 10px;
+  gap: 0;
+  padding: 3px 5px;
   box-sizing: border-box;
-  /* 内容已简化为单行，宽度由内容撑开（面板位置由 JS 按真实 offsetWidth 夹回） */
   width: auto;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--tb-bg) 82%, transparent);
-  backdrop-filter: blur(16px) saturate(1.35);
-  -webkit-backdrop-filter: blur(16px) saturate(1.35);
+  border-radius: 10px;
+  background: var(--tb-bg);
   border: 1px solid var(--tb-border);
   box-shadow: var(--tb-shadow);
   color: var(--tb-fg);
-  font-size: 13px;
+  font-size: 12px;
   user-select: none;
   pointer-events: auto;
   cursor: default;
@@ -220,21 +217,25 @@
   gap: 6px;
   white-space: nowrap;
 }
+/* 按钮：与 .shot-toolbar button 完全一致——无边框、透明底、--tb-fg 字色，
+   hover 只加一层 --tb-hover-bg，按压回弹。整条工具的视觉语言由此统一 */
 .rec-quick-row button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  padding: 6px 12px;
-  border-radius: 9px;
-  border: 1px solid var(--tb-border);
+  gap: 4px;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 3px 8px;
+  border-radius: 7px;
+  border: none;
   background: transparent;
   color: var(--tb-fg);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
     transform var(--dur-fast) var(--ease-out);
 }
 .rec-quick-row button:hover {
@@ -242,61 +243,48 @@
   color: var(--tb-fg);
 }
 .rec-quick-row button:not(:disabled):active {
-  transform: scale(0.96);
+  transform: scale(0.93);
 }
 
-/* 格式按钮：纯文字、更轻的内边距与底色（图标已去掉，避免臃肿） */
+/* 格式按钮：纯文字 */
 .rec-quick-row .rec-fmt-btn {
-  padding: 4px 10px;
-  background: transparent;
-  color: color-mix(in srgb, var(--tb-fg) 70%, transparent);
+  padding: 3px 8px;
+  color: color-mix(in srgb, var(--tb-fg) 72%, transparent);
 }
 .rec-quick-row .rec-fmt-btn:hover:not(.active) {
-  background: var(--tb-hover-bg);
   color: var(--tb-fg);
 }
+/* 选中格式：与截图工具栏 active 按钮同一实心主题色胶囊 */
 .rec-quick-row .rec-fmt-btn.active {
-  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.95), rgba(var(--accent-rgb), 0.8));
-  border-color: rgba(255, 255, 255, 0.2);
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.98), rgba(var(--accent-rgb), 0.82));
   color: var(--accent-text);
   font-weight: 600;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25),
-    0 2px 8px rgba(var(--accent-rgb), 0.35);
+}
+
+/* 音源按钮：复用格式按钮的形态，但更窄（单字标签），与格式组形成层次 */
+.rec-quick-row .rec-audio-btn {
+  padding: 3px 6px;
+  min-width: 22px;
 }
 
 /* 分隔竖线：把「选格式」与「开始录制」两组动作分开 */
 .rec-quick-sep {
   width: 1px;
   align-self: stretch;
-  margin: 3px 4px;
+  margin: 2px 2px;
   background: var(--tb-line, rgba(255, 255, 255, 0.14));
   flex-shrink: 0;
 }
 
-/* 开始录制：红色圆形录制点（纯图标），整行唯一的动作按钮，一眼可点 */
+/* 开始录制：不再画红色实心圆，只留一枚危险色三角——与同条其它按钮一样
+   无边框透明底，hover 才浮出 --tb-hover-bg，视觉更简洁 */
 .rec-quick-row .rec-start {
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  border-radius: 50%;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--danger) 96%, transparent),
-    color-mix(in srgb, var(--danger) 82%, black)
-  );
-  border-color: rgba(255, 255, 255, 0.22);
-  color: #fff;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28),
-    0 2px 8px color-mix(in srgb, var(--danger) 40%, transparent);
+  color: var(--danger);
+  padding: 3px 6px;
 }
 .rec-quick-row .rec-start:hover {
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--danger) 100%, transparent),
-    color-mix(in srgb, var(--danger) 92%, black)
-  );
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.32),
-    0 3px 12px color-mix(in srgb, var(--danger) 55%, transparent);
+  background: var(--tb-hover-bg);
+  color: var(--danger);
 }
 
 /* ==========================================================================
@@ -309,15 +297,14 @@
   height: 100vh;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 8px 0 14px;
+  gap: 8px;
+  padding: 0 6px 0 12px;
   box-sizing: border-box;
-  /* 与截图工具栏同一套令牌（--tb-*，定义在 screenshot.css 的 html 层级）；
-     底色半透明化，透出窗口的 SWCA 系统级实时模糊——观感与通用设置/截图工具栏一致 */
-  border-radius: 12px;
+  /* 简洁向：单层细边 + 一道弱投影，去掉多层重阴影 */
+  border-radius: 10px;
   border: 1px solid var(--tb-border);
-  background: color-mix(in srgb, var(--tb-bg) 76%, transparent);
-  box-shadow: var(--tb-shadow);
+  background: color-mix(in srgb, var(--tb-bg) 78%, transparent);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
   color: var(--tb-fg);
   font-size: 13px;
   user-select: none;
@@ -326,11 +313,11 @@
 
 /* ---- 录制中指示灯：呼吸红点 ---- */
 .recb-dot {
-  width: 9px;
-  height: 9px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--danger);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--danger) 95%, transparent), 0 0 2px color-mix(in srgb, var(--danger) 70%, transparent);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--danger) 60%, transparent);
   animation: recb-pulse 1.2s ease-in-out infinite;
   flex-shrink: 0;
 }
@@ -387,20 +374,14 @@
   cursor: default;
 }
 
-/* 停止按钮：危险红实心药丸（唯一强调，一眼可点） */
+/* 停止按钮：纯色危险红，唯一强调项；去掉渐变与彩色投影，观感更干净 */
 .recb-stop {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--danger) 95%, transparent), color-mix(in srgb, var(--danger) 88%, black));
-  border-color: rgba(255, 255, 255, 0.16);
+  background: color-mix(in srgb, var(--danger) 92%, black);
+  border-color: transparent;
   color: #fff;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.28),
-    0 2px 8px color-mix(in srgb, var(--danger) 35%, transparent);
 }
 .recb-stop:hover:not(:disabled) {
-  background: linear-gradient(180deg, rgba(238, 88, 94, 1), rgba(224, 62, 68, 0.95));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.32),
-    0 3px 12px color-mix(in srgb, var(--danger) 50%, transparent);
+  background: var(--danger);
 }
 
 /* ---- 图标按钮（暂停 / 停止 / 取消 / 打开 / 文件夹）：统一 26px 圆形玻璃 ----
@@ -422,6 +403,19 @@
 }
 .recb-btn.recb-icon.recb-resume:hover:not(:disabled) {
   background: rgba(var(--accent-rgb), 0.32);
+}
+/* 静音：琥珀色标记"已静音"，与暂停（品牌色）、停止（危险色）区分开 */
+.recb-btn.recb-icon.recb-muted {
+  background: color-mix(in srgb, var(--warning) 20%, transparent);
+  border-color: color-mix(in srgb, var(--warning) 42%, transparent);
+  color: var(--warning);
+}
+.recb-btn.recb-icon.recb-muted:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--warning) 32%, transparent);
+}
+/* 未静音时用次要前景色，避免抢走「停止/暂停」的视觉重点 */
+.recb-btn.recb-icon:has(> svg):not(.recb-stop):not(.recb-cancel):not(.recb-muted) {
+  color: color-mix(in srgb, var(--tb-fg) 72%, transparent);
 }
 /* 取消：中性幽灵圆钮，hover 泛红示意"丢弃" */
 .recb-btn.recb-icon.recb-cancel {

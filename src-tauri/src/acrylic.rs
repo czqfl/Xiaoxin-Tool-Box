@@ -85,10 +85,16 @@ pub fn apply_blur(hwnd: HWND, light: bool) -> bool {
     apply_blur_impl(hwnd, if light { 0x01FF_FFFF } else { 0x0100_0000 })
 }
 
-fn apply_blur_impl(hwnd: HWND, gradient_color: u32) -> bool {
+/// 通用 ACCENT 策略应用（任务栏透明等模块复用）。accent_state 为未公开
+/// ACCENT_STATE 常量值：0=DISABLED / 2=TRANSPARENTGRADIENT(纯透明) /
+/// 3=BLURBEHIND(模糊) / 4=ACRYLICBLURBEHIND(亚克力)。
+/// gradient_color 为 ABGR 排列（高字节 alpha）。
+/// accent_flags：TranslucentTB 全部非亚克力模式用 2（亚克力才用 0）——
+/// flags=0 时任务栏上渐变色会被忽略/渲染异常（紫色层疑与此有关）。
+pub(crate) fn apply_accent(hwnd: HWND, accent_state: u32, accent_flags: u32, gradient_color: u32) -> bool {
     let mut policy = AccentPolicy {
-        accent_state: ACCENT_ENABLE_BLURBEHIND,
-        accent_flags: 0,
+        accent_state,
+        accent_flags,
         gradient_color,
         animation_id: 0,
     };
@@ -100,21 +106,14 @@ fn apply_blur_impl(hwnd: HWND, gradient_color: u32) -> bool {
     unsafe { set_window_composition_attribute(hwnd, &mut data) }
 }
 
+fn apply_blur_impl(hwnd: HWND, gradient_color: u32) -> bool {
+    apply_accent(hwnd, ACCENT_ENABLE_BLURBEHIND, 0, gradient_color)
+}
+
 /// 清除背景模糊。
 #[allow(dead_code)]
 pub fn clear_blur(hwnd: HWND) -> bool {
-    let mut policy = AccentPolicy {
-        accent_state: ACCENT_DISABLED,
-        accent_flags: 0,
-        gradient_color: 0,
-        animation_id: 0,
-    };
-    let mut data = WindowCompositionAttrData {
-        attribute: WCA_ACCENT_POLICY,
-        p_data: &mut policy as *mut _ as *mut c_void,
-        data_size: std::mem::size_of::<AccentPolicy>(),
-    };
-    unsafe { set_window_composition_attribute(hwnd, &mut data) }
+    apply_accent(hwnd, ACCENT_DISABLED, 0, 0)
 }
 
 /// Win11：窗口自身设为系统原生圆角。

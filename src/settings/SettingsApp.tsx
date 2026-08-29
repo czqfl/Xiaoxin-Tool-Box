@@ -15,6 +15,7 @@ import { GeneralPage } from "./GeneralPage";
 import { AboutPage } from "./AboutPage";
 import { TranslationPage } from "./TranslationPage";
 import { ToolbarPage } from "./ToolbarPage";
+import { TaskbarPage } from "./TaskbarPage";
 import { FilesPage } from "./FilesPage";
 import { ScreenshotPage } from "./ScreenshotPage";
 import { RecorderPage } from "./RecorderPage";
@@ -34,6 +35,7 @@ import {
   IconPort,
   IconSnippet,
   IconRecord,
+  IconTaskbar,
 } from "../components/icons";
 import "../styles/settings.css";
 
@@ -50,6 +52,7 @@ export type Page =
   | "features"
   | "general"
   | "toolbar"
+  | "taskbar"
   | "about";
 
 /** 功能模块页（受功能开关控制：停用即从侧栏隐藏） */
@@ -64,6 +67,7 @@ const MODULE_ITEMS: Array<{ key: Page; label: string; feature: string; icon: Rea
   { key: "screenshot", label: "截图贴图", feature: "screenshot", icon: <IconScreenshot size={15} /> },
   { key: "recorder", label: "屏幕录制", feature: "recorder", icon: <IconRecord size={15} /> },
   { key: "toolbar", label: "悬浮工具栏", feature: "toolbar", icon: <IconGrid size={15} /> },
+  { key: "taskbar", label: "任务栏透明", feature: "taskbar", icon: <IconTaskbar size={15} /> },
 ];
 
 /** 固定页（不受功能开关控制） */
@@ -271,6 +275,7 @@ export function SettingsApp() {
             {page === "features" && <FeaturePage onNavigate={setPage} />}
             {page === "general" && <GeneralPage />}
             {page === "toolbar" && <ToolbarPage />}
+            {page === "taskbar" && <TaskbarPage />}
             {page === "about" && <AboutPage />}
           </>
         )}

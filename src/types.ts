@@ -123,6 +123,11 @@ export interface RecorderConfig {
   max_duration_secs?: number;
   /** 录像保存目录；为空回退截图保存目录，再回退系统图片目录 */
   save_dir?: string | null;
+  /**
+   * 默认音源："off" = 不录音 | "mic" = 麦克风 | "system" = 系统声音 |
+   * "mix" = 麦克风 + 系统声音。仅 MP4 生效（GIF 容器不支持音频）。
+   */
+  audio?: string;
 }
 
 /** 端口工具面板配置 */
@@ -350,6 +355,15 @@ export interface AnnotateConfig {
   colors: string[];
 }
 
+/** 任务栏透明配置 */
+export interface TaskbarConfig {
+  enabled: boolean;
+  /** 任务栏底色不透明度 0~100：0=完全透明只留图标，100=趋近原版底色 */
+  opacity: number;
+  /** 亚克力实时毛玻璃（与不透明度叠加） */
+  acrylic: boolean;
+}
+
 export interface AppConfig {
   clipboard: ClipboardConfig;
   folder: FolderConfig;
@@ -365,6 +379,7 @@ export interface AppConfig {
   recorder: RecorderConfig;
   pin: PinConfig;
   annotate: AnnotateConfig;
+  taskbar: TaskbarConfig;
   panel_positions: Record<string, [number, number]>;
   panel_sizes?: Record<string, [number, number]>;
 }
