@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "所有窗口共享的基础权限",
-  "windows": ["settings", "clipboard-panel", "folder-panel", "credential-panel", "port-panel", "files-panel", "snippets-panel", "translate-popup", "palette", "toolbar", "shot-overlay-*", "pin-*", "pin-staging", "scrollshot-bar", "scrollshot-frame", "rec-select", "rec-bar"],
+  "windows": ["settings", "clipboard-panel", "folder-panel", "credential-panel", "port-panel", "files-panel", "snippets-panel", "translate-popup", "palette", "toolbar", "shot-overlay-*", "pin-*", "pin-staging", "scrollshot-bar", "scrollshot-frame", "rec-select", "rec-bar", "note_*", "particles", "sticky-history", "sticky-imageviewer", "sticky-settings"],
   "permissions": [
     "core:default",
     "core:window:allow-show",

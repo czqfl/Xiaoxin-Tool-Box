@@ -15,10 +15,10 @@ import { GeneralPage } from "./GeneralPage";
 import { AboutPage } from "./AboutPage";
 import { TranslationPage } from "./TranslationPage";
 import { ToolbarPage } from "./ToolbarPage";
-import { TaskbarPage } from "./TaskbarPage";
 import { FilesPage } from "./FilesPage";
 import { ScreenshotPage } from "./ScreenshotPage";
 import { RecorderPage } from "./RecorderPage";
+import { StickyNotePage } from "./StickyNotePage";
 import { FeaturePage, featureEnabled } from "./FeaturePage";
 import { SettingsErrorBoundary } from "./ErrorBoundary";
 import {
@@ -35,7 +35,7 @@ import {
   IconPort,
   IconSnippet,
   IconRecord,
-  IconTaskbar,
+  IconSticky,
 } from "../components/icons";
 import "../styles/settings.css";
 
@@ -52,7 +52,7 @@ export type Page =
   | "features"
   | "general"
   | "toolbar"
-  | "taskbar"
+  | "sticky"
   | "about";
 
 /** 功能模块页（受功能开关控制：停用即从侧栏隐藏） */
@@ -67,11 +67,11 @@ const MODULE_ITEMS: Array<{ key: Page; label: string; feature: string; icon: Rea
   { key: "screenshot", label: "截图贴图", feature: "screenshot", icon: <IconScreenshot size={15} /> },
   { key: "recorder", label: "屏幕录制", feature: "recorder", icon: <IconRecord size={15} /> },
   { key: "toolbar", label: "悬浮工具栏", feature: "toolbar", icon: <IconGrid size={15} /> },
-  { key: "taskbar", label: "任务栏透明", feature: "taskbar", icon: <IconTaskbar size={15} /> },
 ];
 
 /** 固定页（不受功能开关控制） */
 const FIXED_ITEMS: Array<{ key: Page; label: string; icon: React.ReactNode }> = [
+  { key: "sticky", label: "便签设置", icon: <IconSticky size={15} /> },
   { key: "features", label: "功能开关", icon: <IconKey size={15} /> },
   { key: "general", label: "通用设置", icon: <IconSettings size={15} /> },
   { key: "about", label: "关于", icon: <IconInfo size={15} /> },
@@ -154,6 +154,10 @@ export function SettingsApp() {
     onEvent<string>(EVT_SHORTCUT_FAILED, (target) => {
       setShortcutFailed(FAILED_TARGET_NAME[target] ?? target);
       setPage(FAILED_TARGET_PAGE[target] ?? "features");
+    }).then((un) => (disposed ? un() : cleanup.push(un)));
+    // 便签窗口"设置"入口：跳到便签设置页
+    onEvent<void>("sticky://goto-settings", () => {
+      setPage("sticky");
     }).then((un) => (disposed ? un() : cleanup.push(un)));
     return () => {
       disposed = true;
@@ -275,7 +279,7 @@ export function SettingsApp() {
             {page === "features" && <FeaturePage onNavigate={setPage} />}
             {page === "general" && <GeneralPage />}
             {page === "toolbar" && <ToolbarPage />}
-            {page === "taskbar" && <TaskbarPage />}
+            {page === "sticky" && <StickyNotePage />}
             {page === "about" && <AboutPage />}
           </>
         )}

@@ -1,7 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Play } from "lucide-react";
+import { Play, VolumeX, Mic, MonitorSpeaker, AudioLines } from "lucide-react";
 import {
   recorderStart, recorderStop, recSelectCancel,
   EVT_REC_DONE, type RecDonePayload,
@@ -19,9 +19,14 @@ const RES_LIST: ResPreset[] = ["raw", "1080", "720", "360"];
 const MIN_FPS = 5;
 const MAX_FPS = 60;
 
-/** 音源：短标签（面板空间有限）+ 完整名称（tooltip） */
+/** 音源：图标（按钮本体）+ 完整名称（tooltip）。面板空间有限，不用文字 */
 const AUDIO_LIST: AudioSource[] = ["off", "mic", "system", "mix"];
-const AUDIO_SHORT: Record<AudioSource, string> = { off: "关", mic: "麦", system: "系", mix: "混" };
+const AUDIO_ICON: Record<AudioSource, ReactNode> = {
+  off: <VolumeX size={13} />,
+  mic: <Mic size={13} />,
+  system: <MonitorSpeaker size={13} />,
+  mix: <AudioLines size={13} />,
+};
 const AUDIO_LABEL: Record<AudioSource, string> = {
   off: "不录音",
   mic: "麦克风",
@@ -86,7 +91,15 @@ export function RecorderSelect() {
       setStarting(false);
       setMasking(true);
     });
-    const un3 = listen<RecDonePayload>(EVT_REC_DONE, () => setMasking(false));
+    // 录制结束把选区/拖拽状态一并清空：窗口 hide 后状态必须归零，否则下次
+    // 复用呼出时 show 的第一帧会用【上一次的选区】渲染（"闪出上次录制区域"）
+    const un3 = listen<RecDonePayload>(EVT_REC_DONE, () => {
+      setMasking(false);
+      setBoth(null);
+      setDragging(false);
+      startingRef.current = false;
+      setStarting(false);
+    });
     return () => {
       void un1.then((u) => u());
       void un2.then((u) => u());
@@ -313,7 +326,7 @@ export function RecorderSelect() {
                         onClick={() => setOpts((o) => ({ ...o, audio: v }))}
                         title={`音源：${AUDIO_LABEL[v]}`}
                       >
-                        {AUDIO_SHORT[v]}
+                        {AUDIO_ICON[v]}
                       </button>
                     ))}
                   </>

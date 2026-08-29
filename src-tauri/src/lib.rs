@@ -26,10 +26,9 @@ mod panel;
 mod port;
 mod quickfiles;
 mod shortcut;
+mod sticky;
 mod snippets;
 mod palette_stats;
-#[cfg(windows)]
-mod taskbar;
 mod storage;
 mod translate;
 mod tray;
@@ -67,6 +66,7 @@ use crate::folder::FolderStore;
 use crate::shortcut::ShortcutBindings;
 use crate::translate::TranslateStore;
 use std::sync::Mutex;
+use tauri::Listener;
 use tauri::Manager;
 use tauri_plugin_global_shortcut::ShortcutState;
 
@@ -228,6 +228,8 @@ pub fn run() {
         storage::load_json(&paths.folders_file, vec![]);
     let creds: Vec<credentials::Credential> =
         storage::load_json(&paths.creds_file, vec![]);
+    // 便签集成：首次启动把旧 StickyNote 应用的数据迁移到工具箱数据目录
+    sticky::migrate_legacy_sticky(&paths);
     // OCR 档位先于任何识别调用就位（识别本身在 spawn_blocking 里读这个全局）
     ocr::set_model(&config.shot.ocr_model);
 
@@ -251,6 +253,13 @@ pub fn run() {
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
                     if event.state != ShortcutState::Pressed {
+                        return;
+                    }
+                    // 便签全局快捷键（呼出 / 收起 / 新建 / 历史）：命中便签设置里的
+                    // 组合则短路，不再走工具箱面板切换逻辑。便签组合存于便签自己的
+                    // sticky_settings.json（设置归属独立），注册时也刻意不调用
+                    // unregister_all，以免注销工具箱快捷键。
+                    if sticky::handle_sticky_shortcut(app, shortcut) {
                         return;
                     }
                     shortcut::handle_shortcut_pressed(app, shortcut);
@@ -312,6 +321,22 @@ pub fn run() {
             // 默认普通模式，Ctrl+V 不会被接管（register_initial 已按残留配置
             // 同步过 SEQ_ENABLED，这里再统一归位为放行）
             clipboard::reset_paste_mode_if_sequential(&handle);
+            // ---- 便签初始化 ----
+            // 便签全局快捷键（呼出/收起/新建/历史）：启动即注册，组合来自便签自己的
+            // 设置文件（与工具箱快捷键体系并存，注册时不 unregister_all）。
+            sticky::register_all_shortcuts(&handle);
+            // 确保全屏透明「粒子层」窗口存在（粒子消散可飘出便签矩形）：
+            // tauri.conf.json 已声明，此处运行时兜底——若 conf 声明未生效也能
+            // 正常创建，粒子动画不丢失飘散能力。
+            sticky::ensure_particles_window(&handle);
+            // 粒子层就绪自检：前端挂载成功后上报，日志可确认渲染链路是否通
+            {
+                let app2 = handle.clone();
+                let _ = app2.listen("sticky://particles-layer-ready", move |_| {
+                    crate::storage::diag_write("[sticky] particles layer ready");
+                    crate::sticky::mark_particles_ready();
+                });
+            }
             clipboard::start_watcher(handle.clone());
             #[cfg(windows)]
             explorer::start_explorer_watcher(handle.clone());
@@ -324,10 +349,6 @@ pub fn run() {
             }
             // 恢复上次的贴图
             crate::pin::restore_pins(&handle);
-            // 任务栏透明守护线程：explorer 重启/系统重置外观后自动重施样式；
-            // 首轮 tick 也会把启动时已启用的配置施加上（签名 None → 必然触发）
-            #[cfg(windows)]
-            crate::taskbar::start_watcher(handle.clone());
             // 预建隐藏的复用贴图窗：贴图时直接装图秒显，免临时建 WebView2 窗口
             crate::pin::ensure_staging(&handle);
             // 工具栏保持置顶（盖过任务栏等系统级置顶窗口，300ms 周期顶置）
@@ -420,6 +441,46 @@ pub fn run() {
             panel::panel_toggle,
             panel::panel_active,
             panel::toolbar_set_visible,
+            // ---- 便签（sticky）----
+            // 设置存储独立于工具箱 AppConfig（存在便签自己的 sticky_settings.json），
+            // 命令仅做读写通道；界面统一挂在工具箱设置里（StickyNotePage）。
+            sticky::load_note,
+            sticky::save_note,
+            sticky::list_notes,
+            sticky::delete_note,
+            sticky::new_note_id,
+            sticky::set_note_priority,
+            sticky::load_settings,
+            sticky::save_settings,
+            sticky::effective_notes_dir,
+            sticky::save_md_custom,
+            sticky::read_md_custom,
+            sticky::open_file,
+            sticky::open_folder,
+            sticky::save_bg_image,
+            sticky::read_bg_image,
+            sticky::delete_bg_image,
+            sticky::get_wallpaper,
+            sticky::open_note_window,
+            sticky::create_note_window,
+            sticky::open_history_window,
+            sticky::toggle_sticky_notes,
+            sticky::mark_note_open,
+            sticky::mark_note_closed,
+            sticky::get_open_notes,
+            sticky::close_window,
+            sticky::start_dragging,
+            sticky::set_always_on_top,
+            sticky::minimize_to_taskbar,
+            sticky::minimize_to_tray,
+            sticky::show_window,
+            sticky::quit_app,
+            sticky::register_shortcuts,
+            sticky::open_settings_window,
+            sticky::particles_layer_ready,
+            sticky::set_acrylic,
+            sticky::format_with_llm,
+            sticky::capture_screen_region,
             port::port_query,
             port::port_kill,
             port::port_search,

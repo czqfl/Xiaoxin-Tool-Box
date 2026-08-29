@@ -369,6 +369,8 @@ function SearchTab({
             placeholder="全盘搜索文件/文件夹名（至少 2 个字符，含 \\ 时按路径匹配）"
             value={q}
             spellCheck={false}
+            autoComplete="off"
+            name="qf-fulltext-search"
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && hits.length) open(hits[0]);

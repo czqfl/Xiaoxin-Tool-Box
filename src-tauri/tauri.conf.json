@@ -176,6 +176,24 @@
         "skipTaskbar": true,
         "visible": false,
         "focus": false
+      },
+      {
+        "label": "particles",
+        "title": "粒子层",
+        "url": "index.html",
+        "visible": false,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "shadow": false,
+        "skipTaskbar": true,
+        "focusable": false,
+        "resizable": true,
+        "width": 1920,
+        "height": 1080,
+        "x": 0,
+        "y": 0,
+        "center": false
       }
     ],
     "security": {

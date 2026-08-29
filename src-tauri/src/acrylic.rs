@@ -38,6 +38,9 @@ const WCA_ACCENT_POLICY: u32 = 19;
 // ACCENT_STATE
 const ACCENT_DISABLED: u32 = 0;
 const ACCENT_ENABLE_BLURBEHIND: u32 = 3;
+/// 亚克力（带 tint 着色 + 背景模糊）。便签的透明主题用它：tint 由前端 CSS 的
+/// 面板不透明度换算，模糊由系统合成——与 PowerShell 亚克力观感一致。
+const ACCENT_ENABLE_ACRYLICBLURBEHIND: u32 = 4;
 
 #[repr(C)]
 struct AccentPolicy {
@@ -114,6 +117,18 @@ fn apply_blur_impl(hwnd: HWND, gradient_color: u32) -> bool {
 #[allow(dead_code)]
 pub fn clear_blur(hwnd: HWND) -> bool {
     apply_accent(hwnd, ACCENT_DISABLED, 0, 0)
+}
+
+/// 便签用：带自定义着色的亚克力（tint_rgb = 0xRRGGBB）。
+/// alpha 取最小可用值 1——面板深浅交给前端 CSS 控制，系统层只负责着色 + 模糊。
+/// 梯度色是 ABGR 排列（高字节 alpha），故需把 RGB 倒序组装。
+pub fn apply_acrylic_tinted(hwnd: HWND, tint_rgb: u32) -> bool {
+    let r = (tint_rgb >> 16) & 0xff;
+    let g = (tint_rgb >> 8) & 0xff;
+    let b = tint_rgb & 0xff;
+    let gradient = (1u32 << 24) | (b << 16) | (g << 8) | r;
+    // accent_flags = 0：亚克力模式才用 0（非亚克力模式用 2，否则渐变色被忽略）
+    apply_accent(hwnd, ACCENT_ENABLE_ACRYLICBLURBEHIND, 0, gradient)
 }
 
 /// Win11：窗口自身设为系统原生圆角。

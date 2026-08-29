@@ -265,6 +265,34 @@
   color: var(--text-tertiary);
   white-space: nowrap;
 }
+
+/* ---- 便签设置页：背景图预览 ---- */
+.sticky-bg-preview {
+  margin-top: 10px;
+  max-width: 360px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  overflow: hidden;
+  background: var(--bg-panel);
+  position: relative;
+}
+/* 整行独占预览：脱离控件列，占满分组宽度（图片单独一行，文字另占一行） */
+.sticky-bg-preview--full {
+  max-width: none;
+  margin: 0 16px 16px;
+}
+.sticky-bg-preview img {
+  display: block;
+  width: 100%;
+  max-height: 160px;
+  object-fit: cover;
+}
+.sticky-bg-preview span {
+  display: block;
+  padding: 14px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
 /* 行内状态提示：默认=淡灰说明文字；ok/err=彩色胶囊 + 圆形图标徽标 + 淡入动画 */
 .shortcut-hint {
   display: flex;

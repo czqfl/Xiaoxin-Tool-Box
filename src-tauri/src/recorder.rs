@@ -105,9 +105,11 @@ pub fn begin_select<R: Runtime>(app: &AppHandle<R>) {
     // 复用后二次呼出即时）。重置鼠标穿透（上次录制可能置了 true）并通知前端清空状态
     if let Some(w) = app.get_webview_window(SELECT_LABEL) {
         let _ = w.set_ignore_cursor_events(false);
+        // 【先广播 reset 再 show】窗口隐藏期间前端就把状态清零，show 的
+        // 第一帧一定是干净的全屏遮罩，不会闪出上一次的录制区域
+        let _ = app.emit("recorder://select-reset", ());
         let _ = w.show();
         let _ = w.set_focus();
-        let _ = app.emit("recorder://select-reset", ());
         return;
     }
     let Some((mx, my, mw, mh)) = cursor_pos().and_then(|(x, y)| monitor_at(app, x, y)) else {

@@ -16,10 +16,11 @@
   overflow: hidden;
 }
 
-/* ---- 遮罩层：黑色半透明，镂空选区（选区内无遮罩=清晰，对比强烈） ---- */
+/* ---- 遮罩层：黑色半透明，镂空选区（选区内无遮罩=清晰，对比强烈）。
+   不透明度压低（0.20）：过重的暗化会让背后实时画面显得像一张冻住的图 ---- */
 .rec-shade {
   position: absolute;
-  background: rgba(0, 0, 0, 0.38);
+  background: rgba(0, 0, 0, 0.20);
   pointer-events: none;
 }
 .rec-shade-full { inset: 0; }
@@ -261,10 +262,14 @@
   font-weight: 600;
 }
 
-/* 音源按钮：复用格式按钮的形态，但更窄（单字标签），与格式组形成层次 */
+/* 音源按钮：复用格式按钮的形态，图标居中（VolumeX/Mic/MonitorSpeaker/AudioLines），
+   与格式组形成层次 */
 .rec-quick-row .rec-audio-btn {
   padding: 3px 6px;
   min-width: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* 分隔竖线：把「选格式」与「开始录制」两组动作分开 */

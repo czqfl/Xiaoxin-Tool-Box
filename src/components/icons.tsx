@@ -256,16 +256,6 @@ export const IconPalette = (p: IconProps) => (
   </svg>
 );
 
-/** 任务栏透明：底部任务栏条 + 其上的应用图标（三个小方块） */
-export const IconTaskbar = (p: IconProps) => (
-  <svg {...base(p)}>
-    <rect x="2.5" y="14.5" width="19" height="7" rx="2" />
-    <rect x="6" y="17" width="3" height="2" rx="0.5" />
-    <rect x="10.5" y="17" width="3" height="2" rx="0.5" />
-    <rect x="15" y="17" width="3" height="2" rx="0.5" />
-  </svg>
-);
-
 
 export const IconKey = (p: IconProps) => (
   <svg {...base(p)}>
@@ -501,5 +491,14 @@ export const IconSaveImage = (p: IconProps) => (
 export const IconCropSelect = (p: IconProps) => (
   <svg {...base(p)}>
     <rect x="4" y="5" width="16" height="14" rx="1" strokeDasharray="3 3" />
+  </svg>
+);
+
+/** 便签（记事本/贴纸）：设置页"便签设置"与工具栏"便签"入口用 */
+export const IconSticky = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M4 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12l-6 6H6a2 2 0 0 1-2-2V4Z" />
+    <path d="M14 14v6l6-6" />
+    <path d="M8 8h8M8 12h5" />
   </svg>
 );

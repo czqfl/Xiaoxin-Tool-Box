@@ -334,6 +334,13 @@ button {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+/* 文本输入类控件：聚焦态由自身边框/底色变化表达（各面板均有 focus-within 样式）。
+   outline 是矩形、不随圆角且外扩 offset——叠在圆角输入框上就是"错位的第二个边框" */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
+}
 
 /* 徽标 */
 .badge {

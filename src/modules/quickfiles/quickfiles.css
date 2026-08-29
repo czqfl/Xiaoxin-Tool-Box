@@ -667,11 +667,17 @@
   flex: 1;
   min-width: 0;
   border: none;
-  outline: none;
   background: transparent;
   color: var(--text-primary);
   font-size: 13px;
   padding: 7px 0;
+  /* 聚焦反馈由 .qf-search-wrap:focus-within 的边框变色承担；
+     base.css 的全局 :focus-visible outline（2px 矩形、不随圆角、外扩 2px）
+     会在这里叠出一个"错位的第二个输入框边框"，必须显式关掉 */
+  outline: none;
+}
+.qf-search:focus-visible {
+  outline: none;
 }
 .qf-index-meta {
   font-size: 11px;

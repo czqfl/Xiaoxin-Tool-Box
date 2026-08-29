@@ -86,7 +86,7 @@ const defaultConfig: AppConfig = {
   },
   toolbar: {
     enabled: true,
-    tools: ["clipboard", "folder", "credentials", "translation", "port", "files", "snippets", "screenshot", "settings"],
+    tools: ["clipboard", "folder", "credentials", "translation", "port", "files", "snippets", "screenshot", "settings", "sticky"],
     orientation: "vertical",
     auto_hide: true,
     size: "small",
@@ -133,11 +133,6 @@ const defaultConfig: AppConfig = {
     font_size: 18,
     mosaic_block: 12,
     colors: ["#e5484d", "#ff8d1a", "#ffd60a", "#36b37e", "#4c8dff", "#b06fd6", "#ffffff", "#000000"],
-  },
-  taskbar: {
-    enabled: false,
-    opacity: 60,
-    acrylic: true,
   },
   panel_positions: {},
   panel_sizes: {},

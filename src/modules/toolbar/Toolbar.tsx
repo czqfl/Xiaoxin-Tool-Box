@@ -28,6 +28,7 @@ import {
   IconSnippet,
   IconTranslate,
   IconScreenshot,
+  IconSticky,
 } from "../../components/icons";
 import "./toolbar.css";
 
@@ -100,6 +101,11 @@ export const TOOLS: Record<ToolKey, { label: string; color: string; icon: React.
     color: "var(--tool-settings)",
     icon: <IconSettings size={14} />,
   },
+  sticky: {
+    label: "便签",
+    color: "var(--tool-sticky)",
+    icon: <IconSticky size={14} />,
+  },
 };
 
 /** 可用工具列表（设置页勾选用） */
@@ -115,6 +121,8 @@ const PANEL_LABEL_TO_KEY: Record<string, ToolKey> = {
   "snippets-panel": "snippets",
   settings: "settings",
   "translate-popup": "translation",
+  // 便签：工具栏入口 toggle 历史窗口；便签窗口各自独立显隐
+  "sticky-history": "sticky",
 };
 
 /** 拖动判定阈值（px）：超过视为拖动窗口，否则视为点击。
@@ -348,7 +356,10 @@ export function Toolbar() {
     const labels = await panelActive();
     const keys = new Set<ToolKey>();
     for (const label of labels) {
-      const k = PANEL_LABEL_TO_KEY[label];
+      // 便签窗口 label 是 note_<id>（id 不定），前缀匹配归入"便签"
+      const k =
+        PANEL_LABEL_TO_KEY[label] ??
+        (label.startsWith("note_") ? ("sticky" satisfies ToolKey) : undefined);
       if (k) keys.add(k);
     }
     setActiveKeys(keys);

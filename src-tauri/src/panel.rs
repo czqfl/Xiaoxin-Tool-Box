@@ -137,13 +137,23 @@ pub fn panel_active(app: tauri::AppHandle) -> Vec<String> {
             labels.push((*label).to_string());
         }
     }
-    for label in ["settings", crate::translate::TRANSLATE_PANEL] {
+    for label in [
+        "settings",
+        crate::translate::TRANSLATE_PANEL,
+        crate::sticky::HISTORY_WINDOW,
+    ] {
         if app
             .get_webview_window(label)
             .and_then(|w| w.is_visible().ok())
             .unwrap_or(false)
         {
             labels.push(label.to_string());
+        }
+    }
+    // 便签窗口（note_*）可见时也算“面板打开”，工具栏据此点亮“便签”图标
+    for (label, w) in app.webview_windows() {
+        if label.starts_with(crate::sticky::NOTE_PREFIX) && w.is_visible().unwrap_or(false) {
+            labels.push(label);
         }
     }
     labels
@@ -193,6 +203,28 @@ pub fn panel_toggle(app: tauri::AppHandle, label: String) -> Result<(), String> 
         }
         crate::translate::trigger_selection_translate(&app);
         broadcast_panel_visibility(&app, crate::translate::TRANSLATE_PANEL, true);
+        return Ok(());
+    }
+    // 便签：工具栏入口 toggle 历史窗口（可见 → 收起；不可见/无 → 打开）。
+    // 历史窗口关闭 = 隐藏常驻（close_window 语义），再次点击秒开，不重建。
+    // 便签窗口各自独立显隐，不受此开关影响。
+    if label == "sticky" {
+        let hist = app.get_webview_window(crate::sticky::HISTORY_WINDOW);
+        let visible = hist
+            .as_ref()
+            .map(|w| w.is_visible().unwrap_or(false))
+            .unwrap_or(false);
+        if visible {
+            crate::storage::diag_write("[panel_toggle] sticky -> hide history");
+            if let Some(w) = hist {
+                let _ = w.hide();
+            }
+            broadcast_panel_visibility(&app, crate::sticky::HISTORY_WINDOW, false);
+        } else {
+            crate::storage::diag_write("[panel_toggle] sticky -> open history");
+            let _ = crate::sticky::open_history_window(app.clone());
+            broadcast_panel_visibility(&app, crate::sticky::HISTORY_WINDOW, true);
+        }
         return Ok(());
     }
     let full = match label.as_str() {

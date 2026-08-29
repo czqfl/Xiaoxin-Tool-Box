@@ -343,32 +343,6 @@ pub fn default_toolbar_orientation() -> String {
     "vertical".into()
 }
 
-/// 任务栏透明配置：修改 Windows 任务栏窗口背景（透明度 + 亚克力）。
-/// 启用状态由功能开关页统一控制（feature_enabled("taskbar")）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct TaskbarConfig {
-    /// 是否启用
-    #[serde(default)]
-    pub enabled: bool,
-    /// 任务栏底色不透明度 0~100：0=完全透明只留图标，100=趋近原版底色
-    #[serde(default = "default_taskbar_opacity")]
-    pub opacity: u32,
-    /// 亚克力实时毛玻璃（与不透明度叠加；关=纯透明/纯色 tint）
-    #[serde(default = "default_true")]
-    pub acrylic: bool,
-}
-
-fn default_taskbar_opacity() -> u32 {
-    60
-}
-
-impl Default for TaskbarConfig {
-    fn default() -> Self {
-        Self { enabled: false, opacity: default_taskbar_opacity(), acrylic: true }
-    }
-}
-
 /// 布尔默认值 true（serde 字段级 default 用）
 pub fn default_true() -> bool {
     true
@@ -662,9 +636,6 @@ pub struct AppConfig {
     /// 标注工具默认参数
     #[serde(default)]
     pub annotate: AnnotateConfig,
-    /// 任务栏透明配置
-    #[serde(default)]
-    pub taskbar: TaskbarConfig,
     /// 各面板上次关闭时的窗口位置（标签 -> 屏幕坐标），下次呼出恢复（记忆位置）
     pub panel_positions: std::collections::HashMap<String, (i32, i32)>,
     /// 各面板上次关闭时的窗口尺寸（标签 -> 物理像素宽高），下次呼出恢复（记忆大小）
@@ -687,7 +658,6 @@ impl AppConfig {
             "screenshot" => self.shot.enabled,
             "recorder" => self.recorder.enabled,
             "toolbar" => self.toolbar.enabled,
-            "taskbar" => self.taskbar.enabled,
             _ => true,
         }
     }
@@ -713,7 +683,6 @@ pub fn config_save(
     // 「旧配置把刚改好的快捷键悄悄改回、重启后旧键复活」的问题。
     config.shortcuts = state.0.lock().unwrap().shortcuts.clone();
     let old_toolbar_enabled = state.0.lock().unwrap().toolbar.enabled;
-    let old_taskbar = state.0.lock().unwrap().taskbar.clone();
     save_json(&paths.config_file, &config).map_err(|e| format!("保存配置失败：{e}"))?;
     *state.0.lock().unwrap() = config.clone();
     // OCR 档位切换即时生效（set_model 内部比对，未变化时不重建引擎）
@@ -722,14 +691,6 @@ pub fn config_save(
     // 原设置页开关的 setToolbarVisible 行为迁移至此）
     if config.toolbar.enabled != old_toolbar_enabled {
         let _ = crate::panel::toolbar_set_visible(app.clone(), config.toolbar.enabled);
-    }
-    // 任务栏透明配置变化时立即应用（开/关/滑不透明度/切亚克力，滑杆拖动即时反馈；
-    // 未变化时不调用，避免无谓的 SWCA 系统调用）
-    #[cfg(windows)]
-    if (config.taskbar.enabled, config.taskbar.opacity, config.taskbar.acrylic)
-        != (old_taskbar.enabled, old_taskbar.opacity, old_taskbar.acrylic)
-    {
-        crate::taskbar::apply(&config.taskbar);
     }
     // 全量重注册快捷键：功能启用开关变化（停用的功能热键即时注销）、
     // 快捷键以外的配置调整都借此保证运行时与配置严格一致（推倒重来语义）

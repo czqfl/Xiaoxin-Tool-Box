@@ -238,7 +238,8 @@ export type ToolKey =
   | "snippets"
   | "screenshot"
   | "recorder"
-  | "settings";
+  | "settings"
+  | "sticky";
 
 /** 悬浮工具栏配置：常驻小工具条，快速呼出各面板 */
 export interface ToolbarConfig {
@@ -355,15 +356,6 @@ export interface AnnotateConfig {
   colors: string[];
 }
 
-/** 任务栏透明配置 */
-export interface TaskbarConfig {
-  enabled: boolean;
-  /** 任务栏底色不透明度 0~100：0=完全透明只留图标，100=趋近原版底色 */
-  opacity: number;
-  /** 亚克力实时毛玻璃（与不透明度叠加） */
-  acrylic: boolean;
-}
-
 export interface AppConfig {
   clipboard: ClipboardConfig;
   folder: FolderConfig;
@@ -379,7 +371,6 @@ export interface AppConfig {
   recorder: RecorderConfig;
   pin: PinConfig;
   annotate: AnnotateConfig;
-  taskbar: TaskbarConfig;
   panel_positions: Record<string, [number, number]>;
   panel_sizes?: Record<string, [number, number]>;
 }
