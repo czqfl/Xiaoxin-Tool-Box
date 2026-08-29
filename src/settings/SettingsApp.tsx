@@ -199,8 +199,11 @@ export function SettingsApp() {
 
   // 停用功能的模块页从侧栏隐藏；当前页若被停用则回落到「功能开关」
   const moduleItems = MODULE_ITEMS.filter((it) => featureEnabled(config, it.feature));
+  // 固定页（便签设置/功能开关/通用/关于）不受功能开关控制，永不判为"停用"——
+  // 此前漏了 sticky，导致点「便签设置」被误判为停用模块页，页面回落到功能开关
+  const fixedPageKeys = new Set(FIXED_ITEMS.map((it) => it.key));
   const currentPageDisabled =
-    page !== "features" && page !== "general" && page !== "about" &&
+    !fixedPageKeys.has(page) &&
     !moduleItems.some((it) => it.key === page);
 
   return (
