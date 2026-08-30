@@ -25,6 +25,14 @@ const fmtSize = (bytes: number) =>
   bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB`
     : bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : `${bytes} B`;
 
+// 录制条窗口尺寸，必须与 Rust recorder.rs 的 BAR_W / BAR_H 保持一致
+const BAR_W = 356;
+const BAR_H = 36;
+/** 音量面板展开时窗口需要额外长出的高度（竖条 + 数值 + 内外边距与余量）。
+ *  录制条窗口平时只有 36px 高，而 WebView 会把超出窗口边界的内容直接裁掉——
+ *  弹出面板不能指望 CSS "浮到窗口外"，只能让窗口临时长高再复原。 */
+const VOL_EXTRA_H = 108;
+
 export function RecorderBar() {
   const [phase, setPhase] = useState<Phase>("recording");
   const [elapsed, setElapsed] = useState(0);
@@ -83,6 +91,9 @@ export function RecorderBar() {
   // done/error 状态 6 秒后自动关闭
   useEffect(() => {
     if (phase === "recording") return;
+    // 停止/完成后收起音量面板：下面紧接着要把窗口缩成右下角通知卡尺寸，
+    // 面板若还开着会跟着被压扁、露出半截
+    setVolOpen(false);
     const place = async () => {
       try {
         const win = getCurrentWindow();
@@ -110,6 +121,25 @@ export function RecorderBar() {
     }
     return () => { if (autoCloseRef.current) clearTimeout(autoCloseRef.current); };
   }, [phase]);
+
+  // 音量面板展开/收起时同步撑高/还原窗口。
+  // 【为什么必须动窗口】录制条窗口固定 36px 高，而 WebView 对超出窗口边界的
+  // 内容一律裁剪——旧版把面板绝对定位到 top:-34px（窗口上方），等于整个画在
+  // 可视区之外，表现就是"点了音量按钮什么也没出现"。CSS 再怎么调 z-index 也
+  // 救不回来，只能让窗口临时长高、收起时复原。
+  useEffect(() => {
+    if (phase !== "recording") return;
+    // 关闭录音会连带收起音量按钮（没在收声调音量没意义），此时必须把面板一起
+    // 关掉：否则窗口仍被撑高，而面板所在的按钮已经不渲染——留出一块空白
+    if (!recOn && volOpen) {
+      setVolOpen(false);
+      return;
+    }
+    const h = volOpen ? BAR_H + VOL_EXTRA_H : BAR_H;
+    void getCurrentWindow()
+      .setSize(new LogicalSize(BAR_W, h))
+      .catch(() => {});
+  }, [volOpen, phase, recOn]);
 
   const stop = () => {
     if (stoppingRef.current) return;
@@ -177,18 +207,20 @@ export function RecorderBar() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
+        // 面板开着时 Esc 先收面板：否则调个音量顺手按 Esc，会把整段录制结束掉
+        if (volOpen) { setVolOpen(false); return; }
         if (phase === "recording") stop();
         else void recDismiss().catch(() => {});
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [phase]);
+  }, [phase, volOpen]);
 
   const dismiss = () => void recDismiss().catch(() => {});
 
   return (
-    <div className={`recb-root${phase !== "recording" ? " recb-toast" : ""}${paused && phase === "recording" ? " paused" : ""}${phase === "done" || phase === "error" ? " recb-final" : ""}`}>
+    <div className={`recb-root${phase !== "recording" ? " recb-toast" : ""}${paused && phase === "recording" ? " paused" : ""}${phase === "done" || phase === "error" ? " recb-final" : ""}${volOpen && phase === "recording" ? " vol-open" : ""}`}>
       {/* 录制中：顶部迷你条（红点 + 时间 + 暂停/停止/取消，全部纯图标 + 悬浮说明）。
           窗口仅 312×36，此前还塞了「REC」与「Esc 停止并保存」兩段文字导致溢出错乱，
           现一律改图标，语义靠 title 与按钮配色表达。 */}

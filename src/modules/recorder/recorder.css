@@ -345,6 +345,14 @@
 
 /* 暂停时整条弱化：一眼区分"正在录"与"暂停中"
    （状态语义由红点熄灭 + 暂停钮变「继续」并高亮表达，不再用文字标识） */
+/* 音量面板展开态：窗口被临时加高，按钮行必须改为贴顶。
+   沿用 align-items:center 的话，整排按钮会随窗口变高一起沉到中间去，
+   看起来像整条录制条忽然往下掉了一截 */
+.recb-root.vol-open {
+  align-items: flex-start;
+  padding-top: 5px;
+}
+
 .recb-root.paused .recb-time {
   color: color-mix(in srgb, var(--tb-fg) 55%, transparent);
 }
@@ -572,31 +580,50 @@
 }
 
 
-/* ---- 音量调节：按钮 + 上方浮出滑杆（录制条仅 36px 高，滑杆向下放不下） ---- */
+/* ---- 音量调节：按钮 + 向下展开的竖向滑杆 ----
+   面板【必须】向下展开：旧版 top:-34px 把它推到窗口上方，而录制条窗口只有
+   36px 高且贴在屏幕顶部，等于整个画在可视区之外——点了什么都看不到。
+   展开时 RecorderBar 会把窗口临时加高（VOL_EXTRA_H），这里才放得下竖条。 */
 .recb-vol-wrap { position: relative; display: inline-flex; }
 .recb-vol-pop {
   position: absolute;
-  top: -34px;
+  top: calc(100% + 6px);
   left: 50%;
   transform: translateX(-50%);
   display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 6px;
-  padding: 5px 9px;
-  border-radius: 8px;
+  padding: 9px 7px 10px;
+  border-radius: 10px;
   background: var(--tb-bg, rgba(24, 26, 30, 0.95));
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.1);
-  white-space: nowrap;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.1);
   z-index: 20;
+  animation: recb-vol-in 140ms cubic-bezier(0.2, 0.9, 0.3, 1.1) both;
 }
+@keyframes recb-vol-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-5px) scale(0.96); }
+  to { opacity: 1; transform: translateX(-50%) none scale(1); }
+}
+/* 竖向滑杆：writing-mode 是 Chromium 现役写法（-webkit-appearance:
+   slider-vertical 已废弃）；direction:rtl 让 0 落在底部、向上拖增大，
+   与音量直觉一致（否则拖上去反而变小） */
 .recb-vol-pop input[type="range"] {
-  width: 110px;
+  /* 兜底：老版 WebView2 走已废弃但仍有效的 slider-vertical；现代 Chromium
+     （121+）由下面这行 writing-mode 接管。两者互不冲突，谁支持谁生效。
+     缺了兜底的话，旧内核上会退化成一个横向躺着的滑杆，拖动手感全错 */
+  -webkit-appearance: slider-vertical;
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 22px;
+  height: 62px;
+  margin: 0;
   accent-color: var(--accent, #4c8dff);
   cursor: pointer;
 }
 .recb-vol-val {
   font-size: 11px;
+  line-height: 1;
   color: rgba(255, 255, 255, 0.85);
-  min-width: 34px;
-  text-align: right;
+  text-align: center;
 }
