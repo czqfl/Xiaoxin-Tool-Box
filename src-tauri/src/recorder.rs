@@ -97,10 +97,13 @@ pub fn begin_select<R: Runtime>(app: &AppHandle<R>) {
         crate::storage::diag_write("[recorder] begin_select ignored: pending=true");
         return;
     }
-    // 截图会话进行中：先收掉遮罩，避免两个全屏置顶窗互相叠盖抢输入
-    if crate::screenshot::shooting() {
-        let _ = crate::screenshot::cancel_impl(app);
-    }
+    // 【无条件】收掉截图遮罩窗，不再只在 shooting() 为真时才收。
+    // 冻结层是挂在 shot-overlay 里、贴了整帧位图的子 HWND——只要那个窗口还
+    // 留在屏幕上，透明的录制选区窗就会把它透出来当背景，观感正是"录屏前先
+    // 截了一张图、在图上框选"。会话状态（SHOOTING）与窗口实际可见性并不可靠
+    // 地同步（异常退出、贴图路径残留等），此前那句 if 放过了这类残留。
+    // cancel_impl → hide_all 是幂等的，无条件调用无副作用。
+    let _ = crate::screenshot::cancel_impl(app);
     // 已存在的旧选择窗直接复用（窗口只 hide 不销毁——重建 WebView 要一两秒，
     // 复用后二次呼出即时）。重置鼠标穿透（上次录制可能置了 true）并通知前端清空状态
     if let Some(w) = app.get_webview_window(SELECT_LABEL) {
