@@ -489,6 +489,26 @@ html[data-theme="dark"] {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   user-select: none;
 }
+/* OCR 文字高亮层：铺满截图视口，覆盖在冻结帧之上、选区画布之上；
+   pointer-events:none 不挡任何鼠标交互（拖拽/缩放选区照常） */
+.shot-ocr-hl-layer {
+  position: absolute; left: 0; top: 0; z-index: 9;
+  pointer-events: none; overflow: hidden;
+}
+/* 单行识别文字的半透明蓝高亮（与贴图 Alt 文字模式 .pin-ocr-hint 同款视觉）：
+   浅蓝底 + 蓝色描边，浅/深截图上均清晰可见，且文字仍可读 */
+.shot-ocr-hl {
+  position: absolute; pointer-events: none;
+  background: rgba(96, 165, 250, 0.30);
+  outline: 1px solid rgba(96, 165, 250, 0.6);
+  border-radius: 1px;
+  /* 弹入：识别完逐行浮现，给用户"文字被标亮"的明确反馈 */
+  animation: shot-ocr-hl-in 180ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+@keyframes shot-ocr-hl-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
 /* 翻译态：原文/译文两列对照。表体吃掉面板剩余高度并内部滚动，
    两列等宽逐行同高——译文出来时原文不再被挤成 90px 小窗 */
 .shot-ocr-trans {

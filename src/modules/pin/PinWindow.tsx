@@ -363,11 +363,15 @@ export function PinWindow() {
 
   // drag
   const dragClearRef = useRef(0);
+  // 自驱动拖拽中标记：onMoved 监听据此跳过（否则每次 setPosition 都会回调
+  // onMoved → debouncePersist + 定时器重置，等于每帧白干一遍调度，拖拽发涩）
+  const draggingRef = useRef(false);
   // 根节点直改引用：startDragging 进入 OS 模态循环后 JS 冻结，React 的
   // 批处理渲染要等拖拽结束才提交——拖拽态样式必须同步直改 DOM 才能生效
   const rootRef = useRef<HTMLDivElement | null>(null);
   const clearDragState = () => {
     window.clearTimeout(dragClearRef.current);
+    draggingRef.current = false;
     rootRef.current?.classList.remove("pin-dragging");
     setDragging(false);
   };
@@ -376,6 +380,7 @@ export function PinWindow() {
     // 文字模式开启：划选接管本次按下，绝不触发窗口拖拽
     if (ocr.onMouseDown(e.nativeEvent)) return;
     ocr.clearSelection();
+    draggingRef.current = true;
     setDragging(true);
     rootRef.current?.classList.add("pin-dragging");
     window.clearTimeout(dragClearRef.current);
@@ -435,10 +440,10 @@ export function PinWindow() {
   useEffect(() => {
     let un: (() => void) | undefined;
     void getCurrentWindow().onMoved(() => {
+      // 自驱动拖拽中：位置由 onMove/rAF 维护，落点在 mouseup 统一持久化。
+      // 这里若每帧都跑，就成了 setPosition→onMoved→调度持久化 的每帧噪声，拖拽发涩
+      if (draggingRef.current) return;
       debouncePersist();
-      // 每次 onMoved 都重置回 180ms：停稳（最后一次移动后 180ms）才算松手。
-      // 定时器清挂本身纳秒级，事件风暴下也非负担——不能省，省了会让
-      // mousedown 的 800ms 兜底在拖拽中途误触拖拽态复位
       window.clearTimeout(dragClearRef.current);
       dragClearRef.current = window.setTimeout(clearDragState, 180);
     }).then((f) => { un = f; });
@@ -721,6 +726,14 @@ export function PinWindow() {
         <div className="pin-ocr-loading">
           <span className="pin-ocr-spinner" />
           识别中…
+        </div>
+      )}
+      {/* 文字选择模式常驻标识（左上角）：进入该模式后贴图不可拖动，
+          若不显式告知用户会误以为"拖不动/卡了"。标明状态 + 退出方式 */}
+      {ocr.altActive && (
+        <div className="pin-textmode-badge">
+          <span className="pin-textmode-badge-k">文字选择模式</span>
+          <span className="pin-textmode-badge-s">拖动已锁定 · 再按 Alt 退出</span>
         </div>
       )}
       {zoomLabel && (

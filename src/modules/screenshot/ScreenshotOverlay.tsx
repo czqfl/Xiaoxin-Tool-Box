@@ -2625,6 +2625,24 @@ export function ScreenshotOverlay() {
         </div>
       )}
 
+      {/* OCR 文字高亮：识别完成后在截图上直接以半透明蓝块覆盖每行识别到的文字
+          （与贴图 Alt 文字模式同款视觉），让用户一眼看到哪些文字被识别、且
+          此时选区不可拖动。仅展示用，复制仍走右侧面板划选 / Ctrl+C。
+          坐标映射：OCR 行是裁剪图【物理像素】，÷cssScale 归一到 CSS 像素后
+          再加选区左上角（region 已是 CSS 像素），与底层冻结帧严格对齐 */}
+      {ocrPhase === "done" && ocrLines.length > 0 && (() => {
+        const sc = cssScale();
+        const bx = region.x, by = region.y;
+        return (
+          <div className="shot-ocr-hl-layer" style={{ width: displayW, height: displayH }}>
+            {ocrLines.map((l, i) => (
+              <div key={i} className="shot-ocr-hl"
+                style={{ left: bx + l.x / sc, top: by + l.y / sc, width: l.w / sc, height: l.h / sc }} />
+            ))}
+          </div>
+        );
+      })()}
+
       {/* OCR 结果面板：贴在选区右侧；放不下翻到左侧。
           识别文本【可直接划选】（像普通文本一样拖动选中 → Ctrl+C 复制）。
           翻译态换成宽面板 + 原文/译文两列对照，避免"译文出来了原文被挤没" */}
