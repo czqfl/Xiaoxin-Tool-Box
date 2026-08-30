@@ -35,6 +35,9 @@ export interface GlassOptions {
   strength: number;
   /** 毛玻璃总开关（关闭时回到"无模糊"） */
   enabled: boolean;
+  /** true = 立即落定（不做 280ms 平滑渐变）。拖动滑块等【交互过程中】用：
+   *  实时跟手（拖到哪就是哪）；非交互（设置保存/切主题）保持平滑渐变。 */
+  immediate?: boolean;
 }
 
 /** 统一入口：把「毛玻璃强度」应用到背景图。幂等，可随时改强度/开关反复调用。 */
@@ -62,8 +65,8 @@ export function applyGlassBlur(opts: GlassOptions): void {
   const px = Math.round((pct / 100) * MAX_BLUR_PX);
   // 首次开启（尚无 .glass）：直接落定目标模糊半径——呼出/打开窗口时「一出现就是磨砂」，
   // 不做 0→目标 的 280ms 渐变（否则先清晰后糊上来）。已在磨砂态下改强度/开关则仍走
-  // rAF 平滑过渡，滑块拖动、开关切换不跳变。
-  if (!target.classList.contains("glass")) {
+  // rAF 平滑过渡，滑块拖动、开关切换不跳变；但【交互中 immediate】直接落定（跟手）。
+  if (!target.classList.contains("glass") || opts.immediate) {
     target.classList.add("glass");
     target.style.setProperty("--glass-blur", px + "px");
     return;
@@ -103,34 +106,38 @@ export async function renderBlurredBackground(target: HTMLElement): Promise<stri
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const img = await loadImage(url);
     if (!img || !img.naturalWidth) return null;
+    // 【预渲染图尺寸 = ::before 区域（窗口 + 48×2 扩展），与 CSS
+    // `.note-window.has-bg::before` 的 inset:-48px 完全一致】
+    // 关键：若 canvas 只按窗口大小绘制（内容 cover 到"窗口+96"再裁回窗口），
+    // 显示时 ::before（窗口+96 尺寸）还会对它再做一次 cover → 二次放大 →
+    // "切到模糊时背景图放大"（用户反馈）。改为 canvas 直接等于 ::before 尺寸、
+    // 内容 cover 到该尺寸，显示时同尺寸 1:1，无二次放大；48px 也足够容纳
+    // 最大模糊（MAX_BLUR_PX=40px）的边缘溢出。
+    const ext = 48;
+    const cw = w + ext * 2;
+    const ch = h + ext * 2;
     const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(w * dpr));
-    canvas.height = Math.max(1, Math.round(h * dpr));
+    canvas.width = Math.max(1, Math.round(cw * dpr));
+    canvas.height = Math.max(1, Math.round(ch * dpr));
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
     ctx.scale(dpr, dpr);
-    // cover 适配 + 向外扩展容纳模糊边缘。
-    // 【关键】扩展量固定为 48px，与 CSS `.note-window.has-bg::before` 的
-    // `inset: -48px` 完全一致——若按"模糊半径×2+8"缩放，模糊越强 cover 目标
-    // 区域越大，背景图被放得越大，从"无模糊切到有模糊"时图片会突然放大（用户
-    // 反馈）。48px 足够容纳最大模糊（MAX_BLUR_PX=40px）的边缘溢出。
-    const ext = 48;
     ctx.filter = `blur(${px}px)`;
     const iw = img.naturalWidth;
     const ih = img.naturalHeight;
     const ir = iw / ih;
-    const fr = w / h;
+    const fr = cw / ch;
     let dw: number, dh: number, dx: number, dy: number;
     if (ir > fr) {
-      dh = h + ext * 2;
+      dh = ch;
       dw = dh * ir;
-      dx = (w - dw) / 2;
-      dy = -ext;
+      dx = (cw - dw) / 2;
+      dy = 0;
     } else {
-      dw = w + ext * 2;
+      dw = cw;
       dh = dw / ir;
-      dx = -ext;
-      dy = (h - dh) / 2;
+      dx = 0;
+      dy = (ch - dh) / 2;
     }
     ctx.drawImage(img, dx, dy, dw, dh);
     ctx.filter = "none";

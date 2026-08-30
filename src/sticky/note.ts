@@ -166,6 +166,9 @@ export function mountNoteApp(noteId: string, preset = "") {
   let posSaveTimer: number | undefined;
   /** 背景模糊效果图重烘焙防抖（窗口尺寸变化 → cover 适配变化 → 重新烘焙） */
   let blurredBgTimer: number | undefined;
+  /** 上次应用毛玻璃的时刻：相邻两次 settings-changed 间隔 <300ms 视为
+   *  「正在拖动滑块」→ 立即落定模糊（实时跟手）；否则平滑渐变。 */
+  let lastGlassApplyAt = 0;
   // 该便签是否已被删除（在历史列表中删除）。为 true 时停止一切保存，防止窗口失焦/尺寸
   // 变化把已删除的内容重新写回磁盘导致“复活”。用户重新输入内容时会自动解除。
   let deleted = false;
@@ -601,12 +604,20 @@ export function mountNoteApp(noteId: string, preset = "") {
       noteWindow.style.removeProperty("--note-bg-blurred");
       return;
     }
-    applyGlassBlur({ target: noteWindow, strength: pct, enabled });
-    // 【预渲染模糊背景图：用户方案，但必须防抖】拖动「模糊强度」滑块时每次
-    // settings-changed 都会走到这里。若每次立即 canvas 预渲染（主线程
-    // toDataURL 几十~上百 ms），拖动中连续触发会把实时预览拖卡——模糊跟不上
-    // 拖动、松开后才定格生效（回归）。改为拖动停止 350ms 后烘焙；拖动过程中
-    // 实时效果由 applyGlassBlur 的 CSS filter 渐变提供（轻量、跟手）。
+    applyGlassBlur({
+      target: noteWindow,
+      strength: pct,
+      enabled,
+      // 【交互中实时渲染】连续 settings-changed（<300ms）= 正在拖动滑块 →
+      // 立即落定模糊（无 280ms 渐变，拖到哪就是哪、实时跟手）；松手/低频
+      // 变更走平滑渐变。
+      immediate: Date.now() - lastGlassApplyAt < 300,
+    });
+    lastGlassApplyAt = Date.now();
+    // 【预渲染模糊背景图：用户方案，松手后才加载】拖动滑块时每次 settings-changed
+    // 都会走到这里；若每次立即 canvas 预渲染（主线程 toDataURL 几十~上百 ms）
+    // 会把实时预览拖卡（回归）。改为拖动停止 350ms 后才烘焙——交互过程中由
+    // 上面的 CSS 实时模糊接管（跟手），松手后加载成品图（呼出即模糊更稳）。
     if (enabled && pct > 0 && noteWindow.classList.contains("has-bg")) {
       if (blurredBgTimer) window.clearTimeout(blurredBgTimer);
       blurredBgTimer = window.setTimeout(() => {
