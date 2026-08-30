@@ -78,6 +78,8 @@ export const recorderOpenDir = () => invoke<void>("recorder_open_dir");
 
 export const EVT_REC_TICK = "recorder://tick";
 export const EVT_REC_DONE = "recorder://done";
+/** 新一次录制已开始（控制条窗口复用，需重置"已完成"通知卡状态） */
+export const EVT_REC_START = "recorder://start";
 
 export interface RecTickPayload { elapsed_ms: number; frames: number }
 

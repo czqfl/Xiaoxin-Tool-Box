@@ -8,10 +8,14 @@
  *
  *  数据只需单向流通：音量真实值存在 Rust 侧，本窗挂载时读一次、拖动时写回，
  *  因此不必与录制条同步数值（录制条会在本窗关闭时重读一次刷新自己的提示）。
+ *
+ *  【定位归录制条管】窗口位置由 RecorderBar 在每次打开时计算并 setPosition，
+ *  本组件不做任何定位——尤其不能读 URL 参数定位：复用窗口在 DEV 下 show 会
+ *  整页重载，重载后若再用旧 URL 参数 setPosition，会把录制条刚设好的正确
+ *  位置覆盖掉（"音量条错位"根因）。
  */
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { LogicalPosition } from "@tauri-apps/api/dpi";
 import { listen, emitTo } from "@tauri-apps/api/event";
 import { recorderAudioVolume, recorderAudioVolumeGet } from "./api";
 import "./volume-popover.css";
@@ -30,20 +34,6 @@ export function VolumePopover() {
     void recorderAudioVolumeGet()
       .then((v) => setVolume(v))
       .catch(() => {});
-
-    // 定位到录制条音量按钮正下方（坐标由录制条按按钮屏幕位置算好后传入）
-    const place = async () => {
-      try {
-        const p = new URLSearchParams(window.location.search);
-        const x = Number(p.get("x") ?? 0);
-        const y = Number(p.get("y") ?? 0);
-        const win = getCurrentWindow();
-        await win.setPosition(new LogicalPosition(Math.round(x), Math.round(y)));
-        await win.show();
-        await win.setFocus();
-      } catch { /* 定位失败也要显示，否则等于点了没反应 */ }
-    };
-    void place();
   }, []);
 
   // 失焦 / Esc / 录制条再次点击音量按钮 → 收起。

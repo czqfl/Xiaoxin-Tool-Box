@@ -6,7 +6,7 @@ import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { LogicalPosition, LogicalSize, PhysicalPosition } from "@tauri-apps/api/dpi";
 import { Square, Film, FolderOpen, X, Pause, Play, LoaderCircle, Mic, MicOff, Volume2 } from "lucide-react";
 import {
-  EVT_REC_TICK, EVT_REC_DONE,
+  EVT_REC_TICK, EVT_REC_DONE, EVT_REC_START,
   recorderStop, recorderPause, recorderResume, recorderCancel,
   recDismiss, revealFile, recorderAudioRec, recorderAudioState, recorderAudioVolumeGet,
   type RecDonePayload,
@@ -54,7 +54,13 @@ export function RecorderBar() {
     // 录制线程起来后才会置「支持录音」标志（MP4 即 true）。立即查询必然读到
     // false，按钮就永远不出现——这正是上一版"加了按钮却看不到"的原因之一。
     // 延迟到录制线程就绪后再查一次；MP4 标志在录制线程开头即写，无需等太长。
-    const t = setTimeout(() => {
+    refreshAudio();
+  }, []);
+
+  // 重新查询录音/音量状态（录制线程刚起来时标志还没置位，需延迟；
+  // 挂载与「新一次录制开始」共用同一份延迟逻辑）
+  const refreshAudio = () => {
+    setTimeout(() => {
       void recorderAudioState()
         .then(([available, on]) => { setRecSupported(available); setRecOn(on); })
         .catch(() => setRecSupported(false));
@@ -62,8 +68,7 @@ export function RecorderBar() {
         .then((v) => setVolume(v))
         .catch(() => {});
     }, 500);
-    return () => clearTimeout(t);
-  }, []);
+  };
 
   useEffect(() => {
     document.documentElement.dataset.window = "panel";
@@ -82,7 +87,20 @@ export function RecorderBar() {
       setResult(e.payload);
       setPhase(e.payload.ok ? "done" : "error");
     });
-    return () => { void un1.then((u) => u()); void un2.then((u) => u()); };
+    // 新一次录制开始：控制条窗口是复用的，若上次通知卡还在（6 秒自动消失前
+    // 又开始了录制），窗口会被拉到顶部但内容仍是"已完成"通知卡；收到此事件
+    // 即重置回录制中，通知卡的 autoClose 定时器也会随 phase 变化的 cleanup 清除。
+    const un3 = listen(EVT_REC_START, () => {
+      stoppingRef.current = false;
+      setPhase("recording");
+      setElapsed(0);
+      setPaused(false);
+      setResult(null);
+      setVolOpen(false);
+      setRecErr("");
+      refreshAudio();
+    });
+    return () => { void un1.then((u) => u()); void un2.then((u) => u()); void un3.then((u) => u()); };
   }, []);
 
   // 停止后即把控制条变为右下角通知：立即出现（避免停止后空窗期卡顿感），
@@ -146,23 +164,23 @@ export function RecorderBar() {
       y = pos.y / dpr + r.bottom + 6;
     } catch { /* 取不到窗口位置就退回按钮视口坐标，仍可显示 */ }
     setVolOpen(true);
-    const params = new URLSearchParams({
-      x: String(Math.round(x)),
-      y: String(Math.round(y)),
-    });
+    const lp = new LogicalPosition(Math.round(x), Math.round(y));
     // 复用单例：重建 WebView2 窗口要几百毫秒，第二次起必须瞬时
     const existing = await WebviewWindow.getByLabel("rec-vol").catch(() => null);
     if (existing) {
       void existing
-        .setPosition(new LogicalPosition(Math.round(x), Math.round(y)))
+        .setPosition(lp)
         .then(() => existing.show())
         .then(() => existing.setFocus())
         .catch(() => {});
       return;
     }
     try {
+      // 【定位由本函数全权负责】URL 不再带坐标参数：VolumePopover 挂载时不做
+      // setPosition——否则 DEV 下复用窗口 show 触发整页重载，挂载逻辑会用旧的
+      // URL 参数把这里刚设置好的正确位置覆盖掉（"音量条错位"根因）。
       new WebviewWindow("rec-vol", {
-        url: `index.html?${params.toString()}`,
+        url: "index.html",
         width: VOLP_W,
         height: VOLP_H,
         decorations: false,
@@ -174,6 +192,19 @@ export function RecorderBar() {
         visible: false,
         skipTaskbar: true,
       });
+      // 窗口异步创建：轮询拿到实例后定位+显示（visible:false 期间不会闪现错位）
+      for (let i = 0; i < 40; i++) {
+        const w = await WebviewWindow.getByLabel("rec-vol").catch(() => null);
+        if (w) {
+          void w
+            .setPosition(lp)
+            .then(() => w.show())
+            .then(() => w.setFocus())
+            .catch(() => {});
+          return;
+        }
+        await new Promise((r2) => setTimeout(r2, 50));
+      }
     } catch { /* 建窗失败静默 */ }
   };
 

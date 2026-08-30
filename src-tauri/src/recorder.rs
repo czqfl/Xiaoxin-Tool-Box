@@ -18,6 +18,9 @@ pub const BAR_LABEL: &str = "rec-bar";
 
 pub const EVT_TICK: &str = "recorder://tick";
 pub const EVT_DONE: &str = "recorder://done";
+/// 每次录制真正开始时发出：控制条窗口是复用的（通知卡可能还停在"已完成"
+/// 状态），前端收到后重置为"录制中"，否则第二次录制时仍显示上次的通知卡
+pub const EVT_START: &str = "recorder://start";
 
 /// 正在录制
 static ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -863,6 +866,7 @@ pub fn recorder_start(
     PENDING.store(false, Ordering::SeqCst);
     let _ = window.set_ignore_cursor_events(true);
     ensure_bar(&app, mon, (rx, ry, rw, rh));
+    let _ = app.emit(EVT_START, ());
     let _ = app.emit("recorder://mask", ());
 
     let app2 = app.clone();
