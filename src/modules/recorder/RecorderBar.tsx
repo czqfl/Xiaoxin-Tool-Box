@@ -7,7 +7,7 @@ import { Square, Film, FolderOpen, X, Pause, Play, LoaderCircle, Mic, MicOff, Vo
 import {
   EVT_REC_TICK, EVT_REC_DONE,
   recorderStop, recorderPause, recorderResume, recorderCancel,
-  recDismiss, revealFile, recorderAudioMute, recorderAudioState, recorderAudioVolume, recorderAudioVolumeGet,
+  recDismiss, revealFile, recorderAudioRec, recorderAudioState, recorderAudioVolume, recorderAudioVolumeGet,
   type RecDonePayload,
 } from "./api";
 import "./recorder.css";
@@ -30,10 +30,13 @@ export function RecorderBar() {
   const [elapsed, setElapsed] = useState(0);
   const [paused, setPaused] = useState(false);
   const [result, setResult] = useState<RecDonePayload | null>(null);
-  // 音频：本次录制是否带音轨（决定静音按钮显隐）+ 当前静音状态。
-  // 未录音（GIF / 音源关 / 端点不可用）时按钮不出现，避免摆一个点不动的死按钮。
-  const [audioOn, setAudioOn] = useState(false);
-  const [muted, setMuted] = useState(false);
+  // 录音：本次录制是否【支持】录音（决定按钮显隐）+ 当前是否正在录音。
+  // 显隐只看格式（MP4 即支持），与启动时音源是否为 off 无关——MP4 一律预留
+  // 音轨，音源 off 只是开局不采集，用户仍可在录制条上随时开录。
+  const [recSupported, setRecSupported] = useState(false);
+  const [recOn, setRecOn] = useState(false);
+  // 开启失败时的短提示（无可用音频设备等），避免按钮点了没反应像坏了
+  const [recErr, setRecErr] = useState("");
   // 音量调节：0~200（100=原声）；滑杆展开态
   const [volume, setVolume] = useState(100);
   const [volOpen, setVolOpen] = useState(false);
@@ -41,16 +44,17 @@ export function RecorderBar() {
   const autoCloseRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    // 音频引擎在录制线程启动后约 200ms 才设置 AUDIO_STATE；立即查询必然读到
-    // "未启用"（静音按钮显隐与实际音轨脱节）。延迟到引擎就绪后再查询
+    // 录制线程起来后才会置「支持录音」标志（MP4 即 true）。立即查询必然读到
+    // false，按钮就永远不出现——这正是上一版"加了按钮却看不到"的原因之一。
+    // 延迟到录制线程就绪后再查一次；MP4 标志在录制线程开头即写，无需等太长。
     const t = setTimeout(() => {
       void recorderAudioState()
-        .then(([available, m]) => { setAudioOn(available); setMuted(m); })
-        .catch(() => setAudioOn(false));
+        .then(([available, on]) => { setRecSupported(available); setRecOn(on); })
+        .catch(() => setRecSupported(false));
       void recorderAudioVolumeGet()
         .then((v) => setVolume(v))
         .catch(() => {});
-    }, 800);
+    }, 500);
     return () => clearTimeout(t);
   }, []);
 
@@ -122,15 +126,32 @@ export function RecorderBar() {
     void (next ? recorderPause() : recorderResume()).catch(() => {});
   };
 
-  // 静音：写零帧而不是停流，因此音画时间线不中断，取消静音可无缝接回。
-  // 以 Rust 返回的真实状态为准（命令失败时回滚本地状态）
-  const toggleMute = () => {
-    const next = !muted;
-    setMuted(next);
-    void recorderAudioMute(next)
-      .then((v) => setMuted(v))
-      .catch(() => setMuted(!next));
+  // 录音开关：开=按需启动采集并混入真实音频；关=停采集，音轨继续写零帧，
+  // 因此音画时间线不中断，重新开启能无缝接回。
+  // 以 Rust 返回的真实状态为准——设备不可用时命令返回 false，回滚并提示，
+  // 绝不留下"看着开着实际没录"的假象
+  const toggleRec = () => {
+    const next = !recOn;
+    setRecOn(next);
+    setRecErr("");
+    void recorderAudioRec(next)
+      .then((v) => {
+        if (v === next) return;
+        setRecOn(v);
+        if (next) setRecErr("无音频设备");
+      })
+      .catch(() => {
+        setRecOn(!next);
+        setRecErr("切换失败");
+      });
   };
+
+  // 失败提示自动消失（录制条只有 36px 高，不长期占位）
+  useEffect(() => {
+    if (!recErr) return;
+    const t = setTimeout(() => setRecErr(""), 2400);
+    return () => clearTimeout(t);
+  }, [recErr]);
 
   // 音量：拖动滑杆实时调节（0=无声 100=原声 200=两倍），下一混音周期即生效
   const changeVolume = (v: number) => {
@@ -175,37 +196,44 @@ export function RecorderBar() {
         <>
           <span className={`recb-dot${paused ? " off" : ""}`} />
           <span className="recb-time">{fmt(elapsed)}</span>
-          {audioOn && (
+          {recSupported && (
             <>
               <button
-                className={`recb-btn recb-icon${muted ? " recb-muted" : ""}`}
-                onClick={toggleMute}
-                title={muted ? "取消静音" : "静音（不中断录制，可随时切回）"}
+                className={`recb-btn recb-icon${recOn ? " recb-rec-on" : " recb-rec-off"}`}
+                onClick={toggleRec}
+                title={recOn ? "关闭录音（音轨保留，可随时重开）" : "开启录音（录制中随时可开）"}
               >
-                {muted ? <MicOff size={12} /> : <Mic size={12} />}
+                {recOn ? <Mic size={12} /> : <MicOff size={12} />}
               </button>
-              <div className="recb-vol-wrap">
-                <button
-                  className="recb-btn recb-icon"
-                  onClick={() => setVolOpen((o) => !o)}
-                  title={`录制音量 ${volume}%（点击调节）`}
-                >
-                  <Volume2 size={12} />
-                </button>
-                {volOpen && (
-                  <div className="recb-vol-pop">
-                    <input
-                      type="range"
-                      min={0}
-                      max={200}
-                      value={volume}
-                      onChange={(e) => changeVolume(Number(e.target.value))}
-                      title="0=无声 100=原声 200=两倍"
-                    />
-                    <span className="recb-vol-val">{volume}%</span>
-                  </div>
-                )}
-              </div>
+              {/* 切换失败提示：内联在录音按钮旁。录制条窗口仅 36px 高，窗口外
+                  放气泡会被裁掉，只能内联；文案刻意极短以省下横向空间 */}
+              {recErr && <span className="recb-rec-tip">{recErr}</span>}
+              {/* 音量只在录音开启时才有意义（没在收声调它没效果），顺带为
+                  上面的失败提示腾出横向空间——录制条只有 356px 宽，全摆上去会挤 */}
+              {recOn && (
+                <div className="recb-vol-wrap">
+                  <button
+                    className="recb-btn recb-icon"
+                    onClick={() => setVolOpen((o) => !o)}
+                    title={`录制音量 ${volume}%（点击调节）`}
+                  >
+                    <Volume2 size={12} />
+                  </button>
+                  {volOpen && (
+                    <div className="recb-vol-pop">
+                      <input
+                        type="range"
+                        min={0}
+                        max={200}
+                        value={volume}
+                        onChange={(e) => changeVolume(Number(e.target.value))}
+                        title="0=无声 100=原声 200=两倍"
+                      />
+                      <span className="recb-vol-val">{volume}%</span>
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           )}
           <button

@@ -330,7 +330,7 @@ export function RecorderSelect() {
                         key={v}
                         className={`rec-fmt-btn rec-audio-btn${opts.audio === v ? " active" : ""}`}
                         onClick={() => setOpts((o) => ({ ...o, audio: v }))}
-                        title={`音源：${AUDIO_LABEL[v]}`}
+                        title={`音源：${AUDIO_LABEL[v]}（录制中可在顶部控制条随时开关）`}
                       >
                         {AUDIO_ICON[v]}
                       </button>

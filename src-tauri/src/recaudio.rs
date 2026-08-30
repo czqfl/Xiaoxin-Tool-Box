@@ -14,7 +14,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering, AtomicU32 };
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Mutex};
 
 use windows::core::GUID;
 use windows::Win32::Media::Audio::{
@@ -56,11 +56,120 @@ pub static AUDIO_VOLUME: AtomicU32 = AtomicU32::new(100);
 /// 音频子系统状态：0=未启用 1=正常 2=失败（UI 据此禁用开关）
 pub static AUDIO_STATE: AtomicU8 = AtomicU8::new(0);
 
-pub fn mute_state() -> (bool, bool) {
-    (AUDIO_STATE.load(Ordering::SeqCst) == 1, AUDIO_MUTE.load(Ordering::SeqCst))
-}
+/// 本次录制是否【支持】录音（仅 MP4——GIF 容器无法承载音轨）。
+/// UI 据此决定录音按钮的【显隐】：MP4 时始终可点，与启动时音源是否为 off 无关。
+pub static AUDIO_AVAILABLE: AtomicBool = AtomicBool::new(false);
+/// 录音开关（录制条麦克风按钮）：true=混入真实采集音频；false=写零帧。
+/// 与 AUDIO_MUTE 的区别：本开关可在录制中随时开合，且开时会【按需动态启动
+/// 采集线程】，关时停采集——实现"录到一半才想加旁白"的场景。
+pub static AUDIO_REC_ON: AtomicBool = AtomicBool::new(false);
+/// 本次录制的目标音源（0=off 1=mic 2=system 3=mix）。录制开始时记录；
+/// 音源为 off 时用户中途开启录音，默认用 mic（总得有路可采）。
+pub static AUDIO_SRC: AtomicU8 = AtomicU8::new(0);
+/// 命令侧新建的引擎 → 录制线程接管。采集线程与 IMFSinkWriter 分属两侧：
+/// 引擎可以在命令线程创建（只是起 WASAPI 线程），但 drain 必须且只能在
+/// 录制线程调用，因此新建的引擎先入槽，由录制循环取走。
+pub static AUDIO_SLOT: Mutex<Option<AudioEngine>> = Mutex::new(None);
+/// 停止采集请求（命令置位 → 录制线程消费后 finish，保证与 drain 同线程）
+pub static AUDIO_STOP_REQ: AtomicBool = AtomicBool::new(false);
+
 pub fn set_mute(on: bool) {
     AUDIO_MUTE.store(on, Ordering::SeqCst);
+}
+
+pub fn src_to_u8(s: AudioSource) -> u8 {
+    match s {
+        AudioSource::Off => 0,
+        AudioSource::Mic => 1,
+        AudioSource::System => 2,
+        AudioSource::Mix => 3,
+    }
+}
+
+pub fn src_from_u8(v: u8) -> AudioSource {
+    match v {
+        1 => AudioSource::Mic,
+        2 => AudioSource::System,
+        3 => AudioSource::Mix,
+        _ => AudioSource::Off,
+    }
+}
+
+pub fn set_available(on: bool) {
+    AUDIO_AVAILABLE.store(on, Ordering::SeqCst);
+}
+pub fn set_rec_on(on: bool) {
+    AUDIO_REC_ON.store(on, Ordering::SeqCst);
+}
+pub fn rec_on() -> bool {
+    AUDIO_REC_ON.load(Ordering::SeqCst)
+}
+
+/// 录制会话开始时复位全部音频状态。上次录制的残留（尤其是 AUDIO_STATE==1）
+/// 会让 UI 在本次无音轨时错误地亮出录音按钮，变成点了没反应的死按钮。
+pub fn reset_session(src: AudioSource) {
+    AUDIO_MUTE.store(false, Ordering::SeqCst);
+    AUDIO_REC_ON.store(false, Ordering::SeqCst);
+    AUDIO_STOP_REQ.store(false, Ordering::SeqCst);
+    AUDIO_AVAILABLE.store(false, Ordering::SeqCst);
+    AUDIO_STATE.store(0, Ordering::SeqCst);
+    AUDIO_SRC.store(src_to_u8(src), Ordering::SeqCst);
+    let mut slot = match AUDIO_SLOT.lock() {
+        Ok(g) => g,
+        Err(e) => e.into_inner(),
+    };
+    if let Some(mut e) = slot.take() {
+        e.finish();
+    }
+}
+
+/// 录制线程调用：取走命令侧新建的引擎（若有）
+pub fn take_slot() -> Option<AudioEngine> {
+    let mut slot = match AUDIO_SLOT.lock() {
+        Ok(g) => g,
+        Err(e) => e.into_inner(),
+    };
+    slot.take()
+}
+
+/// 录制线程调用：消费"停止采集"请求
+pub fn take_stop_req() -> bool {
+    AUDIO_STOP_REQ.swap(false, Ordering::SeqCst)
+}
+
+/// 录制线程调用：处理命令侧挂起的启停意图——先消费停止请求，再接管新建引擎。
+///
+/// drain / finish 都必须与录制线程同处一侧（采集线程绝不碰 IMFSinkWriter），
+/// 所以启停动作统一在这里落地，录制循环的每个分支（正常帧、暂停）都要调一次：
+/// 漏掉的分支会让引擎一直挂在槽里，直到本次录制结束都收不掉——采集线程泄漏。
+pub fn apply_pending(eng: &mut Option<AudioEngine>) -> bool {
+    let mut changed = false;
+    if take_stop_req() {
+        if let Some(mut e) = eng.take() {
+            e.finish();
+            changed = true;
+        }
+    }
+    if let Some(new) = take_slot() {
+        if let Some(mut old) = eng.take() {
+            old.finish();
+        }
+        *eng = Some(new);
+        changed = true;
+    }
+    changed
+}
+
+/// 录制结束时兜底：收掉命令侧新建、但录制线程始终没来得及接管的引擎
+/// （例如暂停期间点了开启录音就直接停止录制）
+pub fn drop_slot() {
+    let mut slot = match AUDIO_SLOT.lock() {
+        Ok(g) => g,
+        Err(e) => e.into_inner(),
+    };
+    if let Some(mut e) = slot.take() {
+        e.finish();
+    }
 }
 
 /// 设置录制音量（0~200，100=原声）。录制中实时生效（下一混音周期起）
@@ -199,6 +308,11 @@ impl AudioEngine {
                 let _ = h.join();
             }
         }
+        // 【必须归零】否则"关闭录音 → 再开启"会被误判成"采集还在跑"而直接置位：
+        // 引擎其实已被 finish，按钮看着亮着、实际一个字节也录不进来。
+        if AUDIO_STATE.load(Ordering::SeqCst) == 1 {
+            AUDIO_STATE.store(0, Ordering::SeqCst);
+        }
     }
 }
 
@@ -210,8 +324,6 @@ pub fn recorder_audio_mute(on: bool) -> bool {
     AUDIO_MUTE.load(Ordering::SeqCst)
 }
 
-/// 查询音频子系统状态，返回 (音频是否可用, 当前是否静音)。
-/// UI 据此禁用/置灰开关——音频起不来时不该让用户点一个没用的按钮。
 /// 设置录制音量（录制条滑杆实时调节；0=静音 100=原声 200=两倍）
 #[tauri::command]
 pub fn recorder_audio_volume(volume: u32) -> u32 {
@@ -225,11 +337,68 @@ pub fn recorder_audio_volume_get() -> u32 {
     audio_volume()
 }
 
-/// 查询音频子系统状态，返回 (音频是否可用, 当前是否静音)。
-/// UI 据此禁用/置灰开关——音频起不来时不该让用户点一个没用的按钮。
+/// 查询录音状态，返回 (本次录制是否支持录音, 当前是否正在录音)。
+/// 第一个值决定按钮【显隐】：仅 MP4 为 true——GIF 无音轨，摆个按钮是死的。
+/// 注意它【不】再表示"启动时的音源是否为 off"：MP4 一律预留音轨，音源 off
+/// 只是初始不采集，用户仍可在录制条上随时开录。
 #[tauri::command]
 pub fn recorder_audio_state() -> (bool, bool) {
-    mute_state()
+    (AUDIO_AVAILABLE.load(Ordering::SeqCst), AUDIO_REC_ON.load(Ordering::SeqCst))
+}
+
+/// 录制中随时开启/关闭录音，返回操作后的【实际】录音状态。
+///
+/// 开启：若采集已在跑直接置位；否则按目标音源（off→mic）当场起 WASAPI 采集，
+/// 引擎入 AUDIO_SLOT 由录制线程下一帧接管。端点不可用 / 启动失败 → 返回 false，
+/// 前端据此把按钮回滚并提示，绝不留下"看着开着其实没录"的假象。
+/// 关闭：置位为 false 并发停止请求，由录制线程 finish 掉采集线程；音轨继续
+/// 写零帧，因此音画时间线不断——之后重新开启能无缝接回。
+#[tauri::command]
+pub fn recorder_audio_rec(on: bool) -> bool {
+    if !AUDIO_AVAILABLE.load(Ordering::SeqCst) {
+        return false;
+    }
+    if !on {
+        AUDIO_REC_ON.store(false, Ordering::SeqCst);
+        AUDIO_STOP_REQ.store(true, Ordering::SeqCst);
+        return false;
+    }
+    // 采集已在运行：直接开，无需重建引擎
+    if AUDIO_STATE.load(Ordering::SeqCst) == 1 {
+        AUDIO_REC_ON.store(true, Ordering::SeqCst);
+        return true;
+    }
+    // 开场音源为 off 时中途开录音，默认用麦克风——总得有一路可采
+    let src = match src_from_u8(AUDIO_SRC.load(Ordering::SeqCst)) {
+        AudioSource::Off => AudioSource::Mic,
+        s => s,
+    };
+    match AudioEngine::start(src) {
+        Ok(Some(eng)) => {
+            let mut slot = match AUDIO_SLOT.lock() {
+                Ok(g) => g,
+                Err(e) => e.into_inner(),
+            };
+            // 上一台还没被录制线程取走（极短的窗口期）：先收掉，避免泄漏采集线程
+            if let Some(mut old) = slot.take() {
+                old.finish();
+            }
+            *slot = Some(eng);
+            AUDIO_STOP_REQ.store(false, Ordering::SeqCst);
+            AUDIO_REC_ON.store(true, Ordering::SeqCst);
+            true
+        }
+        Ok(None) => {
+            crate::storage::diag_write("[recaudio] 中途开启录音失败：无可用音频端点");
+            AUDIO_REC_ON.store(false, Ordering::SeqCst);
+            false
+        }
+        Err(e) => {
+            crate::storage::diag_write(&format!("[recaudio] 中途开启录音失败：{e}"));
+            AUDIO_REC_ON.store(false, Ordering::SeqCst);
+            false
+        }
+    }
 }
 
 fn add_into(dst: &mut [f32], src: &[f32]) {

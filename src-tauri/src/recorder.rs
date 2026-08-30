@@ -446,27 +446,33 @@ fn run<R: Runtime + 'static>(
     // 任何一步失败都降级为「无音轨」，绝不阻断录制。
     let mut audio_eng: Option<crate::recaudio::AudioEngine> = None;
     let mut audio_cfg: Option<crate::h264::AudioCfg> = None;
-    if opts.audio != crate::recaudio::AudioSource::Off {
-        if opts.fmt != RecFmt::Mp4 {
-            crate::storage::diag_write("[recorder] GIF 不支持音频，本次录制无音轨");
-        } else {
+    if opts.fmt == RecFmt::Mp4 {
+        // MP4 一律【预留音轨】：音轨在 SinkWriter 创建时就固定下来，启动时若
+        // 不预留，用户在录制条上再怎么点"开启录音"也写不进 PCM（成品无音轨）。
+        // 代价只是不录音时多一条静音轨（AAC 静音帧极小），换来中途随时可开录。
+        audio_cfg = Some(crate::h264::AudioCfg {
+            sample_rate: 48000,
+            channels: 2,
+            bitrate: 128_000,
+        });
+        crate::recaudio::set_available(true);
+        // 音源非 off：开场即开录，沿用启动栏/设置页的选择
+        if opts.audio != crate::recaudio::AudioSource::Off {
             match crate::recaudio::AudioEngine::start(opts.audio) {
                 Ok(Some(eng)) => {
-                    audio_cfg = Some(crate::h264::AudioCfg {
-                        sample_rate: 48000,
-                        channels: 2,
-                        bitrate: 128_000,
-                    });
                     audio_eng = Some(eng);
+                    crate::recaudio::set_rec_on(true);
                 }
-                Ok(None) => {
-                    crate::storage::diag_write("[recorder] 音频端点不可用，本次录制无音轨")
-                }
+                Ok(None) => crate::storage::diag_write(
+                    "[recorder] 音频端点不可用，已预留静音轨（可中途重试开启）",
+                ),
                 Err(e) => crate::storage::diag_write(&format!(
-                    "[recorder] 音频启动失败，降级为无音轨：{e}"
+                    "[recorder] 音频启动失败，已预留静音轨：{e}"
                 )),
             }
         }
+    } else if opts.audio != crate::recaudio::AudioSource::Off {
+        crate::storage::diag_write("[recorder] GIF 不支持音频，本次录制无音轨");
     }
     let mut h264: Option<crate::h264::H264Writer> = if opts.fmt == RecFmt::Mp4 {
         // 先试带音轨；音频侧（如系统缺 AAC 编码器）失败 → 回退重建无音轨 writer
@@ -488,6 +494,10 @@ fn run<R: Runtime + 'static>(
                 if let Some(mut eng) = audio_eng.take() {
                     eng.finish();
                 }
+                // 成品已确定无音轨（系统缺 AAC 编码器等）：收回录音按钮，
+                // 否则又是一个点了没反应、还让人以为录上了的死按钮
+                crate::recaudio::set_available(false);
+                crate::recaudio::set_rec_on(false);
                 match crate::h264::H264Writer::new(
                     &path,
                     ow,
@@ -539,6 +549,10 @@ fn run<R: Runtime + 'static>(
 
         // 暂停：不采集不写入（视频时间线跳过暂停段），边框环变琥珀色提示
         if PAUSE.load(Ordering::SeqCst) {
+            // 暂停期间用户仍可在录制条上开关录音，因此启停意图要【每帧】落地：
+            // 放进下面的 if !was_paused 里的话，只有刚进入暂停那一帧会处理，
+            // 暂停中途点的"开启录音"会一直挂在槽里收不掉——采集线程泄漏
+            crate::recaudio::apply_pending(&mut audio_eng);
             if !was_paused {
                 was_paused = true;
                 // 暂停：丢弃在途音频包且不推进音频时间线，与视频侧
@@ -667,10 +681,15 @@ fn run<R: Runtime + 'static>(
         dur_ms += gap_ms as u64;
         // 音频：视频帧写成功后把在途 PCM 混音并写入 AAC。
         // 必须在同一线程（录制线程）调——IMFSinkWriter 要求串行化，
-        // 采集线程绝不碰它。静音时 drain 写零帧，时间线不断。
+        // 采集线程绝不碰它。录音关闭时 drain 写零帧，时间线不断。
+        //
+        // 中途启停：命令侧建好的引擎先入 AUDIO_SLOT，由这里接管；停止请求同样
+        // 在这里消费——finish 必须与 drain 同线程，否则采集线程会和正在写入的
+        // SinkWriter 抢用，轻则丢音、重则崩在 MF 内部。
+        crate::recaudio::apply_pending(&mut audio_eng);
         if let (Some(eng), Some(wr)) = (audio_eng.as_mut(), h264.as_mut()) {
             let video_ts = wr.video_ts();
-            let muted = crate::recaudio::AUDIO_MUTE.load(Ordering::SeqCst);
+            let muted = !crate::recaudio::rec_on();
             eng.drain(wr, video_ts, muted);
         }
         // 前几帧各记一条：一旦再崩溃，日志能明确停在「采集后」还是「编码后」
@@ -701,6 +720,7 @@ fn run<R: Runtime + 'static>(
     if CANCEL.load(Ordering::SeqCst) {
         drop(gif_enc.take());
         if let Some(mut eng) = audio_eng.take() { eng.finish(); }
+        crate::recaudio::drop_slot(); // 兜底：暂停中开录、未及接管就取消的情形
         drop(h264.take());
         let _ = std::fs::remove_file(&path);
         crate::storage::diag_write("[recorder] canceled by user, temp file removed");
@@ -712,6 +732,7 @@ fn run<R: Runtime + 'static>(
     // 音频必须先停采集并 join，再 finalize——保证最后一段 PCM 已提交。
     drop(gif_enc.take());
     if let Some(mut eng) = audio_eng.take() { eng.finish(); }
+    crate::recaudio::drop_slot(); // 兜底：同上，避免采集线程随录制结束而泄漏
     let mut finalize_err: Option<String> = None;
     if let Some(mut h) = h264.take() {
         if let Err(e) = h.finalize() {
@@ -811,10 +832,10 @@ pub fn recorder_start(
     STOP.store(false, Ordering::SeqCst);
     PAUSE.store(false, Ordering::SeqCst);
     CANCEL.store(false, Ordering::SeqCst);
-    // 静音状态随会话复位：上次录制点了静音，下次录制不该开场即静音
-    crate::recaudio::AUDIO_MUTE.store(false, Ordering::SeqCst);
-    // 静音状态随会话复位：上次录制点了静音，下次录制不该开场即静音
-    crate::recaudio::AUDIO_MUTE.store(false, Ordering::SeqCst);
+    // 音频状态随会话整体复位：静音/录音开关/可用标志/采集状态全部归零。
+    // 只清 AUDIO_MUTE 是不够的——上次带音频录完后 AUDIO_STATE 会停在 1，
+    // 本次若以音源 off 开录，UI 会误判"支持录音"而亮出一个点了没反应的死按钮。
+    crate::recaudio::reset_session(audio);
 
     if w < 24 || h < 24 {
         ACTIVE.store(false, Ordering::SeqCst);

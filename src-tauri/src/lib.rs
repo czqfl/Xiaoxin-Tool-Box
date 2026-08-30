@@ -558,7 +558,8 @@ pub fn run() {
             recorder::recorder_bar_popup,
             recorder::rec_dismiss,
             recorder::recorder_open_dir,
-            // 录屏音频：录制中静音开关 + 音频子系统状态查询
+            // 录屏音频：录制中随时开关录音 + 静音 + 音量 + 状态查询
+            recaudio::recorder_audio_rec,
             recaudio::recorder_audio_mute,
             recaudio::recorder_audio_volume,
             recaudio::recorder_audio_volume_get,

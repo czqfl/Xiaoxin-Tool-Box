@@ -45,9 +45,17 @@ export const recorderAudioVolume = (volume: number) =>
 export const recorderAudioVolumeGet = () =>
   invoke<number>("recorder_audio_volume_get");
 
-/** 查询音频子系统状态：[音频是否可用, 当前是否静音] */
+/** 查询录音状态：[本次录制是否支持录音, 当前是否正在录音]。
+ *  前一个值只取决于格式（MP4=true，GIF=false），与启动时音源是否为 off 无关：
+ *  MP4 一律预留音轨，音源 off 只是开局不采集，仍可中途开录。 */
 export const recorderAudioState = () =>
   invoke<[boolean, boolean]>("recorder_audio_state");
+
+/** 录制中随时开启/关闭录音。开启时会按需动态启动采集（音源 off 时默认用麦克风），
+ *  关闭时停采集、音轨继续写零帧（时间线不断，之后可无缝重开）。
+ *  返回操作后的真实状态：端点不可用等失败情形返回 false，前端应回滚按钮。 */
+export const recorderAudioRec = (on: boolean) =>
+  invoke<boolean>("recorder_audio_rec", { on });
 
 export const recorderStop = () => invoke<void>("recorder_stop");
 

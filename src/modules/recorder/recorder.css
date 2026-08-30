@@ -418,8 +418,43 @@
 .recb-btn.recb-icon.recb-muted:hover:not(:disabled) {
   background: color-mix(in srgb, var(--warning) 32%, transparent);
 }
+/* 录音开关：开启=红色描边高亮（呼应顶部 REC 红点，一眼看出正在收声），
+   与「停止」的实心红靠形状与填充区分；关闭=次要幽灵态（由本条规则统一着色）
+   ——注意必须把 .recb-rec-on 排除在外，否则本条更高特异性的 color 会把它
+   刷回次要色，点亮效果直接失效 */
+.recb-btn.recb-icon.recb-rec-on {
+  background: color-mix(in srgb, var(--danger) 20%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  color: var(--danger);
+}
+.recb-btn.recb-icon.recb-rec-on:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 32%, transparent);
+}
+.recb-btn.recb-icon.recb-rec-off {
+  opacity: 0.7;
+}
+.recb-btn.recb-icon.recb-rec-off:hover:not(:disabled) {
+  opacity: 1;
+}
+/* 切换失败提示：内联在录音按钮旁。窗口仅 36px 高，绝对定位到条外会被裁掉，
+   只能内联；文案刻意极短（"无音频设备"）以省下紧张的横向空间 */
+.recb-rec-tip {
+  flex: none;
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  color: var(--warning, #f5a524);
+  background: color-mix(in srgb, var(--warning, #f5a524) 18%, transparent);
+  animation: recb-tip-in 160ms ease-out both;
+}
+@keyframes recb-tip-in {
+  from { opacity: 0; transform: translateX(-3px); }
+  to { opacity: 1; transform: none; }
+}
 /* 未静音时用次要前景色，避免抢走「停止/暂停」的视觉重点 */
-.recb-btn.recb-icon:has(> svg):not(.recb-stop):not(.recb-cancel):not(.recb-muted) {
+.recb-btn.recb-icon:has(> svg):not(.recb-stop):not(.recb-cancel):not(.recb-muted):not(.recb-rec-on) {
   color: color-mix(in srgb, var(--tb-fg) 72%, transparent);
 }
 /* 取消：中性幽灵圆钮，hover 泛红示意"丢弃" */
