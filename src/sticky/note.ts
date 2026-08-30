@@ -602,13 +602,20 @@ export function mountNoteApp(noteId: string, preset = "") {
       return;
     }
     applyGlassBlur({ target: noteWindow, strength: pct, enabled });
-    // 【预渲染模糊背景图：用户方案】把背景图按模糊半径烘焙成一张现成的
-    // 静态效果图（--note-bg-blurred），呼出时背景层直接显示它——不依赖实时
-    // CSS filter 计算/重采样、不参与成形动画裁切，背景模糊"一出现就是好的"。
-    // 无背景图 / 模糊关闭 / 渲染失败时回退实时 filter 管线。
+    // 【预渲染模糊背景图：用户方案，但必须防抖】拖动「模糊强度」滑块时每次
+    // settings-changed 都会走到这里。若每次立即 canvas 预渲染（主线程
+    // toDataURL 几十~上百 ms），拖动中连续触发会把实时预览拖卡——模糊跟不上
+    // 拖动、松开后才定格生效（回归）。改为拖动停止 350ms 后烘焙；拖动过程中
+    // 实时效果由 applyGlassBlur 的 CSS filter 渐变提供（轻量、跟手）。
     if (enabled && pct > 0 && noteWindow.classList.contains("has-bg")) {
-      await bakeBlurredBg();
+      if (blurredBgTimer) window.clearTimeout(blurredBgTimer);
+      blurredBgTimer = window.setTimeout(() => {
+        blurredBgTimer = undefined;
+        void bakeBlurredBg();
+      }, 350);
     } else {
+      if (blurredBgTimer) window.clearTimeout(blurredBgTimer);
+      blurredBgTimer = undefined;
       noteWindow.classList.remove("blurred-bg");
       noteWindow.style.removeProperty("--note-bg-blurred");
     }

@@ -85,8 +85,14 @@ export async function applyPanelBackground(
   }
 
   if (bgUrl) {
-    el.style.setProperty("--note-bg-img", `url("${bgUrl}")`);
-    el.style.setProperty("--note-bg-opacity", "1");
+    const newVal = `url("${bgUrl}")`;
+    // 背景图 URL 未变时【不重设】--note-bg-img：重设 dataURL 会触发浏览器重新
+    // 解码（大图几十 ms），拖动「模糊强度」等滑块时每次 settings-changed 都走
+    // 这里 → 实时预览被拖卡（回归）。URL 未变说明背景图已在渲染缓存，跳过。
+    if (el.style.getPropertyValue("--note-bg-img") !== newVal) {
+      el.style.setProperty("--note-bg-img", newVal);
+      el.style.setProperty("--note-bg-opacity", "1");
+    }
     el.classList.add("has-bg");
   } else {
     el.style.removeProperty("--note-bg-img");
@@ -95,7 +101,12 @@ export async function applyPanelBackground(
   }
   el.classList.toggle("bg-transparent", transparent);
 
-  await applyAdaptiveColors(el, bgUrl);
+  // 亮度自适应：仅当【生效的背景图 URL】与目标不一致时才计算（避免每次解码大图
+  // 取平均亮度 → 拖动滑块卡顿）；URL 未变直接跳过。
+  const curUrl = /url\((['"]?)([\s\S]*?)\1\)/.exec(el.style.getPropertyValue("--note-bg-img"))?.[2] ?? "";
+  if (curUrl !== (bgUrl ?? "")) {
+    await applyAdaptiveColors(el, bgUrl ?? "");
+  }
 }
 
 /** 计算背景图平均亮度（0~1），用于判断按钮是否需要切换浅色 */
