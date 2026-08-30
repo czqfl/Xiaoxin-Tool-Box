@@ -63,19 +63,17 @@ pub fn note_on_screen(label: &str) -> bool {
     matches!(note_state(label), NoteState::Visible | NoteState::Closing)
 }
 
-/// 【唯一呼出入口】显示便签：取消待执行的强制隐藏兜底、打断进行中的关闭动画、
-/// 确保窗口存在并置顶、通知前端复原 + 播呼出成形动画，最后置 Visible。
-/// 无论经快捷键、工具栏、历史面板还是托盘菜单，全部走这里，保证行为一致。
+/// 【唯一呼出入口】显示便签：取消待执行的强制隐藏兜底、确保窗口存在并置顶、
+/// 置 Visible，再通知前端。前端收到 summoned 会【无条件】打断进行中的任何动画
+/// （呼出成形 / 关闭消散，含独立粒子层）并复位状态，再视情况重播成形动画——
+/// 因此"关闭动画播放中再呼出"不需要单独的事件：summoned 本身就是打断信号。
+/// 顺序要点：先置 Visible（与 hide_note_window / schedule_force_close 的状态
+/// 判定配合）再 show + emit，保证"最后一次呼出"必定以可见 + Visible 收尾，
+/// 不被并发的隐藏兜底吞掉。
 pub fn summon_note(app: &AppHandle, id: &str) {
     let label = window_label(id);
     cancel_force_close(&[label.clone()]);
-    // 打断进行中的关闭动画：前端立即停掉消散（含独立粒子层实例）并复原页面，
-    // 但【不隐藏窗口】——紧接着下面的 show 会把它召回来。
-    if note_state(&label) == NoteState::Closing {
-        if let Some(win) = app.get_webview_window(&label) {
-            let _ = win.emit("sticky://cancel-close-anim", ());
-        }
-    }
+    set_note_state(&label, NoteState::Visible);
     ensure_note_window(app, id);
     if let Some(win) = app.get_webview_window(&label) {
         let _ = win.show();
@@ -85,7 +83,6 @@ pub fn summon_note(app: &AppHandle, id: &str) {
         let _ = win.set_always_on_top(true);
         let _ = win.emit("summoned", ());
     }
-    set_note_state(&label, NoteState::Visible);
     crate::panel::broadcast_panel_visibility(app, &label, true);
     let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
     crate::storage::diag_write(&format!("[sticky] summon_note: {label}"));
@@ -1360,12 +1357,15 @@ fn hide_note_window(app: &AppHandle, label: &str) {
     // （label "particles"），便签窗口隐藏并不会带走它。若动画仍在播就把窗口藏了，
     // 就会出现「便签本体已消失、粒子层还在凭空播消散动画」。前端收到本事件后
     // 立即取消进行中的动画（含粒子层实例）并复位关闭状态机。
+    // 【先置 Hidden 再 hide】与 summon_note 的"先置 Visible 再 show"对称：
+    // 状态写入紧邻窗口操作，并发的呼出要么在置位前被放弃、要么后置位并 show，
+    // 缩小"窗口被藏但状态是 Visible"的竞态窗口。
+    set_note_state(label, NoteState::Hidden);
     let _ = win.emit("sticky://force-hidden", ());
     let _ = win.hide();
     crate::storage::diag_write(&format!("[sticky] hide_note_window: hidden (persistent) {label}"));
     let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
     crate::panel::broadcast_panel_visibility(app, label, false);
-    set_note_state(label, NoteState::Hidden);
 }
 
 /// 快捷键「收起便签 / 工具栏便签入口」的关闭兜底：
@@ -1399,9 +1399,13 @@ pub fn schedule_force_close(app: &AppHandle, labels: Vec<String>) {
                     }
                     // 仅当窗口仍可见（前端动画未正常完成）才强制销毁；
                     // 动画已播完 / 已隐藏则跳过，避免打断粒子消散。
-                    if let Some(w) = app4.get_webview_window(l) {
-                        if w.is_visible().unwrap_or(false) {
-                            hide_note_window(&app4, l);
+                    // 【防误伤】兜底到期时若便签已被重新呼出（状态 Visible），
+                    // 绝不隐藏——用户刚呼出的窗口不能被旧兜底藏掉（"呼出后消失"根治）。
+                    if note_state(l) != NoteState::Visible {
+                        if let Some(w) = app4.get_webview_window(l) {
+                            if w.is_visible().unwrap_or(false) {
+                                hide_note_window(&app4, l);
+                            }
                         }
                     }
                 }
