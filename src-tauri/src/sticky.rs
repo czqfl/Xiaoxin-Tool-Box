@@ -87,6 +87,23 @@ fn refresh_note_acrylic(app: &AppHandle, label: &str) {
     }
 }
 
+/// 【呼出即模糊】透明窗口 show 后 DWM 亚克力被系统释放，且 show() 是异步生效
+/// 的——DWM 在窗口实际显示时会重建渲染并清掉此前的亚克力设置。**必须等窗口
+/// 真正显示后再重刷**（同步调用会在 show 生效前设置 → 被清 → 白做，用户仍
+/// 感知"呼出时才模糊"）。延迟 ~40ms（约 2 帧）后在主线程重刷，用户看到窗口
+/// 时模糊已就绪。
+fn schedule_refresh_note_acrylic(app: &AppHandle, label: &str) {
+    let app2 = app.clone();
+    let label2 = label.to_string();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(40));
+        let app3 = app2.clone();
+        let _ = app2.run_on_main_thread(move || {
+            refresh_note_acrylic(&app3, &label2);
+        });
+    });
+}
+
 /// 【唯一呼出入口】显示便签：取消待执行的强制隐藏兜底、确保窗口存在并置顶、
 /// 置 Visible，再通知前端。前端收到 summoned 会【无条件】打断进行中的任何动画
 /// （呼出成形 / 关闭消散，含独立粒子层）并复位状态，再视情况重播成形动画——
@@ -107,9 +124,9 @@ pub fn summon_note(app: &AppHandle, id: &str) {
         let _ = win.set_always_on_top(true);
         let _ = win.emit("summoned", ());
     }
-    // 【呼出即模糊】透明窗口 show 后 DWM 亚克力被系统释放：用记忆参数同步
-    // 重刷（无 IPC），保证窗口显示瞬间模糊已就绪，而不是等前端异步补刷。
-    refresh_note_acrylic(app, &label);
+    // 【呼出即模糊】show 是异步生效：等窗口真正显示后再用记忆参数重刷 DWM
+    // 亚克力（见 schedule_refresh_note_acrylic 注释），保证窗口可见时模糊已就绪。
+    schedule_refresh_note_acrylic(app, &label);
     crate::panel::broadcast_panel_visibility(app, &label, true);
     let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
     crate::storage::diag_write(&format!("[sticky] summon_note: {label}"));
@@ -1561,8 +1578,8 @@ pub fn show_window(app: AppHandle, label: String) -> Result<(), String> {
             // （含粒子层）并复原/播成形——托盘"显示便签"路径也必须跟手，否则
             // 关闭动画播放中走托盘显示会继续播动画、呼出不及时。
             let _ = win.emit("summoned", ());
-            // 【呼出即模糊】同 summon_note：show 后同步重刷 DWM 亚克力
-            refresh_note_acrylic(&app, &label);
+            // 【呼出即模糊】同 summon_note：等窗口真正显示后重刷 DWM 亚克力
+            schedule_refresh_note_acrylic(&app, &label);
         }
     }
     Ok(())

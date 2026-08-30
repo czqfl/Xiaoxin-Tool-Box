@@ -861,13 +861,12 @@ export function mountNoteApp(noteId: string, preset = "") {
     wasHidden = false;
     if (fromHidden) {
       if (noteWindow.classList.contains("bg-transparent")) {
-        // 透明主题：无粒子特效，直接复原显示（窗口已由后端显示）
-        // 关闭后 50ms 内立刻呼出时亚克力还没恢复：立即补上，
-        // 避免等定时器在可见窗口上触发 SWCA 造成卡顿 + 模糊晚到
-        if (acrylicOffPending) {
-          acrylicOffPending = false;
-          applyAcrylic().catch(() => {});
-        }
+        // 透明主题：无粒子特效，直接复原显示（窗口已由后端显示）。
+        // 【呼出即模糊】无条件立即补亚克力（幂等）——覆盖"关闭时临时关模糊
+        // 的 50ms 窗口"（此时 Rust 记忆为 false，其后端延迟重刷不会开模糊，
+        // 必须由前端立即补开，避免呼出瞬间无模糊、慢半拍才模糊）。
+        if (acrylicOffPending) acrylicOffPending = false;
+        applyAcrylic().catch(() => {});
       } else {
         // 非透明主题：按粒子数量/风格设置启动呼出动画（火焰模式（设置值 "erode"，历史命名）用火焰成形；
         // 粒子吸入用吸入动画；默认「粒子光效」无呼出动画——直接复原便签显示）。
