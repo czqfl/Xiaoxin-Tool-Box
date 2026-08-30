@@ -75,6 +75,11 @@ export function RecorderSelect() {
     document.documentElement.dataset.window = "panel";
   }, []);
 
+  // masking 镜像 ref：失焦回调读最新遮罩态（录制中点击其他应用是正常动作，
+  // 绝不能因失焦把充当录制遮罩的选区窗收掉）
+  const maskingRef = useRef(false);
+  useEffect(() => { maskingRef.current = masking; }, [masking]);
+
   // Rust 侧驱动的状态迁移：
   // select-reset —— 窗口被复用呼出（只 hide 不销毁），清空回到选区模式；
   // mask         —— recorder_start 成功，转入录制遮罩模式（窗口已鼠标穿透）；
@@ -200,6 +205,7 @@ export function RecorderSelect() {
     let blurTimer: ReturnType<typeof setTimeout> | null = null;
     const onBlur = () => {
       if (startingRef.current) return;
+      if (maskingRef.current) return;
       blurTimer = setTimeout(() => {
         if (!document.hasFocus()) {
           dragRef.current = null;

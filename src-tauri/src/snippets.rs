@@ -33,6 +33,10 @@ fn save_snippets(paths: &AppPaths, list: &[Snippet]) -> Result<(), String> {
     crate::storage::save_json(&paths.snippets_file, list).map_err(|e| format!("保存失败：{e}"))
 }
 
+/// 读-改-写序列的互斥锁：两个面板窗口并发写 snippets.json 时
+/// 后写者会覆盖先写者的更新（storage save_json 的 tmp 竞态叠加）
+static SNIPPETS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

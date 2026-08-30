@@ -1,25 +1,54 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+
+/** 便签窗口同步工具箱主题：便签样式体系完全隔离（自带明暗/主题预设），
+ *  之前不消费工具箱主题——切换红色等主题时便签毫无反应。此处：
+ *  1) 引入 theme.css 并挂 data-theme（工具箱主题令牌生效，仅 CSS 变量，无副作用）
+ *  2) 把便签强调色 --accent 对齐工具箱主题色（color-mix 派生色自动跟随）
+ *  3) 监听配置变化实时跟随（含 system 跟随系统切换）
+ *  仅覆盖 --accent 一个变量，便签其余视觉（明暗/圆角/图钉色等）保持独立 */
+function syncToolboxTheme(): void {
+  invoke<{ general?: { theme?: string } }>("config_load")
+    .then((cfg) => {
+      const t = cfg?.general?.theme ?? "system";
+      if (t === "system") document.documentElement.removeAttribute("data-theme");
+      else document.documentElement.setAttribute("data-theme", t);
+      // 读解析后的 rgb 三元组设置【具体色值】——不嵌套 var 引用：任何一环
+      // var 解析失败都会让下游 color-mix 整体无效 → 便签窗口（transparent
+      // 窗体）全透明。theme.css 已在此前 await import，变量必然可读
+      const rgb = getComputedStyle(document.documentElement)
+        .getPropertyValue("--accent-rgb").trim();
+      if (rgb) {
+        document.documentElement.style.setProperty("--accent", `rgb(${rgb})`);
+        document.documentElement.style.setProperty("--grip-dot", `rgba(${rgb}, 0.8)`);
+        document.documentElement.style.setProperty(
+          "--select-bg",
+          `color-mix(in srgb, rgb(${rgb}) 16%, var(--bg))`,
+        );
+      }
+    })
+    .catch(() => {});
+}
 
 /** 全局入口：按窗口 label 分流——
  *  便签相关窗口（note_* / sticky-*）挂载 vanilla 便签应用（样式完全隔离），
  *  其余窗口挂载工具箱 React 应用。
- *  工具箱设置页"便签设置"用 iframe 嵌入便签自己的设置面板：
- *  iframe 加载 index.html?view=sticky-settings（label 是父窗口的 "settings"，
- *  故 URL 参数优先于 label 判断）。
+ *  便签设置入口：工具箱设置页「便签设置」页签（settings/StickyNotePage.tsx，
+ *  React 实现，直接读写便签配置）；便签自带的旧版设置面板已删除。
  *  【设置归属】便签设置存于便签自己的 sticky_settings.json，不进工具箱
  *  AppConfig——界面统一挂在工具箱设置里，底层配置保持独立。 */
 async function bootstrap() {
   const label = getCurrentWindow().label;
 
-  const params = new URLSearchParams(window.location.search);
-  // 便签设置面板嵌入模式（iframe）：加载便签自己的设置面板（settings.ts，
-  // 内部按 label=settings 走 standalone 全屏铺满模式），样式仅作用于 iframe
-  if (params.get("view") === "sticky-settings") {
-    document.documentElement.dataset.window = "sticky";
-    await import("./sticky/styles.css");
-    const { openSettingsModal } = await import("./sticky/settings");
-    openSettingsModal().catch((e) => console.error("便签设置面板加载失败:", e));
-    return;
+  // 【仅开发模式】便签/历史/截图遮罩等窗口都是"预热创建、隐藏复用"的常驻窗口，
+  // 隐藏期间 vite 热更新推送会丢失——改动前端后呼出窗口看到的仍是旧页面
+  // （"改了没生效"的顽疾）。显示（从隐藏转为可见）时自动整页重载，
+  // 保证开发期呼出即最新代码；生产构建（DEV=false）完全不注册，无任何影响
+  if (import.meta.env.DEV) {
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) location.reload();
+    });
   }
 
   const isSticky =
@@ -30,10 +59,18 @@ async function bootstrap() {
     label === "sticky-imageviewer" ||
     label === "sticky-settings";
 
-  // 便签窗口：动态加载便签样式与应用（不注入工具箱 base.css，避免样式污染）
+  // 便签窗口：动态加载便签样式与应用（不注入工具箱 base.css，避免样式污染；
+  // theme.css 仅含 CSS 变量，单独引入以提供工具箱主题色令牌）
   if (isSticky) {
     document.documentElement.dataset.window = "sticky";
     await import("./sticky/styles.css");
+    await import("./styles/theme.css");
+    syncToolboxTheme();
+    void listen("config://changed", () => {
+      syncToolboxTheme();
+      // 已打开的便签实时跟随工具箱主题（明暗派生 + 重新应用）
+      void import("./sticky/settings").then((m) => m.refreshThemeFromToolbox());
+    });
     const { mountStickyByLabel } = await import("./sticky/sticky-main");
     mountStickyByLabel();
     return;

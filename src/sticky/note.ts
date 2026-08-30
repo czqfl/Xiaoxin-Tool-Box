@@ -10,6 +10,7 @@ import {
   readMdCustom,
   formatWithLLM,
   setAcrylic,
+  setNotePriority,
 } from "./api";
 import { NoteData, Settings } from "./types";
 import { renderMarkdown } from "./markdown";
@@ -17,6 +18,7 @@ import { DEFAULT_MD_CSS, DEFAULT_MD_CSS_DARK, getThemeCss, MD_BG_CSS } from "./m
 import { anim } from "./anim-loader";
 import { MAX_BLUR_PX, applyGlassBlur, parseColorToRgbInt } from "./glass";
 import { applyPanelBackground } from "./panel-bg";
+import { PIN_ICON_PATH } from "../modules/screenshot/pin-path.const";
 import {
   getCurrentWindow,
   PhysicalPosition,
@@ -58,9 +60,8 @@ export function mountNoteApp(noteId: string, preset = "") {
           </button>
           <button class="icon-btn" id="btn-pin" title="置顶" aria-pressed="true">
             <span class="nail" aria-hidden="true">
-              <svg class="pin-icon" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
-                <rect x="6.5" y="3.2" width="11" height="6.8" rx="2.4" fill="currentColor"></rect>
-                <path d="M10.4 10 H13.6 L12 21 Z" fill="currentColor"></path>
+              <svg class="pin-icon" viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
+                <path d="${PIN_ICON_PATH}"></path>
               </svg>
             </span>
           </button>
@@ -69,7 +70,10 @@ export function mountNoteApp(noteId: string, preset = "") {
           <button class="icon-btn close" id="btn-close" title="关闭">&#10005;</button>
         </div>
       </div>
-      {/* 新建便签默认隐藏格式工具栏（display:none 兜底，避免首帧闪现；加载后按设置恢复） */}
+      <!-- 新建便签默认隐藏格式工具栏（display:none 兜底，避免首帧闪现；加载后按设置恢复）。
+           【必须用 HTML 注释】此处是 innerHTML 模板字符串而非 JSX——JSX 风格的
+           {&#47;* ... *&#47;} 在 HTML 里是一行真实文本节点，会把标题栏与工具栏之间
+           撑出一条无垫底空隙，壁纸从那里透出（"中间多一条深色横带"的根因） -->
       <div class="toolbar" style="display:none">
         <div class="tool-color wps" id="tool-fg-wrap" title="字体颜色">
           <button type="button" class="cc-main" id="tool-fg-apply" title="应用当前字体颜色">
@@ -455,13 +459,14 @@ export function mountNoteApp(noteId: string, preset = "") {
     btnPin.classList.toggle("pinned", pinned);
     btnPin.setAttribute("aria-pressed", pinned ? "true" : "false");
     btnPin.title = pinned ? "取消置顶" : "置顶";
-    // 钉子动画：置顶=敲入，取消=拔出（仅用户点击时播放，加载便签不播放）
-    if (animate) {
-      btnPin.classList.remove("anim-in", "anim-out");
-      void btnPin.offsetWidth; // 强制 reflow 以重启动画
-      btnPin.classList.add(pinned ? "anim-in" : "anim-out");
-    }
     setAlwaysOnTop(pinned).catch((e) => console.error("置顶失败:", e));
+    // 【登记快捷键目标】呼出/收起快捷键按 NoteData.top_priority 查找置顶便签；
+    // 图钉点击必须同步登记，否则快捷键找不到置顶便签、操作的是别的便签
+    // （"呼出/收起快捷键无法呼出置顶便签"的根因）。加载便签恢复状态
+    // （animate=false）时不抢登记，避免打开即顶掉已有置顶
+    if (animate && pinned) {
+      setNotePriority(noteId).catch((e) => console.error("登记置顶失败:", e));
+    }
   }
 
   /** 解析生效的背景图 data URL：优先便签自身背景，否则回退全局设置；磁盘路径读回为 data URL */
@@ -529,17 +534,12 @@ export function mountNoteApp(noteId: string, preset = "") {
     const bgUrl = await resolveBgImage(s);
     await applyPanelBackground(noteWindow, s, { bgUrl: bgUrl || undefined });
 
-    // 背景沉浸仅对「自定义背景图 + 非透明」有意义：整张便签（含标题栏/工具栏）透出背景
-    const immersive = s.bg_immersive === true && !!bgUrl;
-    noteWindow.classList.toggle("bg-immersive", immersive);
-    if (bgUrl) {
-      // 非沉浸：内容面板用 0.98 近不透明底色垫底保证可读；沉浸时由 CSS 整体透明
-      noteWindow.style.setProperty("--note-panel-alpha", "0.98");
-      noteWindow.style.setProperty("--note-bar-alpha", "0.98");
-    } else {
-      noteWindow.style.removeProperty("--note-panel-alpha");
-      noteWindow.style.removeProperty("--note-bar-alpha");
-    }
+    // 【背景沉浸恒开】配置了背景图 → 整张便签（标题栏/工具栏/输入区）直接
+    // 透出壁纸原色，无垫底无染色；文字可读性由投影规则保证。
+    // bg_immersive 设置字段保留仅作兼容，不再消费
+    noteWindow.classList.toggle("bg-immersive", !!bgUrl);
+    noteWindow.style.removeProperty("--note-panel-alpha");
+    noteWindow.style.removeProperty("--note-bar-alpha");
   }
 
   /** 透明主题：开启 DWM 实时模糊（SWCA 亚克力，失焦也持续模糊），
@@ -888,7 +888,11 @@ export function mountNoteApp(noteId: string, preset = "") {
             if (seq !== summonSeq || closing || deleted) return;
             const intensity = s.particle_count ?? 50;
             const speed = s.animation_speed ?? 100;
-            if (s.particle_mode === "erode") anim.flame!.playFlameMaterialize(noteWindow, intensity, speed);
+            if (s.particle_mode === "none") {
+              // 无动画模式：直接复原显示（呼出/关闭零动画，动画竞态绕行）
+              restoreGlowSummoned();
+            }
+            else if (s.particle_mode === "erode") anim.flame!.playFlameMaterialize(noteWindow, intensity, speed);
             else if (s.particle_mode === "inhale") anim.inhale!.playInhaleMaterialize(noteWindow, intensity, speed);
             else if (s.particle_mode === "glass") anim.glass?.restoreGlassSummoned(); // 玻璃碎裂无成形动画：直接复原
             else restoreGlowSummoned();
@@ -1876,6 +1880,11 @@ export function mountNoteApp(noteId: string, preset = "") {
         const intensity = s.particle_count ?? 50;
         const speed = s.animation_speed ?? 100;
         // 关闭动画：默认粒子光效（鸿蒙通知删除同款·与呼出共用同一套粒子）；火焰模式（设置值 "erode"，历史命名）用火焰消散；inhale=粒子吸入。
+        if (s.particle_mode === "none") {
+          // 无动画模式：直接收尾（立即隐藏），呼出/关闭的全部动画竞态绕行
+          finishClose();
+          return;
+        }
         if (s.particle_mode === "erode") anim.flame!.requestFlameDissolveClose(finishClose, intensity, speed);
         else if (s.particle_mode === "inhale") anim.inhale!.requestInhaleDissolveClose(finishClose, intensity, speed);
         // glass：玻璃碎裂 → 渐渐淡出（画布碎块动画，粒子数量滑块控制碎块多少）

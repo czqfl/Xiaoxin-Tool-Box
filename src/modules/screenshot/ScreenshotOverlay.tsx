@@ -795,16 +795,42 @@ export function ScreenshotOverlay() {
           toggleColorFmt();
         }
       }
-      else if (e.key === "Enter" && phase === "selected") { e.preventDefault(); if (!e.repeat) void doOutput("copy"); }
+      else if (e.key === "Enter" && phase === "selected") {
+        // OCR 面板内有划选时放行：Enter 是确认/换行的通用键，不能被劫持为复制收场
+        const sel = ocrActiveRef.current ? (window.getSelection?.()?.toString() ?? "") : "";
+        if (sel.trim()) return;
+        e.preventDefault(); if (!e.repeat) void doOutput("copy");
+      }
       // 字母键用 e.code 判定：中文输入法激活时 e.key 可能是 "Process"，e.code 始终是物理键
       // OCR 面板内划选的文字由浏览器原生 Ctrl+C 复制（面板文本可选中）：
       // 有划选时【必须原样放行】——这条分支原本无条件 preventDefault + doOutput("copy")，
       // 结果是"复制没生效、截图会话还结束了"，表现为一按复制整个界面就关掉
+      // 【智能选区免点击】idle 态已有悬停高亮窗口时，Ctrl+C 直接采纳该窗口为
+      // 选区并复制——无需鼠标左键确认（与贴图热键的免点击采纳同一逻辑）
+      else if (e.code === "KeyC" && e.ctrlKey && phase === "idle") {
+        const s = snapRef.current;
+        if (!s) return; // 无智能高亮 → 放行（无操作）
+        e.preventDefault();
+        if (e.repeat) return;
+        regRef.current = s; setRegion(s);
+        snapRef.current = null; setSnap(null);
+        setPhase("selected"); phaseRef.current = "selected";
+        const g = geomRef.current; const sc = cssScale();
+        void shotSaveRegion([s.x*sc + (g?.x ?? 0), s.y*sc + (g?.y ?? 0), s.w*sc, s.h*sc]).catch(() => {});
+        void doOutput("copy");
+      }
       else if (e.code === "KeyC" && e.ctrlKey && phase === "selected") {
         const sel = ocrActiveRef.current ? (window.getSelection?.()?.toString() ?? "") : "";
         if (sel.trim()) return;
         e.preventDefault();
         if (!e.repeat) void doOutput("copy");
+      }
+      // P = 直接贴图（与工具栏贴图钮等效）
+      else if (e.code === "KeyP" && phase === "selected" && !e.ctrlKey && !e.altKey) {
+        const sel = ocrActiveRef.current ? (window.getSelection?.()?.toString() ?? "") : "";
+        if (sel.trim()) return;
+        e.preventDefault();
+        if (!e.repeat) void doOutput("pin");
       }
       // 贴图不再用内置 Ctrl+T/F8：全局「显示/隐藏贴图」热键（用户可在快捷键页
       // 自定义，如 F8）在截图会话中由 Rust 转发 shot://pin-hotkey 事件触发贴图
@@ -2068,11 +2094,14 @@ export function ScreenshotOverlay() {
       }
       if ((!canCrop && (!bgRef.current || bgRef.current.width <= 0)) || !geom) {
         void diagLog(`[shot] output ${action} skipped: canCrop=${canCrop} bgW=${bgRef.current?.width ?? -1} geom=${!!geom}`);
+        // 守卫失败也必须收遮罩：否则全屏遮罩继续吞输入，用户侧"无反应"
+        await shotCancel().catch(() => {});
         return;
       }
       const r = regRef.current;
       if (r.w <= 0 || r.h <= 0) {
         void diagLog(`[shot] output ${action} skipped: region ${r.w}x${r.h}`);
+        await shotCancel().catch(() => {});
         return;
       }
       // PNG 编码惰性化：贴图最快路径（原始像素直传）完全用不到 PNG，

@@ -716,6 +716,13 @@ export function PinWindow() {
         <div key={`s${i}`} className="pin-ocr-sel"
           style={{ left: r.x, top: r.y, width: r.w, height: r.h }} />
       ))}
+      {/* OCR 识别中 loading：右下角小徽标（左上角被缩放角标占用，避免重叠） */}
+      {ocr.busy && (
+        <div className="pin-ocr-loading">
+          <span className="pin-ocr-spinner" />
+          识别中…
+        </div>
+      )}
       {zoomLabel && (
         <div className={`pin-zoom-badge${zoomLabel.cls ? " " + zoomLabel.cls : ""}`}>{zoomLabel.text}</div>
       )}

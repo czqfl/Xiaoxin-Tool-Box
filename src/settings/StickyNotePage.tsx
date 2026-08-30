@@ -5,12 +5,13 @@
  *  快捷键录制 / Markdown 样式 / 大模型整理 / 存储目录。 */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { SettingGroup, SettingRow, Switch, Segmented, Slider } from "./components";
+import { SettingGroup, SettingRow, Switch, Slider } from "./components";
 
 interface StickySettings {
   theme: string;
   bg_image: string;
   bg_immersive: boolean;
+  bg_opacity: number;
   bg_transparent: boolean;
   bg_glass_opacity: number;
   edge_snap: boolean;
@@ -34,6 +35,7 @@ const DEFAULT: StickySettings = {
   theme: "light",
   bg_image: "",
   bg_immersive: false,
+  bg_opacity: 45,
   bg_transparent: false,
   bg_glass_opacity: 0.3,
   edge_snap: true,
@@ -70,6 +72,7 @@ const PARTICLE_MODES: { value: string; label: string }[] = [
   { value: "inhale", label: "粒子吸入" },
   { value: "erode", label: "火焰侵蚀" },
   { value: "glass", label: "玻璃碎裂" },
+  { value: "none", label: "无动画（直接显示/隐藏）" },
 ];
 
 /** 便签快捷键项（存储于便签设置 sticky_settings.json 的 shortcuts 字段）：
@@ -178,6 +181,20 @@ export function StickyNotePage() {
         if (s.theme === "transparent") {
           s.theme = "light";
           void invoke("save_settings", { settings: s }).catch(() => {});
+        }
+        // 便签明暗主题统一由工具箱「通用设置 → 主题」派生（本页不再提供选择）：
+        // dark → 深色；light/彩色浅色 → 浅色；system → 跟随系统深浅。
+        // 便签窗口侧（sticky/settings.ts deriveTheme）用同一规则，两边始终一致。
+        try {
+          const tb = await invoke<{ general?: { theme?: string } }>("config_load");
+          const t = tb?.general?.theme ?? "system";
+          const sysDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          s.theme =
+            t === "dark" ? "dark"
+            : t === "system" ? (sysDark ? "dark" : "light")
+            : "light";
+        } catch {
+          /* 读不到工具箱配置时保留便签存量主题 */
         }
         const sc = s.shortcuts ?? {};
         setSettings({ ...DEFAULT, ...s, shortcuts: sc });
@@ -291,17 +308,8 @@ export function StickyNotePage() {
       <p className="page-desc">功能与原版便签设置面板一致：外观 / 背景 / 毛玻璃 / 动画 / 快捷键 / Markdown / 大模型 / 存储</p>
 
       {/* ===== 主题与窗口 ===== */}
+      {/* 便签明暗主题已统一由工具箱「通用设置 → 主题」派生，此处不再提供选择 */}
       <SettingGroup>
-        <SettingRow title="主题" desc="浅色暖白 / 深色石墨（透明主题已移除，工具箱自带不透明度 + 亚克力）">
-          <Segmented<"light" | "dark">
-            value={(settings.theme === "transparent" ? "light" : settings.theme) as "light" | "dark"}
-            options={[
-              { value: "light", label: "浅色" },
-              { value: "dark", label: "深色" },
-            ]}
-            onChange={(v) => patch({ theme: v })}
-          />
-        </SettingRow>
         <SettingRow title="贴边自动收起 / 弹出" desc="QQ 风格：窗口贴屏幕边缘时自动收起">
           <Switch checked={settings.edge_snap} onChange={(v) => patch({ edge_snap: v })} />
         </SettingRow>
@@ -338,7 +346,7 @@ export function StickyNotePage() {
 
       {/* ===== 背景与毛玻璃 ===== */}
       <SettingGroup>
-        <SettingRow title="背景图片" desc="便签全局默认背景；透明主题下不生效">
+        <SettingRow title="背景图片" desc="便签全局默认背景；配置后整张便签沉浸透出壁纸（文字自动加投影保证可读）">
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button
               className="btn btn-primary btn-sm"
@@ -369,9 +377,6 @@ export function StickyNotePage() {
             {bgPreview ? <img src={bgPreview} alt="便签背景预览" /> : <span>预览加载中…</span>}
           </div>
         )}
-        <SettingRow title="背景沉浸" desc="标题栏、工具栏也透出背景（非沉浸仅输入区）">
-          <Switch checked={settings.bg_immersive} onChange={(v) => patch({ bg_immersive: v })} />
-        </SettingRow>
         <SettingRow title="高斯模糊效果" desc="背景图模式下内容面板叠加磨砂">
           <Switch checked={settings.glass_enabled} onChange={(v) => patch({ glass_enabled: v })} />
         </SettingRow>

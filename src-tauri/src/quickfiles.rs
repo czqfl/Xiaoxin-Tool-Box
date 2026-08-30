@@ -173,8 +173,8 @@ pub fn quickfiles_open(
             .spawn()
             .map_err(|e| format!("无法用「{op}」打开：{e}"))?;
     } else {
-        std::process::Command::new("cmd")
-            .args(["/c", "start", "", &path])
+        std::process::Command::new("explorer")
+            .arg(&path)
             .spawn()
             .map_err(|e| format!("打开失败：{e}"))?;
     }

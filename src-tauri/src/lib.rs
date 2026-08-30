@@ -560,6 +560,8 @@ pub fn run() {
             recorder::recorder_open_dir,
             // 录屏音频：录制中静音开关 + 音频子系统状态查询
             recaudio::recorder_audio_mute,
+            recaudio::recorder_audio_volume,
+            recaudio::recorder_audio_volume_get,
             recaudio::recorder_audio_state,
             pin::pin_create,
             pin::pin_from_clipboard,

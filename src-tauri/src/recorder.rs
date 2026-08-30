@@ -515,6 +515,7 @@ fn run<R: Runtime + 'static>(
     let mut rgb_buf: Vec<u8> = Vec::new();
     let mut bgra_buf: Vec<u8> = Vec::new();
 
+    let mut write_err: Option<String> = None;
     let mut frames: u32 = 0;
     let mut last_tick = started;
     let mut fail_streak = 0usize;
@@ -619,7 +620,7 @@ fn run<R: Runtime + 'static>(
             .unwrap_or(10_000_000 / fps.max(1) as i64);
 
         let frame_written;
-        let mut write_err: Option<String> = None;
+        // （write_err 声明已提升到本函数外层）
         match opts.fmt {
             RecFmt::Gif => {
                 let Some(enc) = gif_enc.as_mut() else { unreachable!() };
@@ -659,7 +660,7 @@ fn run<R: Runtime + 'static>(
         if !frame_written {
             crate::storage::diag_write(&format!(
                 "[recorder] write frame FAILED after {frames} frames: {}",
-                write_err.unwrap_or_else(|| "未知错误".into())));
+                write_err.as_deref().unwrap_or("未知错误")));
             break;
         }
         frames += 1;
@@ -711,8 +712,10 @@ fn run<R: Runtime + 'static>(
     // 音频必须先停采集并 join，再 finalize——保证最后一段 PCM 已提交。
     drop(gif_enc.take());
     if let Some(mut eng) = audio_eng.take() { eng.finish(); }
+    let mut finalize_err: Option<String> = None;
     if let Some(mut h) = h264.take() {
         if let Err(e) = h.finalize() {
+            finalize_err = Some(format!("{e}"));
             crate::storage::diag_write(&format!("[recorder] mp4 finalize: {e}"));
         }
     }
@@ -726,6 +729,19 @@ fn run<R: Runtime + 'static>(
     if frames == 0 {
         let _ = std::fs::remove_file(&path);
         finish(&app, false, None, dur, 0, Some("未捕获到任何画面".into()), false);
+        return;
+    }
+    // 写帧中途失败（磁盘满/编码器异常）或 moov 写出失败 → 产出的是坏文件，
+    // 必须报错丢弃，绝不能弹"已保存"让用户拿去用
+    if write_err.is_some() {
+        let _ = std::fs::remove_file(&path);
+        let we = write_err.unwrap_or_else(|| "未知错误".into());
+        finish(&app, false, None, dur, frames, Some(format!("录制中途写入失败：{we}")), false);
+        return;
+    }
+    if let Some(fe) = finalize_err {
+        let _ = std::fs::remove_file(&path);
+        finish(&app, false, None, dur, frames, Some(format!("视频封装失败：{fe}")), false);
         return;
     }
     finish(&app, true, Some(path.display().to_string()), dur, frames, None, false);
@@ -795,6 +811,10 @@ pub fn recorder_start(
     STOP.store(false, Ordering::SeqCst);
     PAUSE.store(false, Ordering::SeqCst);
     CANCEL.store(false, Ordering::SeqCst);
+    // 静音状态随会话复位：上次录制点了静音，下次录制不该开场即静音
+    crate::recaudio::AUDIO_MUTE.store(false, Ordering::SeqCst);
+    // 静音状态随会话复位：上次录制点了静音，下次录制不该开场即静音
+    crate::recaudio::AUDIO_MUTE.store(false, Ordering::SeqCst);
 
     if w < 24 || h < 24 {
         ACTIVE.store(false, Ordering::SeqCst);

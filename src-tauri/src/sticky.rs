@@ -128,6 +128,10 @@ pub struct StickySettings {
     pub bg_image: String,
     #[serde(default)]
     pub bg_immersive: bool,
+    /// 背景图模式的内容面板不透明度（0~100，仅非沉浸生效）：数字越小背景图越明显。
+    /// 标题栏/工具栏始终实色，背景图只在输入区透出；整窗透出请开 bg_immersive
+    #[serde(default = "default_bg_opacity")]
+    pub bg_opacity: f64,
     #[serde(default)]
     pub bg_transparent: bool,
     #[serde(default = "default_bg_glass_opacity")]
@@ -143,7 +147,7 @@ pub struct StickySettings {
     pub llm_api_key: String,
     #[serde(default)]
     pub llm_model: String,
-    #[serde(default = "default_true")]
+    #[serde(default = "default_glass_enabled")]
     pub glass_enabled: bool,
     #[serde(default = "default_glass_blur")]
     pub glass_blur: f64,
@@ -166,6 +170,15 @@ fn default_true() -> bool {
 fn default_glass_blur() -> f64 {
     55.0
 }
+fn default_bg_opacity() -> f64 {
+    30.0
+}
+
+/// 玻璃模糊默认关：壁纸模式下模糊会把背景细节抹成灰白一团
+fn default_glass_enabled() -> bool {
+    false
+}
+
 fn default_transparent_opacity() -> f64 {
     65.0
 }
@@ -192,6 +205,7 @@ impl Default for StickySettings {
             theme: "light".into(),
             bg_image: String::new(),
             bg_immersive: false,
+            bg_opacity: 30.0,
             bg_transparent: false,
             bg_glass_opacity: 0.3,
             edge_snap: true,
@@ -668,8 +682,8 @@ pub fn open_file(path: String) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
-            .args(["/c", "start", "", &path])
+        std::process::Command::new("explorer")
+            .arg(&path)
             .spawn()
             .map_err(|e| e.to_string())?;
     }
@@ -772,8 +786,12 @@ pub fn delete_bg_image(paths: State<'_, AppPaths>, path: String) -> Result<(), S
     let p = std::path::Path::new(&path);
     let base = bg_dir(&paths);
     if let Ok(canon) = p.canonicalize() {
-        if canon.starts_with(&base) && p.exists() {
-            let _ = std::fs::remove_file(p);
+        // base 也要 canonicalize：Windows 的 canonicalize 返回 \?\ verbatim
+        // 前缀路径，与普通路径 starts_with 恒为 false → 背景图永远删不掉
+        if let Ok(base_canon) = base.canonicalize() {
+            if canon.starts_with(&base_canon) && p.exists() {
+                let _ = std::fs::remove_file(p);
+            }
         }
     }
     Ok(())
@@ -1267,7 +1285,7 @@ pub fn schedule_force_close(app: &AppHandle, labels: Vec<String>) {
     let app2 = app.clone();
     std::thread::spawn(move || {
         // 大于前端 closeFailSafe（1500ms）：确保前端正常收尾后本兜底不误伤正在播放的动画
-        std::thread::sleep(std::time::Duration::from_millis(1800));
+        std::thread::sleep(std::time::Duration::from_millis(2600));
         let app3 = app2.clone();
         let _ = app3.run_on_main_thread({
             let app4 = app3.clone();
@@ -1396,7 +1414,7 @@ fn to_accelerator(combo: &str) -> String {
 /// 组合键来自便签设置（现统一在工具箱「快捷键设置」的便签分组里配置）。
 /// 只注册便签自己的组合（不去 unregister_all，避免注销工具箱快捷键）；
 /// 与工具箱组合撞车时 register 失败被忽略。
-pub fn register_all_shortcuts(app: &AppHandle) {
+pub fn register_all_shortcuts<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     use std::collections::HashSet;
     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut as GShortcut};
     let Some(paths) = app.try_state::<AppPaths>() else {
@@ -1622,7 +1640,7 @@ fn toggle_priority_note(app: &AppHandle) {
     let visible = VISIBLE_NOTES.lock().unwrap().contains(&label);
     if visible {
         // 关闭：先广播粒子消散动画（前端播放），再 Rust 兜底关闭——
-        // 与"收起全部便签"同机制（不依赖前端动画回调，1800ms 后若仍未关闭才兜底隐藏）。
+        // 与"收起全部便签"同机制（不依赖前端动画回调，2600ms 后若仍未关闭才兜底隐藏）。
         // 修复：此前直接 hide_note_window 无动画（用户反馈"快捷键关闭无动画"）。
         if let Some(win) = app.get_webview_window(&label) {
             let wins = vec![(label.clone(), win)];

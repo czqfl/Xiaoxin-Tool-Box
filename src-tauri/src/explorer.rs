@@ -63,17 +63,21 @@ pub fn start_explorer_watcher<R: Runtime>(app: AppHandle<R>) {
                 continue;
             };
             let now = chrono::Utc::now().timestamp_millis();
-            let mut entries = store.0.lock().unwrap();
-            let mut changed = false;
-            for path in newly {
-                if is_ignored_path(&path) {
-                    continue;
+            // 锁内只改内存并在有变化时克隆快照；save_json 的磁盘 IO 放到锁外——
+            // 持锁写盘会让文件夹面板的所有命令在此期间阻塞在锁上
+            let snapshot: Option<Vec<crate::folder::FolderEntry>> = {
+                let mut entries = store.0.lock().unwrap();
+                let mut changed = false;
+                for path in newly {
+                    if is_ignored_path(&path) {
+                        continue;
+                    }
+                    changed |= register_visit(&mut entries, &path, now);
                 }
-                changed |= register_visit(&mut entries, &path, now);
-            }
-            if changed {
-                let _ = save_json(&paths_state.folders_file, &*entries);
-                drop(entries);
+                if changed { Some(entries.clone()) } else { None }
+            };
+            if let Some(snapshot) = snapshot {
+                let _ = save_json(&paths_state.folders_file, &snapshot);
                 let _ = app.emit(EVT_CHANGED, ());
             }
         }

@@ -43,6 +43,8 @@ export interface Settings {
   bg_image?: string;
   /** 背景沉浸：整张便签（含标题栏/工具栏）都显示背景，而非仅输入区 */
   bg_immersive?: boolean;
+  /** 背景图模式的内容面板不透明度（0~100，仅非沉浸生效）：越低背景图越明显 */
+  bg_opacity?: number;
   /** 靠边自动收起（QQ 贴边风格）：便签拖到屏幕边缘附近、鼠标离开时收起，移回时弹出 */
   edge_snap?: boolean;
   /** 便签存储目录（绝对路径，可空；空 = 默认应用数据目录 %APPDATA%/XiaoxinStickyNote） */

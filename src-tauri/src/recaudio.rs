@@ -12,7 +12,7 @@
 
 #![cfg(windows)]
 
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering, AtomicU32 };
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{mpsc, Arc};
 
@@ -51,6 +51,8 @@ impl AudioSource {
 
 /// 录制中静音开关（命令写入，drain 读取）。静音=写零帧，不断流。
 pub static AUDIO_MUTE: AtomicBool = AtomicBool::new(false);
+/// 录制音量（0~200，100=原声）：drain 混音时按比例缩放采样
+pub static AUDIO_VOLUME: AtomicU32 = AtomicU32::new(100);
 /// 音频子系统状态：0=未启用 1=正常 2=失败（UI 据此禁用开关）
 pub static AUDIO_STATE: AtomicU8 = AtomicU8::new(0);
 
@@ -59,6 +61,15 @@ pub fn mute_state() -> (bool, bool) {
 }
 pub fn set_mute(on: bool) {
     AUDIO_MUTE.store(on, Ordering::SeqCst);
+}
+
+/// 设置录制音量（0~200，100=原声）。录制中实时生效（下一混音周期起）
+pub fn set_audio_volume(v: u32) {
+    AUDIO_VOLUME.store(v.clamp(0, 200), Ordering::SeqCst);
+}
+
+pub fn audio_volume() -> u32 {
+    AUDIO_VOLUME.load(Ordering::SeqCst)
 }
 
 /// 规范内部格式：48kHz / 2ch / f32 交错。1024 帧 = 一个 AAC 单元。
@@ -134,11 +145,12 @@ impl AudioEngine {
             }
             let mut mixed = vec![0f32; UNIT * CH];
             if !muted {
+                let gain = AUDIO_VOLUME.load(Ordering::SeqCst) as f32 / 100.0;
                 if let Some(m) = mic {
-                    add_into(&mut mixed, &m);
+                    add_into_gain(&mut mixed, &m, gain);
                 }
                 if let Some(s) = sys {
-                    add_into(&mut mixed, &s);
+                    add_into_gain(&mut mixed, &s, gain);
                 }
             }
             // f32 → s16 交错，削波
@@ -200,6 +212,21 @@ pub fn recorder_audio_mute(on: bool) -> bool {
 
 /// 查询音频子系统状态，返回 (音频是否可用, 当前是否静音)。
 /// UI 据此禁用/置灰开关——音频起不来时不该让用户点一个没用的按钮。
+/// 设置录制音量（录制条滑杆实时调节；0=静音 100=原声 200=两倍）
+#[tauri::command]
+pub fn recorder_audio_volume(volume: u32) -> u32 {
+    set_audio_volume(volume);
+    audio_volume()
+}
+
+/// 查询录制音量
+#[tauri::command]
+pub fn recorder_audio_volume_get() -> u32 {
+    audio_volume()
+}
+
+/// 查询音频子系统状态，返回 (音频是否可用, 当前是否静音)。
+/// UI 据此禁用/置灰开关——音频起不来时不该让用户点一个没用的按钮。
 #[tauri::command]
 pub fn recorder_audio_state() -> (bool, bool) {
     mute_state()
@@ -209,6 +236,14 @@ fn add_into(dst: &mut [f32], src: &[f32]) {
     let n = dst.len().min(src.len());
     for i in 0..n {
         dst[i] += src[i];
+    }
+}
+
+/// 带增益的混入：gain 0=无声，1=原声，>1 放大（削波在 s16 转换处处理）
+fn add_into_gain(dst: &mut [f32], src: &[f32], gain: f32) {
+    let n = dst.len().min(src.len());
+    for i in 0..n {
+        dst[i] += src[i] * gain;
     }
 }
 

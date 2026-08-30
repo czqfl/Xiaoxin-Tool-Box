@@ -297,8 +297,11 @@ pub fn port_kill(pid: u32) -> Result<(), String> {
         };
         let handle = OpenProcess(PROCESS_TERMINATE, false, pid)
             .map_err(|_| format!("无法打开进程 PID {pid}（可能权限不足，请以管理员运行本工具）"))?;
-        TerminateProcess(handle, 1)
-            .map_err(|_| format!("结束进程 PID {pid} 失败（可能权限不足）"))?;
+        // OpenProcess 的裸句柄必须显式关闭（每次结束进程泄漏一个句柄）
+        let r = TerminateProcess(handle, 1)
+            .map_err(|_| format!("结束进程 PID {pid} 失败（可能权限不足）"));
+        let _ = windows::Win32::Foundation::CloseHandle(handle);
+        r?;
     }
     #[cfg(not(windows))]
     {
@@ -345,8 +348,9 @@ fn process_image_path(pid: u32) -> String {
             let mut buf = [0u16; 1024];
             let mut size = buf.len() as u32;
             let name = PWSTR(buf.as_mut_ptr());
-            if QueryFullProcessImageNameW(handle, PROCESS_NAME_FORMAT(0), name, &mut size).is_ok()
-            {
+            let ok = QueryFullProcessImageNameW(handle, PROCESS_NAME_FORMAT(0), name, &mut size).is_ok();
+            let _ = windows::Win32::Foundation::CloseHandle(handle);
+            if ok {
                 let wide = String::from_utf16_lossy(&buf[..size as usize]);
                 if !wide.is_empty() {
                     return wide;

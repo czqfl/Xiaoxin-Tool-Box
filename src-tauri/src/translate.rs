@@ -519,10 +519,11 @@ fn read_selection_clipboard(src_raw: Option<usize>) -> Option<String> {
     // Alt+C，会命中 QQ 等截图工具热键（这正是早期"长按快捷键误触截图"的根因）。
     crate::keyhook::wait_modifiers_released();
 
+    // 只在能取到【文本】时才记录还原值：剪贴板是图片/文件时置 None，
+    // 还原阶段跳过——绝不用空串覆盖用户的非文本剪贴板内容
     let prev_default = arboard::Clipboard::new()
         .ok()
-        .and_then(|mut c| c.get_text().ok())
-        .unwrap_or_default();
+        .and_then(|mut c| c.get_text().ok());
     let seq_before = crate::keyhook::clipboard_seq();
 
     // 抑制"选中文本"被剪贴板监听器误记进历史：在注入 Ctrl+C 之前置位 SUPPRESS_WATCH，
@@ -547,7 +548,7 @@ fn read_selection_clipboard(src_raw: Option<usize>) -> Option<String> {
             .ok()
             .and_then(|mut c| c.get_text().ok())
             .unwrap_or_default();
-        if (seq_changed || cur != prev_default) && !cur.trim().is_empty() {
+        if (seq_changed || cur != prev_default.clone().unwrap_or_default()) && !cur.trim().is_empty() {
             copied = true;
             break;
         }
@@ -558,10 +559,44 @@ fn read_selection_clipboard(src_raw: Option<usize>) -> Option<String> {
         copied
     ));
 
-    // 还原剪贴板（抹掉我们复制的那条，且不进历史）
-    if let Ok(mut cb) = arboard::Clipboard::new() {
-        crate::clipboard::SUPPRESS_WATCH.store(true, std::sync::atomic::Ordering::SeqCst);
-        let _ = cb.set_text(prev_default);
+    // 还原剪贴板（抹掉我们模拟 Ctrl+C 塞进去的原文，且不进历史）：
+    // - 原剪贴板是文本 → 还原为原文
+    // - 原剪贴板是图片/文件/空（无法用文本还原）→ 清空剪贴板——
+    //   绝不让划词的原文残留在用户剪贴板中（用户明确要求）
+    let mut cb = match arboard::Clipboard::new() {
+        Ok(c) => c,
+        Err(e) => {
+            crate::storage::diag_write(&format!("[translate] clipboard open failed: {e}"));
+            return if copied { Some(cur.trim().to_string()) } else { None };
+        }
+    };
+    crate::clipboard::SUPPRESS_WATCH.store(true, std::sync::atomic::Ordering::SeqCst);
+    match prev_default {
+        Some(prev) => {
+            // 还原失败（剪贴板被占用）重试三次；仍失败写诊断
+            for attempt in 0..3 {
+                match cb.set_text(prev.clone()) {
+                    Ok(_) => break,
+                    Err(e) => {
+                        crate::storage::diag_write(&format!(
+                            "[translate] clipboard restore failed (attempt {}): {e}", attempt + 1));
+                        std::thread::sleep(std::time::Duration::from_millis(120));
+                    }
+                }
+            }
+        }
+        None => {
+            for attempt in 0..3 {
+                match cb.clear() {
+                    Ok(_) => break,
+                    Err(e) => {
+                        crate::storage::diag_write(&format!(
+                            "[translate] clipboard clear failed (attempt {}): {e}", attempt + 1));
+                        std::thread::sleep(std::time::Duration::from_millis(120));
+                    }
+                }
+            }
+        }
     }
 
     if copied {

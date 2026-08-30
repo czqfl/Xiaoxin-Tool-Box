@@ -93,10 +93,10 @@ pub fn set_model(name: &str) {
     *lock(&ENGINE) = None;
 }
 
-/// ONNX Runtime 线程数。实测（i5-1155G7）2~4 线程最优、8 线程反而变慢，
-/// 上限取物理核数量级，避免贴图批量 OCR 把整机 CPU 吃满导致界面卡顿。
+/// ONNX Runtime 线程数。OCR 已改为按需触发（按 Alt 才跑），2 线程识别稍慢
+/// 但给贴图拖拽/缩放留足 CPU 余量，避免推理抢占导致界面卡顿。
 fn intra_threads() -> usize {
-    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2).clamp(1, 4)
+    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2).clamp(1, 2)
 }
 
 /// 模型搜索目录（按优先级）：exe 同级（安装包把 resources 平铺在这里）→

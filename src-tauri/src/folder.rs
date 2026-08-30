@@ -519,13 +519,17 @@ fn exec_in_shell(path: &str, shell: &str, command: &str) -> CmdResult {
     let (sep, join) = if shell == "cmd" { (" & ", " & ") } else { ("; ", "; ") };
     let exec_line = parts.join(join);
     let shown_line = format!("$ {}", parts.join(sep));
+    // 各 shell 的 echo 转义：cmd 的 & 是命令分隔符须转 ^&；PowerShell 单引号须双写。
+    // 不转义的话多命令在 echo 处被截断、后半段提前执行一遍再被 exec_line 重复执行
+    let shown_line_cmd = shown_line.replace('&', "^&");
+    let shown_line_ps = shown_line.replace('\'', "''");
 
     match shell {
         "cmd" => {
             // @echo off：整行因 @ 前缀不回显；cls 清掉启动痕迹；timeout 1 秒让窗口
             // 先停在目录，再执行命令，输出从头滚动（缓冲已扩到 9999 行可回看全量）
             let cmd_line = format!(
-                "@echo off & mode con: cols=150 lines=9999 & cls & cd /d \"{}\" & echo. & echo {shown_line} & timeout /t 1 /nobreak >nul & {exec_line}",
+                "@echo off & mode con: cols=150 lines=9999 & cls & cd /d \"{}\" & echo. & echo {shown_line_cmd} & timeout /t 1 /nobreak >nul & {exec_line}",
                 path.replace('"', "\"\"")
             );
             Command::new("cmd")
@@ -537,7 +541,7 @@ fn exec_in_shell(path: &str, shell: &str, command: &str) -> CmdResult {
         "powershell" => {
             // Clear-Host 清屏；Write-Host 先显示一行命令；Start-Sleep 给窗口建立时间
             let cmd_line = format!(
-                "$Host.UI.RawUI.BufferSize = New-Object System.Management.Automation.Host.Size(150,9999); Clear-Host; Set-Location -LiteralPath '{}'; Write-Host ''; Write-Host '{shown_line}'; Start-Sleep -Milliseconds 800; {exec_line}",
+                "$Host.UI.RawUI.BufferSize = New-Object System.Management.Automation.Host.Size(150,9999); Clear-Host; Set-Location -LiteralPath '{}'; Write-Host ''; Write-Host '{shown_line_ps}'; Start-Sleep -Milliseconds 800; {exec_line}",
                 path.replace('\'', "''")
             );
             Command::new("powershell")
@@ -549,7 +553,7 @@ fn exec_in_shell(path: &str, shell: &str, command: &str) -> CmdResult {
         _ => {
             // Windows Terminal；未安装时回退 cmd。wt 窗口较宽，命令执行沿用 PowerShell 分支逻辑
             let cmd_line = format!(
-                "$Host.UI.RawUI.BufferSize = New-Object System.Management.Automation.Host.Size(150,9999); Clear-Host; Set-Location -LiteralPath '{}'; Write-Host ''; Write-Host '{shown_line}'; Start-Sleep -Milliseconds 800; {exec_line}",
+                "$Host.UI.RawUI.BufferSize = New-Object System.Management.Automation.Host.Size(150,9999); Clear-Host; Set-Location -LiteralPath '{}'; Write-Host ''; Write-Host '{shown_line_ps}'; Start-Sleep -Milliseconds 800; {exec_line}",
                 path.replace('\'', "''")
             );
             if Command::new("wt")
@@ -559,7 +563,7 @@ fn exec_in_shell(path: &str, shell: &str, command: &str) -> CmdResult {
                 .is_err()
             {
                 let cmd_line = format!(
-                    "@echo off & cls & cd /d \"{}\" & echo. & echo {shown_line} & timeout /t 1 /nobreak >nul & {exec_line}",
+                    "@echo off & cls & cd /d \"{}\" & echo. & echo {shown_line_cmd} & timeout /t 1 /nobreak >nul & {exec_line}",
                     path.replace('"', "\"\"")
                 );
                 Command::new("cmd")

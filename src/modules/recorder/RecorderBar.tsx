@@ -3,11 +3,11 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize, PhysicalPosition } from "@tauri-apps/api/dpi";
-import { Square, Film, FolderOpen, X, Pause, Play, LoaderCircle, Mic, MicOff } from "lucide-react";
+import { Square, Film, FolderOpen, X, Pause, Play, LoaderCircle, Mic, MicOff, Volume2 } from "lucide-react";
 import {
   EVT_REC_TICK, EVT_REC_DONE,
   recorderStop, recorderPause, recorderResume, recorderCancel,
-  recDismiss, revealFile, recorderAudioMute, recorderAudioState,
+  recDismiss, revealFile, recorderAudioMute, recorderAudioState, recorderAudioVolume, recorderAudioVolumeGet,
   type RecDonePayload,
 } from "./api";
 import "./recorder.css";
@@ -34,13 +34,24 @@ export function RecorderBar() {
   // 未录音（GIF / 音源关 / 端点不可用）时按钮不出现，避免摆一个点不动的死按钮。
   const [audioOn, setAudioOn] = useState(false);
   const [muted, setMuted] = useState(false);
+  // 音量调节：0~200（100=原声）；滑杆展开态
+  const [volume, setVolume] = useState(100);
+  const [volOpen, setVolOpen] = useState(false);
   const stoppingRef = useRef(false);
   const autoCloseRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    void recorderAudioState()
-      .then(([available, m]) => { setAudioOn(available); setMuted(m); })
-      .catch(() => setAudioOn(false));
+    // 音频引擎在录制线程启动后约 200ms 才设置 AUDIO_STATE；立即查询必然读到
+    // "未启用"（静音按钮显隐与实际音轨脱节）。延迟到引擎就绪后再查询
+    const t = setTimeout(() => {
+      void recorderAudioState()
+        .then(([available, m]) => { setAudioOn(available); setMuted(m); })
+        .catch(() => setAudioOn(false));
+      void recorderAudioVolumeGet()
+        .then((v) => setVolume(v))
+        .catch(() => {});
+    }, 800);
+    return () => clearTimeout(t);
   }, []);
 
   useEffect(() => {
@@ -121,6 +132,12 @@ export function RecorderBar() {
       .catch(() => setMuted(!next));
   };
 
+  // 音量：拖动滑杆实时调节（0=无声 100=原声 200=两倍），下一混音周期即生效
+  const changeVolume = (v: number) => {
+    setVolume(v);
+    void recorderAudioVolume(v).catch(() => {});
+  };
+
   // 取消：丢弃本次录制（不保存）
   const cancel = () => {
     if (stoppingRef.current) return;
@@ -159,13 +176,37 @@ export function RecorderBar() {
           <span className={`recb-dot${paused ? " off" : ""}`} />
           <span className="recb-time">{fmt(elapsed)}</span>
           {audioOn && (
-            <button
-              className={`recb-btn recb-icon${muted ? " recb-muted" : ""}`}
-              onClick={toggleMute}
-              title={muted ? "取消静音" : "静音（不中断录制，可随时切回）"}
-            >
-              {muted ? <MicOff size={12} /> : <Mic size={12} />}
-            </button>
+            <>
+              <button
+                className={`recb-btn recb-icon${muted ? " recb-muted" : ""}`}
+                onClick={toggleMute}
+                title={muted ? "取消静音" : "静音（不中断录制，可随时切回）"}
+              >
+                {muted ? <MicOff size={12} /> : <Mic size={12} />}
+              </button>
+              <div className="recb-vol-wrap">
+                <button
+                  className="recb-btn recb-icon"
+                  onClick={() => setVolOpen((o) => !o)}
+                  title={`录制音量 ${volume}%（点击调节）`}
+                >
+                  <Volume2 size={12} />
+                </button>
+                {volOpen && (
+                  <div className="recb-vol-pop">
+                    <input
+                      type="range"
+                      min={0}
+                      max={200}
+                      value={volume}
+                      onChange={(e) => changeVolume(Number(e.target.value))}
+                      title="0=无声 100=原声 200=两倍"
+                    />
+                    <span className="recb-vol-val">{volume}%</span>
+                  </div>
+                )}
+              </div>
+            </>
           )}
           <button
             className={`recb-btn recb-icon${paused ? " recb-resume" : ""}`}

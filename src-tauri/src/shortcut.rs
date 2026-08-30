@@ -394,6 +394,10 @@ pub fn resync_all_result<R: Runtime>(
         let s = config_shortcut(config, target);
         register_one_result(app, target, &s)?;
     }
+    // 【恢复便签全局快捷键】unregister_all 会连便签注册的 F4 等一起注销，
+    // 而便签热键注册在独立的 sticky_settings.json（不在 config.shortcuts）——
+    // 不补注册的话，用户在工具箱保存任何一次配置后便签快捷键就全部失效
+    crate::sticky::register_all_shortcuts(app);
     Ok(())
 }
 

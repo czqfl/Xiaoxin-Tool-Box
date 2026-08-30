@@ -23,9 +23,9 @@ export async function mountStickyByLabel() {
   if (label === "sticky-history") {
     mountHistoryApp();
   } else if (label === "sticky-settings") {
-    // 独立“设置”窗口入口：settings-window.ts 自带样式与首帧兜底，顶层执行
-    // openSettingsModal()（standalone 路径），paint 完成后自行 show 窗口。
-    await import("./settings-window");
+    // 便签设置已统一移至工具箱设置页（StickyNotePage）；该独立窗口为历史残留，
+    // 无 UI 可挂载，直接关闭避免悬空空窗
+    getCurrentWindow().close().catch(() => {});
   } else if (label === "sticky-imageviewer") {
     mountImageViewer().catch((e) => console.error("图片预览加载失败:", e));
   } else if (label === "particles") {

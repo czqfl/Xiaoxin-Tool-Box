@@ -37,6 +37,14 @@ export const recorderStart = (rect: RecRect, o: RecOptions) =>
 export const recorderAudioMute = (on: boolean) =>
   invoke<boolean>("recorder_audio_mute", { on });
 
+/** 设置录制音量（0~200，100=原声）。录制中实时生效 */
+export const recorderAudioVolume = (volume: number) =>
+  invoke<number>("recorder_audio_volume", { volume: Math.round(volume) });
+
+/** 查询录制音量 */
+export const recorderAudioVolumeGet = () =>
+  invoke<number>("recorder_audio_volume_get");
+
 /** 查询音频子系统状态：[音频是否可用, 当前是否静音] */
 export const recorderAudioState = () =>
   invoke<[boolean, boolean]>("recorder_audio_state");

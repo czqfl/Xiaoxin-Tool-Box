@@ -44,6 +44,12 @@ export function usePinOcrSelect({ autoRun, interactive, id, src, imgRef, onFeedb
   // 识别进行中：Alt 按下但结果未就绪时给用户角标反馈（否则像功能坏了）。
   // 只需 ref——反馈经 onFeedback 走 PinWindow 角标，hook 内无需触发渲染
   const ocrBusyRef = useRef(false);
+  // busy 状态：供 PinWindow 渲染「识别中」loading 指示（state 驱动渲染，
+  // 与 ocrBusyRef 同步——ref 给鼠标事件闭包读，state 给 JSX 用）
+  const [busy, setBusy] = useState(false);
+  // Alt 触发的识别完成后自动进入文字模式：用户反馈「识别完还要再按一次 Alt
+  // 才能看到文字高亮」这步多余——首次按 Alt 已表明意图，识别完就该立即可选
+  const autoEnterRef = useRef(false);
   // 文字选择模式开关（单击 Alt 切换；光标 I-beam + 提示底纹）
   const [altActive, setAltActive] = useState(false);
   const modeRef = useRef(false);
@@ -81,29 +87,43 @@ export function usePinOcrSelect({ autoRun, interactive, id, src, imgRef, onFeedb
     return () => window.removeEventListener("resize", h);
   }, []);
 
-  // ---- 自动 OCR：src 变化即后台识别（Rust 直读贴图文件，前端零传图） ----
-  useEffect(() => {
-    // 代际令牌：staging 复用窗跨多张贴图存活，旧请求晚到绝不覆盖新贴图结果；
-    // 换图同时清掉上一张的选区与识别缓存
-    let stale = false;
-    linesRef.current = null;
-    setLines(null);
-    clearSelection();
-    if (!autoRun || !id || !src) return;
+  // 把本帧的 id/src/autoRun 存进 ref，供空依赖的 keydown 闭包读取
+  const idSrcRef = useRef({ id, src, autoRun });
+  idSrcRef.current = { id, src, autoRun };
+  const staleRef = useRef(0);
+  const runOcrRef = useRef<() => void>(() => {});
+  runOcrRef.current = () => {
+    const { id, src, autoRun } = idSrcRef.current;
+    if (!autoRun || !id || !src || ocrBusyRef.current || linesRef.current) return;
+    const gen = ++staleRef.current;
     ocrBusyRef.current = true;
+    setBusy(true);
     pinOcr(id)
       .then((res) => {
-        if (stale) return;
+        if (staleRef.current !== gen) return;
         linesRef.current = res;
         setLines(res);
       })
       .catch(() => { /* 识别失败静默降级：仅文字选择不可用 */ })
       .finally(() => {
-        if (stale) return;
+        if (staleRef.current !== gen) return;
         ocrBusyRef.current = false;
+        setBusy(false);
       });
-    return () => { stale = true; };
-  }, [autoRun, id, src]);
+  };
+
+  // ---- 延迟 OCR：src 变化只清缓存，不立即识别 ----
+  // 贴图挂载/换图时【不】自动跑 OCR——4 线程 ONNX 推理会和拖拽/缩放抢 CPU，
+  // 表现为"刚贴图时拖不动、放大卡"。改为按 Alt 进文字模式时才触发（见下）。
+  useEffect(() => {
+    staleRef.current++;
+    linesRef.current = null;
+    setLines(null);
+    clearSelection();
+    ocrBusyRef.current = false;
+    setBusy(false);
+    autoEnterRef.current = false;
+  }, [id, src]);
 
   // ---- Alt 开关跟踪（单击切换，无需一直按住）----
   // keydown 切换 + blur 退出两路维护：blur（Alt+Tab 切窗等）立即退出模式并清高亮。
@@ -112,10 +132,16 @@ export function usePinOcrSelect({ autoRun, interactive, id, src, imgRef, onFeedb
     const kd = (e: KeyboardEvent) => {
       if (e.key !== "Alt" || e.repeat || !interactiveRef.current) return;
       e.preventDefault();
-      // 没有识别结果：区分"还在识别中"与"识别完但没有文字"给角标反馈——
-      // 大图识别耗时明显，无反馈时用户会以为文字选择功能坏了
-      if (!linesRef.current?.length) {
-        feedbackRef.current(ocrBusyRef.current ? "文字识别中，请稍候…" : "未识别到文字", 1400);
+      // 还没跑过识别：首次按 Alt 才触发（延迟 OCR），并提示识别中。
+      // 标记 autoEnter：识别完成后自动进文字模式（不再要求第二次 Alt）
+      if (!linesRef.current) {
+        autoEnterRef.current = true;
+        runOcrRef.current();
+        feedbackRef.current("文字识别中，请稍候…", 1400, "ocr-busy");
+        return;
+      }
+      if (!linesRef.current.length) {
+        feedbackRef.current("未识别到文字", 1400);
         return;
       }
       modeRef.current = !modeRef.current;
@@ -132,8 +158,14 @@ export function usePinOcrSelect({ autoRun, interactive, id, src, imgRef, onFeedb
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // OCR 完成（或清空）时同步一次模式状态：识别刚完成也要立即可选
+  // OCR 完成（或清空）时同步一次模式状态：
+  // - 结果就绪且是 Alt 触发（autoEnterRef）→ 自动进入文字模式，高亮立即可见；
+  // - 清空（换图 / 识别失败）→ 退出模式并清高亮
   useEffect(() => {
+    if (lines?.length && autoEnterRef.current) {
+      autoEnterRef.current = false;
+      modeRef.current = true;
+    }
     setAltActive(modeRef.current && !!lines?.length && interactiveRef.current);
     if (!lines?.length) clearSelection();
   }, [lines]);
@@ -337,5 +369,5 @@ export function usePinOcrSelect({ autoRun, interactive, id, src, imgRef, onFeedb
         }).filter((r): r is SelRect => !!r)
       : [];
 
-  return { altActive, selRects, hintRects, onMouseDown, onKeyDown, clearSelection, hasSelectionRef };
+  return { altActive, selRects, hintRects, busy, onMouseDown, onKeyDown, clearSelection, hasSelectionRef };
 }

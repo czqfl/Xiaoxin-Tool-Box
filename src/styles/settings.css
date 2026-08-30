@@ -94,7 +94,10 @@
   background: var(--bg-app);
 }
 .settings-page {
-  max-width: 640px;
+  /* 640px 在最大化/全屏下右侧大片空白（"页面没有随窗口放大"）；
+     放宽到 1080 并水平居中：小窗口不受影响，大窗口内容居中利用宽度 */
+  max-width: 1080px;
+  margin: 0 auto;
   animation: page-in var(--dur-base) var(--ease-out);
 }
 @keyframes page-in {

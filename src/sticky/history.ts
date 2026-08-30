@@ -1,6 +1,7 @@
 import { listNotes, deleteNote, openNoteWindow, closeWindow, startDragging, getOpenNotes, setAcrylic, newNoteId, createNoteWindow, setNotePriority } from "./api";
 import { getSettings, normalizeOpacity, onSettingsChanged } from "./settings";
 import { applyPanelBackground } from "./panel-bg";
+import { PIN_ICON_PATH } from "../modules/screenshot/pin-path.const";
 import { applyGlassBlur, parseColorToRgbInt } from "./glass";
 import type { NoteMeta, Settings } from "./types";
 import { listen } from "@tauri-apps/api/event";
@@ -232,20 +233,22 @@ export function mountHistoryApp() {
         // 有标题：标题为主行、内容摘要为副行；无标题：直接以内容摘要为主行
         const primary = title || item.snippet;
         const secondary = title ? `<div class="card-snippet">${escapeHtml(item.snippet)}</div>` : "";
-        const statusTag = isOpen ? `<div class="card-status">打开中</div>` : "";
+        const statusTag = isOpen ? `<span class="card-status">打开中</span>` : "";
         // 所有便签都显示删除按钮：后端 delete_note 会先向窗口发 note-deleted
         // （前端停止保存并关闭窗口），再删文件，故即使便签还开着也能安全删除、不会复活。
         const delBtnHtml = `<button class="card-delete" title="删除">\u2715</button>`;
         // 置顶优先级按钮（标准图钉图标，SVG 可被 CSS 着色）：全局唯一，快捷键优先操作
         const pinBtnHtml = `<button class="card-pin${item.top_priority ? " active" : ""}" title="${
           item.top_priority ? "已置顶（快捷键优先操作此便签）" : "设为置顶（快捷键优先操作此便签）"
-        }"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg></button>`;
+        }"><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="${PIN_ICON_PATH}"/></svg></button>`;
         card.innerHTML = `
           <div class="card-info">
             <div class="card-title">${escapeHtml(primary)}</div>
             ${secondary}
-            <div class="card-time">${escapeHtml(item.updatedStr)}</div>
-            ${statusTag}
+            <div class="card-meta">
+              <span class="card-time">${escapeHtml(item.updatedStr)}</span>
+              ${statusTag}
+            </div>
           </div>
           <div class="card-actions">
             ${pinBtnHtml}

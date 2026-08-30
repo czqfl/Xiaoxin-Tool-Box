@@ -20,12 +20,19 @@
 let summoning = false;
 let rafId = 0;
 let backupId = 0;
+// 看门狗句柄提升为模块级：cancelSummon 必须清理，否则陈旧看门狗到期会
+// 取消【新】动画的 rAF 并剥掉新动画的样式（快速"呼出→取消→再呼出"必现）
+let watchdogId = 0;
 
 /** 立即结束呼出动画并复原页面（关闭动画开始前调用，避免两个动画同时改 clip-path）。 */
 export function cancelSummon(): void {
   if (!summoning) return;
   summoning = false;
   cancelAnimationFrame(rafId);
+  if (watchdogId) {
+    window.clearTimeout(watchdogId);
+    watchdogId = 0;
+  }
   if (backupId) {
     window.clearInterval(backupId);
     backupId = 0;
@@ -240,9 +247,10 @@ export function playSummonMaterialize(root: HTMLElement, particleDensity = 50): 
 
   // 看门狗：极端情况下动画未能在 3.5s 内结束，强制收尾（先停帧循环再复原），
   // 绝不卡在"空画面"
-  const watchdog = window.setTimeout(() => {
+  watchdogId = window.setTimeout(() => {
     stopLoop();
     finishSummon();
+    watchdogId = 0;
   }, 3500);
 
   // 粒子透明度分桶：预分配容量（避免逐帧 push 扩容），用 bucketLens 跟踪实际长度
@@ -379,7 +387,7 @@ export function playSummonMaterialize(root: HTMLElement, particleDensity = 50): 
 
     if (age >= duration) {
       // 收尾：先清空画面（页面已完整成形）——直接复原样式并移除覆盖层
-      window.clearTimeout(watchdog);
+      window.clearTimeout(watchdogId); watchdogId = 0;
       ctx.clearRect(0, 0, w, h);
       stopLoop();
       finishSummon();

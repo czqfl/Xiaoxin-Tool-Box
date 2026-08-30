@@ -68,7 +68,17 @@ impl AppPaths {
 /// 读取 JSON 文件，文件不存在或解析失败时返回默认值（错误兜底，不让前端崩溃）。
 pub fn load_json<T: DeserializeOwned>(path: &Path, default: T) -> T {
     match fs::read_to_string(path) {
-        Ok(content) => serde_json::from_str(&content).unwrap_or(default),
+        Ok(content) => match serde_json::from_str(&content) {
+            Ok(v) => v,
+            Err(e) => {
+                // JSON 损坏：改名留底（可手工修复），绝不用默认值静默覆盖
+                let bak = path.with_extension("json.bak");
+                let _ = fs::rename(path, &bak);
+                crate::storage::diag_write(&format!(
+                    "[storage] {} 解析失败（已改名 .bak）：{e}", path.display()));
+                default
+            }
+        },
         Err(_) => default,
     }
 }
@@ -78,7 +88,8 @@ pub fn save_json<T: Serialize + ?Sized>(path: &Path, value: &T) -> std::io::Resu
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let tmp = path.with_extension("tmp");
+    // tmp 名带进程 ID：不同线程/进程并发写同一文件时不再互踩半截内容
+    let tmp = path.with_extension(format!("tmp.{}", std::process::id()));
     let content = serde_json::to_string_pretty(value).map_err(std::io::Error::other)?;
     fs::write(&tmp, content)?;
     fs::rename(&tmp, path)?;

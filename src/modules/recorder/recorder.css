@@ -535,3 +535,33 @@
   color: var(--tb-fg);
   background: var(--tb-hover-bg);
 }
+
+
+/* ---- 音量调节：按钮 + 上方浮出滑杆（录制条仅 36px 高，滑杆向下放不下） ---- */
+.recb-vol-wrap { position: relative; display: inline-flex; }
+.recb-vol-pop {
+  position: absolute;
+  top: -34px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border-radius: 8px;
+  background: var(--tb-bg, rgba(24, 26, 30, 0.95));
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  white-space: nowrap;
+  z-index: 20;
+}
+.recb-vol-pop input[type="range"] {
+  width: 110px;
+  accent-color: var(--accent, #4c8dff);
+  cursor: pointer;
+}
+.recb-vol-val {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.85);
+  min-width: 34px;
+  text-align: right;
+}
