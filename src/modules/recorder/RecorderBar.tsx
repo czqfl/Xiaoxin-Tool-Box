@@ -29,8 +29,8 @@ const fmtSize = (bytes: number) =>
 // 音量浮窗（独立小窗 rec-vol）尺寸，必须与 volume-popover.css 的内容盒一致：
 // 宽 = 数值 34 + 两侧少量余量（窄窄一条，不要抢录制条的视觉重心）；
 // 高 = 12 + 滑杆 64 + 8 + 数值 11 + 12
-const VOLP_W = 42;
-const VOLP_H = 112;
+const VOLP_W = 44;
+const VOLP_H = 124;
 
 export function RecorderBar() {
   const [phase, setPhase] = useState<Phase>("recording");

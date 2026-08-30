@@ -9,15 +9,19 @@
  *  数据只需单向流通：音量真实值存在 Rust 侧，本窗挂载时读一次、拖动时写回，
  *  因此不必与录制条同步数值（录制条会在本窗关闭时重读一次刷新自己的提示）。
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalPosition } from "@tauri-apps/api/dpi";
 import { listen, emitTo } from "@tauri-apps/api/event";
 import { recorderAudioVolume, recorderAudioVolumeGet } from "./api";
 import "./volume-popover.css";
 
+const MAX = 200;
+
 export function VolumePopover() {
   const [volume, setVolume] = useState(100);
+  const draggingRef = useRef(false);
+  const trackRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     document.documentElement.dataset.window = "panel";
@@ -63,23 +67,54 @@ export function VolumePopover() {
     };
   }, []);
 
-  const change = (v: number) => {
-    setVolume(v);
-    void recorderAudioVolume(v).catch(() => {});
+  const commit = (v: number) => {
+    const clamped = Math.min(MAX, Math.max(0, Math.round(v)));
+    setVolume(clamped);
+    void recorderAudioVolume(clamped).catch(() => {});
   };
+
+  const calcFromClientY = (clientY: number) => {
+    const el = trackRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (rect.bottom - clientY) / rect.height));
+    commit(ratio * MAX);
+  };
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    e.preventDefault();
+    draggingRef.current = true;
+    trackRef.current?.setPointerCapture(e.pointerId);
+    calcFromClientY(e.clientY);
+  };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!draggingRef.current) return;
+    calcFromClientY(e.clientY);
+  };
+
+  const onPointerUp = (e: React.PointerEvent) => {
+    draggingRef.current = false;
+    trackRef.current?.releasePointerCapture(e.pointerId);
+  };
+
+  const pct = Math.round((volume / MAX) * 100);
 
   return (
     <div className="volp-root">
-      <div className="volp-track">
-        <input
-          type="range"
-          min={0}
-          max={200}
-          value={volume}
-          onChange={(e) => change(Number(e.target.value))}
-          title="0=无声 100=原声 200=两倍"
-          aria-label="录制音量"
-        />
+      <div
+        className="volp-track-area"
+        ref={trackRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerLeave={onPointerUp}
+        title="向上拖动增大，向下拖动减小（0=无声，100=原声，200=两倍）"
+      >
+        <div className="volp-track">
+          <div className="volp-fill" style={{ height: `${pct}%` }} />
+          <div className="volp-thumb" style={{ bottom: `${pct}%` }} />
+        </div>
       </div>
       <span className="volp-val">{volume}%</span>
     </div>

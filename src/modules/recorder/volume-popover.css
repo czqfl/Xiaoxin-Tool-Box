@@ -16,49 +16,90 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 12px 0;
+  justify-content: flex-start;
+  padding: 12px 0 10px;
   gap: 8px;
-  border-radius: 12px;
-  background: rgba(22, 24, 28, 0.94);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5);
-  color: #e9eaec;
+  border-radius: 14px;
+  background: var(--bg-elevated, rgba(38, 38, 38, 0.95));
+  border: 1px solid var(--border-strong, rgba(255, 255, 255, 0.12));
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  color: var(--text-primary, #ececec);
   font-size: 12px;
   user-select: none;
 }
 
-/* 竖条：把一根横向 range 旋转 90° 得到。
-   为什么不用 writing-mode：它要 Chromium 121+ 才对 range 生效，老版 WebView2
-   上会退化成一根躺着的横杆、拖动方向全反；rotate 则各版本表现一致。
-   rotate(-90deg) 让最大值那端朝上，因此向上拖 = 增大，符合音量直觉。 */
+/* 可拖拽区域：比视觉轨道宽很多，方便一次点中/拖动，不挑准头 */
+.volp-track-area {
+  position: relative;
+  width: 28px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: ns-resize;
+}
+
+/* 视觉轨道：细圆角条，低对比度背景 */
 .volp-track {
   position: relative;
-  flex: none;
-  width: 26px;
-  height: 64px;
+  width: 6px;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--border-strong, rgba(255, 255, 255, 0.14));
+  overflow: visible;
 }
 
-.volp-track input[type="range"] {
+/* 已填充部分：品牌色，从底部向上增长，带微光 */
+.volp-fill {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 64px;
-  height: 26px;
-  margin: 0;
-  transform: translate(-50%, -50%) rotate(-90deg);
-  transform-origin: center;
-  accent-color: #4c8dff;
-  cursor: pointer;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  border-radius: 999px;
+  background: rgb(var(--accent-rgb, 76, 141, 255));
+  box-shadow: 0 0 10px rgba(var(--accent-rgb, 76, 141, 255), 0.32);
+  pointer-events: none;
 }
 
-/* 固定宽度 + 等宽数字：否则 9% 与 100% 会把面板撑得忽宽忽窄。
-   宽度压到 34px——面板整体只有 42px 宽，是贴在按钮下方的一条，不是一块 */
+/* 滑块：白色圆点，带投影，悬浮/拖拽时轻微缩放 */
+.volp-thumb {
+  position: absolute;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(0, 0, 0, 0.08);
+  pointer-events: none;
+  transform: translateY(50%) scale(1);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.volp-track-area:hover .volp-thumb {
+  transform: translateY(50%) scale(1.1);
+  box-shadow:
+    0 3px 9px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+.volp-track-area:active .volp-thumb {
+  transform: translateY(50%) scale(0.96);
+}
+
+/* 当前数值：等宽数字，避免 9% 与 100% 导致面板宽度抖动 */
 .volp-val {
   flex: none;
   min-width: 34px;
+  padding: 2px 6px;
+  border-radius: 6px;
   text-align: center;
   font-size: 11px;
   line-height: 1;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
-  color: rgba(233, 234, 236, 0.9);
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
 }
