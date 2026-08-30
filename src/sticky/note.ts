@@ -1969,6 +1969,35 @@ export function mountNoteApp(noteId: string, preset = "") {
     })
     .catch((e) => console.error("监听关闭动画事件失败:", e));
 
+  // 后端强制隐藏（收起兜底到期 / 托盘隐藏等 Rust 侧直接 hide）时收尾：
+  // 粒子消散动画跑在【独立全屏粒子层窗口】（label "particles"），便签窗口被隐藏
+  // 并不会带走它。若动画仍在播就把窗口藏了，就会看到「便签本体已消失、粒子层还在
+  // 凭空播消散动画」。这里立即取消进行中的动画（含粒子层实例）、复位关闭状态机，
+  // 并复原便签样式（下次呼出直接可见）。
+  getCurrentWindow()
+    .listen("sticky://force-hidden", () => {
+      summonSeq++; // 作废尚未开始的呼出动画
+      closing = false;
+      finished = false;
+      if (closeFailSafe) {
+        window.clearTimeout(closeFailSafe);
+        closeFailSafe = undefined;
+      }
+      // 懒加载：未加载 = 无动画在播，跳过
+      anim.glow?.cancelGlowParticles();
+      anim.inhale?.cancelInhaleParticles();
+      anim.flame?.cancelFlame();
+      anim.glass?.cancelGlassShards();
+      noteWindow.style.clipPath = "";
+      noteWindow.style.setProperty("-webkit-mask-image", "");
+      noteWindow.style.setProperty("mask-image", "");
+      noteWindow.style.opacity = "";
+      noteWindow.style.boxShadow = "";
+      // 下次呼出按"从隐藏态呼出"处理（播成形动画）
+      wasHidden = true;
+    })
+    .catch((e) => console.error("监听强制隐藏事件失败:", e));
+
   // ---- 窗口尺寸记忆：拖拽改变大小后保存，下次打开沿用该便签自己的尺寸 ----
   // 【单位统一】存档 width/height 用逻辑像素（Rust inner_size 直接消费）——
   // 此前用 window.innerWidth（在用户 150% 缩放环境实测返回物理像素），
