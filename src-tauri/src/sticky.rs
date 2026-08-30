@@ -1416,8 +1416,12 @@ fn hide_note_window(app: &AppHandle, label: &str) {
     // 状态写入紧邻窗口操作，并发的呼出要么在置位前被放弃、要么后置位并 show，
     // 缩小"窗口被藏但状态是 Visible"的竞态窗口。
     set_note_state(label, NoteState::Hidden);
-    let _ = win.emit("sticky://force-hidden", ());
     let _ = win.hide();
+    // 【先隐藏再通知前端收尾】若先 emit force-hidden，前端收到会清掉 mask/
+    // 复原样式——此时窗口若还没隐藏，已消散的便签会突然恢复完整显示 →
+    // "关闭后闪一下"。hide() 先入队、emit 后入队，前端收到事件时窗口已隐藏，
+    // 收尾（粒子层 cancel / 样式复位）无感知。
+    let _ = win.emit("sticky://force-hidden", ());
     crate::storage::diag_write(&format!("[sticky] hide_note_window: hidden (persistent) {label}"));
     let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
     crate::panel::broadcast_panel_visibility(app, label, false);

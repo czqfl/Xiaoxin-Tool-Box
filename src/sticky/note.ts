@@ -1888,15 +1888,26 @@ export function mountNoteApp(noteId: string, preset = "") {
     acrylicOffPending = true;
     // 记录"已隐藏"：下次呼出时播放粒子成形动画
     wasHidden = true;
-    // 【新逻辑·先隐藏后清理】关闭动画结束时便签本体可能残留 clip/mask 裁切态。
-    // 先隐藏窗口（closeWindow → Rust hide），再清空本体样式——隐藏后清理无感知，
-    // 且保证下次呼出时本体样式干净、内容完整显示（不再保留"空画面"态）。
-    closeWindow().catch((e) => console.error("关闭失败:", e));
-    noteWindow.style.clipPath = "";
-    noteWindow.style.setProperty("-webkit-mask-image", "");
-    noteWindow.style.setProperty("mask-image", "");
-    noteWindow.style.opacity = "";
-    noteWindow.style.boxShadow = "";
+    // 【先隐藏再清理（await）】closeWindow 是异步（invoke → Rust close_window →
+    // hide_note_window → hide）。若在 hide 生效前同步清掉 mask/样式，已消散的
+    // 便签会突然恢复完整显示 → "关闭后闪一下"。必须等窗口真正隐藏后再清，
+    // 清理无感知；且下次呼出时本体样式干净、内容完整（不再保留"空画面"态）。
+    void (async () => {
+      try {
+        await closeWindow();
+      } catch (e) {
+        console.error("关闭失败:", e);
+      }
+      try {
+        noteWindow.style.clipPath = "";
+        noteWindow.style.setProperty("-webkit-mask-image", "");
+        noteWindow.style.setProperty("mask-image", "");
+        noteWindow.style.opacity = "";
+        noteWindow.style.boxShadow = "";
+      } catch {
+        /* ignore */
+      }
+    })();
     window.setTimeout(() => {
       applyAcrylic()
         .catch(() => {})
