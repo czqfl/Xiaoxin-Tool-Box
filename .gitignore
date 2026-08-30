@@ -1,8 +1,8 @@
 node_modules
 dist
 dist-ssr
-# 临时验证/对比用构建输出（dist_check*/dist_verify/），与 dist 一样不入库
-dist_check*/
+# 临时验证/对比用构建输出（dist_check*/dist_ocr_check/dist_sticky_check 等），与 dist 一样不入库
+dist_*check*/
 dist_verify/
 *.local
 
