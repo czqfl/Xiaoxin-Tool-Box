@@ -1804,6 +1804,23 @@ export function mountNoteApp(noteId: string, preset = "") {
       closeFailSafe = undefined;
     }
   };
+  /** 设置关闭动画超时兜底：只在【动画已启动后】计时，时长 = 估算动画时长 + 1500ms 余量。
+   *  关键：绝不在动画加载期（getSettings / anim.load 动态 import）计时——快速呼出关闭时
+   *  WebView 主线程正忙（刚处理完呼出事件 + 强重绘 + 动画模块首次加载），加载可能超过
+   *  原先写死的 1500ms，兜底会在关闭动画启动前触发 finishClose → "便签无动画直接消失"。
+   *  动画正常播完时 finishClose 会清除本定时器；慢速动画（speed 小 → 时长成倍拉长）
+   *  也按实际时长估算，不会被误杀。 */
+  const setCloseWatchdog = (speed: number): void => {
+    clearCloseFailSafe();
+    const k = Math.max(0.25, Math.min(4, 100 / Math.max(10, speed || 100)));
+    const estDuration = Math.round(2400 * k); // 关闭动画主体时长（glow/flame/inhale/glass 近似）
+    closeFailSafe = window.setTimeout(() => {
+      if (!finished && closing) {
+        console.warn("[sticky] close fail-safe triggered");
+        finishClose();
+      }
+    }, estDuration + 1500);
+  };
   /** 立即完成关闭（隐藏窗口）：requestAnimatedClose 与 play-close-anim（快捷键"全部关闭"
    *  打断正在播放的关闭动画）共用。复位 closing、关亚克力、隐藏窗口、标记已关闭。 */
   const finishClose = () => {
@@ -1840,17 +1857,9 @@ export function mountNoteApp(noteId: string, preset = "") {
     if (closing) return;
     closing = true;
     finished = false;
-    // 兜底：动画模块加载/回调异常时，到时强制完成关闭，避免窗口残留
-    // （快捷键「收起便签」尤其依赖此逻辑——它走的是 play-close-anim → 本函数路径）
-    closeFailSafe = window.setTimeout(() => {
-      // 【防误伤】兜底只在前端仍处于"关闭中"（closing）且动画未完成时触发。
-      // 若期间被呼出打断（summoned 已把 closing 复位），绝不能把刚呼出的窗口关掉——
-      // 这是"呼出后面板出现又快速消失"的根治点之一。
-      if (!finished && closing) {
-        console.warn("[sticky] close fail-safe triggered");
-        finishClose();
-      }
-    }, 1500);
+    // 兜底不在加载期设置（见 setCloseWatchdog 注释：快速呼出关闭时加载可能 >1500ms，
+    // 过早兜底会在动画启动前误杀 → "无动画直接消失"）；由动画启动点 setCloseWatchdog
+    // 按估算时长 + 余量设置，兜住动画卡死/模块异常，且动画播完 finishClose 会清除。
     // 【立即标记关闭】点 × 的瞬间就把"打开中"状态移除并广播——历史列表
     // 马上刷新，不等粒子动画播完（用户反馈"关闭完应该立马更新"；此前要等
     // finishClose 才 markNoteClosed，动画 0.5~1s+ 的延迟全算在状态更新上）。
@@ -1885,8 +1894,12 @@ export function mountNoteApp(noteId: string, preset = "") {
     void Promise.all([settings !== null ? Promise.resolve(settings) : getSettings(), anim.load()])
       .then(([s]) => {
         // getSettings 是异步的：等待期间若用户又呼出了（closing 已被复位/取消），
-        // 作废本次关闭，避免关闭动画与呼出动画同时改 clip-path 打架导致“卡住”。
+        // 作废本次关闭，避免关闭动画与呼出动画同时改 clip-path 打架导致"卡住"。
         if (!closing) return;
+        // 【再取消一遍】等待期间呼出成形动画可能已启动（异步竞态）：确保关闭动画
+        // 启动时 glowActive/flaming/materializing 均为 false，不被 requestXxxClose
+        // 内部的 "if (active) onDone()" 分支吞掉（那会导致无动画直接消失）。
+        cancelAllAnimations();
         const intensity = s.particle_count ?? 50;
         const speed = s.animation_speed ?? 100;
         // 关闭动画：默认粒子光效（鸿蒙通知删除同款·与呼出共用同一套粒子）；火焰模式（设置值 "erode"，历史命名）用火焰消散；inhale=粒子吸入。
@@ -1895,6 +1908,8 @@ export function mountNoteApp(noteId: string, preset = "") {
           finishClose();
           return;
         }
+        // 动画即将启动：此刻才设超时兜底（动画时长 + 余量）
+        setCloseWatchdog(speed);
         if (s.particle_mode === "erode") anim.flame!.requestFlameDissolveClose(finishClose, intensity, speed);
         else if (s.particle_mode === "inhale") anim.inhale!.requestInhaleDissolveClose(finishClose, intensity, speed);
         // glass：玻璃碎裂 → 渐渐淡出（画布碎块动画，粒子数量滑块控制碎块多少）
@@ -1905,6 +1920,8 @@ export function mountNoteApp(noteId: string, preset = "") {
       })
       .catch(() => {
         if (!closing) return;
+        cancelAllAnimations();
+        setCloseWatchdog(100);
         anim.glow?.requestGlowDissolveClose(finishClose);
       });
   }
@@ -1967,10 +1984,15 @@ export function mountNoteApp(noteId: string, preset = "") {
   getCurrentWindow()
     .listen("play-close-anim", () => {
       if (closing) {
-        // 已在关闭中：再次收到关闭指令 → 立即完成（清掉粒子层本便签实例 + 隐藏），
-        // 避免历史便签位置的粒子动画继续播放/叠加。
-        cancelAllAnimations();
-        finishClose();
+        // 已在关闭中：再次收到关闭指令。
+        // 仅当关闭动画【已启动】（closeFailSafe 已由 setCloseWatchdog 设置）时
+        // 立即完成——强制快速关闭，清掉粒子层本便签实例 + 隐藏，避免叠加播放；
+        // 若动画还在加载（closeFailSafe 未设置），不打断，让关闭动画正常启动播放
+        // （否则会"动画没播放便签直接消失"）。
+        if (closeFailSafe) {
+          cancelAllAnimations();
+          finishClose();
+        }
         return;
       }
       requestAnimatedClose();
