@@ -1,6 +1,6 @@
 /* 录制条音量浮窗（独立小窗 rec-vol）。
-   窗口整体透明，可见的只有这块玻璃面板：html/body 必须透明，否则 WebView
-   的不透明底色会在圆角外糊出一块矩形——正是上一版"大白框"的成因。 */
+   无面板背景：窗口完全透明，只有滑杆 + 数值芯片悬浮在桌面上。
+   —— 此前版本带圆角面板背景，用户反馈"白色背景框太大"，故彻底去框。 */
 
 html,
 body {
@@ -17,13 +17,8 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  padding: 8px 0;
+  padding: 4px 0;
   gap: 6px;
-  border-radius: 12px;
-  background: var(--bg-panel, rgba(31, 31, 31, 0.82));
-  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.07));
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
-  color: var(--text-primary, #ececec);
   font-size: 12px;
   user-select: none;
 }
@@ -32,20 +27,22 @@ body {
 .volp-track-area {
   position: relative;
   width: 100%;
-  height: 80px;
+  height: 88px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: ns-resize;
 }
 
-/* 视觉轨道：细圆角条 */
+/* 视觉轨道：细圆角条，深色半透明 + 一圈浅色内描边，
+   在亮/暗壁纸上都能看清（无面板背景后的可读性保障） */
 .volp-track {
   position: relative;
   width: 6px;
   height: 100%;
   border-radius: 999px;
-  background: var(--border-strong, rgba(255, 255, 255, 0.14));
+  background: rgba(0, 0, 0, 0.26);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.30);
   overflow: visible;
 }
 
@@ -57,10 +54,11 @@ body {
   right: 0;
   border-radius: 999px;
   background: rgb(var(--accent-rgb, 76, 141, 255));
+  box-shadow: 0 0 8px rgba(var(--accent-rgb, 76, 141, 255), 0.35);
   pointer-events: none;
 }
 
-/* 滑块：白色圆点 */
+/* 滑块：白色圆点，带投影 */
 .volp-thumb {
   position: absolute;
   left: 50%;
@@ -69,7 +67,7 @@ body {
   margin-left: -7px;
   border-radius: 50%;
   background: #ffffff;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
   pointer-events: none;
   transform: translateY(50%) scale(1);
   transition: transform 0.12s ease, box-shadow 0.12s ease;
@@ -83,13 +81,16 @@ body {
   transform: translateY(50%) scale(0.96);
 }
 
-/* 当前数值：等宽数字，不再加背景标签，避免底部比滑杆还宽 */
+/* 当前数值：小深色芯片，只包住数字，不撑宽面板 */
 .volp-val {
   flex: none;
+  padding: 2px 6px;
+  border-radius: 6px;
   text-align: center;
   font-size: 11px;
   line-height: 1;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  color: var(--text-primary, #ececec);
+  color: #ffffff;
+  background: rgba(15, 17, 21, 0.72);
 }

@@ -49,16 +49,6 @@ struct Done {
 
 // ---------- 入口 ----------
 
-/// 控制条（rec-bar）小窗启用真亚克力：SWCA 实时模糊 + 前端半透明底。
-/// 模糊必须走系统层——透明 Tauri 窗口上 CSS backdrop-filter 采不到桌面（且被禁用）。
-#[cfg(windows)]
-fn apply_select_blur<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
-    if let Some(h) = crate::screenshot::hwnd_of_webview(window) {
-        let light = crate::window_theme_is_light(window);
-        let _ = crate::acrylic::apply_blur(h, light);
-    }
-}
-
 fn monitor_at<R: Runtime>(app: &AppHandle<R>, x: i32, y: i32) -> Option<(i32, i32, i32, i32)> {
     app.available_monitors().ok()?.into_iter()
         .map(|m| (m.position().x, m.position().y, m.size().width as i32, m.size().height as i32))
@@ -243,9 +233,11 @@ fn ensure_bar<R: Runtime>(app: &AppHandle<R>, mon: (i32, i32, i32, i32), _region
             if let Some(h) = crate::screenshot::hwnd_of_webview(&win) {
                 crate::acrylic::exclude_from_capture(h);
             }
-            // 真亚克力：SWCA 实时模糊 + 前端半透明底（观感与通用设置/截图工具栏一致）
-            #[cfg(windows)]
-            apply_select_blur(&win);
+            // 排除采集 + 透明背景后即可。注意【不加窗口级模糊】：
+            // ACCENT_ENABLE_BLURBEHIND 会把整个矩形窗口刷成模糊层，CSS 圆角
+            // 只作用于内容，四角会露出一圈方形的模糊边（用户反馈"没有圆角的
+            // 边框"）。控制条本身只有 36px 高，实心底（前端 recb-root 用
+            // --tb-bg）观感与截图工具栏一致，不依赖亚克力。
             let _ = win.show();
         }
     });
