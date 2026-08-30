@@ -273,6 +273,15 @@ body,
   /* 提升到独立合成层，模糊渐变时避免整页重绘 */
   transform: translateZ(0);
 }
+/* 预渲染模式（.blurred-bg，见 glass.ts renderBlurredBackground）：背景层直接显示
+   烘焙好的模糊效果图（--note-bg-blurred），不再实时 filter——呼出/打开便签瞬间
+   背景模糊即完整（"提前模糊好放后台，打开时换出来"的用户方案），且不参与
+   呼出成形动画（mask 只作用于内容层 .note-body）的裁切。 */
+.note-window.has-bg.glass.blurred-bg::before {
+  background-image: var(--note-bg-blurred, var(--note-bg-img));
+  filter: none;
+  transform: translateZ(0);
+}
 /* 模糊过渡动画进行中（由 blur-anim.ts 添加/移除 .animating）：
    提示浏览器为 filter 预留合成层，逐帧插值不掉帧；动画结束移除，避免长期占用显存 */
 .note-window.has-bg.glass.animating::before {

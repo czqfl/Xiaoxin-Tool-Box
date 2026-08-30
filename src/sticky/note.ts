@@ -164,6 +164,8 @@ export function mountNoteApp(noteId: string, preset = "") {
   let saveTimer: number | undefined;
   let sizeSaveTimer: number | undefined;
   let posSaveTimer: number | undefined;
+  /** 背景模糊效果图重烘焙防抖（窗口尺寸变化 → cover 适配变化 → 重新烘焙） */
+  let blurredBgTimer: number | undefined;
   // 该便签是否已被删除（在历史列表中删除）。为 true 时停止一切保存，防止窗口失焦/尺寸
   // 变化把已删除的内容重新写回磁盘导致“复活”。用户重新输入内容时会自动解除。
   let deleted = false;
@@ -594,9 +596,41 @@ export function mountNoteApp(noteId: string, preset = "") {
     if (transparent) {
       // 原生亚克力：不透明度变化时刷新（无需强度，系统固定模糊半径）
       await applyAcrylic();
+      // 透明主题无背景图：清掉预渲染模式
+      noteWindow.classList.remove("blurred-bg");
+      noteWindow.style.removeProperty("--note-bg-blurred");
       return;
     }
     applyGlassBlur({ target: noteWindow, strength: pct, enabled });
+    // 【预渲染模糊背景图：用户方案】把背景图按模糊半径烘焙成一张现成的
+    // 静态效果图（--note-bg-blurred），呼出时背景层直接显示它——不依赖实时
+    // CSS filter 计算/重采样、不参与成形动画裁切，背景模糊"一出现就是好的"。
+    // 无背景图 / 模糊关闭 / 渲染失败时回退实时 filter 管线。
+    if (enabled && pct > 0 && noteWindow.classList.contains("has-bg")) {
+      await bakeBlurredBg();
+    } else {
+      noteWindow.classList.remove("blurred-bg");
+      noteWindow.style.removeProperty("--note-bg-blurred");
+    }
+  }
+
+  /** 烘焙"模糊好的背景效果图"到 CSS 变量（--note-bg-blurred）+ 切预渲染模式。
+   *  失败时回退实时 filter（移除预渲染标志）。幂等。 */
+  async function bakeBlurredBg(): Promise<void> {
+    try {
+      const { renderBlurredBackground } = await import("./glass");
+      const dataUrl = await renderBlurredBackground(noteWindow);
+      if (dataUrl) {
+        noteWindow.style.setProperty("--note-bg-blurred", `url("${dataUrl}")`);
+        noteWindow.classList.add("blurred-bg");
+      } else {
+        noteWindow.classList.remove("blurred-bg");
+        noteWindow.style.removeProperty("--note-bg-blurred");
+      }
+    } catch {
+      noteWindow.classList.remove("blurred-bg");
+      noteWindow.style.removeProperty("--note-bg-blurred");
+    }
   }
 
   function scheduleSave() {
@@ -2042,6 +2076,14 @@ export function mountNoteApp(noteId: string, preset = "") {
       await appWindow.onResized(() => {
         updateMaxIcon();
         if (programmaticResize || deleted) return;
+        // 窗口尺寸变化 → 背景图 cover 适配变化 → 重烘焙模糊效果图（仅预渲染模式）
+        if (noteWindow.classList.contains("blurred-bg")) {
+          if (blurredBgTimer) window.clearTimeout(blurredBgTimer);
+          blurredBgTimer = window.setTimeout(() => {
+            blurredBgTimer = undefined;
+            void bakeBlurredBg();
+          }, 400);
+        }
         if (sizeSaveTimer) window.clearTimeout(sizeSaveTimer);
         sizeSaveTimer = window.setTimeout(() => {
           if (deleted) return;

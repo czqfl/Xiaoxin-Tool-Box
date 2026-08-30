@@ -70,3 +70,73 @@ export function applyGlassBlur(opts: GlassOptions): void {
   }
   tweenGlassBlur(target, px);
 }
+
+/** 加载一张图片（resolve 为 HTMLImageElement；失败 resolve null）。 */
+function loadImage(src: string): Promise<HTMLImageElement | null> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
+/**
+ * 【用户方案：预渲染"模糊好的效果图"】把自定义背景图按当前模糊半径渲染成一张
+ * 现成的静态模糊图（canvas 烘焙，dataURL）。呼出/打开便签时背景层直接显示这张
+ * 图——无需实时 CSS filter 计算/重采样，也不参与成形动画裁切，背景模糊"一出现
+ * 就是好的"（"提前模糊好放后台，打开时换出来"）。
+ * 返回 dataURL；无背景图 / 模糊未开启 / 渲染失败时返回 null（调用方回退实时
+ * filter 管线）。
+ */
+export async function renderBlurredBackground(target: HTMLElement): Promise<string | null> {
+  try {
+    const cs = getComputedStyle(target);
+    const m = /url\((['"]?)([\s\S]*?)\1\)/.exec(cs.getPropertyValue("--note-bg-img") || "");
+    const url = m ? m[2] : "";
+    if (!url) return null;
+    const px = parseFloat(cs.getPropertyValue("--glass-blur") || "") || 0;
+    if (px <= 0) return null;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    if (w <= 0 || h <= 0) return null;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const img = await loadImage(url);
+    if (!img || !img.naturalWidth) return null;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(w * dpr));
+    canvas.height = Math.max(1, Math.round(h * dpr));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.scale(dpr, dpr);
+    // cover 适配 + 向外扩展容纳模糊边缘（与 ::before 的 inset -48px 同款，避免边缘透透明）
+    const ext = Math.ceil(px * 2) + 8;
+    ctx.filter = `blur(${px}px)`;
+    const iw = img.naturalWidth;
+    const ih = img.naturalHeight;
+    const ir = iw / ih;
+    const fr = w / h;
+    let dw: number, dh: number, dx: number, dy: number;
+    if (ir > fr) {
+      dh = h + ext * 2;
+      dw = dh * ir;
+      dx = (w - dw) / 2;
+      dy = -ext;
+    } else {
+      dw = w + ext * 2;
+      dh = dw / ir;
+      dx = -ext;
+      dy = (h - dh) / 2;
+    }
+    ctx.drawImage(img, dx, dy, dw, dh);
+    ctx.filter = "none";
+    // JPEG 压缩（透明背景图罕见，此处非透明主题才走本路径）以控制内存
+    try {
+      return canvas.toDataURL("image/jpeg", 0.85);
+    } catch {
+      return canvas.toDataURL();
+    }
+  } catch {
+    return null;
+  }
+}
