@@ -1,0 +1,134 @@
+/* 统一 OCR 结果弹窗（贴图 + 截图共用）样式。
+   主题变量全部带兜底：贴图窗不加载 base/theme.css，var(--accent-rgb,…) 取不到
+   时用列表兜底（59,130,246 = 主题蓝），保证浅/深主题与贴图窗都可读。 */
+
+.ocr-panel {
+  position: absolute; z-index: 300;
+  display: flex; flex-direction: column;
+  background: rgba(12, 12, 14, 0.82);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border-radius: 12px; overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1), 0 10px 30px rgba(0, 0, 0, 0.5);
+  color: #fff;
+  /* 弹入：识别完成弹窗浮现，给"结果出来了"的明确反馈 */
+  animation: ocr-panel-in 130ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+  user-select: text; cursor: auto;
+}
+@keyframes ocr-panel-in {
+  from { opacity: 0; transform: translateY(-6px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* 标题行：字重/字距强调 + 底部发丝分隔线；主按钮为主题色实心 */
+.ocr-head {
+  display: flex; align-items: center; gap: 8px; flex: none;
+  padding: 9px 12px; font-size: 13px; font-weight: 600; letter-spacing: 0.3px;
+  background: rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  user-select: none;
+}
+.ocr-head button {
+  background: rgba(var(--accent-rgb, 59, 130, 246), 0.92); border: none; color: #fff;
+  font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: 6px; cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 1px 5px rgba(var(--accent-rgb, 59, 130, 246), 0.4);
+  transition: filter var(--dur-fast, 120ms) var(--ease-out, ease-out), transform var(--dur-fast, 120ms) var(--ease-out, ease-out);
+}
+.ocr-head button:hover { filter: brightness(1.1); }
+.ocr-head button:active { transform: scale(0.95); }
+
+.ocr-body { padding: 6px 10px 10px; font-size: 13px; overflow-y: auto; }
+.ocr-muted { color: rgba(255, 255, 255, 0.66); }
+.ocr-err { color: color-mix(in srgb, var(--danger, #e5484d) 55%, white); }
+
+.ocr-lines { overflow-y: auto; padding: 4px 6px 8px; cursor: text; }
+/* 逐行卡片：悬停微亮 + 圆角，长文阅读节奏更清晰 */
+.ocr-line {
+  padding: 7px 10px; margin: 2px 0; border-radius: 7px;
+  color: rgba(255, 255, 255, 0.94); font-size: 13px; line-height: 1.6;
+  white-space: pre-wrap; word-break: break-word;
+  transition: background var(--dur-fast, 120ms) var(--ease-out, ease-out);
+}
+.ocr-line:hover { background: rgba(255, 255, 255, 0.05); }
+.ocr-line::selection,
+.ocr-pcell::selection,
+.ocr-lines ::selection { background: rgba(var(--accent-rgb, 59, 130, 246), 0.5); color: #fff; }
+
+/* 面板内滚动条：细圆条不抢内容视线（玻璃卡片上原生粗滚动条很突兀） */
+.ocr-lines::-webkit-scrollbar,
+.ocr-pairs::-webkit-scrollbar,
+.ocr-body::-webkit-scrollbar { width: 7px; height: 7px; }
+.ocr-lines::-webkit-scrollbar-thumb,
+.ocr-pairs::-webkit-scrollbar-thumb,
+.ocr-body::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.18); border-radius: 4px; }
+.ocr-lines::-webkit-scrollbar-thumb:hover,
+.ocr-pairs::-webkit-scrollbar-thumb:hover,
+.ocr-body::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.3); }
+.ocr-lines::-webkit-scrollbar-track,
+.ocr-pairs::-webkit-scrollbar-track,
+.ocr-body::-webkit-scrollbar-track { background: transparent; }
+
+/* 划选提示条：主题色微染底，与「已选中」语义呼应 */
+.ocr-selbar {
+  flex: none; padding: 7px 12px; font-size: 12px;
+  color: var(--accent-text, #cfe2ff);
+  background: rgba(var(--accent-rgb, 59, 130, 246), 0.14);
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  user-select: none;
+}
+
+/* 翻译态：原文/译文两列对照。表体吃面板剩余高度内部滚动，两列等宽逐行同高 */
+.ocr-trans {
+  display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden;
+  animation: ocr-trans-col 240ms var(--ease-out, ease-out) both;
+}
+@keyframes ocr-trans-col {
+  from { opacity: 0; transform: translateY(-6px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+.ocr-thead {
+  flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  padding: 6px 14px; font-size: 11px; letter-spacing: 0.4px;
+  color: rgba(255, 255, 255, 0.55); background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08); user-select: none;
+}
+.ocr-pairs { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 8px 8px; cursor: text; }
+.ocr-pair {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  padding: 7px 6px; border-radius: 7px;
+  transition: background var(--dur-fast, 120ms) var(--ease-out, ease-out);
+}
+.ocr-pair + .ocr-pair { border-top: 1px solid rgba(255, 255, 255, 0.06); }
+.ocr-pair:hover { background: rgba(255, 255, 255, 0.05); }
+.ocr-pcell {
+  font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-word;
+  color: rgba(255, 255, 255, 0.66);
+}
+/* 单行译文：译完那一刻才挂载的新元素，弹入动画自然只播一次 */
+.ocr-pout { color: #fff; animation: ocr-trans-line 300ms var(--ease-out, ease-out) both; }
+@keyframes ocr-trans-line {
+  0%   { opacity: 0; transform: translateY(5px) scale(0.96); }
+  60%  { opacity: 1; transform: translateY(-1px) scale(1.012); }
+  100% { opacity: 1; transform: none; }
+}
+/* 还没译出的行：占位骨架条微扫光，明示"这一行在路上"而非空着 */
+.ocr-pwait {
+  display: block; width: 62%; height: 10px; margin-top: 6px; border-radius: 5px;
+  background: linear-gradient(90deg,
+    rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.22) 45%, rgba(255, 255, 255, 0.09) 90%);
+  background-size: 220% 100%;
+  animation: ocr-trans-wait 1.15s linear infinite;
+}
+@keyframes ocr-trans-wait {
+  from { background-position: 120% 0; }
+  to   { background-position: -120% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ocr-trans, .ocr-pout, .ocr-pwait, .ocr-panel { animation: none; }
+}
+/* 该行没译成（回退显示原文）：压暗以区别于正常译文 */
+.ocr-pfail { color: rgba(255, 255, 255, 0.42); }
+.ocr-note {
+  flex: none; padding: 5px 14px; font-size: 11px; color: rgba(255, 255, 255, 0.5);
+  border-top: 1px solid rgba(255, 255, 255, 0.07); user-select: none;
+}

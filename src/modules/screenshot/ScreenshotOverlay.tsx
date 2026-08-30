@@ -8,7 +8,7 @@ import {
   shotDragBegin, shotDragEnd,
   shotHistoryList, shotHistoryStep, shotHistoryUrl, ShotHistItem, shotHistorySaveRegion,
   shotHistoryDelete, shotHistoryClear,
-  shotOcrPost, ShotOcrLine,
+  shotOcrPost, ShotOcrLine, ShotOcrWord,
 } from "../../core/tauri";
 import { translateLines } from "../../core/tauri";
 import { EVT_TRANSLATE_LINE } from "../../core/events";
@@ -16,6 +16,7 @@ import { useConfigStore } from "../../stores/configStore";
 import { scrollBegin } from "../scrollshot/api";
 import { Pencil, Undo2, Redo2, X, Download, Copy } from "lucide-react";
 import { ARROW_ICON_PATH } from "./arrow-path.const";
+import { OcrPanel } from "../shared/OcrPanel";
 import "./screenshot.css";
 
 type Tool = "select"|"rect"|"ellipse"|"arrow"|"line"|"brush"|"mosaic"|"text"|"number";
@@ -905,6 +906,36 @@ export function ScreenshotOverlay() {
     return () => window.removeEventListener("keydown", h);
   }, [phase, annos, undos]);
 
+  // ---- OCR 文字模式键盘：ALT 触发/切换、Esc 退出、Ctrl+C 复制划选 ----
+  // 与贴图 Alt 文字模式保持一致：未识别时 ALT 启动识别并自动进模式，已识别时
+  // ALT 切换模式；识别激活期间左键拖拽划选文字、Ctrl+C 复制选中，Esc 退出
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.key === "Alt" && !e.repeat) {
+        e.preventDefault();
+        const ph = ocrPhaseRef.current;
+        if (ph === "idle" || ph === "error") {
+          void runOcrRef.current();
+        } else if (ph === "done") {
+          setAltActive((v) => { const nv = !v; if (!nv) applyScrSel([]); return nv; });
+        }
+        return;
+      }
+      if (e.key === "Escape" && altActiveRef.current) {
+        setAltActive(false); applyScrSel([]);
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === "c" || e.key === "C")
+        && altActiveRef.current && hasScrSelRef.current) {
+        e.preventDefault();
+        const t = buildScrText(scrSelRef.current);
+        if (t) void copyText(t, true).catch(() => {});
+      }
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
+
   // 统一在 CSS 像素空间工作：覆盖层固定在视口 (0,0)，clientX/Y 即画布坐标，
   // 不再做 物理px/CSSpx 的换算——这是消除高 DPI 矩形错位的根基
   const toCanvas = (e: React.MouseEvent): Pt => {
@@ -1188,9 +1219,31 @@ export function ScreenshotOverlay() {
   const ocrActiveRef = useRef(false);
   useEffect(() => { ocrActiveRef.current = ocrPhase !== "idle"; }, [ocrPhase]);
 
+  // ---- 文字选择模式（ALT 触发 / 与贴图一致）----
+  // 识别完成后进入该模式：左键拖拽改为划选被识别文字（而非新建接收区域），
+  // 选区以半透明蓝块高亮，Ctrl+C 复制选中文本。再次按 Alt 退出。
+  const [altActive, setAltActive] = useState(false);
+  const altActiveRef = useRef(false);
+  useEffect(() => { altActiveRef.current = altActive; }, [altActive]);
+  // 划选选中的词（行号+词号），驱动图上高亮与复制重组
+  const [scrSel, setScrSel] = useState<{ li: number; wi: number }[]>([]);
+  const scrSelRef = useRef<{ li: number; wi: number }[]>([]);
+  const hasScrSelRef = useRef(false);
+  // 划选手势进行中：拦截 React 的 onMove/onUp，避免与选区拖拽冲突
+  const textSelectingRef = useRef(false);
+  const applyScrSel = (sel: { li: number; wi: number }[]) => {
+    scrSelRef.current = sel; hasScrSelRef.current = sel.length > 0;
+    setScrSel(sel);
+  };
+  const ocrLinesRef = useRef<ShotOcrLine[]>(ocrLines);
+  ocrLinesRef.current = ocrLines;
+  const runOcrRef = useRef<() => void>(() => {});
+  runOcrRef.current = () => { void runOcr(); };
+
   const resetOcr = () => {
     setOcrPhase("idle"); setOcrLines([]); setOcrError("");
     setOcrTrans(null); setOcrTranslating(false);
+    setAltActive(false); applyScrSel([]);
   };
 
   // 译文逐行回填：Rust 每译完一行推一行（并发请求，完成顺序不定，按行号对上）
@@ -1227,6 +1280,9 @@ export function ScreenshotOverlay() {
       const lines = await shotOcrPost(blob);
       setOcrLines(lines);
       setOcrPhase("done");
+      // 识别完成自动进入文字选择模式（与贴图 Alt 语义一致）：用户一按 ALT
+      // 即表明要选字，识别完就该立即可划选，不必再点一次按钮
+      if (lines.length) setAltActive(true);
     } catch (e) {
       setOcrError(e instanceof Error ? e.message : "识别失败");
       setOcrPhase("error");
@@ -1273,6 +1329,90 @@ export function ScreenshotOverlay() {
     if (!ocrTrans?.pairs.length) return;
     const all = ocrTrans.pairs.filter((p) => !p.pending).map((p) => p.out).join("\n");
     if (all) void copyText(all, true);
+  };
+
+  /** 按行吸附的划选命中（与贴图 Alt 文字模式同款）：行级相交≥40% 或行中心在框内
+   *  或框整体落在行内 → 该行激活；激活行内水平任何相交的词全选（起点词到终点词） */
+  const scrCollect = (x0: number, y0: number, x1: number, y1: number) => {
+    const L = ocrLinesRef.current;
+    const picked: { li: number; wi: number }[] = [];
+    for (let li = 0; li < L.length; li++) {
+      const line = L[li];
+      const ly0 = line.y, ly1 = line.y + line.h, lcy = line.y + line.h / 2;
+      const iy = Math.min(y1, ly1) - Math.max(y0, ly0);
+      const contained = y0 >= ly0 && y1 <= ly1;
+      if (!(iy >= line.h * 0.4 || (lcy >= y0 && lcy <= y1) || contained)) continue;
+      const words = line.words;
+      for (let wi = 0; wi < words.length; wi++) {
+        const wd = words[wi];
+        const ix = Math.min(x1, wd.x + wd.w) - Math.max(x0, wd.x);
+        const cx = wd.x + wd.w / 2;
+        if (ix > 0 || (cx >= x0 && cx <= x1)) picked.push({ li, wi });
+      }
+    }
+    return picked;
+  };
+
+  /** 选中文本重组：按行(y 序)→行内按 x 排序；词间隙超行高35%补空格（英文单词边界） */
+  const buildScrText = (sel: { li: number; wi: number }[]): string => {
+    const L = ocrLinesRef.current;
+    if (!L.length || !sel.length) return "";
+    const byLine = new Map<number, ShotOcrWord[]>();
+    for (const p of sel) {
+      const wd = L[p.li]?.words[p.wi];
+      if (!wd || !wd.t) continue;
+      let arr = byLine.get(p.li);
+      if (!arr) { arr = []; byLine.set(p.li, arr); }
+      arr.push(wd);
+    }
+    return [...byLine.entries()]
+      .sort((a, b) => L[a[0]].y - L[b[0]].y)
+      .map(([, ws]) => {
+        ws.sort((a, b) => a.x - b.x);
+        let out = ""; let prevRight = NaN, prevH = NaN;
+        for (const w of ws) {
+          if (!Number.isNaN(prevRight) && w.x - prevRight > prevH * 0.35) out += " ";
+          out += w.t;
+          prevRight = w.x + w.w; prevH = Math.max(prevH || 0, w.h);
+        }
+        return out.trim();
+      })
+      .filter(Boolean)
+      .join("\n");
+  };
+
+  /** 文字选择手势：左键在图上拖拽划选被识别文字（识别激活后替代「新建接收区域」）。
+   *  坐标由裁剪图【物理像素】经 ÷cssScale + 选区原点(region, CSS 像素)映射回视口，
+   *  与冻结帧逐像素对齐——高 DPI 下不漂移 */
+  const beginScreenshotTextSelect = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    const lines = ocrLinesRef.current;
+    if (!lines.length) return;
+    const reg = regRef.current;
+    const sc = cssScale();
+    const toOrig = (cx: number, cy: number) => ({ x: (cx - reg.x) * sc, y: (cy - reg.y) * sc });
+    e.preventDefault();
+    textSelectingRef.current = true;
+    const a = toOrig(e.clientX, e.clientY);
+    let raf = 0;
+    let lastSel: { li: number; wi: number }[] = [];
+    const move = (ev: MouseEvent) => {
+      const b = toOrig(ev.clientX, ev.clientY);
+      lastSel = scrCollect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.max(a.x, b.x), Math.max(a.y, b.y));
+      if (!raf) raf = requestAnimationFrame(() => { raf = 0; applyScrSel(lastSel); });
+    };
+    const finish = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", finish);
+      document.removeEventListener("mouseleave", onLeave);
+      textSelectingRef.current = false;
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
+      applyScrSel(lastSel.length ? lastSel : []);
+    };
+    const onLeave = () => finish();
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", finish);
+    document.addEventListener("mouseleave", onLeave);
   };
 
   const querySmartRect = async () => {
@@ -1763,6 +1903,7 @@ export function ScreenshotOverlay() {
   };
 
   const onMove = (e: React.MouseEvent) => {
+    if (textSelectingRef.current) return;
     const pt = toCanvas(e);
     if (geom) {
       // 全局物理坐标（窗口识别/hit-test 用）：pt 是本地 CSS 像素，须 ×scale
@@ -1884,6 +2025,15 @@ export function ScreenshotOverlay() {
     // 编辑中的文字先落盘：点击别处=确认上一条并继续下一步操作（内容不丢）
     if (textEditRef.current) commitText();
     const pt = toCanvas(e);
+    // OCR 文字选择模式：识别激活后左键拖拽改为划选被识别文字，
+    // 不再新建接收区域（按需求：识别后页面视为已选定，需先关闭 OCR 才能重选区域）
+    if (ocrPhaseRef.current !== "idle") {
+      if ((altActiveRef.current || e.altKey) && ocrLinesRef.current.length) {
+        beginScreenshotTextSelect(e);
+      }
+      e.preventDefault();
+      return;
+    }
     if (phase === "selected" && tool === "text") {
       // 文字工具：点击位置弹出输入框，Enter 或"确定"提交；Esc 取消
       setTextEdit({ x: pt.x, y: pt.y, value: "" });
@@ -1937,6 +2087,7 @@ export function ScreenshotOverlay() {
   };
 
   const onUp = (e: React.MouseEvent) => {
+    if (textSelectingRef.current) return;
     // 取消未执行的 rAF 并同步应用最后位置，避免松手时选区落后一帧
     if (moveRafRef.current) { cancelAnimationFrame(moveRafRef.current); moveRafRef.current = 0; }
     applyMoveVisual(toCanvas(e));
