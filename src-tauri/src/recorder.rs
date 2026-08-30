@@ -219,7 +219,11 @@ fn ensure_bar<R: Runtime>(app: &AppHandle<R>, mon: (i32, i32, i32, i32), _region
         if let Ok(win) = WebviewWindowBuilder::new(&app2, BAR_LABEL, url)
             .title("录制控制")
             .decorations(false)
-            .transparent(true)
+            // 【关键】不透明窗口 + DWM 系统圆角：透明窗口在 WebView2 合成时，
+            // 窗口矩形边缘会残留一圈 1px 的方形描边 artifact，CSS 圆角盖不住
+            // （用户多次反馈"没有圆角的边框"）。改不透明窗口后由 DWM 直接
+            // 裁剪物理边角，边缘 artifact 从根上消失（与通用面板同一方案）。
+            .transparent(false)
             .always_on_top(true)
             .skip_taskbar(true)
             .resizable(false)
@@ -230,17 +234,22 @@ fn ensure_bar<R: Runtime>(app: &AppHandle<R>, mon: (i32, i32, i32, i32), _region
         {
             let _ = win.set_position(tauri::PhysicalPosition::new(bx, by));
             let _ = win.set_size(tauri::PhysicalSize::new(bw.max(1) as u32, bh.max(1) as u32));
-            crate::make_webview_transparent(&win);
+            // 与通用面板同一套效果：DWM 系统圆角 + WebView 透明 +
+            // （配置开启时）ACCENT 亚克力模糊。DWM 会把模糊一并裁成圆角，
+            // 四角不会再露出方形边。
+            #[cfg(windows)]
+            {
+                let acrylic = app2
+                    .try_state::<crate::config::ConfigState>()
+                    .map(|s| s.0.lock().unwrap().general.acrylic_enabled)
+                    .unwrap_or(true);
+                crate::apply_panel_effects_for(&win, acrylic);
+            }
             // 控制条从屏幕采集中排除：即使区域调整后盖到它也不会被录进视频
             #[cfg(windows)]
             if let Some(h) = crate::screenshot::hwnd_of_webview(&win) {
                 crate::acrylic::exclude_from_capture(h);
             }
-            // 排除采集 + 透明背景后即可。注意【不加窗口级模糊】：
-            // ACCENT_ENABLE_BLURBEHIND 会把整个矩形窗口刷成模糊层，CSS 圆角
-            // 只作用于内容，四角会露出一圈方形的模糊边（用户反馈"没有圆角的
-            // 边框"）。控制条本身只有 36px 高，实心底（前端 recb-root 用
-            // --tb-bg）观感与截图工具栏一致，不依赖亚克力。
             let _ = win.show();
         }
     });

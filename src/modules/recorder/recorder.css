@@ -4,8 +4,8 @@
    - rec-select（选区窗）：透明 WebView2，【不加窗口级模糊】——
      黑色半透明遮罩镂空选区，选区内画面保持清晰可见（用户要看清背后内容）；
      配置面板自身用高不透明度深底 + 玻璃质感保证可读
-   - rec-bar（控制条）：小窗实心底（与截图工具栏同款），无窗口级模糊——
-     模糊层是矩形的，会在圆角药丸外露出方形边
+   - rec-bar（控制条）：不透明窗口 + DWM 系统圆角 +（配置开启时）亚克力模糊，
+     与通用面板同一套方案——DWM 裁剪物理边角，绝无透明窗边缘的方形描边
    ========================================================================== */
 
 /* 录制窗口（选区窗 rec-select、控制条 rec-bar）都是透明浮层，html/body 必须
@@ -317,11 +317,12 @@ html[data-window="panel"] body {
   padding: 0 6px 0 12px;
   box-sizing: border-box;
   /* 简洁向：单层细边 + 一道弱投影，去掉多层重阴影。
-     实心底（与截图工具栏同款 --tb-bg）：控制条窗口不再加系统级模糊，
-     否则模糊层铺满矩形窗口、四角露出方形边（见 recorder.rs ensure_bar 注释） */
+     半透明底 + 窗口级亚克力模糊（DWM 圆角裁剪）：控制条窗口已改为不透明
+     窗口 + DWM 系统圆角（见 recorder.rs ensure_bar），模糊只存在于圆角
+     药丸内，不会再露出方形边；磨砂观感与通用设置/截图工具栏一致 */
   border-radius: 10px;
   border: 1px solid var(--tb-border);
-  background: var(--tb-bg);
+  background: color-mix(in srgb, var(--tb-bg) 72%, transparent);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
   color: var(--tb-fg);
   font-size: 13px;
