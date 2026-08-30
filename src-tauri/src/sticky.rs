@@ -1383,8 +1383,12 @@ pub fn schedule_force_close(app: &AppHandle, labels: Vec<String>) {
     }
     let app2 = app.clone();
     std::thread::spawn(move || {
-        // 大于前端 closeFailSafe（1500ms）：确保前端正常收尾后本兜底不误伤正在播放的动画
-        std::thread::sleep(std::time::Duration::from_millis(2600));
+        // 兜底只覆盖"动画从未启动/加载异常"：前端关闭动画一旦成功启动会调用
+        // sticky_cancel_force_close 取消本兜底（动画改由前端 closeFailSafe +
+        // 各动画模块内部 watchdog 兜底，时长与动画匹配）。本兜底从 dismiss 时刻
+        // 计时，若动画启动后仍保留，快速场景的加载延迟 / 慢速动画会让它在动画
+        // 播完前强制隐藏窗口 → "动画播放不完"。
+        std::thread::sleep(std::time::Duration::from_millis(3000));
         let app3 = app2.clone();
         let _ = app3.run_on_main_thread({
             let app4 = app3.clone();
@@ -1412,6 +1416,21 @@ pub fn schedule_force_close(app: &AppHandle, labels: Vec<String>) {
             }
         });
     });
+}
+
+/// 前端关闭动画【已成功启动】后调用：取消 Rust 侧 3s 强制隐藏兜底。
+/// 动画启动后由前端 closeFailSafe + 动画模块内部 watchdog 兜底（时长与动画
+/// 匹配），Rust 兜底只负责"动画从未启动/加载异常"的最后防线。若不取消，兜底
+/// 从 dismiss 时刻计时，快速场景的加载延迟 / 慢速动画会让它在动画播完前强制
+/// 隐藏 → "动画播放不完"（用户反馈"快速呼出关闭播放不完"的根因）。
+#[tauri::command]
+pub fn sticky_cancel_force_close(window: tauri::WebviewWindow) -> Result<(), String> {
+    let label = window.label().to_string();
+    if label.starts_with(NOTE_PREFIX) {
+        cancel_force_close(&[label.clone()]);
+        crate::storage::diag_write(&format!("[sticky] cancel_force_close (anim started): {label}"));
+    }
+    Ok(())
 }
 
 #[tauri::command]

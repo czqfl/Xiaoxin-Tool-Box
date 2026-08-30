@@ -474,6 +474,7 @@ pub fn run() {
             sticky::minimize_to_taskbar,
             sticky::minimize_to_tray,
             sticky::show_window,
+            sticky::sticky_cancel_force_close,
             sticky::quit_app,
             sticky::register_shortcuts,
             sticky::open_settings_window,

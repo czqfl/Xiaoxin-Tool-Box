@@ -1804,6 +1804,14 @@ export function mountNoteApp(noteId: string, preset = "") {
       closeFailSafe = undefined;
     }
   };
+  /** 取消 Rust 侧 3s 强制隐藏兜底：关闭动画【已成功启动】后调用。
+   *  Rust 兜底从 dismiss 时刻计时，若动画启动后仍保留，快速场景的加载延迟 /
+   *  慢速动画会让它在动画播完前强制隐藏窗口 → "动画播放不完"。动画启动后由
+   *  前端 closeFailSafe（setCloseWatchdog）+ 各动画模块内部 watchdog 兜底，
+   *  Rust 兜底只负责"动画从未启动/加载异常"的最后防线。 */
+  const cancelRustForceClose = (): void => {
+    invoke("sticky_cancel_force_close").catch(() => {});
+  };
   /** 设置关闭动画超时兜底：只在【动画已启动后】计时，时长 = 估算动画时长 + 1500ms 余量。
    *  关键：绝不在动画加载期（getSettings / anim.load 动态 import）计时——快速呼出关闭时
    *  WebView 主线程正忙（刚处理完呼出事件 + 强重绘 + 动画模块首次加载），加载可能超过
@@ -1908,8 +1916,10 @@ export function mountNoteApp(noteId: string, preset = "") {
           finishClose();
           return;
         }
-        // 动画即将启动：此刻才设超时兜底（动画时长 + 余量）
+        // 动画即将启动：此刻才设超时兜底（动画时长 + 余量），并取消 Rust 侧
+        // 3s 强制隐藏兜底（它从 dismiss 计时，动画启动后保留会在播完前误杀）。
         setCloseWatchdog(speed);
+        cancelRustForceClose();
         if (s.particle_mode === "erode") anim.flame!.requestFlameDissolveClose(finishClose, intensity, speed);
         else if (s.particle_mode === "inhale") anim.inhale!.requestInhaleDissolveClose(finishClose, intensity, speed);
         // glass：玻璃碎裂 → 渐渐淡出（画布碎块动画，粒子数量滑块控制碎块多少）
@@ -1922,6 +1932,7 @@ export function mountNoteApp(noteId: string, preset = "") {
         if (!closing) return;
         cancelAllAnimations();
         setCloseWatchdog(100);
+        cancelRustForceClose();
         anim.glow?.requestGlowDissolveClose(finishClose);
       });
   }
@@ -1984,15 +1995,9 @@ export function mountNoteApp(noteId: string, preset = "") {
   getCurrentWindow()
     .listen("play-close-anim", () => {
       if (closing) {
-        // 已在关闭中：再次收到关闭指令。
-        // 仅当关闭动画【已启动】（closeFailSafe 已由 setCloseWatchdog 设置）时
-        // 立即完成——强制快速关闭，清掉粒子层本便签实例 + 隐藏，避免叠加播放；
-        // 若动画还在加载（closeFailSafe 未设置），不打断，让关闭动画正常启动播放
-        // （否则会"动画没播放便签直接消失"）。
-        if (closeFailSafe) {
-          cancelAllAnimations();
-          finishClose();
-        }
+        // 已在关闭中：重复的关闭指令【不打断】进行中的动画，让动画自然播完
+        // ——此前立即 finishClose() 会把动画掐断（"播放不完"的另一条路径）。
+        // 动画模块自身 watchdog + closeFailSafe 兜底，不会卡住关不掉。
         return;
       }
       requestAnimatedClose();
