@@ -69,30 +69,41 @@ export function cancelFlame(): void {
   document.querySelectorAll(".flame-canvas").forEach((el) => el.remove());
 }
 
-/** 复原便签本体样式（mask / 透明度 / 阴影 / 裁剪全部还原）。 */
+/** 复原便签本体样式（mask / 透明度 / 阴影 / 裁剪全部还原）。
+ *  同时清理内容层 .note-body（呼出成形动画的 mask/淡入作用在其上）。 */
 function restoreRoot(root: HTMLElement): void {
-  try {
-    root.style.setProperty("-webkit-mask-image", "");
-    root.style.setProperty("mask-image", "");
-    root.style.clipPath = "";
-    root.style.opacity = "";
-    root.style.boxShadow = "";
-  } catch {
-    /* ignore */
-  }
+  const clear = (el: HTMLElement): void => {
+    try {
+      el.style.setProperty("-webkit-mask-image", "");
+      el.style.setProperty("mask-image", "");
+      el.style.clipPath = "";
+      el.style.opacity = "";
+      el.style.boxShadow = "";
+    } catch {
+      /* ignore */
+    }
+  };
+  clear(root);
+  const body = root.querySelector<HTMLElement>(".note-body");
+  if (body && body !== root) clear(body);
 }
 
 /** 隐藏便签本体（保持"空画面"，供下次呼出从空开始，契约与 dissolve.ts 一致）。 */
 function blankRoot(root: HTMLElement): void {
-  try {
-    root.style.setProperty("-webkit-mask-image", "");
-    root.style.setProperty("mask-image", "");
-    root.style.clipPath = "inset(0 0 100% 0)";
-    root.style.opacity = "";
-    root.style.boxShadow = "none";
-  } catch {
-    /* ignore */
-  }
+  const blank = (el: HTMLElement): void => {
+    try {
+      el.style.setProperty("-webkit-mask-image", "");
+      el.style.setProperty("mask-image", "");
+      el.style.clipPath = "inset(0 0 100% 0)";
+      el.style.opacity = "";
+      el.style.boxShadow = "none";
+    } catch {
+      /* ignore */
+    }
+  };
+  blank(root);
+  const body = root.querySelector<HTMLElement>(".note-body");
+  if (body && body !== root) blank(body);
 }
 
 /** 请求播放「火焰消散」关闭动画；onDone 在动画完全结束后调用（用于真正关闭窗口）。 */
@@ -217,6 +228,13 @@ function runFlame(
 ): () => void {
   const myGen = ++flameGen; // 本动画实例代次：作废上一轮遗留的延时清理
   const isDissolve = direction === "dissolve";
+  // 【内容层 vs 背景层】呼出成形（materialize）的 mask/淡入只作用于内容层
+  // .note-body：背景模糊层（.note-window::before 背景图 + 毛玻璃）挂在窗口上
+  // 不被裁切 → 呼出瞬间背景模糊立即完整（"呼出时才模糊"的根治）。关闭（dissolve）
+  // 仍裁整个窗口（背景也随便签消散）。
+  const styleTarget = isDissolve
+    ? root
+    : (root.querySelector<HTMLElement>(".note-body") ?? root);
   const k = Math.max(0.25, Math.min(4, 100 / Math.max(10, speed))); // 速度系数：200%→0.5（时长减半）
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   // 内容尺寸（便签本体）：动画开始前窗口尚未扩大，innerWidth/Height 即便签尺寸。
@@ -652,19 +670,19 @@ function runFlame(
   // materialize：保持空裁剪（clip-path inset），等空蒙版解码后再清除，避免闪现旧内容。
   if (isDissolve) {
     try {
-      root.style.clipPath = "";
+      styleTarget.style.clipPath = "";
     } catch {
       /* ignore */
     }
   }
-  root.style.boxShadow = "none";
+  styleTarget.style.boxShadow = "none";
   const setMask = (url: string) => {
-    root.style.setProperty("-webkit-mask-image", `url("${url}")`);
-    root.style.setProperty("mask-image", `url("${url}")`);
-    root.style.setProperty("-webkit-mask-size", "100% 100%");
-    root.style.setProperty("mask-size", "100% 100%");
-    root.style.setProperty("-webkit-mask-repeat", "no-repeat");
-    root.style.setProperty("mask-repeat", "no-repeat");
+    styleTarget.style.setProperty("-webkit-mask-image", `url("${url}")`);
+    styleTarget.style.setProperty("mask-image", `url("${url}")`);
+    styleTarget.style.setProperty("-webkit-mask-size", "100% 100%");
+    styleTarget.style.setProperty("mask-size", "100% 100%");
+    styleTarget.style.setProperty("-webkit-mask-repeat", "no-repeat");
+    styleTarget.style.setProperty("mask-repeat", "no-repeat");
   };
 
   // 把当前 age 对应的蒙版写入 canvas 并返回是否还有内容（materialize 起始全透明）
@@ -711,9 +729,9 @@ function runFlame(
       if (endedLocal || isDissolve || seq < lastAppliedSeq) return;
       lastAppliedSeq = seq;
       try {
-        root.style.opacity = "1";
-        root.style.setProperty("-webkit-mask-image", "");
-        root.style.setProperty("mask-image", "");
+        styleTarget.style.opacity = "1";
+        styleTarget.style.setProperty("-webkit-mask-image", "");
+        styleTarget.style.setProperty("mask-image", "");
       } catch {
         /* ignore */
       }
@@ -724,13 +742,15 @@ function runFlame(
   // 全局透明度：dissolve 从完全不透明缓慢淡出到透明度 70%（opacity 0.3）即止——
   // 剩余画面由后续「火烧/关闭」收尾，无需完全透明；materialize 从全透明淡入到不透明。
   // 淡出放缓：dissolve 用整个动画时长（wipe+tailMs）完成淡出，而不是随 wipe 一起结束。
+  // 【关键】materialize 的透明度只作用于内容层（styleTarget）——背景模糊层
+  // （.note-window::before）全程不透明，呼出瞬间背景模糊完整。
   const applyOpacity = (age: number): void => {
     const fadeSpan = isDissolve ? duration : wipe;
     let p = age / fadeSpan;
     if (p < 0) p = 0;
     else if (p > 1) p = 1;
     const o = isDissolve ? 1 - p * 0.7 : p;
-    root.style.opacity = o.toFixed(3);
+    styleTarget.style.opacity = o.toFixed(3);
   };
 
   // ---- 帧循环 ----
@@ -860,19 +880,19 @@ function runFlame(
   setMask(maskCanvas.toDataURL());
   if (isDissolve) {
     try {
-      root.style.clipPath = "";
+      styleTarget.style.clipPath = "";
     } catch {
       /* ignore */
     }
   } else {
     // materialize：清掉 flame 残留的 clip-path 空裁切，由 mask 接管；起始 opacity=0
-    // 配合 applyOpacity 淡入，杜绝闪现旧内容。
+    // 配合 applyOpacity 淡入，杜绝闪现旧内容。仅作用于内容层（背景模糊不参与淡入）。
     try {
-      root.style.clipPath = "";
+      styleTarget.style.clipPath = "";
     } catch {
       /* ignore */
     }
-    root.style.opacity = "0";
+    styleTarget.style.opacity = "0";
   }
   rafId = requestAnimationFrame(step);
   backupId = window.setInterval(() => {

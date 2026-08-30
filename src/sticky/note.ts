@@ -49,6 +49,11 @@ export function mountNoteApp(noteId: string, preset = "") {
   const app = document.getElementById("app")!;
   app.innerHTML = `
     <div class="note-window">
+      <!-- 【内容层 wrapper】呼出成形动画（flame/inhale 的 mask/淡入）只作用于
+           本层；背景模糊层（.note-window::before，自定义背景图 + 毛玻璃）挂
+           在窗口上、不被裁切 → 呼出瞬间背景模糊立即完整，不会"呼出时才模糊"。
+           注意：必须是 .note-window 的直接子元素并撑满（flex:1）。 -->
+      <div class="note-body">
       <div class="titlebar">
         <div class="titlebar-left">
           <input class="title-input" id="note-title" placeholder="便签" maxlength="40" spellcheck="false" title="点击编辑标题" />
@@ -114,6 +119,7 @@ export function mountNoteApp(noteId: string, preset = "") {
       <div class="cc-panel" id="tool-bg-panel" hidden></div>
       <!-- 自动保存提示（左下角浮动，短暂显示） -->
       <span class="save-status" id="save-status"></span>
+      </div><!-- /.note-body -->
     </div>
   `;
 
@@ -1784,17 +1790,23 @@ export function mountNoteApp(noteId: string, preset = "") {
     anim.flame?.cancelFlame();
     anim.glass?.cancelGlassShards();
   };
-  /** 复原便签本体样式：关闭动画会把窗口裁成空画面/降透明，呼出前必须无条件清干净。 */
+  /** 复原便签本体样式：关闭动画会把窗口裁成空画面/降透明，呼出前必须无条件清干净。
+   *  同时清理内容层 .note-body（呼出成形动画 flame/inhale 的 mask/淡入作用在其上）。 */
   const restoreNoteStyles = (): void => {
-    try {
-      noteWindow.style.clipPath = "";
-      noteWindow.style.setProperty("-webkit-mask-image", "");
-      noteWindow.style.setProperty("mask-image", "");
-      noteWindow.style.opacity = "";
-      noteWindow.style.boxShadow = "";
-    } catch {
-      /* ignore */
-    }
+    const clear = (el: HTMLElement): void => {
+      try {
+        el.style.clipPath = "";
+        el.style.setProperty("-webkit-mask-image", "");
+        el.style.setProperty("mask-image", "");
+        el.style.opacity = "";
+        el.style.boxShadow = "";
+      } catch {
+        /* ignore */
+      }
+    };
+    clear(noteWindow);
+    const body = noteWindow.querySelector<HTMLElement>(".note-body");
+    if (body && body !== noteWindow) clear(body);
   };
   /** 清除关闭兜底定时器（呼出打断 / 动画正常收尾时调用）。 */
   const clearCloseFailSafe = (): void => {

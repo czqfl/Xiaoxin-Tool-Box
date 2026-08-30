@@ -53,30 +53,41 @@ export function cancelInhaleParticles(): void {
   document.querySelector(".glow-particles-canvas")?.remove();
 }
 
-/** 复原便签本体样式（裁剪 / mask / 透明度 / 阴影还原）。 */
+/** 复原便签本体样式（裁剪 / mask / 透明度 / 阴影还原）。
+ *  同时清理内容层 .note-body（呼出成形动画的 mask/淡入作用在其上）。 */
 function restoreRoot(root: HTMLElement): void {
-  try {
-    root.style.clipPath = "";
-    root.style.setProperty("-webkit-mask-image", "");
-    root.style.setProperty("mask-image", "");
-    root.style.opacity = "";
-    root.style.boxShadow = "";
-  } catch {
-    /* ignore */
-  }
+  const clear = (el: HTMLElement): void => {
+    try {
+      el.style.clipPath = "";
+      el.style.setProperty("-webkit-mask-image", "");
+      el.style.setProperty("mask-image", "");
+      el.style.opacity = "";
+      el.style.boxShadow = "";
+    } catch {
+      /* ignore */
+    }
+  };
+  clear(root);
+  const body = root.querySelector<HTMLElement>(".note-body");
+  if (body && body !== root) clear(body);
 }
 
-/** 隐藏便签本体（保持“空画面”，供下次呼出从空开始，契约与 flame.ts 一致）。 */
+/** 隐藏便签本体（保持"空画面"，供下次呼出从空开始，契约与 flame.ts 一致）。 */
 function blankRoot(root: HTMLElement): void {
-  try {
-    root.style.clipPath = "inset(0 0 100% 0)";
-    root.style.setProperty("-webkit-mask-image", "");
-    root.style.setProperty("mask-image", "");
-    root.style.opacity = "";
-    root.style.boxShadow = "none";
-  } catch {
-    /* ignore */
-  }
+  const blank = (el: HTMLElement): void => {
+    try {
+      el.style.clipPath = "inset(0 0 100% 0)";
+      el.style.setProperty("-webkit-mask-image", "");
+      el.style.setProperty("mask-image", "");
+      el.style.opacity = "";
+      el.style.boxShadow = "none";
+    } catch {
+      /* ignore */
+    }
+  };
+  blank(root);
+  const body = root.querySelector<HTMLElement>(".note-body");
+  if (body && body !== root) blank(body);
 }
 
 /** 请求播放「粒子光效消散」关闭动画（自底向上）；onDone 在动画完全结束后调用（真正关闭窗口）。 */
@@ -298,6 +309,13 @@ function runGlow(
 ): () => void {
   const myGen = ++inhaleGen; // 本动画实例代次：作废上一轮遗留的延时清理
   const isDissolve = direction === "dissolve";
+  // 【内容层 vs 背景层】呼出成形（materialize）的 mask/淡入只作用于内容层
+  // .note-body：背景模糊层（.note-window::before 背景图 + 毛玻璃）挂在窗口上
+  // 不被裁切 → 呼出瞬间背景模糊立即完整（"呼出时才模糊"的根治）。关闭（dissolve）
+  // 仍裁整个窗口（背景也随便签消散）。
+  const styleTarget = isDissolve
+    ? root
+    : (root.querySelector<HTMLElement>(".note-body") ?? root);
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const w = window.innerWidth;
   const h = window.innerHeight;
@@ -619,12 +637,12 @@ function runGlow(
   // ---- mask 裁切：把 T 场逐像素 alpha 渲染到蒙版 canvas，驱动便签平滑消散 ----
   // （前沿为光滑连续曲线、多起点发起；与 flame.ts 同机制，但无随机破碎）
   const setMask = (url: string): void => {
-    root.style.setProperty("-webkit-mask-image", `url("${url}")`);
-    root.style.setProperty("mask-image", `url("${url}")`);
-    root.style.setProperty("-webkit-mask-size", "100% 100%");
-    root.style.setProperty("mask-size", "100% 100%");
-    root.style.setProperty("-webkit-mask-repeat", "no-repeat");
-    root.style.setProperty("mask-repeat", "no-repeat");
+    styleTarget.style.setProperty("-webkit-mask-image", `url("${url}")`);
+    styleTarget.style.setProperty("mask-image", `url("${url}")`);
+    styleTarget.style.setProperty("-webkit-mask-size", "100% 100%");
+    styleTarget.style.setProperty("mask-size", "100% 100%");
+    styleTarget.style.setProperty("-webkit-mask-repeat", "no-repeat");
+    styleTarget.style.setProperty("mask-repeat", "no-repeat");
   };
   const renderMask = (age: number): void => {
     let p = 0;
@@ -663,7 +681,7 @@ function runGlow(
       if (!isDissolve && !clipCleared) {
         clipCleared = true;
         try {
-          root.style.clipPath = ""; // mask 已接管显示，解除 materialize 起始的全裁
+          styleTarget.style.clipPath = ""; // mask 已接管显示，解除 materialize 起始的全裁
         } catch {
           /* ignore */
         }
@@ -676,7 +694,7 @@ function runGlow(
       if (!isDissolve && !clipCleared) {
         clipCleared = true;
         try {
-          root.style.clipPath = "";
+          styleTarget.style.clipPath = "";
         } catch {
           /* ignore */
         }
@@ -803,7 +821,8 @@ function runGlow(
       let op = age / wipe;
       if (op < 0) op = 0;
       else if (op > 1) op = 1;
-      root.style.opacity = op.toFixed(3);
+      // 只作用于内容层：背景模糊层不参与淡入，呼出瞬间背景模糊完整
+      styleTarget.style.opacity = op.toFixed(3);
     }
     // 连续发射：从“激活窗口内的发射点”按 emitW 加权采样生成（全局速率直接落地）。
     // 先收集落在 [age-emitWindow, age] 的激活桶（~28 个，远少于全部发射点），再从中选点，
@@ -934,9 +953,10 @@ function runGlow(
     renderMask(0);
     setMask(maskCanvas.toDataURL());
     try {
-      root.style.clipPath = isDissolve ? "" : "inset(0 0 100% 0)";
-      if (!isDissolve) root.style.opacity = "0"; // materialize：随帧淡入（防卡死兜底）
-      root.style.boxShadow = "none";
+      // materialize 的起始全裁/淡入只作用于内容层（背景模糊层保持完整）
+      styleTarget.style.clipPath = isDissolve ? "" : "inset(0 0 100% 0)";
+      if (!isDissolve) styleTarget.style.opacity = "0"; // materialize：随帧淡入（防卡死兜底）
+      styleTarget.style.boxShadow = "none";
     } catch {
       /* ignore */
     }
