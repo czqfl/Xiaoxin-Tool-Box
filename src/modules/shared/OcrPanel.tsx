@@ -42,7 +42,6 @@ export interface OcrPanelProps {
 
 export function OcrPanel(p: OcrPanelProps) {
   const { lines, phase, error, trans, translating, onClose, onCopyAll, onCopyTrans, onTranslate, onReturn, style } = p;
-  const transMode = !!trans || translating;
   const tTotal = trans?.pairs.length ?? 0;
   const tDone = trans?.pairs.filter((x) => !x.pending).length ?? 0;
   const hasLines = lines.length > 0;
