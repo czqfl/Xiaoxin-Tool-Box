@@ -17,21 +17,21 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  padding: 12px 0 10px;
-  gap: 8px;
-  border-radius: 14px;
-  background: var(--bg-elevated, rgba(38, 38, 38, 0.95));
-  border: 1px solid var(--border-strong, rgba(255, 255, 255, 0.12));
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  padding: 8px 0;
+  gap: 6px;
+  border-radius: 12px;
+  background: var(--bg-panel, rgba(31, 31, 31, 0.82));
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.07));
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
   color: var(--text-primary, #ececec);
   font-size: 12px;
   user-select: none;
 }
 
-/* 可拖拽区域：比视觉轨道宽很多，方便一次点中/拖动，不挑准头 */
+/* 可拖拽区域：占满面板宽度，方便一次点中/拖动 */
 .volp-track-area {
   position: relative;
-  width: 28px;
+  width: 100%;
   height: 80px;
   display: flex;
   align-items: center;
@@ -39,7 +39,7 @@ body {
   cursor: ns-resize;
 }
 
-/* 视觉轨道：细圆角条，低对比度背景 */
+/* 视觉轨道：细圆角条 */
 .volp-track {
   position: relative;
   width: 6px;
@@ -49,7 +49,7 @@ body {
   overflow: visible;
 }
 
-/* 已填充部分：品牌色，从底部向上增长，带微光 */
+/* 已填充部分：品牌色，从底部向上增长 */
 .volp-fill {
   position: absolute;
   bottom: 0;
@@ -57,11 +57,10 @@ body {
   right: 0;
   border-radius: 999px;
   background: rgb(var(--accent-rgb, 76, 141, 255));
-  box-shadow: 0 0 10px rgba(var(--accent-rgb, 76, 141, 255), 0.32);
   pointer-events: none;
 }
 
-/* 滑块：白色圆点，带投影，悬浮/拖拽时轻微缩放 */
+/* 滑块：白色圆点 */
 .volp-thumb {
   position: absolute;
   left: 50%;
@@ -70,9 +69,7 @@ body {
   margin-left: -7px;
   border-radius: 50%;
   background: #ffffff;
-  box-shadow:
-    0 2px 6px rgba(0, 0, 0, 0.35),
-    0 0 0 1px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.28);
   pointer-events: none;
   transform: translateY(50%) scale(1);
   transition: transform 0.12s ease, box-shadow 0.12s ease;
@@ -80,26 +77,19 @@ body {
 
 .volp-track-area:hover .volp-thumb {
   transform: translateY(50%) scale(1.1);
-  box-shadow:
-    0 3px 9px rgba(0, 0, 0, 0.4),
-    0 0 0 1px rgba(0, 0, 0, 0.08);
 }
 
 .volp-track-area:active .volp-thumb {
   transform: translateY(50%) scale(0.96);
 }
 
-/* 当前数值：等宽数字，避免 9% 与 100% 导致面板宽度抖动 */
+/* 当前数值：等宽数字，不再加背景标签，避免底部比滑杆还宽 */
 .volp-val {
   flex: none;
-  min-width: 34px;
-  padding: 2px 6px;
-  border-radius: 6px;
   text-align: center;
   font-size: 11px;
   line-height: 1;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  color: #ffffff;
-  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary, #ececec);
 }
