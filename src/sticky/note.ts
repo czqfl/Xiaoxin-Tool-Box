@@ -890,11 +890,11 @@ export function mountNoteApp(noteId: string, preset = "") {
     cancelAllAnimations();
     restoreNoteStyles();
     anim.glow?.bumpGlowGen(); // 作废上一轮关闭动画遗留的延时清理（400ms 后 cleanupAfterHide 不裁空刚呼出的便签）
-    // 呼出时确保主题/背景为最新：便签隐藏期间若设置被修改，隐藏窗口的 IPC 事件
-    // 可能被 WebView2 延迟处理，这里显式重应用一次（幂等，失败忽略）。
-    void applyTheme().catch(() => {});
-    void applyBackground().catch(() => {});
-    void applyGlassEnabled().catch(() => {});
+    // 【呼出即完整：不再无条件重应用主题/背景/毛玻璃】背景图是 dataURL，每次
+    // 重新设置都会触发浏览器重新解码——解码期间背景空白/未就绪，解码完才显示
+    // 模糊 → 这正是"呼出时才模糊"的根因。DOM 在隐藏期间保持完整，呼出直接
+    // 显示即最新；设置变更由 settings-changed 事件全量刷新（onSettingsChanged
+    // 已 applyTheme/applyBackground/applyGlassEnabled），此处不重复重算。
     // 从"隐藏 / 关闭中"呼出 → 补播成形动画；已可见（连按呼出键）不重复播放。
     // 注：wasClosing 已在上方快照，此处 closing 恒为 false。
     const fromHidden = wasClosing || wasHidden;
