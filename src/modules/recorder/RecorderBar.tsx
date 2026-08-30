@@ -3,7 +3,7 @@ import { listen, emitTo } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { LogicalPosition, LogicalSize, PhysicalPosition } from "@tauri-apps/api/dpi";
+import { LogicalSize, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
 import { Square, Film, FolderOpen, X, Pause, Play, LoaderCircle, Mic, MicOff, Volume2 } from "lucide-react";
 import {
   EVT_REC_TICK, EVT_REC_DONE, EVT_REC_START,
@@ -26,11 +26,10 @@ const fmtSize = (bytes: number) =>
   bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB`
     : bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : `${bytes} B`;
 
-// 音量浮窗（独立小窗 rec-vol）尺寸，必须与 volume-popover.css 的内容盒一致：
-// 宽 = 数值 34 + 两侧少量余量（窄窄一条，不要抢录制条的视觉重心）；
-// 高 = 12 + 滑杆 64 + 8 + 数值 11 + 12
+/** 音量浮窗（独立小窗 rec-vol）逻辑尺寸：无框悬浮竖条，尺寸与
+ *  volume-popover.css 的内容一致（宽 26 = 命中区，高 = 4+88+6+数值+4） */
 const VOLP_W = 26;
-const VOLP_H = 114;
+const VOLP_H = 120;
 
 export function RecorderBar() {
   const [phase, setPhase] = useState<Phase>("recording");
@@ -44,9 +43,10 @@ export function RecorderBar() {
   const [recOn, setRecOn] = useState(false);
   // 开启失败时的短提示（无可用音频设备等），避免按钮点了没反应像坏了
   const [recErr, setRecErr] = useState("");
-  // 音量调节：0~200（100=原声）；滑杆展开态
+  // 音量调节：0~200（100=原声）；独立浮窗展开态
   const [volume, setVolume] = useState(100);
   const [volOpen, setVolOpen] = useState(false);
+  const volBtnRef = useRef<HTMLButtonElement>(null);
   const stoppingRef = useRef(false);
   const autoCloseRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -139,46 +139,48 @@ export function RecorderBar() {
     return () => { if (autoCloseRef.current) clearTimeout(autoCloseRef.current); };
   }, [phase]);
 
-  // 音量面板是【独立浮窗】（rec-vol），录制条本身始终保持 36px 的条状外观。
-  // 曾试过临时撑高录制条窗口来塞下竖条，结果窗口的亚克力层跟着铺满新增区域，
-  // 变成一整块大白框——亚克力是窗口级效果，撑高多少就铺多少，压不住。
-  // 独立小窗则两边互不干扰：录制条还是那条，面板悬在按钮下方。
-  const volBtnRef = useRef<HTMLButtonElement>(null);
+  // 音量面板是【独立浮窗】（rec-vol），录制条本身始终保持 36px 的条状外观、
+  // 绝不撑高（用户明确不要"整个进度栏撑高"）。
+  //
+  // 定位用【物理像素全链路】：窗口位置取物理坐标、按钮矩形为 CSS 逻辑像素
+  // 乘 devicePixelRatio 转物理，setPosition 直接喂 PhysicalPosition——不再经
+  // LogicalPosition 按窗口所在显示器缩放换算（混合 DPI 下 rec-vol 初始位于
+  // 主显示器、与按钮所在显示器缩放不一致时，逻辑坐标换算必然错位）。
   const closeVolPop = () => {
     if (!volOpen) return;
     setVolOpen(false);
     void emitTo("rec-vol", "rec-vol-hide", {}).catch(() => {});
   };
   const openVolPop = async () => {
-    // 音量按钮的屏幕逻辑坐标：窗口物理位置 ÷ DPR + 按钮在视口内的偏移
     const btn = volBtnRef.current;
     if (!btn) return;
-    let x = 0;
-    let y = 0;
+    const dpr = window.devicePixelRatio || 1;
+    let physX = 0;
+    let physY = 0;
     try {
       const win = getCurrentWindow();
-      const pos = await win.outerPosition();
-      const dpr = window.devicePixelRatio || 1;
-      const r = btn.getBoundingClientRect();
-      x = pos.x / dpr + r.left + r.width / 2 - VOLP_W / 2;
-      y = pos.y / dpr + r.bottom + 6;
+      const pos = await win.outerPosition(); // 物理
+      const r = btn.getBoundingClientRect(); // 逻辑
+      physX = pos.x + (r.left + r.width / 2) * dpr - (VOLP_W / 2) * dpr;
+      physY = pos.y + (r.bottom + 6) * dpr;
     } catch { /* 取不到窗口位置就退回按钮视口坐标，仍可显示 */ }
     setVolOpen(true);
-    const lp = new LogicalPosition(Math.round(x), Math.round(y));
+    const pp = new PhysicalPosition(Math.round(physX), Math.round(physY));
+    const ps = new PhysicalSize(Math.round(VOLP_W * dpr), Math.round(VOLP_H * dpr));
     // 复用单例：重建 WebView2 窗口要几百毫秒，第二次起必须瞬时
     const existing = await WebviewWindow.getByLabel("rec-vol").catch(() => null);
     if (existing) {
       void existing
-        .setPosition(lp)
+        .setPosition(pp)
         .then(() => existing.show())
         .then(() => existing.setFocus())
         .catch(() => {});
       return;
     }
     try {
-      // 【定位由本函数全权负责】URL 不再带坐标参数：VolumePopover 挂载时不做
-      // setPosition——否则 DEV 下复用窗口 show 触发整页重载，挂载逻辑会用旧的
-      // URL 参数把这里刚设置好的正确位置覆盖掉（"音量条错位"根因）。
+      // 【定位由本函数全权负责】URL 不带坐标参数：VolumePopover 挂载时不做
+      // setPosition，否则 DEV 下复用窗口 show 触发整页重载，挂载逻辑会用旧的
+      // URL 参数把正确位置覆盖掉（"音量条错位"根因之一）。
       new WebviewWindow("rec-vol", {
         url: "index.html",
         width: VOLP_W,
@@ -192,12 +194,14 @@ export function RecorderBar() {
         visible: false,
         skipTaskbar: true,
       });
-      // 窗口异步创建：轮询拿到实例后定位+显示（visible:false 期间不会闪现错位）
+      // 窗口异步创建：轮询拿到实例后先校正物理尺寸再定位+显示
+      // （visible:false 期间不会闪现错位）
       for (let i = 0; i < 40; i++) {
         const w = await WebviewWindow.getByLabel("rec-vol").catch(() => null);
         if (w) {
           void w
-            .setPosition(lp)
+            .setSize(ps)
+            .then(() => w.setPosition(pp))
             .then(() => w.show())
             .then(() => w.setFocus())
             .catch(() => {});
@@ -280,9 +284,6 @@ export function RecorderBar() {
     return () => clearTimeout(t);
   }, [recErr]);
 
-  // 音量的写入已移到独立浮窗 VolumePopover 内（那边拖动直接调命令），
-  // 这里只保留读取：用于按钮提示文案，以及面板收起后刷新一次
-
   // 取消：丢弃本次录制（不保存）
   const cancel = () => {
     if (stoppingRef.current) return;
@@ -315,9 +316,8 @@ export function RecorderBar() {
 
   return (
     <div className={`recb-root${phase !== "recording" ? " recb-toast" : ""}${paused && phase === "recording" ? " paused" : ""}${phase === "done" || phase === "error" ? " recb-final" : ""}`}>
-      {/* 录制中：顶部迷你条（红点 + 时间 + 暂停/停止/取消，全部纯图标 + 悬浮说明）。
-          窗口仅 312×36，此前还塞了「REC」与「Esc 停止并保存」兩段文字导致溢出错乱，
-          现一律改图标，语义靠 title 与按钮配色表达。 */}
+      {/* 录制中：顶部迷你条（红点 + 时间 + 录音/音量/暂停/停止/取消，全部纯图标）。
+          音量面板是独立浮窗 rec-vol，录制条始终保持 36px 条状，不撑高 */}
       {phase === "recording" && (
         <>
           <span className={`recb-dot${paused ? " off" : ""}`} />
@@ -331,7 +331,7 @@ export function RecorderBar() {
               >
                 {recOn ? <Mic size={12} /> : <MicOff size={12} />}
               </button>
-              {/* 切换失败提示：内联在录音按钮旁。录制条窗口仅 36px 高，窗口外
+              {/* 切换失败提示：内联在录音按钮旁。窗口仅 36px 高，窗口外
                   放气泡会被裁掉，只能内联；文案刻意极短以省下横向空间 */}
               {recErr && <span className="recb-rec-tip">{recErr}</span>}
               {/* 音量只在录音开启时才有意义（没在收声调它没效果）。点击拉起独立

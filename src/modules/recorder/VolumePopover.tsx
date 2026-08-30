@@ -1,18 +1,12 @@
 /** 录制条音量面板（独立浮窗 label=rec-vol）。
  *
- *  【为什么必须独立成窗】录制条窗口只有 36px 高，而 WebView 会裁掉一切超出
- *  窗口边界的内容——竖条音量面板放不进去。早期尝试"临时把录制条窗口撑高"，
- *  副作用是窗口的亚克力层跟着铺满新增区域，视觉上变成一整块大白框，与
- *  "只在音量按钮下方浮出一个小竖条"相去甚远。独立透明小窗则完全不动录制条：
- *  它保持 36px 的条状外观，面板悬在按钮下方，各自管各自的背景。
+ *  【为什么必须独立成窗】录制条窗口只有 36px 高，且用户明确不要"撑高整个
+ *  进度栏"——竖条音量面板只能放不下，必须独立小窗悬浮在按钮下方。
  *
- *  数据只需单向流通：音量真实值存在 Rust 侧，本窗挂载时读一次、拖动时写回，
- *  因此不必与录制条同步数值（录制条会在本窗关闭时重读一次刷新自己的提示）。
- *
- *  【定位归录制条管】窗口位置由 RecorderBar 在每次打开时计算并 setPosition，
- *  本组件不做任何定位——尤其不能读 URL 参数定位：复用窗口在 DEV 下 show 会
- *  整页重载，重载后若再用旧 URL 参数 setPosition，会把录制条刚设好的正确
- *  位置覆盖掉（"音量条错位"根因）。
+ *  【定位归录制条管】窗口位置由 RecorderBar 在每次打开时按【物理像素】算好
+ *  并 setPosition/setSize，本组件不做任何定位——尤其不能读 URL 参数定位：
+ *  复用窗口在 DEV 下 show 会整页重载，重载后若再用旧 URL 参数 setPosition，
+ *  会把录制条刚设好的正确位置覆盖掉（"音量条错位"根因）。
  */
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -101,7 +95,7 @@ export function VolumePopover() {
         onPointerLeave={onPointerUp}
         title="向上拖动增大，向下拖动减小（0=无声，100=原声，200=两倍）"
       >
-        <div className="volp-track">
+        <div className="volp-line">
           <div className="volp-fill" style={{ height: `${pct}%` }} />
           <div className="volp-thumb" style={{ bottom: `${pct}%` }} />
         </div>

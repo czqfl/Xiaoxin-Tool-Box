@@ -587,8 +587,9 @@ html[data-window="panel"] body {
 
 
 /* ---- 音量按钮：点击拉起独立浮窗 rec-vol（竖条面板在那边）----
-   面板不再内嵌：录制条只有 36px 高，竖条塞不进来；撑高窗口又会让亚克力层
-   铺满新增区域变成大白框。独立小窗两边互不干扰，样式见 volume-popover.css */
+   面板不内嵌：录制条只有 36px 高，竖条塞不进来，且用户明确不要"撑高整个
+   进度栏"；独立小窗由 RecorderBar 按物理像素定位在按钮正下方，录制条
+   始终保持 36px 条状。样式见 volume-popover.css */
 .recb-btn.recb-icon.recb-vol-on {
   background: rgba(var(--accent-rgb, 76, 141, 255), 0.2);
   border-color: rgba(var(--accent-rgb, 76, 141, 255), 0.45);
