@@ -415,88 +415,22 @@ html[data-theme="dark"] {
 .shot-overlay[data-resetting="1"] .shot-toolbar-float,
 .shot-overlay[data-resetting="1"] .shot-hint-panel,
 .shot-overlay[data-resetting="1"] .shot-hist-panel,
-.shot-overlay[data-resetting="1"] .shot-ocr-panel,
 .shot-overlay[data-resetting="1"] .shot-ocr-pop,
+.shot-overlay[data-resetting="1"] .ocr-panel,
 .shot-overlay[data-resetting="1"] .shot-ocr-selrect,
 .shot-overlay[data-resetting="1"] .shot-mag,
 .shot-overlay[data-resetting="1"] .shot-text-editor,
 .shot-overlay[data-resetting="1"] .shot-sw-badge,
 .shot-overlay[data-resetting="1"] .shot-toolbtn-submenu { display: none !important; }
 
-/* ---- OCR 文字识别 ---- */
-/* 结果面板：玻璃卡片，贴在选区右侧/左侧。
-   【核心交互】识别文本像普通文本一样可直接划选（面板解除 body 的
-   user-select:none），划选后 Ctrl+C 原生复制 */
-.shot-ocr-panel {
-  position: fixed; z-index: 300;
-  display: flex; flex-direction: column;
-  background: rgba(12,12,14,0.82); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-  border-radius: 12px; overflow: hidden;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1), 0 10px 30px rgba(0,0,0,0.5);
-  animation: shot-submenu-in 120ms var(--ease-out) both;
-  user-select: text; cursor: auto;
-}
-/* 标题行：字重/字距强调 + 底部发丝分隔线；「复制全部」为主题色实心主按钮 */
-.shot-ocr-head {
-  display: flex; align-items: center; gap: 8px; flex: none;
-  padding: 9px 12px; color: #fff; font-size: 13px; font-weight: 600; letter-spacing: 0.3px;
-  background: rgba(255,255,255,0.05);
-  border-bottom: 1px solid rgba(255,255,255,0.08);
-  user-select: none;
-}
-.shot-ocr-head button {
-  background: rgba(var(--accent-rgb), 0.92); border: none; color: #fff;
-  font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: 6px; cursor: pointer;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 1px 5px rgba(var(--accent-rgb), 0.4);
-  transition: filter var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
-}
-.shot-ocr-head button:hover { filter: brightness(1.1); }
-.shot-ocr-head button:active { transform: scale(0.95); }
-.shot-ocr-body { padding: 6px 10px 10px; font-size: 13px; overflow-y: auto; }
-.shot-ocr-muted { color: rgba(255,255,255,0.66); }
-.shot-ocr-err { color: color-mix(in srgb, var(--danger) 55%, white); }
-.shot-ocr-lines { overflow-y: auto; padding: 4px 6px 8px; cursor: text; }
-/* 逐行卡片：悬停微亮 + 圆角，长文阅读节奏更清晰 */
-.shot-ocr-line {
-  padding: 7px 10px; margin: 2px 0; border-radius: 7px;
-  color: rgba(255,255,255,0.94); font-size: 13px; line-height: 1.6;
-  white-space: pre-wrap; word-break: break-word;
-  transition: background var(--dur-fast) var(--ease-out);
-}
-.shot-ocr-line:hover { background: rgba(255,255,255,0.05); }
-.shot-ocr-line::selection,
-.shot-ocr-pcell::selection,
-.shot-ocr-lines ::selection { background: rgba(var(--accent-rgb), 0.5); color: #fff; }
-/* 面板内滚动条：细圆条不抢内容视线（原生粗滚动条在玻璃卡片上很突兀） */
-.shot-ocr-lines::-webkit-scrollbar,
-.shot-ocr-pairs::-webkit-scrollbar,
-.shot-ocr-body::-webkit-scrollbar { width: 7px; height: 7px; }
-.shot-ocr-lines::-webkit-scrollbar-thumb,
-.shot-ocr-pairs::-webkit-scrollbar-thumb,
-.shot-ocr-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 4px; }
-.shot-ocr-lines::-webkit-scrollbar-thumb:hover,
-.shot-ocr-pairs::-webkit-scrollbar-thumb:hover,
-.shot-ocr-body::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
-.shot-ocr-lines::-webkit-scrollbar-track,
-.shot-ocr-pairs::-webkit-scrollbar-track,
-.shot-ocr-body::-webkit-scrollbar-track { background: transparent; }
-/* 划选提示条：主题色微染底，与「已选中」语义呼应 */
-.shot-ocr-selbar {
-  flex: none; padding: 7px 12px; font-size: 12px;
-  color: var(--accent-text, #cfe2ff);
-  background: rgba(var(--accent-rgb), 0.14);
-  border-top: 1px solid rgba(255,255,255,0.07);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  user-select: none;
-}
-/* OCR 文字高亮层：铺满截图视口，覆盖在冻结帧之上、选区画布之上；
+/* ---- OCR 文字识别（截图）---- */
+/* 高亮层：铺满截图视口，覆盖在冻结帧之上、选区画布之上；
    pointer-events:none 不挡任何鼠标交互（拖拽/缩放选区照常） */
 .shot-ocr-hl-layer {
   position: absolute; left: 0; top: 0; z-index: 9;
   pointer-events: none; overflow: hidden;
 }
-/* 单行识别文字的半透明蓝高亮（与贴图 Alt 文字模式 .pin-ocr-hint 同款视觉）：
-   浅蓝底 + 蓝色描边，浅/深截图上均清晰可见，且文字仍可读 */
+/* 单行识别文字"待命"底纹：浅蓝底 + 蓝描边，暗示文字可选（与贴图 .pin-ocr-hint 同款） */
 .shot-ocr-hl {
   position: absolute; pointer-events: none;
   background: rgba(96, 165, 250, 0.30);
@@ -509,74 +443,66 @@ html[data-theme="dark"] {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
-/* 翻译态：原文/译文两列对照。表体吃掉面板剩余高度并内部滚动，
-   两列等宽逐行同高——译文出来时原文不再被挤成 90px 小窗 */
-.shot-ocr-trans {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  /* 点「翻译」整块弹入（面板同时变宽，这一步给足"进入另一种视图"的反馈） */
-  animation: qf-trans-col 240ms var(--ease-out) both;
+/* 左键拖拽划选命中的词：半透明系统选区蓝，压过待命底纹一眼可辨（与贴图 .pin-ocr-sel 同款） */
+.shot-ocr-sel {
+  position: absolute; pointer-events: none;
+  background: rgba(0, 120, 215, 0.45);
+  animation: shot-ocr-sel-in 140ms ease-out both;
 }
-@keyframes qf-trans-col {
-  from { opacity: 0; transform: translateY(-6px) scale(0.985); }
-  to   { opacity: 1; transform: none; }
+@keyframes shot-ocr-sel-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* 左上角识别中 loading 徽标（与贴图 .pin-ocr-loading.ocr-busy 同款视觉） */
+.shot-ocr-busy {
+  position: fixed; left: 12px; top: 12px; z-index: 320;
+  display: inline-flex; align-items: center; gap: 6px;
+  background: linear-gradient(135deg, var(--accent, #3b82f6), color-mix(in srgb, var(--accent, #3b82f6) 78%, black));
+  color: #fff; font-weight: 600; font-size: 12px; line-height: 1;
+  padding: 7px 12px; border-radius: 8px; pointer-events: none;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  box-shadow: 0 3px 14px color-mix(in srgb, var(--accent, #3b82f6) 45%, transparent);
+  animation: shot-ocr-busy-in 180ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both,
+    shot-ocr-busy-pulse 1.3s ease-in-out 200ms infinite;
 }
-.shot-ocr-thead {
-  flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
-  padding: 6px 14px; font-size: 11px; letter-spacing: 0.4px;
-  color: rgba(255,255,255,0.55); background: rgba(255,255,255,0.04);
-  border-bottom: 1px solid rgba(255,255,255,0.08); user-select: none;
+@keyframes shot-ocr-busy-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes shot-ocr-busy-pulse {
+  0%, 100% { box-shadow: 0 3px 14px color-mix(in srgb, var(--accent, #3b82f6) 45%, transparent); }
+  50% { box-shadow: 0 3px 22px color-mix(in srgb, var(--accent, #3b82f6) 85%, transparent); }
 }
-.shot-ocr-pairs { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 8px 8px; cursor: text; }
-.shot-ocr-pair {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
-  padding: 7px 6px; border-radius: 7px;
-  transition: background var(--dur-fast) var(--ease-out);
+.shot-ocr-spinner {
+  width: 11px; height: 11px; border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.28);
+  border-top-color: #fff;
+  animation: shot-ocr-spin 700ms linear infinite;
 }
-.shot-ocr-pair + .shot-ocr-pair { border-top: 1px solid rgba(255,255,255,0.06); }
-.shot-ocr-pair:hover { background: rgba(255,255,255,0.05); }
-.shot-ocr-pcell {
-  font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-word;
-  color: rgba(255,255,255,0.66);
+@keyframes shot-ocr-spin { to { transform: rotate(360deg); } }
+
+/* 文字选择模式常驻标识（左上角）：进入模式后不可拖出新区域，显式告知状态与
+   退出方式，避免"拖不动"的困惑。与贴图 .pin-textmode-badge 视觉一致 */
+.shot-textmode-badge {
+  position: fixed; left: 12px; top: 12px; z-index: 322; pointer-events: none;
+  display: flex; align-items: flex-start; gap: 7px;
+  background: rgba(0, 0, 0, 0.66); color: #fff;
+  padding: 7px 11px; border-radius: 8px;
+  border-left: 3px solid var(--accent, #3b82f6);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  font-size: 12px; line-height: 1.3;
+  animation: shot-badge-pop 160ms cubic-bezier(0.2, 0.9, 0.3, 1.3) both;
 }
-/* 单行译文：该 cell 是译完那一刻才挂载的新元素，弹入动画自然只播一次 */
-.shot-ocr-pout {
-  color: #fff;
-  animation: qf-trans-line 300ms var(--ease-out) both;
+/* 状态点：蓝色脉冲，强化"当前处于文字选择状态"的感知（与贴图一致） */
+.shot-textmode-badge::before {
+  content: ""; flex: none; margin-top: 3px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent, #3b82f6);
+  animation: shot-textmode-dot 1.4s ease-in-out infinite;
 }
-@keyframes qf-trans-line {
-  0%   { opacity: 0; transform: translateY(5px) scale(0.96); }
-  60%  { opacity: 1; transform: translateY(-1px) scale(1.012); }
-  100% { opacity: 1; transform: none; }
+@keyframes shot-textmode-dot {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent, #3b82f6) 60%, transparent); }
+  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent, #3b82f6) 0%, transparent); }
 }
-/* 还没译出的行：占位骨架条微扫光，明示"这一行在路上"而非空着 */
-.shot-ocr-pwait {
-  display: block;
-  width: 62%;
-  height: 10px;
-  margin-top: 6px;
-  border-radius: 5px;
-  background: linear-gradient(90deg,
-    rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.22) 45%, rgba(255, 255, 255, 0.09) 90%);
-  background-size: 220% 100%;
-  animation: qf-trans-wait 1.15s linear infinite;
-}
-@keyframes qf-trans-wait {
-  from { background-position: 120% 0; }
-  to   { background-position: -120% 0; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .shot-ocr-trans, .shot-ocr-pout, .shot-ocr-pwait { animation: none; }
-}
-/* 该行没译成（回退显示原文）：压暗以区别于正常译文 */
-.shot-ocr-pfail { color: rgba(255,255,255,0.42); }
-.shot-ocr-note {
-  flex: none; padding: 5px 14px; font-size: 11px; color: rgba(255,255,255,0.5);
-  border-top: 1px solid rgba(255,255,255,0.07); user-select: none;
-}
+.shot-textmode-badge-txt { display: flex; flex-direction: column; gap: 2px; }
+.shot-textmode-badge-k { font-weight: 700; }
+.shot-textmode-badge-s { font-size: 11px; opacity: 0.85; }
+@keyframes shot-badge-pop { from { transform: scale(0.85); opacity: 0; } to { transform: none; opacity: 1; } }
 /* 松手浮标：复制 / 翻译 */
 .shot-ocr-pop {
   position: fixed; z-index: 320; display: flex; gap: 2px; padding: 3px;

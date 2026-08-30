@@ -369,5 +369,5 @@ export function usePinOcrSelect({ autoRun, interactive, id, src, imgRef, onFeedb
         }).filter((r): r is SelRect => !!r)
       : [];
 
-  return { altActive, selRects, hintRects, busy, onMouseDown, onKeyDown, clearSelection, hasSelectionRef };
+  return { altActive, lines: lines ?? [], selRects, hintRects, busy, onMouseDown, onKeyDown, clearSelection, exitMode, hasSelectionRef };
 }

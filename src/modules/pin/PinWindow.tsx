@@ -10,9 +10,11 @@ import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
   pinImageUrl, pinUpdate, pinClose, pinSetClickThrough, pinReady, pinHideOne, pinResize, pinKind, diagLog,
-  pinCopyOriginal, pinCopyImageBytes, pinFilePath, pinSaveAs,
+  pinCopyOriginal, pinCopyImageBytes, pinFilePath, pinSaveAs, copyText, translateLines,
 } from "../../core/tauri";
+import { EVT_TRANSLATE_LINE } from "../../core/events";
 import { usePinOcrSelect } from "./usePinOcrSelect";
+import { OcrPanel, type OcrTransState } from "../shared/OcrPanel";
 import "./pin.css";
 
 /** 贴图边框随机定格色板（Snipaste 式：贴图瞬间彩闪几下，随后定格其中一色） */
@@ -256,6 +258,59 @@ export function PinWindow() {
     imgRef,
     onFeedback: showBadge,
   });
+
+  // ---- 文字模式弹窗（原文/译文/复制/翻译）：与截图共用 OcrPanel，交互一致 ----
+  const [pinOcrTrans, setPinOcrTrans] = useState<OcrTransState | null>(null);
+  const [pinOcrTranslating, setPinOcrTranslating] = useState(false);
+  const pinOcrTranslatingRef = useRef(false);
+  const pinCopyAllOcr = () => {
+    const all = ocr.lines.map((l) => l.text).join("\n");
+    if (all) void copyText(all, true);
+  };
+  const pinCopyTransOut = () => {
+    if (!pinOcrTrans?.pairs.length) return;
+    const all = pinOcrTrans.pairs.filter((p) => !p.pending).map((p) => p.out).join("\n");
+    if (all) void copyText(all, true);
+  };
+  /** 翻译当前贴图文字（逐行对照，与截图同款）：点下即铺原文+译文占位，
+   *  后端每译完一行推事件回填一行 */
+  const pinDoTranslate = async () => {
+    const srcs = ocr.lines.map((l) => l.text).join("\n").split("\n").map((s) => s.trim()).filter(Boolean);
+    if (!srcs.length) return;
+    pinOcrTranslatingRef.current = true;
+    setPinOcrTranslating(true);
+    setPinOcrTrans({ err: "", pairs: srcs.map((s) => ({ src: s, out: "", ok: true, pending: true })) });
+    try {
+      const res = await translateLines(srcs);
+      setPinOcrTrans({
+        err: "", pairs: srcs.map((s, i) => ({ src: s, out: res[i]?.out ?? s, ok: res[i]?.ok !== false, pending: false })),
+      });
+    } catch (err) {
+      setPinOcrTrans({ pairs: [], err: err instanceof Error ? err.message : String(err) });
+    } finally {
+      pinOcrTranslatingRef.current = false;
+      setPinOcrTranslating(false);
+    }
+  };
+  /** 关闭弹窗 = 退出文字模式（与截图「关闭」语义一致） */
+  const pinCloseOcr = () => {
+    ocr.exitMode();
+    setPinOcrTrans(null);
+    setPinOcrTranslating(false);
+  };
+  // 译文逐行回填：仅本窗翻译进行中才应用，避免与截图窗的 translate://line 事件串扰
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    void listen<{ i: number; out: string; ok: boolean }>(EVT_TRANSLATE_LINE, (e) => {
+      const { i, out, ok } = e.payload;
+      if (!pinOcrTranslatingRef.current) return;
+      setPinOcrTrans((prev) =>
+        !prev || i >= prev.pairs.length
+          ? prev
+          : { ...prev, pairs: prev.pairs.map((p, k) => (k === i ? { ...p, out, ok, pending: false } : p)) });
+    }).then((f) => { un = f; });
+    return () => { un?.(); };
+  }, []);
 
   // ---- 滚轮缩放的尺寸缓存与 rAF 合并 ----
   // 【为什么不能逐事件 outerSize()】每次滚轮都异步查窗口尺寸再 setSize，
@@ -734,6 +789,25 @@ export function PinWindow() {
         <div className="pin-textmode-badge">
           <span className="pin-textmode-badge-k">文字选择模式</span>
           <span className="pin-textmode-badge-s">拖动已锁定 · 再按 Alt 退出</span>
+        </div>
+      )}
+      {/* 文字模式弹窗：与截图共用 OcrPanel（原文/译文/复制/翻译），保证两种
+          场景功能与交互完全一致。停靠贴图窗右上角；点击弹窗不触发窗口拖拽/
+          文字划选（stopPropagation）。弹窗外区域仍可拖拽移动或划选文字 */}
+      {ocr.altActive && (
+        <div onMouseDown={(e) => e.stopPropagation()} onMouseUp={(e) => e.stopPropagation()}>
+          <OcrPanel
+            style={{ right: "calc(var(--pin-m, 0px) + 6px)", top: "calc(var(--pin-m, 0px) + 6px)", width: 300, maxWidth: "calc(100% - 12px)", maxHeight: "64%" }}
+            lines={ocr.lines}
+            phase="done"
+            trans={pinOcrTrans}
+            translating={pinOcrTranslating}
+            onClose={pinCloseOcr}
+            onCopyAll={pinCopyAllOcr}
+            onCopyTrans={pinCopyTransOut}
+            onTranslate={() => void pinDoTranslate()}
+            onReturn={() => setPinOcrTrans(null)}
+          />
         </div>
       )}
       {zoomLabel && (

@@ -1205,6 +1205,8 @@ export function ScreenshotOverlay() {
   // 在选区内按住左键拖动可框选部分行，松手弹出 复制/翻译 按钮，Ctrl+C 亦可复制
   type OcrPhase = "idle" | "loading" | "done" | "error";
   const [ocrPhase, setOcrPhase] = useState<OcrPhase>("idle");
+  const ocrPhaseRef = useRef(ocrPhase);
+  useEffect(() => { ocrPhaseRef.current = ocrPhase; }, [ocrPhase]);
   const [ocrLines, setOcrLines] = useState<ShotOcrLine[]>([]);
   const [ocrError, setOcrError] = useState("");
   const ocrBusyRef = useRef(false);
@@ -2777,97 +2779,78 @@ export function ScreenshotOverlay() {
       )}
 
       {/* OCR 文字高亮：识别完成后在截图上直接以半透明蓝块覆盖每行识别到的文字
-          （与贴图 Alt 文字模式同款视觉），让用户一眼看到哪些文字被识别、且
-          此时选区不可拖动。仅展示用，复制仍走右侧面板划选 / Ctrl+C。
+          （与贴图 Alt 文字模式同款视觉），让用户一眼看到哪些文字被识别。
+          其中 .shot-ocr-hl = 全部行"待命"底纹（暗示文字可选）；.shot-ocr-sel =
+          左键拖拽划选命中的词（半透明选区蓝，压在底纹上）。文字模式（altActive）
+          下左键拖拽即划选，复制走 Ctrl+C。
           坐标映射：OCR 行是裁剪图【物理像素】，÷cssScale 归一到 CSS 像素后
           再加选区左上角（region 已是 CSS 像素），与底层冻结帧严格对齐 */}
       {ocrPhase === "done" && ocrLines.length > 0 && (() => {
         const sc = cssScale();
         const bx = region.x, by = region.y;
+        const selRects = scrSel.map((p) => {
+          const wd = ocrLines[p.li]?.words[p.wi];
+          return wd ? { left: bx + wd.x / sc, top: by + wd.y / sc, w: wd.w / sc, h: wd.h / sc } : null;
+        }).filter((r): r is { left: number; top: number; w: number; h: number } => !!r);
         return (
           <div className="shot-ocr-hl-layer" style={{ width: displayW, height: displayH }}>
             {ocrLines.map((l, i) => (
               <div key={i} className="shot-ocr-hl"
                 style={{ left: bx + l.x / sc, top: by + l.y / sc, width: l.w / sc, height: l.h / sc }} />
             ))}
+            {selRects.map((r, i) => (
+              <div key={`s${i}`} className="shot-ocr-sel"
+                style={{ left: r.left, top: r.top, width: r.w, height: r.h }} />
+            ))}
           </div>
         );
       })()}
 
-      {/* OCR 结果面板：贴在选区右侧；放不下翻到左侧。
-          识别文本【可直接划选】（像普通文本一样拖动选中 → Ctrl+C 复制）。
-          翻译态换成宽面板 + 原文/译文两列对照，避免"译文出来了原文被挤没" */}
+      {/* OCR 结果弹窗：贴图与截图共用同一套 OcrPanel（原文/译文/复制/翻译），
+          保证两种场景下功能与交互完全一致。贴在选区右侧；放不下翻到左侧 */}
       {ocrPhase !== "idle" && (() => {
         const vw = window.innerWidth, vh = window.innerHeight;
         const transMode = !!ocrTrans || ocrTranslating;
         const pw = transMode ? Math.min(560, vw - 16) : 320;
         const phMax = Math.min(transMode ? 520 : 380, vh - 16);
-        const tTotal = ocrTrans?.pairs.length ?? 0;
-        const tDone = ocrTrans?.pairs.filter((p) => !p.pending).length ?? 0;
         let px2 = region.x + region.w + 10;
         if (px2 + pw > vw - 8) px2 = Math.max(8, region.x - pw - 10);
         const py2 = Math.max(8, Math.min(region.y, vh - phMax - 8));
         return (
-          <div className="shot-ocr-panel" style={{ left: px2, top: py2, width: pw, maxHeight: phMax }}
-            onMouseDown={(ev) => ev.stopPropagation()} onMouseUp={(ev) => ev.stopPropagation()}>
-            <div className="shot-ocr-head">
-              <b>文字识别</b>
-              <span style={{ flex: 1 }} />
-              {ocrPhase === "done" && ocrLines.length > 0 && (
-                <>
-                  {ocrTrans && <button onClick={() => setOcrTrans(null)}>返回原文</button>}
-                  {ocrTrans
-                    ? (tDone > 0 && <button onClick={copyTransOut}>复制译文</button>)
-                    : <button onClick={copyAllOcr}>复制全部</button>}
-                  {!ocrTrans && <button onClick={() => void doTranslate()}>翻译</button>}
-                </>
-              )}
-              <button onClick={resetOcr}>关闭</button>
-            </div>
-            {ocrPhase === "loading" && <div className="shot-ocr-body shot-ocr-muted">识别中…</div>}
-            {ocrPhase === "error" && <div className="shot-ocr-body shot-ocr-err">{ocrError}</div>}
-            {ocrPhase === "done" && (
-              ocrTrans ? (
-                ocrTrans.err ? <div className="shot-ocr-body shot-ocr-err">翻译失败：{ocrTrans.err}</div> : (
-                  <div className="shot-ocr-trans">
-                    <div className="shot-ocr-thead">
-                      <span>原文</span>
-                      <span>{ocrTranslating ? `译文 ${tDone}/${tTotal}…` : "译文"}</span>
-                    </div>
-                    <div className="shot-ocr-pairs">
-                      {ocrTrans.pairs.map((p, i) => (
-                        <div key={i} className="shot-ocr-pair">
-                          <div className="shot-ocr-pcell">{p.src}</div>
-                          {p.pending ? (
-                            <div className="shot-ocr-pcell"><i className="shot-ocr-pwait" /></div>
-                          ) : (
-                            <div className={`shot-ocr-pcell shot-ocr-pout${p.ok ? "" : " shot-ocr-pfail"}`}>{p.out}</div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                    {!ocrTranslating && ocrTrans.pairs.some((p) => !p.ok) && (
-                      <div className="shot-ocr-note">部分行未翻译（网络/配额或行数超出上限），已回退显示原文</div>
-                    )}
-                  </div>
-                )
-              ) : (
-                <div className="shot-ocr-lines">
-                  {ocrLines.length === 0 && <div className="shot-ocr-body shot-ocr-muted">未识别到文字（可调整选区后重新点击识别）</div>}
-                  {ocrLines.map((l, i) => (
-                    <div key={i} className="shot-ocr-line">{l.text}</div>
-                  ))}
-                </div>
-              )
-            )}
-            {ocrPhase === "done" && ocrLines.length > 0 && (
-              <div className="shot-ocr-selbar">
-                {ocrTrans ? "划选任一列文字后 Ctrl+C 复制，或点上方「复制译文」" : "划选文字后 Ctrl+C 复制，或点上方「复制全部」"}
-              </div>
-            )}
+          <div onMouseDown={(e) => e.stopPropagation()} onMouseUp={(e) => e.stopPropagation()}>
+            <OcrPanel
+              style={{ left: px2, top: py2, width: pw, maxHeight: phMax }}
+              lines={ocrLines}
+              phase={ocrPhase === "loading" ? "loading" : ocrPhase === "error" ? "error" : "done"}
+              error={ocrError}
+              trans={ocrTrans}
+              translating={ocrTranslating}
+              onClose={resetOcr}
+              onCopyAll={copyAllOcr}
+              onCopyTrans={copyTransOut}
+              onTranslate={() => void doTranslate()}
+              onReturn={() => setOcrTrans(null)}
+            />
           </div>
         );
       })()}
+
+      {/* 左上角状态标识（与贴图 Alt 文字模式同款）：识别中 loading + 文字选择
+          模式常驻提示。两者都在 OCR 激活期间出现，明确告知"此时不可拖出新
+          区域、如何退出"，避免用户困惑 */}
+      {ocrPhase === "loading" && (
+        <div className="shot-ocr-busy">
+          <span className="shot-ocr-spinner" />识别中…
+        </div>
+      )}
+      {altActive && (
+        <div className="shot-textmode-badge">
+          <div className="shot-textmode-badge-txt">
+            <span className="shot-textmode-badge-k">文字选择模式</span>
+            <span className="shot-textmode-badge-s">拖动已锁定 · 再按 Alt 退出</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
