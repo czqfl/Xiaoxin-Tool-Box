@@ -448,6 +448,11 @@ pub fn show_toolbar_initial<R: Runtime>(app: &AppHandle<R>) {
             );
         }
     }
+    // 【双保险：运行时强制无边框】conf 里 toolbar 已声明 decorations:false，
+    // 但常驻应用若由一份较早的构建（早于该配置/工具栏 v3 重画）长期运行，
+    // 窗口仍可能带系统标题栏。这里在显示前显式关一次边框，确保无论当前
+    // 进程是哪个版本，工具栏都不会露出原生标题栏（"启动后工具栏带标题栏"的根因）。
+    let _ = window.set_decorations(false);
     let _ = window.show();
 }
 

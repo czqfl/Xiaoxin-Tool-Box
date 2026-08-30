@@ -1998,6 +1998,37 @@ export function mountNoteApp(noteId: string, preset = "") {
     })
     .catch((e) => console.error("监听强制隐藏事件失败:", e));
 
+  // 后端 summon_note 在「便签正处于 Closing（关闭动画播放中）时再次呼出」会发本事件：
+  // 打断进行中的关闭动画、复位关闭状态机，但【不隐藏窗口】（紧接着后端的 show +
+  // summoned 会把窗口召回来）。语义 = "把便签叫回来"，与手动关闭途中又按呼出键一致。
+  // 必须复原便签样式（关闭动画会把窗口裁成空画面/降透明），否则窗口可见却内容空白；
+  // 同时标记 wasHidden，让随后到达的 summoned 补播呼出成形动画，避免"面板出现无动画"。
+  getCurrentWindow()
+    .listen("sticky://cancel-close-anim", () => {
+      summonSeq++; // 作废尚未开始的旧呼出动画（防止与本次呼出打架）
+      closing = false;
+      finished = false;
+      if (closeFailSafe) {
+        window.clearTimeout(closeFailSafe);
+        closeFailSafe = undefined;
+      }
+      // 懒加载：未加载 = 无动画在播，跳过
+      anim.glow?.cancelGlowParticles();
+      anim.inhale?.cancelInhaleParticles();
+      anim.flame?.cancelFlame();
+      anim.glass?.cancelGlassShards();
+      // 复原便签样式（关闭动画已把窗口裁空/降透明）：无条件清理，幂等无害，
+      // 让随后 summoned 的复原重绘不再与残留裁剪态冲突（避免"窗口可见却空白/卡住"）。
+      noteWindow.style.clipPath = "";
+      noteWindow.style.setProperty("-webkit-mask-image", "");
+      noteWindow.style.setProperty("mask-image", "");
+      noteWindow.style.opacity = "";
+      noteWindow.style.boxShadow = "";
+      // 视为"从隐藏态呼出"：补播成形动画（与 summoned 中 closing 打断分支保持一致）
+      wasHidden = true;
+    })
+    .catch((e) => console.error("监听取消关闭动画事件失败:", e));
+
   // ---- 窗口尺寸记忆：拖拽改变大小后保存，下次打开沿用该便签自己的尺寸 ----
   // 【单位统一】存档 width/height 用逻辑像素（Rust inner_size 直接消费）——
   // 此前用 window.innerWidth（在用户 150% 缩放环境实测返回物理像素），

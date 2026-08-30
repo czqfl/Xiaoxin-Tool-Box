@@ -10,7 +10,7 @@ import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
   pinImageUrl, pinUpdate, pinClose, pinSetClickThrough, pinReady, pinHideOne, pinResize, pinKind, diagLog,
-  pinCopyOriginal, pinCopyImageBytes, pinFilePath, pinSaveAs, copyText, translateLines,
+  pinCopyOriginal, pinCopyImageBytes, pinFilePath, pinSaveAs, copyText, translateLines, pinBusy,
 } from "../../core/tauri";
 import { EVT_TRANSLATE_LINE } from "../../core/events";
 import { usePinOcrSelect } from "./usePinOcrSelect";
@@ -319,6 +319,8 @@ export function PinWindow() {
   const sizeRef = useRef<{ w: number; h: number } | null>(null);
   const pendingSizeRef = useRef<{ w: number; h: number } | null>(null);
   const zoomRafRef = useRef(0);
+  // 缩放空闲计时：滚轮缩放期间置 pinBusy(true)，停手 600ms 后解除
+  const zoomIdleRef = useRef(0);
 
   // mouse wheel: 普通滚动=缩放；Ctrl+滚轮=透明度 ±5%（范围 5%~100%）
   // 【不能用"左键按住+滚轮"调透明度】原生拖放循环期间 webview 收不到
@@ -329,6 +331,10 @@ export function PinWindow() {
     const h = (e: WheelEvent) => {
       e.preventDefault();
       const win = getCurrentWindow();
+      // 缩放是交互：把待命窗补建顺延到停手后，避免缩放中途"卡一下"
+      void pinBusy(true);
+      window.clearTimeout(zoomIdleRef.current);
+      zoomIdleRef.current = window.setTimeout(() => void pinBusy(false), 600);
       // Ctrl+滚轮：调透明度 ±5%，左上角角标实时提示当前透明度
       if (e.ctrlKey && idRef.current) {
         const nv = Math.min(1, Math.max(0.05, +(opacityRef.current - Math.sign(e.deltaY) * 0.05).toFixed(2)));
@@ -427,6 +433,7 @@ export function PinWindow() {
   const clearDragState = () => {
     window.clearTimeout(dragClearRef.current);
     draggingRef.current = false;
+    void pinBusy(false);
     rootRef.current?.classList.remove("pin-dragging");
     setDragging(false);
   };
@@ -436,6 +443,7 @@ export function PinWindow() {
     if (ocr.onMouseDown(e.nativeEvent)) return;
     ocr.clearSelection();
     draggingRef.current = true;
+    void pinBusy(true);
     setDragging(true);
     rootRef.current?.classList.add("pin-dragging");
     window.clearTimeout(dragClearRef.current);

@@ -17,15 +17,114 @@ use std::str::FromStr;
 use std::sync::{LazyLock, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
-/// 运行时「当前可见便签窗口」集合（label 集合，如 "note_abc123"）。
-/// 用于快捷键「呼出/收起便签」的切换决策——绕过 WebviewWindow::is_visible() 在
-/// 透明 / always-on-top / 无边框窗口上的不可靠性（show 后 is_visible 仍可能返回
-/// false，导致 toggle 永远走「显示」分支、表现为「能呼出、关不掉」）。
-/// 命中由全局快捷键 handler 触发，与 Tauri 命令同在主线程事件循环，Mutex 仅作保险。
-static VISIBLE_NOTES: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
+// ---------------------------------------------------------------------------
+// 呼出 / 收起 状态机（单一权威）
+// ---------------------------------------------------------------------------
+// 历史包袱：早期用「VISIBLE_NOTES 集合（在屏幕上=true）」这一枚布尔做 toggle 决策，
+// 于是「已发出关闭指令、但消散动画仍在播（窗口还看得见）」这一个真实存在的中间态
+// 无处安放——要么算可见（用户想召回便签却变成"再关一次"）、要么算不可见（下次按
+// 又重复播关闭动画）。前端另有一套 closing/finished/wasHidden 标志，两边不同步，
+// 快速"关闭→呼出"必然错乱（面板一闪而过 / 按两次才出来 / 便签没了粒子还在飘）。
+//
+// 重写原则：
+//  1. 状态只存一处（本状态机），Rust 侧为唯一权威；前端不再参与"是否可见"的决策，
+//     只负责按指令播动画与复原；
+//  2. 发出关闭指令的【瞬间】就置 Closing，不等动画结束——用户在此期间的按键语义是
+//     "把便签叫回来"，走呼出分支（取消关闭），而不是"再关一次"；
+//  3. 一切"显示"路径统一走 summon_note，一切"收起"路径统一走 dismiss_note，
+//     兜底定时器可取消（pending 集合），杜绝延时的强制隐藏误伤刚呼出的便签；
+//  4. 不依赖 WebviewWindow::is_visible()（透明 / 置顶 / 无边框窗口上不可靠）。
+// ---------------------------------------------------------------------------
+
+/// 单个便签窗口的呼出/收起状态。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum NoteState {
+    /// 已隐藏（初始 / 关闭动画正常收尾 / 兜底强制隐藏 / 托盘隐藏）
+    Hidden,
+    /// 正常显示中
+    Visible,
+    /// 已发出关闭指令、消散动画播放中（窗口可能仍可见）
+    Closing,
+}
+
+static NOTE_STATES: LazyLock<Mutex<HashMap<String, NoteState>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+pub fn note_state(label: &str) -> NoteState {
+    NOTE_STATES.lock().unwrap().get(label).copied().unwrap_or(NoteState::Hidden)
+}
+
+pub fn set_note_state(label: &str, s: NoteState) {
+    NOTE_STATES.lock().unwrap().insert(label.to_string(), s);
+}
+
+/// 便签是否"在屏幕上"（含消散动画播放中）：toggle 决策用。
+pub fn note_on_screen(label: &str) -> bool {
+    matches!(note_state(label), NoteState::Visible | NoteState::Closing)
+}
+
+/// 【唯一呼出入口】显示便签：取消待执行的强制隐藏兜底、打断进行中的关闭动画、
+/// 确保窗口存在并置顶、通知前端复原 + 播呼出成形动画，最后置 Visible。
+/// 无论经快捷键、工具栏、历史面板还是托盘菜单，全部走这里，保证行为一致。
+pub fn summon_note(app: &AppHandle, id: &str) {
+    let label = window_label(id);
+    cancel_force_close(&[label.clone()]);
+    // 打断进行中的关闭动画：前端立即停掉消散（含独立粒子层实例）并复原页面，
+    // 但【不隐藏窗口】——紧接着下面的 show 会把它召回来。
+    if note_state(&label) == NoteState::Closing {
+        if let Some(win) = app.get_webview_window(&label) {
+            let _ = win.emit("sticky://cancel-close-anim", ());
+        }
+    }
+    ensure_note_window(app, id);
+    if let Some(win) = app.get_webview_window(&label) {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+        // 重新置顶：便签可能被历史面板等同样置顶的窗口挡住
+        let _ = win.set_always_on_top(true);
+        let _ = win.emit("summoned", ());
+    }
+    set_note_state(&label, NoteState::Visible);
+    crate::panel::broadcast_panel_visibility(app, &label, true);
+    let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
+    crate::storage::diag_write(&format!("[sticky] summon_note: {label}"));
+}
+
+/// 【唯一收起入口】收起便签：立即置 Closing（不必等动画播完），广播消散动画，
+/// 并启动可取消的强制隐藏兜底。前端动画正常收尾会调 close_window → hide_note_window
+/// → 置 Hidden；前端若未收尾，兜底到期（仅当仍为 Closing）强制隐藏。
+pub fn dismiss_note(app: &AppHandle, label: &str) {
+    let Some(win) = app.get_webview_window(label) else {
+        set_note_state(label, NoteState::Hidden);
+        return;
+    };
+    set_note_state(label, NoteState::Closing);
+    emit_close_anim(&[(label.to_string(), win)]);
+    schedule_force_close(app, vec![label.to_string()]);
+    crate::storage::diag_write(&format!("[sticky] dismiss_note: {label}"));
+}
 
 /// 历史窗口当前是否可见（同样绕过 is_visible 不可靠性，供 open_history 快捷键做 toggle）。
 static HISTORY_VISIBLE: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
+
+/// 待执行的「收起兜底强制隐藏」集合（label）。
+/// 快捷键收起会起一个延时兜底（见 schedule_force_close），用于前端动画未正常收尾时
+/// 强制隐藏。若在兜底到期前用户又呼出了便签，必须把它从本集合移除（取消兜底）——
+/// 否则定时器到点看到窗口可见就会把刚呼出的便签又隐藏掉，表现为
+/// 「呼出后面板出现又立刻消失，下一次呼出才正常」。
+static PENDING_FORCE_CLOSE: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
+
+/// 取消待执行的强制隐藏（便签被重新呼出时调用）。
+pub fn cancel_force_close(labels: &[String]) {
+    if labels.is_empty() { return; }
+    let mut pending = PENDING_FORCE_CLOSE.lock().unwrap();
+    for l in labels {
+        if pending.remove(l) {
+            crate::storage::diag_write(&format!("[sticky] cancel_force_close: {l}"));
+        }
+    }
+}
 
 /// 收起时广播关闭动画：每个便签走与手动点击「×」完全相同的
 /// 前端路径（play-close-anim → requestAnimatedClose），先播消散动画再自行隐藏。
@@ -577,11 +676,8 @@ pub fn toggle_sticky_notes(
         .map(|(l, w)| (l.clone(), w.clone()))
         .collect();
     let hist = app.get_webview_window(HISTORY_WINDOW);
-    // 与 show_all_open 一致：用运行时 VISIBLE_NOTES 判断（绕过 is_visible 不可靠性）
-    let notes_visible = {
-        let vis = VISIBLE_NOTES.lock().unwrap();
-        note_wins.iter().any(|(l, _)| vis.contains(l))
-    };
+    // 用状态机判断（绕过 is_visible 不可靠性；状态在发出关闭指令的瞬间即更新）
+    let notes_visible = note_wins.iter().any(|(l, _)| note_on_screen(l));
     crate::storage::diag_write(&format!(
         "[sticky] toggle: real_note_wins={} hist_exists={} notes_visible={notes_visible}",
         note_wins.len(),
@@ -589,14 +685,12 @@ pub fn toggle_sticky_notes(
     ));
 
     if notes_visible {
-        // 收起全部便签（历史窗口保持原样）：
-        // ① 先广播 play-close-anim（只有最后激活的便签播粒子、其余立即收尾）；
-        // ② 再启动 Rust 端兜底定时器（700ms 后强制隐藏）——关闭不再依赖前端动画
-        //    回调是否触发（此前回调异常即"关不掉"）。前端若正常播完会先隐藏，兜底变 no-op。
-        let labels: Vec<String> = note_wins.iter().map(|(l, _)| l.clone()).collect();
-        emit_close_anim(&note_wins);
-        schedule_force_close(&app, labels);
-        crate::storage::diag_write("[sticky] toggle: hid notes (animated + force-hide safety)");
+        // 收起全部便签（历史窗口保持原样）：统一走 dismiss_note
+        // （立即置 Closing + 广播消散动画 + 可取消的强制隐藏兜底）。
+        for (l, _) in &note_wins {
+            dismiss_note(&app, l);
+        }
+        crate::storage::diag_write("[sticky] toggle: dismissing all notes");
         return Ok(false);
     }
     // 呼出：优先便签窗口；没有便签窗口 → 显示/创建历史窗口（便签应用入口）
@@ -614,19 +708,11 @@ pub fn toggle_sticky_notes(
             }
         }
     } else {
-        for (l, w) in &note_wins {
-            let _ = w.show();
-            let _ = w.unminimize();
-            let _ = w.set_focus();
-            VISIBLE_NOTES.lock().unwrap().insert(l.clone());
+        for (l, _) in &note_wins {
+            let id = l.strip_prefix(NOTE_PREFIX).unwrap_or(l).to_string();
+            summon_note(&app, &id);
         }
-        // 【关键】窗口是隐藏常驻的（收起不销毁）：呼出必须广播 summoned，前端据此
-        // 恢复显示 + 播放呼出成形动画（此前窗口每次都重建、新页面无残留样式，
-        // 无需此事件；隐藏常驻后缺失会导致呼出窗口空白/裁切态）。
-        for (_, w) in &note_wins {
-            let _ = w.emit("summoned", ());
-        }
-        crate::storage::diag_write("[sticky] toggle: shown notes");
+        crate::storage::diag_write("[sticky] toggle: summoned all notes");
     }
     Ok(true)
 }
@@ -868,6 +954,8 @@ pub(crate) fn defer_to_main_loop<R: tauri::Runtime>(app: AppHandle<R>, f: impl F
 pub fn ensure_note_window(app: &AppHandle, id: &str) {
     let label = window_label(id);
     if let Some(win) = app.get_webview_window(&label) {
+        // 取消该便签待执行的强制隐藏兜底（历史面板点击打开 / 工具栏入口等路径同样适用）
+        cancel_force_close(&[label.clone()]);
         let _ = win.show();
         let _ = win.unminimize();
         let _ = win.set_focus();
@@ -875,10 +963,10 @@ pub fn ensure_note_window(app: &AppHandle, id: &str) {
         // 焦点，便签虽被 show 仍可能停在面板后面（Windows 前台锁令 set_focus 偶发不生效）。
         // 再次置顶把便签插到置顶层最上方，确保它压在面板之上、必定可见（面板保持常开）。
         let _ = win.set_always_on_top(true);
-        // 登记到运行时可见集合：无论经由历史面板点击、工具栏入口还是快捷键打开，
+        // 登记状态：无论经由历史面板点击、工具栏入口还是快捷键打开，
         // toggle/快捷键「收起」都能在第一次按下即识别到"有可见便签"（此前仅快捷键
         // 路径登记，导致历史面板打开的便签要按两次才关得掉）。
-        VISIBLE_NOTES.lock().unwrap().insert(label.clone());
+        set_note_state(&label, NoteState::Visible);
         // 状态同步：广播可见（工具栏高亮）+ 便签状态变化（历史列表刷新）
         crate::panel::broadcast_panel_visibility(app, &label, true);
         let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
@@ -948,8 +1036,8 @@ pub fn ensure_note_window(app: &AppHandle, id: &str) {
             ));
             // 提前广播可见：工具栏高亮"便签"图标（窗口即将由前端显示，高亮方向正确）
             crate::panel::broadcast_panel_visibility(&app2, &window_label(&id2), true);
-            // 登记到运行时可见集合（与"已存在"分支一致，保证收起 toggle 一次即生效）
-            VISIBLE_NOTES.lock().unwrap().insert(window_label(&id2));
+            // 登记状态（与"已存在"分支一致，保证收起 toggle 一次即生效）
+            set_note_state(&window_label(&id2), NoteState::Visible);
             // 兜底：前端若因故未显示（init 异常 / 设置加载卡住），500ms 后强制显示，
             // 保证"一次呼出必现"；正常路径前端在 ~300ms 已自行显示，此兜底为 no-op。
             let app3 = app2.clone();
@@ -1132,8 +1220,8 @@ pub fn create_note_window(
             let _ = win.show();
             let _ = win.set_focus();
             crate::panel::broadcast_panel_visibility(&app2, &window_label(&id2), true);
-            // 登记到运行时可见集合（新建即打开，需保证收起 toggle 一次生效）
-            VISIBLE_NOTES.lock().unwrap().insert(window_label(&id2));
+            // 登记状态机（新建即打开，需保证收起 toggle 一次生效）
+            set_note_state(&window_label(&id2), NoteState::Visible);
             // 新建即打开：通知历史列表刷新状态
             let _ = app2.emit(EVT_NOTE_STATE_CHANGED, ());
         }
@@ -1232,7 +1320,7 @@ fn hide_note_window(app: &AppHandle, label: &str) {
     let win = match app.get_webview_window(label) {
         Some(w) => w,
         None => {
-            VISIBLE_NOTES.lock().unwrap().remove(label);
+            set_note_state(label, NoteState::Hidden);
             return;
         }
     };
@@ -1268,11 +1356,16 @@ fn hide_note_window(app: &AppHandle, label: &str) {
     // "快捷键呼出便签慢"）；又因早期前端把关闭态窗口裁成"空画面"而未在呼出时复原，
     // 出现过"关闭后再打开打不开"。该残留态现已由前端 note.ts 的 summoned 处理
     // （blanked 检测 + restoreGlowSummoned + 强制重绘 shim）妥善复原，故恢复隐藏常驻是安全的。
+    // 【强制隐藏前先通知前端收尾】粒子消散动画跑在【独立全屏粒子层窗口】
+    // （label "particles"），便签窗口隐藏并不会带走它。若动画仍在播就把窗口藏了，
+    // 就会出现「便签本体已消失、粒子层还在凭空播消散动画」。前端收到本事件后
+    // 立即取消进行中的动画（含粒子层实例）并复位关闭状态机。
+    let _ = win.emit("sticky://force-hidden", ());
     let _ = win.hide();
     crate::storage::diag_write(&format!("[sticky] hide_note_window: hidden (persistent) {label}"));
     let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
     crate::panel::broadcast_panel_visibility(app, label, false);
-    VISIBLE_NOTES.lock().unwrap().remove(label);
+    set_note_state(label, NoteState::Hidden);
 }
 
 /// 快捷键「收起便签 / 工具栏便签入口」的关闭兜底：
@@ -1282,6 +1375,12 @@ fn hide_note_window(app: &AppHandle, label: &str) {
 /// 届时本兜底看到窗口已隐藏即为 no-op；只有前端彻底未关（窗口仍可见）才兜底销毁，
 /// 保留「快捷键关不掉便签」的清理能力。
 pub fn schedule_force_close(app: &AppHandle, labels: Vec<String>) {
+    {
+        let mut pending = PENDING_FORCE_CLOSE.lock().unwrap();
+        for l in &labels {
+            pending.insert(l.clone());
+        }
+    }
     let app2 = app.clone();
     std::thread::spawn(move || {
         // 大于前端 closeFailSafe（1500ms）：确保前端正常收尾后本兜底不误伤正在播放的动画
@@ -1291,6 +1390,13 @@ pub fn schedule_force_close(app: &AppHandle, labels: Vec<String>) {
             let app4 = app3.clone();
             move || {
                 for l in &labels {
+                    // 【可取消】兜底到期前若便签已被重新呼出，cancel_force_close 会把
+                    // 它从集合移除——此时必须跳过，绝不把用户刚呼出的便签又隐藏掉。
+                    let still_pending = PENDING_FORCE_CLOSE.lock().unwrap().remove(l);
+                    if !still_pending {
+                        crate::storage::diag_write(&format!("[sticky] force-close skipped (resummoned): {l}"));
+                        continue;
+                    }
                     // 仅当窗口仍可见（前端动画未正常完成）才强制销毁；
                     // 动画已播完 / 已隐藏则跳过，避免打断粒子消散。
                     if let Some(w) = app4.get_webview_window(l) {
@@ -1353,14 +1459,17 @@ pub fn minimize_to_taskbar(window: tauri::WebviewWindow) -> Result<(), String> {
 
 #[tauri::command]
 pub fn minimize_to_tray(window: tauri::WebviewWindow) -> Result<(), String> {
-    // 【关键】托盘隐藏后必须从 VISIBLE_NOTES 移除，否则 show_app / toggle 快捷键
-    // 会用运行时可见集合判定"便签仍可见"→ 误走"收起"分支，而不是重新呼出已隐藏的便签
-    // （配合 toggle_priority_note 改用 VISIBLE_NOTES 的修复）。同时广播不可见，
+    // 【关键】托盘隐藏后必须把状态机置回 Hidden，否则 show_app / toggle 快捷键
+    // 会用 note_on_screen 判定"便签仍在屏幕上"→ 误走"收起"分支，而不是重新呼出已隐藏的便签
+    // （配合 toggle_priority_note 走状态机的修复）。同时广播不可见，
     // 让工具栏等 UI 高亮同步熄灭。
+    // 托盘隐藏是"瞬时隐藏"（无消散动画），因此直接置 Hidden 而非 Closing，
+    // 也要顺手取消可能在跑的强制隐藏兜底，避免它稍后误伤重新呼出的便签。
     let app = window.app_handle().clone();
     let label = window.label().to_string();
     if label.starts_with(NOTE_PREFIX) {
-        VISIBLE_NOTES.lock().unwrap().remove(&label);
+        cancel_force_close(&[label.clone()]);
+        set_note_state(&label, NoteState::Hidden);
         // 【修复·状态一致】隐藏即视为"已关闭"：同步从持久化"打开中"集合移除，
         // 否则历史列表永远显示"打开中"而便签实际是隐藏的（用户反馈"状态与实际不符"）。
         // 与 hide_note_window 的 mark_note_closed_inner 行为对齐；main 是特殊便签不持久化。
@@ -1382,9 +1491,11 @@ pub fn show_window(app: AppHandle, label: String) -> Result<(), String> {
         let _ = win.show();
         let _ = win.unminimize();
         let _ = win.set_focus();
-        // 便签窗口：登记到运行时可见集合，保证收起 toggle 可靠识别
+        // 便签窗口：登记状态机为 Visible，保证收起 toggle 可靠识别；
+        // 并取消可能在跑的强制隐藏兜底（否则刚显示的窗口会被旧兜底藏掉）。
         if label.starts_with(NOTE_PREFIX) {
-            VISIBLE_NOTES.lock().unwrap().insert(label.clone());
+            cancel_force_close(&[label.clone()]);
+            set_note_state(&label, NoteState::Visible);
         }
     }
     Ok(())
@@ -1529,11 +1640,9 @@ fn quick_new_note(app: &AppHandle) {
     if let Some(paths) = app.try_state::<AppPaths>() {
         mark_note_open_inner(paths.inner(), &id);
     }
-    ensure_note_window(app, &id);
-    VISIBLE_NOTES.lock().unwrap().insert(window_label(&id));
-    if let Some(win) = app.get_webview_window(&window_label(&id)) {
-        let _ = win.emit("summoned", ());
-    }
+    // 新建便签统一走 summon_note：内部完成 ensure_note_window + 取消兜底 +
+    // 打断残留关闭动画 + 置顶 + emit summoned + 置 Visible + 广播，避免此处重复实现。
+    summon_note(app, &id);
 }
 
 /// 设置置顶优先级便签（全局唯一互斥）：清除所有便签的置顶标记，再置位目标。
@@ -1632,37 +1741,22 @@ fn toggle_priority_note(app: &AppHandle) {
         return;
     };
     let label = window_label(&id);
-    // 【关键】用运行时 VISIBLE_NOTES 判断"便签当前是否可见"，而非 is_visible()。
-    // is_visible() 在透明 / always-on-top / 无边框便签窗口上不可靠（show 后仍可能返回
-    // false），会导致 show_app 快捷键"明明便签在屏幕上却判定为不可见"→ 走呼出分支、
-    // 永远不会触发关闭动画（用户反馈"快捷键关闭时不播放动画"，对比工具栏入口
-    // toggle_sticky_notes 已改用 VISIBLE_NOTES）。统一两处判定，保证收起/呼出 toggle 稳定。
-    let visible = VISIBLE_NOTES.lock().unwrap().contains(&label);
-    if visible {
-        // 关闭：先广播粒子消散动画（前端播放），再 Rust 兜底关闭——
-        // 与"收起全部便签"同机制（不依赖前端动画回调，2600ms 后若仍未关闭才兜底隐藏）。
-        // 修复：此前直接 hide_note_window 无动画（用户反馈"快捷键关闭无动画"）。
-        if let Some(win) = app.get_webview_window(&label) {
-            let wins = vec![(label.clone(), win)];
-            emit_close_anim(&wins);
-            schedule_force_close(app, vec![label.clone()]);
-        } else {
-            hide_note_window(app, &label);
-        }
+    // 【关键】用状态机判断，而非 is_visible()（透明 / always-on-top / 无边框窗口上
+    // 不可靠：show 后仍可能返回 false，会导致"明明便签在屏幕上却判定为不可见"）。
+    if note_on_screen(&label) {
+        // 收起：统一走 dismiss_note（立即置 Closing + 播消散动画 + 可取消兜底）。
+        // 关闭动画期间的再次按键会命中 summon 分支（语义 = 把便签叫回来）。
+        dismiss_note(app, &label);
     } else {
-        // 呼出
+        // 呼出：统一走 summon_note（取消兜底 + 打断残留动画 + 置顶 + summoned）
         mark_note_open_inner(paths.inner(), &id);
-        ensure_note_window(app, &id);
-        VISIBLE_NOTES.lock().unwrap().insert(label.clone());
-        if let Some(win) = app.get_webview_window(&label) {
-            let _ = win.emit("summoned", ());
-        }
+        summon_note(app, &id);
     }
 }
 
 /// 分发便签全局快捷键：shortcut 命中便签设置的 show_app/new_note/open_history 之一
 /// 则执行并返回 true（调用方短路，不再走工具箱快捷键逻辑）。
-/// - show_app：呼出/收起便签（基于 VISIBLE_NOTES 运行时集合做 toggle）
+/// - show_app：呼出/收起便签（基于 note_on_screen 状态机做 toggle）
 /// - new_note：新建便签
 /// - open_history：呼出/收起历史便签面板（基于 HISTORY_VISIBLE 做 toggle）
 pub fn handle_sticky_shortcut(app: &AppHandle, shortcut: &tauri_plugin_global_shortcut::Shortcut) -> bool {

@@ -584,6 +584,8 @@ export const pinCopyImageBytes = (png: Blob) =>
 /** 切换贴图鼠标穿透 */
 export const pinSetClickThrough = (on: boolean) =>
   invoke<void>("pin_set_click_through", { on });
+/** 拖拽/缩放开始/结束：后端据此把待命窗补建顺延到空闲，避免交互中"卡一下" */
+export const pinBusy = (on: boolean) => invoke<void>("pin_busy", { on });
 /** Esc 隐藏单个贴图（不销毁，贴图热键可整批唤回） */
 export const pinHideOne = () => invoke<void>("pin_hide_one");
 /** HTML 贴图尺寸回填（前端渲染测量出的物理像素尺寸） */

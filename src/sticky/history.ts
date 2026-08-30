@@ -229,11 +229,14 @@ export function mountHistoryApp() {
         card.className = "history-card" + (isOpen ? " open-note" : "");
         // data-id：事件委托用（重建后仍能精确定位目标便签）
         card.dataset.id = item.id;
+        // 打开中的便签左侧显示绿色竖条，替代原来的"打开中"文字标签
+        if (isOpen) {
+          card.style.borderLeft = "3px solid #22c55e";
+        }
         const title = (item.title || "").trim();
         // 有标题：标题为主行、内容摘要为副行；无标题：直接以内容摘要为主行
         const primary = title || item.snippet;
         const secondary = title ? `<div class="card-snippet">${escapeHtml(item.snippet)}</div>` : "";
-        const statusTag = isOpen ? `<span class="card-status">打开中</span>` : "";
         // 所有便签都显示删除按钮：后端 delete_note 会先向窗口发 note-deleted
         // （前端停止保存并关闭窗口），再删文件，故即使便签还开着也能安全删除、不会复活。
         const delBtnHtml = `<button class="card-delete" title="删除">\u2715</button>`;
@@ -247,7 +250,6 @@ export function mountHistoryApp() {
             ${secondary}
             <div class="card-meta">
               <span class="card-time">${escapeHtml(item.updatedStr)}</span>
-              ${statusTag}
             </div>
           </div>
           <div class="card-actions">

@@ -18,6 +18,25 @@ pub const STAGING_LABEL: &str = "pin-staging";
 
 /// 贴图全显/全隐切换的在途标记：同一时刻只允许一个切换流程执行（防抖）
 static TOGGLE_BUSY: AtomicBool = AtomicBool::new(false);
+
+/// 用户正在与贴图交互（拖拽/缩放）。待命窗补建/销毁是重活（WebView2 建窗），
+/// 此时做会"卡一下"，故顺延到空闲再做。前端在拖拽/缩放开始置 true、结束置 false。
+static INTERACTING: AtomicBool = AtomicBool::new(false);
+
+/// 前端拖拽/缩放开始/结束时调用
+#[tauri::command]
+pub fn pin_busy(on: bool) {
+    INTERACTING.store(on, Ordering::SeqCst);
+}
+
+/// 等待用户空闲，最多 max_ms。每 250ms 探测一次，空闲即返回。
+fn wait_idle(max_ms: u64) {
+    let mut waited = 0u64;
+    while INTERACTING.load(Ordering::SeqCst) && waited < max_ms {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        waited += 250;
+    }
+}
 /// 前端监听：staging 窗被分配了某个贴图任务（payload: { id })
 pub const EVT_PIN_ASSIGN: &str = "pin://assign";
 
@@ -315,6 +334,9 @@ pub(crate) fn attach_to_staging<R: Runtime>(app: &AppHandle<R>, pin: PinData) {
                 crate::storage::diag_write(&format!("[pin] staging {label} unresponsive, closed"));
             }
         }
+        // 补建待命窗是重活（WebView2 建窗）：用户正拖拽/缩放时做会"卡一下"，
+        // 先等空闲（最多 8s）再建，把这次卡顿挪到无感知时刻
+        wait_idle(8000);
         ensure_staging(&app2);
     });
 }

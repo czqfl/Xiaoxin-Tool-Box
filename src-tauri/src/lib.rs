@@ -574,6 +574,8 @@ pub fn run() {
             pin::pin_show_all,
             pin::pin_clear_all,
             pin::pin_set_click_through,
+            // 拖拽/缩放开始/结束标记：待命窗补建据此顺延，避免交互中"卡一下"
+            pin::pin_busy,
             // Esc 隐藏单个贴图（热键可整批唤回）
             pin::pin_hide_one,
             // HTML 贴图尺寸回填（前端渲染测量后调用）
