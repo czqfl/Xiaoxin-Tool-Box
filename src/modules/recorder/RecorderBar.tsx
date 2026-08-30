@@ -27,8 +27,9 @@ const fmtSize = (bytes: number) =>
     : bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : `${bytes} B`;
 
 // 音量浮窗（独立小窗 rec-vol）尺寸，必须与 volume-popover.css 的内容盒一致：
-// 宽 = 数值 40 + 两侧余量；高 = 12 + 滑杆 64 + 8 + 数值 11 + 12
-const VOLP_W = 56;
+// 宽 = 数值 34 + 两侧少量余量（窄窄一条，不要抢录制条的视觉重心）；
+// 高 = 12 + 滑杆 64 + 8 + 数值 11 + 12
+const VOLP_W = 42;
 const VOLP_H = 112;
 
 export function RecorderBar() {
@@ -176,16 +177,29 @@ export function RecorderBar() {
     } catch { /* 建窗失败静默 */ }
   };
 
-  // 面板侧失焦 / Esc 都会发这个事件回来，据此让按钮状态与面板保持一致
+  // 面板侧失焦 / Esc 都会发这个事件回来，据此让按钮状态与面板保持一致。
+  // 【关键】失焦永远抢在按钮 click 之前：用户点音量按钮想收面板时，事件顺序是
+  //   mousedown → 面板 blur（隐藏并发此事件）→ mouseup → 按钮 click
+  // 若 click 里只看 volOpen（此时已被置 false）就会当成"要打开"，结果点了关不掉、
+  // 只能去点别处。故记下被动关闭的时刻，这段时间内不再响应打开请求。
+  const volClosedAtRef = useRef(0);
   useEffect(() => {
     let un: (() => void) | undefined;
     void listen("rec-vol-closed", () => {
+      volClosedAtRef.current = Date.now();
       setVolOpen(false);
       // 面板里可能改过音量，收起后重读一次刷新按钮提示
       void recorderAudioVolumeGet().then(setVolume).catch(() => {});
     }).then((f) => { un = f; });
     return () => { un?.(); };
   }, []);
+
+  const onVolClick = () => {
+    if (volOpen) { closeVolPop(); return; }
+    // 刚被"点别处"关掉的余波：这次点击属于关闭动作，不要再打开
+    if (Date.now() - volClosedAtRef.current < 400) return;
+    void openVolPop();
+  };
 
   // 关闭录音 / 停止录制时收起面板：按钮都消失了，面板不该还挂着
   useEffect(() => {
@@ -295,7 +309,7 @@ export function RecorderBar() {
                 <button
                   ref={volBtnRef}
                   className={`recb-btn recb-icon${volOpen ? " recb-vol-on" : ""}`}
-                  onClick={() => { if (volOpen) closeVolPop(); else void openVolPop(); }}
+                  onClick={onVolClick}
                   title={`录制音量 ${volume}%（点击调节）`}
                 >
                   <Volume2 size={12} />

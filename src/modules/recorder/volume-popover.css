@@ -51,10 +51,11 @@ body {
   cursor: pointer;
 }
 
-/* 固定宽度 + 等宽数字：否则 9% 与 100% 会把面板撑得忽宽忽窄 */
+/* 固定宽度 + 等宽数字：否则 9% 与 100% 会把面板撑得忽宽忽窄。
+   宽度压到 34px——面板整体只有 42px 宽，是贴在按钮下方的一条，不是一块 */
 .volp-val {
   flex: none;
-  min-width: 40px;
+  min-width: 34px;
   text-align: center;
   font-size: 11px;
   line-height: 1;
