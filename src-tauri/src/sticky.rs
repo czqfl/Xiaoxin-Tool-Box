@@ -682,7 +682,18 @@ pub fn toggle_sticky_notes(
     ));
 
     if notes_visible {
-        // 收起全部便签（历史窗口保持原样）：统一走 dismiss_note
+        // 【跟手打断】任一便签处于关闭动画播放中（Closing）→ 打断关闭并召回全部
+        // （与快捷键 toggle 一致：关闭动画播放中点工具栏便签图标 = 立即召回）。
+        let any_closing = note_wins.iter().any(|(l, _)| note_state(l) == NoteState::Closing);
+        if any_closing {
+            for (l, _) in &note_wins {
+                let id = l.strip_prefix(NOTE_PREFIX).unwrap_or(l).to_string();
+                summon_note(&app, &id);
+            }
+            crate::storage::diag_write("[sticky] toggle: recalled all (interrupt closing anim)");
+            return Ok(true);
+        }
+        // 全部可见：收起全部便签（历史窗口保持原样）：统一走 dismiss_note
         // （立即置 Closing + 广播消散动画 + 可取消的强制隐藏兜底）。
         for (l, _) in &note_wins {
             dismiss_note(&app, l);
@@ -1519,6 +1530,10 @@ pub fn show_window(app: AppHandle, label: String) -> Result<(), String> {
         if label.starts_with(NOTE_PREFIX) {
             cancel_force_close(&[label.clone()]);
             set_note_state(&label, NoteState::Visible);
+            // 【跟手打断】与 summon_note 语义一致：通知前端打断进行中的关闭动画
+            // （含粒子层）并复原/播成形——托盘"显示便签"路径也必须跟手，否则
+            // 关闭动画播放中走托盘显示会继续播动画、呼出不及时。
+            let _ = win.emit("summoned", ());
         }
     }
     Ok(())
@@ -1767,9 +1782,17 @@ fn toggle_priority_note(app: &AppHandle) {
     // 【关键】用状态机判断，而非 is_visible()（透明 / always-on-top / 无边框窗口上
     // 不可靠：show 后仍可能返回 false，会导致"明明便签在屏幕上却判定为不可见"）。
     if note_on_screen(&label) {
-        // 收起：统一走 dismiss_note（立即置 Closing + 播消散动画 + 可取消兜底）。
-        // 关闭动画期间的再次按键会命中 summon 分支（语义 = 把便签叫回来）。
-        dismiss_note(app, &label);
+        // 【跟手打断】关闭动画播放中（Closing）再次按键 = 打断关闭、立即召回便签
+        // （用户诉求："关闭动画播放时点击呼出，能及时打断动画、立即呼出"）。
+        // 此前这里一律 dismiss，导致快速"呼出→关闭→呼出"第三下仍走关闭、
+        // 无法打断动画 → 呼出不跟手。完全可见（Visible）才走收起。
+        if note_state(&label) == NoteState::Closing {
+            mark_note_open_inner(paths.inner(), &id);
+            summon_note(app, &id);
+        } else {
+            // 收起：统一走 dismiss_note（立即置 Closing + 播消散动画 + 可取消兜底）
+            dismiss_note(app, &label);
+        }
     } else {
         // 呼出：统一走 summon_note（取消兜底 + 打断残留动画 + 置顶 + summoned）
         mark_note_open_inner(paths.inner(), &id);
