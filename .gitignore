@@ -5,7 +5,8 @@ dist-ssr
 dist_*check*/
 dist_verify/
 dist-verify/
-dist-v2/
+# 迭代构建临时目录（dist-v*）：曾经误入库，现已清理，禁止再跟踪
+dist-v*/
 *.local
 
 # Tauri
