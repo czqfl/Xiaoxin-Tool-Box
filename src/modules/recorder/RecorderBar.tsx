@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { listen, emitTo } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { LogicalSize, PhysicalPosition } from "@tauri-apps/api/dpi";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { LogicalPosition, LogicalSize, PhysicalPosition } from "@tauri-apps/api/dpi";
 import { Square, Film, FolderOpen, X, Pause, Play, LoaderCircle, Mic, MicOff, Volume2 } from "lucide-react";
 import {
   EVT_REC_TICK, EVT_REC_DONE,
   recorderStop, recorderPause, recorderResume, recorderCancel,
-  recDismiss, revealFile, recorderAudioRec, recorderAudioState, recorderAudioVolume, recorderAudioVolumeGet,
+  recDismiss, revealFile, recorderAudioRec, recorderAudioState, recorderAudioVolumeGet,
   type RecDonePayload,
 } from "./api";
 import "./recorder.css";
@@ -25,13 +26,10 @@ const fmtSize = (bytes: number) =>
   bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB`
     : bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : `${bytes} B`;
 
-// 录制条窗口尺寸，必须与 Rust recorder.rs 的 BAR_W / BAR_H 保持一致
-const BAR_W = 356;
-const BAR_H = 36;
-/** 音量面板展开时窗口需要额外长出的高度（竖条 + 数值 + 内外边距与余量）。
- *  录制条窗口平时只有 36px 高，而 WebView 会把超出窗口边界的内容直接裁掉——
- *  弹出面板不能指望 CSS "浮到窗口外"，只能让窗口临时长高再复原。 */
-const VOL_EXTRA_H = 108;
+// 音量浮窗（独立小窗 rec-vol）尺寸，必须与 volume-popover.css 的内容盒一致：
+// 宽 = 数值 40 + 两侧余量；高 = 12 + 滑杆 64 + 8 + 数值 11 + 12
+const VOLP_W = 56;
+const VOLP_H = 112;
 
 export function RecorderBar() {
   const [phase, setPhase] = useState<Phase>("recording");
@@ -122,24 +120,78 @@ export function RecorderBar() {
     return () => { if (autoCloseRef.current) clearTimeout(autoCloseRef.current); };
   }, [phase]);
 
-  // 音量面板展开/收起时同步撑高/还原窗口。
-  // 【为什么必须动窗口】录制条窗口固定 36px 高，而 WebView 对超出窗口边界的
-  // 内容一律裁剪——旧版把面板绝对定位到 top:-34px（窗口上方），等于整个画在
-  // 可视区之外，表现就是"点了音量按钮什么也没出现"。CSS 再怎么调 z-index 也
-  // 救不回来，只能让窗口临时长高、收起时复原。
-  useEffect(() => {
-    if (phase !== "recording") return;
-    // 关闭录音会连带收起音量按钮（没在收声调音量没意义），此时必须把面板一起
-    // 关掉：否则窗口仍被撑高，而面板所在的按钮已经不渲染——留出一块空白
-    if (!recOn && volOpen) {
-      setVolOpen(false);
+  // 音量面板是【独立浮窗】（rec-vol），录制条本身始终保持 36px 的条状外观。
+  // 曾试过临时撑高录制条窗口来塞下竖条，结果窗口的亚克力层跟着铺满新增区域，
+  // 变成一整块大白框——亚克力是窗口级效果，撑高多少就铺多少，压不住。
+  // 独立小窗则两边互不干扰：录制条还是那条，面板悬在按钮下方。
+  const volBtnRef = useRef<HTMLButtonElement>(null);
+  const closeVolPop = () => {
+    if (!volOpen) return;
+    setVolOpen(false);
+    void emitTo("rec-vol", "rec-vol-hide", {}).catch(() => {});
+  };
+  const openVolPop = async () => {
+    // 音量按钮的屏幕逻辑坐标：窗口物理位置 ÷ DPR + 按钮在视口内的偏移
+    const btn = volBtnRef.current;
+    if (!btn) return;
+    let x = 0;
+    let y = 0;
+    try {
+      const win = getCurrentWindow();
+      const pos = await win.outerPosition();
+      const dpr = window.devicePixelRatio || 1;
+      const r = btn.getBoundingClientRect();
+      x = pos.x / dpr + r.left + r.width / 2 - VOLP_W / 2;
+      y = pos.y / dpr + r.bottom + 6;
+    } catch { /* 取不到窗口位置就退回按钮视口坐标，仍可显示 */ }
+    setVolOpen(true);
+    const params = new URLSearchParams({
+      x: String(Math.round(x)),
+      y: String(Math.round(y)),
+    });
+    // 复用单例：重建 WebView2 窗口要几百毫秒，第二次起必须瞬时
+    const existing = await WebviewWindow.getByLabel("rec-vol").catch(() => null);
+    if (existing) {
+      void existing
+        .setPosition(new LogicalPosition(Math.round(x), Math.round(y)))
+        .then(() => existing.show())
+        .then(() => existing.setFocus())
+        .catch(() => {});
       return;
     }
-    const h = volOpen ? BAR_H + VOL_EXTRA_H : BAR_H;
-    void getCurrentWindow()
-      .setSize(new LogicalSize(BAR_W, h))
-      .catch(() => {});
-  }, [volOpen, phase, recOn]);
+    try {
+      new WebviewWindow("rec-vol", {
+        url: `index.html?${params.toString()}`,
+        width: VOLP_W,
+        height: VOLP_H,
+        decorations: false,
+        transparent: true,
+        alwaysOnTop: true,
+        focus: true,
+        resizable: false,
+        shadow: false,
+        visible: false,
+        skipTaskbar: true,
+      });
+    } catch { /* 建窗失败静默 */ }
+  };
+
+  // 面板侧失焦 / Esc 都会发这个事件回来，据此让按钮状态与面板保持一致
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    void listen("rec-vol-closed", () => {
+      setVolOpen(false);
+      // 面板里可能改过音量，收起后重读一次刷新按钮提示
+      void recorderAudioVolumeGet().then(setVolume).catch(() => {});
+    }).then((f) => { un = f; });
+    return () => { un?.(); };
+  }, []);
+
+  // 关闭录音 / 停止录制时收起面板：按钮都消失了，面板不该还挂着
+  useEffect(() => {
+    if (!volOpen) return;
+    if (!recOn || phase !== "recording") closeVolPop();
+  }, [recOn, phase, volOpen]);
 
   const stop = () => {
     if (stoppingRef.current) return;
@@ -183,11 +235,8 @@ export function RecorderBar() {
     return () => clearTimeout(t);
   }, [recErr]);
 
-  // 音量：拖动滑杆实时调节（0=无声 100=原声 200=两倍），下一混音周期即生效
-  const changeVolume = (v: number) => {
-    setVolume(v);
-    void recorderAudioVolume(v).catch(() => {});
-  };
+  // 音量的写入已移到独立浮窗 VolumePopover 内（那边拖动直接调命令），
+  // 这里只保留读取：用于按钮提示文案，以及面板收起后刷新一次
 
   // 取消：丢弃本次录制（不保存）
   const cancel = () => {
@@ -208,7 +257,7 @@ export function RecorderBar() {
       if (e.key === "Escape") {
         e.preventDefault();
         // 面板开着时 Esc 先收面板：否则调个音量顺手按 Esc，会把整段录制结束掉
-        if (volOpen) { setVolOpen(false); return; }
+        if (volOpen) { closeVolPop(); return; }
         if (phase === "recording") stop();
         else void recDismiss().catch(() => {});
       }
@@ -220,7 +269,7 @@ export function RecorderBar() {
   const dismiss = () => void recDismiss().catch(() => {});
 
   return (
-    <div className={`recb-root${phase !== "recording" ? " recb-toast" : ""}${paused && phase === "recording" ? " paused" : ""}${phase === "done" || phase === "error" ? " recb-final" : ""}${volOpen && phase === "recording" ? " vol-open" : ""}`}>
+    <div className={`recb-root${phase !== "recording" ? " recb-toast" : ""}${paused && phase === "recording" ? " paused" : ""}${phase === "done" || phase === "error" ? " recb-final" : ""}`}>
       {/* 录制中：顶部迷你条（红点 + 时间 + 暂停/停止/取消，全部纯图标 + 悬浮说明）。
           窗口仅 312×36，此前还塞了「REC」与「Esc 停止并保存」兩段文字导致溢出错乱，
           现一律改图标，语义靠 title 与按钮配色表达。 */}
@@ -240,31 +289,17 @@ export function RecorderBar() {
               {/* 切换失败提示：内联在录音按钮旁。录制条窗口仅 36px 高，窗口外
                   放气泡会被裁掉，只能内联；文案刻意极短以省下横向空间 */}
               {recErr && <span className="recb-rec-tip">{recErr}</span>}
-              {/* 音量只在录音开启时才有意义（没在收声调它没效果），顺带为
-                  上面的失败提示腾出横向空间——录制条只有 356px 宽，全摆上去会挤 */}
+              {/* 音量只在录音开启时才有意义（没在收声调它没效果）。点击拉起独立
+                  浮窗 rec-vol：录制条只有 36px 高，竖条根本塞不进来 */}
               {recOn && (
-                <div className="recb-vol-wrap">
-                  <button
-                    className="recb-btn recb-icon"
-                    onClick={() => setVolOpen((o) => !o)}
-                    title={`录制音量 ${volume}%（点击调节）`}
-                  >
-                    <Volume2 size={12} />
-                  </button>
-                  {volOpen && (
-                    <div className="recb-vol-pop">
-                      <input
-                        type="range"
-                        min={0}
-                        max={200}
-                        value={volume}
-                        onChange={(e) => changeVolume(Number(e.target.value))}
-                        title="0=无声 100=原声 200=两倍"
-                      />
-                      <span className="recb-vol-val">{volume}%</span>
-                    </div>
-                  )}
-                </div>
+                <button
+                  ref={volBtnRef}
+                  className={`recb-btn recb-icon${volOpen ? " recb-vol-on" : ""}`}
+                  onClick={() => { if (volOpen) closeVolPop(); else void openVolPop(); }}
+                  title={`录制音量 ${volume}%（点击调节）`}
+                >
+                  <Volume2 size={12} />
+                </button>
               )}
             </>
           )}

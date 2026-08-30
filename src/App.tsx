@@ -23,6 +23,7 @@ import { ScrollShotBar } from "./modules/scrollshot/ScrollShotBar";
 import { ScrollShotFrame } from "./modules/scrollshot/ScrollShotFrame";
 import { RecorderSelect } from "./modules/recorder/RecorderSelect";
 import { RecorderBar } from "./modules/recorder/RecorderBar";
+import { VolumePopover } from "./modules/recorder/VolumePopover";
 import { SettingsApp } from "./settings/SettingsApp";
 import { diagLog } from "./core/tauri";
 
@@ -119,6 +120,9 @@ export default function App() {
   }
   if (label.startsWith("rec-bar")) {
     return <RecorderBar />;
+  }
+  if (label.startsWith("rec-vol")) {
+    return <VolumePopover />;
   }
   if (label.startsWith("pin-menu")) {
     return <PinMenu />;
