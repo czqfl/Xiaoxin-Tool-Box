@@ -109,8 +109,12 @@ export async function renderBlurredBackground(target: HTMLElement): Promise<stri
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
     ctx.scale(dpr, dpr);
-    // cover 适配 + 向外扩展容纳模糊边缘（与 ::before 的 inset -48px 同款，避免边缘透透明）
-    const ext = Math.ceil(px * 2) + 8;
+    // cover 适配 + 向外扩展容纳模糊边缘。
+    // 【关键】扩展量固定为 48px，与 CSS `.note-window.has-bg::before` 的
+    // `inset: -48px` 完全一致——若按"模糊半径×2+8"缩放，模糊越强 cover 目标
+    // 区域越大，背景图被放得越大，从"无模糊切到有模糊"时图片会突然放大（用户
+    // 反馈）。48px 足够容纳最大模糊（MAX_BLUR_PX=40px）的边缘溢出。
+    const ext = 48;
     ctx.filter = `blur(${px}px)`;
     const iw = img.naturalWidth;
     const ih = img.naturalHeight;
