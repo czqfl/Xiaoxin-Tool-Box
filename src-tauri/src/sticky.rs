@@ -63,6 +63,30 @@ pub fn note_on_screen(label: &str) -> bool {
     matches!(note_state(label), NoteState::Visible | NoteState::Closing)
 }
 
+/// 便签窗口最近一次应用的 DWM 亚克力参数（label → (enable, tint_rgb)）。
+/// 透明窗口从隐藏态 show 后，DWM 亚克力会被系统释放（与面板窗口同款行为），
+/// 呼出时必须用记忆参数【同步】重刷——否则窗口显示瞬间无模糊，要等前端
+/// 异步 IPC（applyAcrylic → set_acrylic）才到 → 用户感知"呼出时才慢慢模糊"。
+static NOTE_ACRYLIC: LazyLock<Mutex<HashMap<String, (bool, u32)>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// 用记忆参数同步重刷便签窗口的 DWM 亚克力（呼出 show 后调用；无 IPC，
+/// 窗口显示瞬间模糊即就绪）。未记忆过（从未调过 set_acrylic）则跳过。
+fn refresh_note_acrylic(app: &AppHandle, label: &str) {
+    let Some((enable, tint)) = NOTE_ACRYLIC.lock().unwrap().get(label).copied() else {
+        return;
+    };
+    if let Some(w) = app.get_webview_window(label) {
+        if let Some(hwnd) = crate::screenshot::hwnd_of_webview(&w) {
+            if enable {
+                let _ = crate::acrylic::apply_acrylic_tinted(hwnd, tint);
+            } else {
+                let _ = crate::acrylic::clear_blur(hwnd);
+            }
+        }
+    }
+}
+
 /// 【唯一呼出入口】显示便签：取消待执行的强制隐藏兜底、确保窗口存在并置顶、
 /// 置 Visible，再通知前端。前端收到 summoned 会【无条件】打断进行中的任何动画
 /// （呼出成形 / 关闭消散，含独立粒子层）并复位状态，再视情况重播成形动画——
@@ -83,6 +107,9 @@ pub fn summon_note(app: &AppHandle, id: &str) {
         let _ = win.set_always_on_top(true);
         let _ = win.emit("summoned", ());
     }
+    // 【呼出即模糊】透明窗口 show 后 DWM 亚克力被系统释放：用记忆参数同步
+    // 重刷（无 IPC），保证窗口显示瞬间模糊已就绪，而不是等前端异步补刷。
+    refresh_note_acrylic(app, &label);
     crate::panel::broadcast_panel_visibility(app, &label, true);
     let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
     crate::storage::diag_write(&format!("[sticky] summon_note: {label}"));
@@ -1534,6 +1561,8 @@ pub fn show_window(app: AppHandle, label: String) -> Result<(), String> {
             // （含粒子层）并复原/播成形——托盘"显示便签"路径也必须跟手，否则
             // 关闭动画播放中走托盘显示会继续播动画、呼出不及时。
             let _ = win.emit("summoned", ());
+            // 【呼出即模糊】同 summon_note：show 后同步重刷 DWM 亚克力
+            refresh_note_acrylic(&app, &label);
         }
     }
     Ok(())
@@ -2026,6 +2055,12 @@ pub fn set_acrylic(
             }
         }
     }
+    // 记忆最近一次亚克力参数：呼出（show）时 refresh_note_acrylic 用它同步重刷，
+    // 保证"呼出即模糊"（透明窗口 show 后 DWM 亚克力被系统释放，异步补刷会慢半拍）。
+    NOTE_ACRYLIC
+        .lock()
+        .unwrap()
+        .insert(window.label().to_string(), (enable, tint_rgb));
     Ok(())
 }
 
