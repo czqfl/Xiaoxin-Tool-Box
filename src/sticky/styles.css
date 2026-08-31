@@ -885,7 +885,7 @@ body,
   font-weight: 800;
   line-height: 1;
   color: var(--text);
-  text-shadow: 0 0 2px color-mix(in srgb, var(--bg) 65%, transparent);
+  text-shadow: none;
 }
 
 .cc-main-bg .cc-letter {
@@ -998,7 +998,7 @@ body,
   font-weight: 800;
   line-height: 1;
   color: var(--text);
-  text-shadow: 0 0 2px color-mix(in srgb, var(--bg) 65%, transparent);
+  text-shadow: none;
 }
 
 .ts-num {
@@ -1357,21 +1357,17 @@ body,
    垫底不透明度默认只有 30%（壁纸清晰为主），文字可读性由投影保证：
    亮壁纸 → 白字黑影的补集：深字+浅描影；暗壁纸（on-dark-bg）→ 浅字+深投影 */
 .note-window.has-bg .editor {
-  text-shadow:
-    0 1px 2px rgba(255, 255, 255, 0.9),
-    0 0 6px rgba(255, 255, 255, 0.55);
+  /* 去掉发光光晕（0 0 Npx 大模糊），仅保留 1px 紧实投影保证壁纸可读性，文字清晰不发虚 */
+  text-shadow: 0 1px 1px rgba(255, 255, 255, 0.6);
 }
 .note-window.has-bg .editor:empty:before {
-  text-shadow:
-    0 1px 2px rgba(255, 255, 255, 0.9),
-    0 0 6px rgba(255, 255, 255, 0.55);
+  text-shadow: 0 1px 1px rgba(255, 255, 255, 0.6);
 }
 .note-window.has-bg.on-dark-bg .editor {
   color: #f2f2f2;
   caret-color: #f2f2f2;
-  text-shadow:
-    0 1px 3px rgba(0, 0, 0, 0.95),
-    0 0 8px rgba(0, 0, 0, 0.7);
+  /* 去掉发光光晕，仅保留 1px 紧实投影 */
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.6);
 }
 .note-window.has-bg.on-dark-bg .editor:empty:before {
   color: rgba(255, 255, 255, 0.55);
