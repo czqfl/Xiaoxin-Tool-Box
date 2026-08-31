@@ -145,12 +145,13 @@ const IcoPin = () => (
 );
 const IcoSaveAs = () => <Download {...IC} />;
 const IcoCopy = () => <Copy {...IC} />;
-// 长截图：上下两段页面 + 中间向下箭头（滚动拼接长图的经典隐喻）
+// 长截图：页面（底部开口）+ 内容行 + 箭头从开口向下穿出——内容继续向下滚动拼接
 const IcoLongShot = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="6" y="3.5" width="12" height="5.5" rx="2" />
-    <path d="m9.5 10.75 2.5 2.5 2.5-2.5" />
-    <rect x="6" y="15" width="12" height="5.5" rx="2" />
+    <path d="M10.5 15H8.5A2.5 2.5 0 0 1 6 12.5V5.5A2.5 2.5 0 0 1 8.5 3h7a2.5 2.5 0 0 1 2.5 2.5v7a2.5 2.5 0 0 1-2.5 2.5h-2" />
+    <path d="M9 7.5h6M9 10.5h6" />
+    <path d="M12 14.5v6.5" />
+    <path d="m9.8 18.8 2.2 2.2 2.2-2.2" />
   </svg>
 );
 
