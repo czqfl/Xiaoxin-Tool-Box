@@ -14,7 +14,7 @@ import {
 } from "../../core/tauri";
 import { EVT_TRANSLATE_LINE } from "../../core/events";
 import { usePinOcrSelect } from "./usePinOcrSelect";
-import { OcrPanel, type OcrTransState } from "../shared/OcrPanel";
+import { type OcrTransState } from "../shared/OcrPanel";
 import "./pin.css";
 
 /** 贴图边框随机定格色板（Snipaste 式：贴图瞬间彩闪几下，随后定格其中一色） */
@@ -28,11 +28,8 @@ const PIN_MARGIN = 12;
 /** CSS 像素边距：物理边距 ÷ 当前 DPI 缩放 */
 const pinMarginCss = () => PIN_MARGIN / (window.devicePixelRatio || 1);
 
-/** OCR 弹窗：贴图窗内可停靠的最小尺寸；低于此值则弹窗放到独立的 pin-ocr 窗
- *  （贴图外侧），避免小贴图把弹窗裁掉看不见 */
+/** OCR 弹窗宽度（独立 pin-ocr 窗始终位于贴图外侧，避免遮挡原图内容） */
 const OCR_PANEL_W = 300;
-const OCR_DOCK_MIN_W = 320;
-const OCR_DOCK_MIN_H = 240;
 
 export function PinWindow() {
   // 边框主题色：每次贴图从调色板随机取一个——开场彩闪结束后定格于此
@@ -305,11 +302,8 @@ export function PinWindow() {
     setPinOcrTranslating(false);
   };
 
-  // 当前贴图窗逻辑尺寸（含四周透明边距），用于判断是否够大以在窗内停靠 OCR 弹窗
-  const [winSize, setWinSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+  // OCR 弹窗始终渲染在独立 pin-ocr 窗（贴图外侧），不再按贴图尺寸决定是否停靠窗内
   const altActiveRef = useRef(false); altActiveRef.current = ocr.altActive;
-  const fitsRef = useRef(true); fitsRef.current = winSize.w >= OCR_DOCK_MIN_W && winSize.h >= OCR_DOCK_MIN_H;
-  const fits = fitsRef.current;
   // 推送 OCR 状态 + 贴图几何到独立 pin-ocr 窗（读取 ref，永远最新，避免闭包陈旧）
   const ocrPushRef = useRef<() => void>(() => {});
   ocrPushRef.current = () => {
@@ -338,15 +332,10 @@ export function PinWindow() {
     else if (action === "translate") void pinDoTranslate();
     else if (action === "return") setPinOcrTrans(null);
   };
-  // 启动即记录当前窗尺寸（含透明边距），供 OCR 弹窗停靠判断
-  useEffect(() => {
-    const dpr = window.devicePixelRatio || 1;
-    void getCurrentWindow().outerSize().then((s) => setWinSize({ w: s.width / dpr, h: s.height / dpr })).catch(() => {});
-  }, []);
-  // 管理独立 pin-ocr 窗：进入文字模式且贴图太小 → 创建并显示；退出或够大 → 隐藏
+  // 管理独立 pin-ocr 窗：进入文字模式即创建/显示（始终在贴图外侧）；退出文字模式 → 隐藏
   useEffect(() => {
     const LABEL = "pin-ocr";
-    if (!ocr.altActive || fits) {
+    if (!ocr.altActive) {
       void WebviewWindow.getByLabel(LABEL).then((w) => { if (w) void w.hide().catch(() => {}); });
       return;
     }
@@ -355,26 +344,26 @@ export function PinWindow() {
       try {
         new WebviewWindow(LABEL, {
           url: "index.html?pin=" + encodeURIComponent(winLabel), width: OCR_PANEL_W, height: 200,
-          decorations: false, transparent: true, alwaysOnTop: true, focus: true,
+          decorations: false, transparent: true, alwaysOnTop: true, focus: false,
           resizable: false, shadow: false, visible: false, skipTaskbar: true,
         });
       } catch { /* 已存在则忽略 */ }
       // 新窗启动后会发 pin-ocr-ready，由下方监听器触发首次推送（避免事件早于监听到达）
     }).catch(() => {});
-  }, [ocr.altActive, fits]);
+  }, [ocr.altActive]);
   // 接收 OCR 窗就绪信号 → 首次推送完整数据（仅新窗需要；已存在窗走上面的直接推送）
   useEffect(() => {
     let un: (() => void) | undefined;
     void getCurrentWindow().listen<{ pin: string }>("pin-ocr-ready", (e) => {
       if (e.payload.pin !== winLabel) return;
-      if (ocr.altActive && !fits) ocrPushRef.current();
+      if (ocr.altActive) ocrPushRef.current();
     }).then((f) => { un = f; });
     return () => { un?.(); };
-  }, [winLabel, ocr.altActive, fits]);
-  // OCR 状态变化（识别行 / 译文 / 翻译中）→ 刷新独立窗
+  }, [winLabel, ocr.altActive]);
+  // OCR 状态变化（识别行 / 译文 / 翻译中）→ 刷新独立窗（仅推送数据，不重跑翻译）
   useEffect(() => {
-    if (ocr.altActive && !fits) ocrPushRef.current();
-  }, [ocr.lines, pinOcrTrans, pinOcrTranslating, ocr.altActive, fits]);
+    if (ocr.altActive) ocrPushRef.current();
+  }, [ocr.lines, pinOcrTrans, pinOcrTranslating, ocr.altActive]);
   // 接收独立窗按钮动作
   useEffect(() => {
     let un: (() => void) | undefined;
@@ -449,7 +438,7 @@ export function PinWindow() {
         zoomRafRef.current = requestAnimationFrame(() => {
           zoomRafRef.current = 0;
           const p = pendingSizeRef.current;
-          if (p) { const d = window.devicePixelRatio || 1; getCurrentWindow().setSize(new PhysicalSize(p.w, p.h)).catch(() => {}); setWinSize({ w: p.w / d, h: p.h / d }); }
+          if (p) { getCurrentWindow().setSize(new PhysicalSize(p.w, p.h)).catch(() => {}); }
         });
       }
       // 左上角实时缩放比例：当前窗宽 / 图片原始宽（未缩放即 100%）
@@ -575,7 +564,7 @@ export function PinWindow() {
       window.clearTimeout(dragClearRef.current);
       dragClearRef.current = window.setTimeout(clearDragState, 800);
       if (!raf) raf = requestAnimationFrame(apply);
-      if (altActiveRef.current && !fitsRef.current) ocrPushRef.current();
+      if (altActiveRef.current) ocrPushRef.current();
     };
     const onUp = () => cleanup();
     // 监听同步挂载，不等 outerPosition 的 IPC 往返——否则首帧要等一次跨进程才跟手
@@ -594,7 +583,7 @@ export function PinWindow() {
       // 这里若每帧都跑，就成了 setPosition→onMoved→调度持久化 的每帧噪声，拖拽发涩
       if (draggingRef.current) return;
       debouncePersist();
-      if (altActiveRef.current && !fitsRef.current) ocrPushRef.current();
+      if (altActiveRef.current) ocrPushRef.current();
       window.clearTimeout(dragClearRef.current);
       dragClearRef.current = window.setTimeout(clearDragState, 180);
     }).then((f) => { un = f; });
@@ -887,25 +876,9 @@ export function PinWindow() {
           <span className="pin-textmode-badge-s">拖动已锁定 · 再按 Alt 退出</span>
         </div>
       )}
-      {/* 文字模式弹窗：与截图共用 OcrPanel（原文/译文/复制/翻译），保证两种
-          场景功能与交互完全一致。停靠贴图窗右上角；点击弹窗不触发窗口拖拽/
-          文字划选（stopPropagation）。弹窗外区域仍可拖拽移动或划选文字 */}
-      {ocr.altActive && fits && (
-        <div onMouseDown={(e) => e.stopPropagation()} onMouseUp={(e) => e.stopPropagation()}>
-          <OcrPanel
-            style={{ right: "calc(var(--pin-m, 0px) + 6px)", top: "calc(var(--pin-m, 0px) + 6px)", width: 300, maxWidth: "calc(100% - 12px)", maxHeight: "64%" }}
-            lines={ocr.lines}
-            phase="done"
-            trans={pinOcrTrans}
-            translating={pinOcrTranslating}
-            onClose={pinCloseOcr}
-            onCopyAll={pinCopyAllOcr}
-            onCopyTrans={pinCopyTransOut}
-            onTranslate={() => void pinDoTranslate()}
-            onReturn={() => setPinOcrTrans(null)}
-          />
-        </div>
-      )}
+      {/* 文字模式弹窗始终渲染在独立 pin-ocr 窗（贴图外侧），见上方 pin-ocr 管理逻辑；
+         OCR 弹窗不再停靠窗内，避免遮挡原图内容、且小贴图不会被裁掉看不见 */}
+
       {zoomLabel && (
         <div className={`pin-zoom-badge${zoomLabel.cls ? " " + zoomLabel.cls : ""}`}>{zoomLabel.text}</div>
       )}

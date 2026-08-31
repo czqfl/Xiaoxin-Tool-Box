@@ -2,9 +2,13 @@
  *  与右键菜单 pin-menu 同思路：脱离贴图窗矩形裁剪、绝不改动贴图尺寸——
  *  这样当贴图很小、窗内放不下 OCR 弹窗时，弹窗完整显示在贴图外侧。
  *
- *  数据由来源贴图窗 emitTo("pin-ocr-show") 推送（识别行 / 译文 / 翻译态 / 贴图几何）；
- *  弹窗上的按钮动作 emitTo 回传来源贴图窗（pin-ocr-action），由贴图窗执行。
- *  始终置顶显示（不随失焦隐藏），仅在退出文字模式（PinWindow 隐藏本窗）时收起。 */
+ *  设计要点：
+ *  - 弹窗【始终】在贴图外侧（右侧优先，放不下再翻左侧；打开时按可用空间定一边，
+ *    之后拖拽贴图只跟随、不左右翻转，避免位置乱跳）。绝不停靠贴图窗内，避免遮挡原图。
+ *  - 数据由来源贴图窗 emitTo("pin-ocr-show") 推送（识别行 / 译文 / 翻译态 / 贴图几何）；
+ *    本窗仅据几何重新定位，【不】重跑翻译——翻译只由用户点「翻译」按钮触发。
+ *  - 按钮动作 emitTo 回传来源贴图窗（pin-ocr-action），由贴图窗执行。
+ *  - 始终置顶显示（不随失焦隐藏），仅在退出文字模式（PinWindow 隐藏本窗）时收起。 */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
@@ -52,6 +56,9 @@ function readUrl(): OcrShow | null {
 export default function PinOcrWindow() {
   const [data, setData] = useState<OcrShow | null>(readUrl());
   const panelRef = useRef<HTMLDivElement | null>(null);
+  // 打开时锁定弹窗在贴图哪一侧（右/左），之后拖拽只跟随、不翻转，避免位置乱跳
+  const sideRef = useRef<"right" | "left">("right");
+  const placedRef = useRef(false);
 
   // 接收来源贴图窗推送（首次可由 URL 自举，后续由事件驱动）
   useEffect(() => {
@@ -68,22 +75,32 @@ export default function PinOcrWindow() {
     if (data?.pin) void emitTo(data.pin, "pin-ocr-action", { action, pin: data.pin }).catch(() => {});
   };
 
-  // 数据变化 → 量尺寸、贴边定位（默认贴图右侧；放不下翻到左侧 / 上方）、显示。
-  // 注意：只 show() 不抢焦点——拖拽贴图时本窗会随动重定位，若每帧 setFocus 会
-  // 把焦点从贴图窗抢走导致拖拽异常；用户点本窗交互时窗口自然获焦。
+  // 数据变化 → 量尺寸、按锁定侧贴边定位（右侧优先；放不下翻左侧仅在首次定边时决定）、
+  // 显示。只 show() 不抢焦点：拖拽贴图时本窗随动重定位，若每帧 setFocus 会把焦点从
+  // 贴图窗抢走导致拖拽异常；用户点本窗交互时窗口自然获焦。
   useLayoutEffect(() => {
     const el = panelRef.current?.firstElementChild as HTMLElement | null;
-    if (!el || !data) return;
+    if (!el || !data || data.pinW <= 0) return;
     const mw = el.offsetWidth || PANEL_W;
     const mh = el.offsetHeight || 200;
     const availW = window.screen.availWidth;
     const availH = window.screen.availHeight;
-    let x = data.pinLeft + data.pinW + GAP; // 默认贴图右侧
-    if (x + mw > availW) x = data.pinLeft - mw - GAP; // 右侧放不下 → 翻到左侧
+    // 首次确定弹窗在贴图哪一侧：右侧有空间优先右侧，否则左侧，再否则仍右侧（夹到屏边）
+    if (!placedRef.current) {
+      placedRef.current = true;
+      const rightRoom = availW - (data.pinLeft + data.pinW);
+      const leftRoom = data.pinLeft;
+      sideRef.current =
+        rightRoom >= mw + GAP ? "right" : leftRoom >= mw + GAP ? "left" : "right";
+    }
+    let x = sideRef.current === "right"
+      ? data.pinLeft + data.pinW + GAP
+      : data.pinLeft - mw - GAP;
     let y = data.pinTop + GAP;
-    if (y + mh > availH) y = Math.max(2, availH - mh - 2);
-    if (x < 2) x = 2;
-    if (y < 2) y = 2;
+    // 夹到屏幕内（不翻转侧别）：贴图被拖到边缘时弹窗贴屏边，可能轻微压住贴图边缘，
+    // 但位置稳定、绝不在左右之间乱跳
+    x = Math.max(2, Math.min(x, availW - mw - 2));
+    y = Math.max(2, Math.min(y, availH - mh - 2));
     const win = getCurrentWindow();
     void win.setSize(new LogicalSize(mw, mh)).then(() => {
       void win.setPosition(new LogicalPosition(x, y)).then(() => {

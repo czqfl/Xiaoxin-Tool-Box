@@ -126,6 +126,9 @@ export function usePinOcrSelect({ autoRun, interactive, id, src, imgRef, onFeedb
   }, [id, src]);
 
   // ---- Alt 开关跟踪（单击切换，无需一直按住）----
+  // 注意：不再监听 window blur → exitMode。贴图 OCR 弹窗改为独立 pin-ocr 窗后，
+  // 点击弹窗按钮会让贴图窗失焦；若失焦即退出文字模式，弹窗刚出现就被关掉、按钮也点不动。
+  // 文字模式改由 Esc / 再按一次 Alt / 关闭按钮退出（见 PinWindow 的 pinCloseOcr）。
   // keydown 切换 + blur 退出两路维护：blur（Alt+Tab 切窗等）立即退出模式并清高亮。
   // keydown preventDefault：拦下 WebView 里单独按 Alt 触发菜单焦点转移的行为
   useEffect(() => {
@@ -148,12 +151,9 @@ export function usePinOcrSelect({ autoRun, interactive, id, src, imgRef, onFeedb
       setAltActive(modeRef.current);
       if (!modeRef.current) clearSelection();
     };
-    const blur = () => exitMode();
     window.addEventListener("keydown", kd);
-    window.addEventListener("blur", blur);
     return () => {
       window.removeEventListener("keydown", kd);
-      window.removeEventListener("blur", blur);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
