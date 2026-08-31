@@ -63,10 +63,10 @@ const IcoRect = () => (
     <rect x="3" y="4.5" width="18" height="15" rx="3.5" />
   </svg>
 );
-// 椭圆（扁椭圆，比 Lucide 正圆 Circle 更扁、更接近\"椭圆\"语义）
+// 椭圆：正圆形态（与 Lucide Circle 一致）；曾被误改为扁椭圆，已恢复
 const IcoEllipse = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <ellipse cx="12" cy="12" rx="11" ry="7.5" />
+    <circle cx="12" cy="12" r="10" />
   </svg>
 );
 // 形状组图标：矩形（圆角）+ 椭圆叠合（Snipaste 第一格风格）。统一 22×22，
