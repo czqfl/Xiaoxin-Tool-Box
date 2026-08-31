@@ -13,6 +13,7 @@
 
 import { getCurrentWindow, currentMonitor } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
+import { newPool, spawnParticle, stepAndPaint, type MotionCfg, type ParticlePool } from "./particle-motion";
 
 type LayerKind = "particle";
 
@@ -34,6 +35,9 @@ interface ParticleLayerStart {
   tW: number;
   tH: number;
   tField: number[];
+  /** 消散前沿方向×速度场（与 tField 同网格，2 float/格，CSS px/s）：
+   *  粒子初速从这采样 → 同一波前的粒子方向/速度一致（物理关联的核心） */
+  flowField?: number[];
   /** 粒子强度 0~100 */
   density: number;
   /** 动画速度百分比（100=原速） */
@@ -71,25 +75,12 @@ interface PAnim {
   k: number;
   /** 保留概率（0~1），由 density 换算 */
   keepProb: number;
-  /** 风偏（物理 px/s，正右/负左/0 无风）：粒子整体水平漂移 */
-  windPx: number;
+  /** 共享物理配置（dpr/flow/风/k——wind 为 CSS px/s，换算在共享模块内） */
+  motion: MotionCfg;
+  /** 本实例动画是否已播完（帧循环据此移除） */
   done: boolean;
-  // ---- 粒子池（SoA；本实例独立）----
-  maxP: number;
-  px: Float32Array;
-  py: Float32Array;
-  pang: Float32Array;
-  pv0: Float32Array;
-  pv1: Float32Array;
-  plife: Float32Array;
-  page: Float32Array;
-  psize: Float32Array;
-  pseed: Float32Array;
-  psway: Float32Array;
-  pr: Float32Array;
-  pg: Float32Array;
-  pb: Float32Array;
-  pcount: number;
+  /** 粒子池（SoA，共享模块定义） */
+  ps: ParticlePool;
 }
 
 let canvas: HTMLCanvasElement | null = null;
@@ -133,30 +124,6 @@ const sampleColor = (inst: PAnim, lxPhys: number, lyPhys: number): [number, numb
   if (max >= 158) return [r, g, b];
   const f = 158 / Math.max(1, max);
   return [Math.min(255, r * f), Math.min(255, g * f), Math.min(255, b * f)];
-};
-
-/** 在 (sx, sy)（物理 px）为指定实例生成一粒发光微粒 */
-const spawn = (inst: PAnim, sx: number, sy: number, age: number): void => {
-  if (inst.pcount >= inst.maxP) return;
-  let life = Math.round((3000 + Math.random() * 2200) * inst.k); // 3~5.2s（×k 随速度缩放）
-  const fit = inst.duration - age - 40;
-  if (fit < 120) return;
-  if (life > fit) life = fit;
-  const i = inst.pcount++;
-  inst.px[i] = sx;   // 物理 px（屏幕）
-  inst.py[i] = sy;
-  inst.pang[i] = (Math.random() - 0.5) * ((110 * Math.PI) / 180); // ±55°
-  // —— 增强飘动：粒子上升速度要快于「新点前沿向上扩散」形成重叠纵深 ——
-  inst.pv0[i] = (20 + Math.random() * 15) * inst.noteDpr; // 初速 20~35 px/s（适中起飘）
-  inst.pv1[i] = 150 * inst.noteDpr;                        // 加速度 150 px/s²（中等上浮，快于前沿）
-  inst.plife[i] = life;
-  inst.page[i] = 0;
-  inst.psize[i] = 1.9 + Math.random() * 0.7;              // 尺寸 1.9~2.6（原固定 1.8，微增且带随机）
-  inst.pseed[i] = Math.random() * Math.PI * 2;
-  // 水平漂移偏置：随机 ±50 px/s + 全局风偏（windPx，物理 px/s）→ 粒子整体朝（左/右）上飘
-  inst.psway[i] = (Math.random() - 0.5) * 100 * inst.noteDpr + inst.windPx;
-  const [r, g, b] = sampleColor(inst, sx - inst.originX, sy - inst.originY);
-  inst.pr[i] = r / 255; inst.pg[i] = g / 255; inst.pb[i] = b / 255;
 };
 
 /** 构建一个便签的消散动画实例（发射网格 + T 时刻分桶 + 粒子池） */
@@ -213,7 +180,6 @@ function buildAnim(p: ParticleLayerStart): PAnim {
   const density = Math.max(0, Math.min(100, p.density ?? 50)) / 100;
   const keepProb = Math.max(0.015, density);
   const peakAlive = Math.round(ecount * (0.03 + 0.97 * density));
-  const maxP = peakAlive + 1500;
   const k = Math.max(0.25, Math.min(4, 100 / Math.max(10, p.speed ?? 100)));
   return {
     seq: p.seq ?? 0,
@@ -224,15 +190,10 @@ function buildAnim(p: ParticleLayerStart): PAnim {
     layerStartAt: p.startAt ?? Date.now(),
     duration: Math.round(2400 * k),
     k, keepProb,
-    windPx: (p.wind ?? 0) * noteDpr,
+    // wind 传 CSS px/s 原值：dpr 换算由共享物理模块统一处理（勿在此预乘，防双重换算）
+    motion: { dpr: noteDpr, flow: p.flowField, tW, tH, rectW, rectH, ox: p.originX, oy: p.originY, wind: p.wind ?? 0, k },
     done: false,
-    maxP,
-    px: new Float32Array(maxP), py: new Float32Array(maxP), pang: new Float32Array(maxP),
-    pv0: new Float32Array(maxP), pv1: new Float32Array(maxP), plife: new Float32Array(maxP),
-    page: new Float32Array(maxP), psize: new Float32Array(maxP), pseed: new Float32Array(maxP),
-    psway: new Float32Array(maxP), pr: new Float32Array(maxP), pg: new Float32Array(maxP),
-    pb: new Float32Array(maxP),
-    pcount: 0,
+    ps: newPool(peakAlive + 1500),
   };
 }
 
@@ -284,64 +245,18 @@ const frame = (now: number): void => {
         const idx = pts[z];
         if (inst.emitDone[idx] === 0) {
           inst.emitDone[idx] = 1;
-          if (Math.random() < inst.keepProb) spawn(inst, inst.emitX[idx], inst.emitY[idx], age);
+          if (Math.random() < inst.keepProb) {
+            const sx = inst.emitX[idx];
+            const sy = inst.emitY[idx];
+            const [cr, cg, cb] = sampleColor(inst, sx - inst.originX, sy - inst.originY);
+            spawnParticle(inst.ps, inst.motion, sx, sy, age, inst.duration, cr, cg, cb);
+          }
         }
       }
     }
-    // ---- 粒子：物理更新 + 写入全局 glData ----
-    ensureGlData(drawCount + inst.pcount);
-    for (let i = 0; i < inst.pcount; i++) {
-      const a2 = inst.page[i] + dt * 1000;
-      inst.page[i] = a2;
-      const life = inst.plife[i];
-      const u = a2 / life;
-      if (u >= 1) {
-        const last = --inst.pcount;
-        if (i !== last) {
-          inst.px[i] = inst.px[last]; inst.py[i] = inst.py[last]; inst.pang[i] = inst.pang[last];
-          inst.pv0[i] = inst.pv0[last]; inst.pv1[i] = inst.pv1[last]; inst.plife[i] = inst.plife[last];
-          inst.page[i] = inst.page[last]; inst.psize[i] = inst.psize[last]; inst.pseed[i] = inst.pseed[last];
-          inst.psway[i] = inst.psway[last]; inst.pr[i] = inst.pr[last]; inst.pg[i] = inst.pg[last]; inst.pb[i] = inst.pb[last];
-        }
-        i--;
-        continue;
-      }
-      const aSec = a2 / 1000;
-      // 被风轻轻吹走的飘速曲线：前期快速起飘（指数逼近飘速峰值 → 前期加速度大、起步利落），
-      // 后期目标峰值缓慢回落（≈70%）→ 越飘越轻、不冲，观感轻盈
-      const tLife = life / 1000;
-      const rise = 1 - Math.exp(-aSec / 0.3);
-      const ease = 1 - 0.3 * Math.min(1, aSec / Math.max(0.6, tLife));
-      const speed = (inst.pv0[i] + inst.pv1[i] * rise * ease) * (1 + 0.3 * Math.sin(a2 * 0.0021 + inst.pseed[i] * 3));
-      const dx = Math.sin(inst.pang[i]);
-      const dy = -Math.cos(inst.pang[i]); // 向上为负 y
-      // —— 强飘动：慢漂移 + 中频摆动 + 高频抖动，多频正弦叠加 → 复杂有机曲线路径 ——
-      const s1 = Math.sin(a2 * 0.0025 + inst.pseed[i]) * 85 * inst.noteDpr;
-      const s2 = Math.sin(a2 * 0.009 + inst.pseed[i] * 2.3) * 55 * inst.noteDpr;
-      const s3 = Math.sin(a2 * 0.024 + inst.pseed[i] * 4.1) * 20 * inst.noteDpr;
-      const swayX = inst.psway[i] + s1 + s2 + s3;
-      // 纵向起伏（漂浮感）：竖直方向也摆动，幅度随起飘进程渐强
-      const bobY = Math.sin(a2 * 0.0062 + inst.pseed[i] * 1.7) * 55 * inst.noteDpr * (0.35 + 0.65 * rise);
-      inst.px[i] += (dx * speed + swayX) * dt;
-      inst.py[i] += (dy * speed + bobY) * dt;
-      const t = 1 - u;
-      // 明暗呼吸（微闪烁）增强流动感；寿命自然淡出
-      const twinkle = 0.8 + 0.2 * Math.sin(a2 * 0.02 + inst.pseed[i] * 5);
-      const alpha = t * Math.pow(t, 0.2) * globalFade * twinkle;
-      if (alpha < 0.02) continue;
-      // 尺寸呼吸：随摆动节奏轻微脉动（飘动感）
-      const pulse = 1 + 0.22 * Math.sin(a2 * 0.007 + inst.pseed[i] * 2);
-      const haloR = inst.psize[i] * pulse * 1.3;
-      const o = drawCount * 7;
-      glData[o] = inst.px[i];       // 物理 px 直出（u_res = canvas 物理宽）
-      glData[o + 1] = inst.py[i];
-      glData[o + 2] = haloR * 2 * inst.noteDpr;
-      glData[o + 3] = alpha;
-      glData[o + 4] = inst.pr[i];
-      glData[o + 5] = inst.pg[i];
-      glData[o + 6] = inst.pb[i];
-      drawCount++;
-    }
+    // ---- 粒子：共享物理积分 + 写入全局 glData（拖拽/浮力/风/相干湍流）----
+    ensureGlData(drawCount + inst.ps.pcount);
+    drawCount = stepAndPaint(inst.ps, inst.motion, dt, globalFade, glData, drawCount);
   }
 
   if (drawCount > 0) {

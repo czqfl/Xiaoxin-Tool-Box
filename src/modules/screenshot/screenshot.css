@@ -297,7 +297,8 @@ html[data-theme="dark"] {
 .shot-text-editor input::placeholder { color: rgba(255,255,255,0.55); text-shadow: 0 1px 2px rgba(0,0,0,0.8); }
 .shot-text-x { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: none; border-radius: 50%; background: rgba(255,255,255,0.14); color: rgba(255,255,255,0.9); cursor: pointer; flex-shrink: 0; }
 .shot-text-x:hover { background: rgba(255,69,58,0.75); color: #fff; }
-.shot-sw-badge { position: fixed; left: 50%; bottom: 36px; transform: translateX(-50%); z-index: 400; background: rgba(20,20,20,0.88); color: #fff; font-size: 13px; padding: 6px 14px; border-radius: 3px; pointer-events: none; backdrop-filter: blur(8px); }
+.shot-sw-badge { position: fixed; z-index: 400; display: flex; align-items: center; gap: 7px; background: rgba(20,20,20,0.92); color: #fff; font-size: 13px; line-height: 1; padding: 8px 13px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.14); box-shadow: 0 4px 14px rgba(0,0,0,0.35); pointer-events: none; }
+.shot-sw-badge svg { flex-shrink: 0; color: rgba(255,255,255,0.88); }
 
 /* 左下角固定操作提示区（Snipaste 式）：黑色半透明底 + 键帽式快捷键列表。
    未选区显示基础操作，选定后切换为选区操作；选区覆盖提示区时整体隐藏。

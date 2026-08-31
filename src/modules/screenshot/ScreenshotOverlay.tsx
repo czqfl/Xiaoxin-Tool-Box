@@ -17,6 +17,7 @@ import { scrollBegin } from "../scrollshot/api";
 import { Pencil, Undo2, Redo2, X, Download, Copy } from "lucide-react";
 import { ARROW_ICON_PATH } from "./arrow-path.const";
 import { OcrPanel } from "../shared/OcrPanel";
+import { groupOcrParagraphs } from "../shared/ocr-group";
 import "./screenshot.css";
 
 type Tool = "select"|"rect"|"ellipse"|"arrow"|"line"|"brush"|"mosaic"|"text"|"number";
@@ -326,6 +327,66 @@ function drawShape(
   ctx.restore();
 }
 
+/* ---- 图形二次编辑（松手后移动/缩放）的几何工具 ---- */
+/** 标注包围盒（CSS 像素）：rect/ellipse/arrow/line 取对角两点，
+ *  brush 并入笔画点集（x1y1x2y2 只记起终点，不代表真实范围） */
+const annoBounds = (a: Anno): Rect => {
+  let x1 = Math.min(a.x1, a.x2), y1 = Math.min(a.y1, a.y2);
+  let x2 = Math.max(a.x1, a.x2), y2 = Math.max(a.y1, a.y2);
+  for (const p of a.points ?? []) {
+    if (p.x < x1) x1 = p.x; if (p.y < y1) y1 = p.y;
+    if (p.x > x2) x2 = p.x; if (p.y > y2) y2 = p.y;
+  }
+  return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+};
+/** 可二次编辑的图形。马赛克落下即冻结采样快照，移位会换成别处像素、
+ *  露出原处内容，语义不对，排除；文字/序号不在编辑范围 */
+const shapeEditable = (a: Anno) =>
+  a.kind === "rect" || a.kind === "ellipse" || a.kind === "arrow" || a.kind === "line" || a.kind === "brush";
+const distSeg = (p: Pt, a: Pt, b: Pt): number => {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const l2 = dx * dx + dy * dy;
+  if (l2 === 0) return Math.hypot(p.x - a.x, p.y - a.y);
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2));
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+};
+/** 编辑手柄：rect/ellipse = 包围盒四角；arrow/line = 两端点；brush 只可移动无手柄 */
+const shapeHandles = (a: Anno): Pt[] => {
+  if (a.kind === "arrow" || a.kind === "line") return [{ x: a.x1, y: a.y1 }, { x: a.x2, y: a.y2 }];
+  if (a.kind === "rect" || a.kind === "ellipse") {
+    const b = annoBounds(a);
+    return [
+      { x: b.x, y: b.y }, { x: b.x + b.w, y: b.y },
+      { x: b.x + b.w, y: b.y + b.h }, { x: b.x, y: b.y + b.h },
+    ];
+  }
+  return [];
+};
+const hitShapeHandle = (a: Anno, pt: Pt, tol: number): number =>
+  shapeHandles(a).findIndex((h) => Math.abs(pt.x - h.x) <= tol && Math.abs(pt.y - h.y) <= tol);
+/** 图形本体命中（拖动移动用）：矩形内部整块可点中；椭圆按方程判定；
+ *  线条类按笔画距离（容差至少一个线宽，细线也不难点） */
+const shapeHit = (a: Anno, pt: Pt, tol: number): boolean => {
+  const t = Math.max(tol, a.width);
+  if (a.kind === "rect") {
+    const b = annoBounds(a);
+    return pt.x >= b.x - tol && pt.x <= b.x + b.w + tol && pt.y >= b.y - tol && pt.y <= b.y + b.h + tol;
+  }
+  if (a.kind === "ellipse") {
+    const b = annoBounds(a);
+    const rx = b.w / 2 + t, ry = b.h / 2 + t;
+    const nx = (pt.x - (b.x + b.w / 2)) / rx, ny = (pt.y - (b.y + b.h / 2)) / ry;
+    return nx * nx + ny * ny <= 1;
+  }
+  if (a.kind === "arrow" || a.kind === "line") {
+    return distSeg(pt, { x: a.x1, y: a.y1 }, { x: a.x2, y: a.y2 }) <= t;
+  }
+  const pts = a.points;
+  if (!pts || !pts.length) return false;
+  if (pts.length === 1) return Math.hypot(pt.x - pts[0].x, pt.y - pts[0].y) <= t;
+  return pts.slice(1).some((p, i) => distSeg(pt, pts[i], p) <= t);
+};
+
 export function ScreenshotOverlay() {
   const [geom, setGeom] = useState<{index:number;x:number;y:number;width:number;height:number;picker:boolean}|null>(null);
   const [bgReady, setBgReady] = useState(false);
@@ -349,6 +410,9 @@ export function ScreenshotOverlay() {
   const [showMag, setShowMag] = useState(false);
   const [numCnt, setNumCnt] = useState(1);
   const [textEdit, setTextEdit] = useState<{x:number;y:number;value:string}|null>(null);
+  // 二次编辑中的标注下标（-1=无）：松手后图形仍可移动/缩放，
+  // 直到下一次绘制落笔才移交编辑权
+  const [editIdx, setEditIdx] = useState(-1);
   const [dragging, setDragging] = useState(false);
   const dragRef = useRef<Pt|null>(null);
   const regRef = useRef<Rect>({x:0,y:0,w:0,h:0});
@@ -543,7 +607,7 @@ export function ScreenshotOverlay() {
     // shot-refresh 前的窗口期，防止残留 UI 在新画面上闪现）
     if (nativeDragRef.current) { nativeDragRef.current = false; void shotDragEnd().catch(() => {}); }
     rootRef.current?.setAttribute("data-resetting", "1");
-    setAnnos([]); setUndos([]); setTextEdit(null); setNumCnt(1); setShowMag(false);
+    setAnnos([]); setUndos([]); setEditIdx(-1); setTextEdit(null); setNumCnt(1); setShowMag(false);
     // OCR 状态复位：新会话不保留上一场的识别结果
     resetOcr();
     // 历史浏览状态复位：新会话永远从实时画面开始
@@ -705,7 +769,7 @@ export function ScreenshotOverlay() {
   };
   /** 切换历史帧后的完整可见刷新：作废标注/合成缓存 → 画新帧 → 后台预取邻帧 */
   const showHistFrame = async (file: string) => {
-    setAnnos([]); setUndos([]);
+    setAnnos([]); setUndos([]); setEditIdx(-1);
     mosaicCacheRef.current.clear();
     clearMosaicSnapshots();
     prevAnnoLenRef.current = 0;
@@ -755,6 +819,13 @@ export function ScreenshotOverlay() {
     return () => { un.then((f) => f()); };
   }, []);
 
+  // OCR 阶段状态声明在重绘 effect 之前：effect 依赖数组在渲染期求值，
+  // 须先于使用处声明（其余 OCR 状态仍在下方原处）
+  type OcrPhase = "idle" | "loading" | "done" | "error";
+  const [ocrPhase, setOcrPhase] = useState<OcrPhase>("idle");
+  const ocrPhaseRef = useRef(ocrPhase);
+  useEffect(() => { ocrPhaseRef.current = ocrPhase; }, [ocrPhase]);
+
   useEffect(() => {
     if (!geom || !bgReady) return;
     const c = annoRef.current; if (!c) return;
@@ -771,7 +842,27 @@ export function ScreenshotOverlay() {
     annos.forEach((s) => {
       drawShape(ctx, s, bgRef.current, mosaicCacheRef.current, scale);   // 屏显层
     });
-  }, [annos, geom, bgReady]);
+    // 二次编辑装饰：虚线包围盒 + 白色方形手柄（仅同种绘制工具激活时显示；
+    // OCR 划选期间隐藏，避免与文字选择视觉打架）
+    const es = editIdx >= 0 ? annos[editIdx] : undefined;
+    if (phase === "selected" && ocrPhase === "idle" && es && es.kind === tool && shapeEditable(es)) {
+      const b = annoBounds(es);
+      ctx.save();
+      ctx.strokeStyle = "rgba(255,255,255,0.85)";
+      ctx.lineWidth = Math.max(1, scale);
+      ctx.setLineDash([4 * scale, 3 * scale]);
+      ctx.strokeRect((b.x - 3) * scale, (b.y - 3) * scale, (b.w + 6) * scale, (b.h + 6) * scale);
+      ctx.setLineDash([]);
+      const hs = 3.5 * scale;
+      for (const h of shapeHandles(es)) {
+        const hx = h.x * scale, hy = h.y * scale;
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(hx - hs, hy - hs, hs * 2, hs * 2);
+        ctx.strokeRect(hx - hs, hy - hs, hs * 2, hs * 2);
+      }
+      ctx.restore();
+    }
+  }, [annos, geom, bgReady, editIdx, tool, phase, ocrPhase]);
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -897,9 +988,9 @@ export function ScreenshotOverlay() {
         else if (e.key === "ArrowUp") r.y -= d; else r.y += d;
         setRegion(r); regRef.current = r;
       } else if (e.code === "KeyZ" && e.ctrlKey && !e.shiftKey) {
-        e.preventDefault(); if (annos.length > 0) { setUndos((u)=>[...u,[...annos]]); setAnnos((a)=>a.slice(0,-1)); }
+        e.preventDefault(); if (annos.length > 0) { setEditIdx(-1); setUndos((u)=>[...u,[...annos]]); setAnnos((a)=>a.slice(0,-1)); }
       } else if (e.code === "KeyZ" && e.ctrlKey && e.shiftKey) {
-        e.preventDefault(); if (undos.length > 0) { setAnnos(undos[undos.length-1]); setUndos((u)=>u.slice(0,-1)); }
+        e.preventDefault(); if (undos.length > 0) { setEditIdx(-1); setAnnos(undos[undos.length-1]); setUndos((u)=>u.slice(0,-1)); }
       }
     };
     window.addEventListener("keydown", h);
@@ -908,7 +999,10 @@ export function ScreenshotOverlay() {
 
   // ---- OCR 文字模式键盘：ALT 触发/切换、Esc 退出、Ctrl+C 复制划选 ----
   // 与贴图 Alt 文字模式保持一致：未识别时 ALT 启动识别并自动进模式，已识别时
-  // ALT 切换模式；识别激活期间左键拖拽划选文字、Ctrl+C 复制选中，Esc 退出
+  // ALT 切换模式；再按 ALT 退出时【连同弹窗一起关闭】（此前只退模式不关弹窗，
+  // 观感像"没关掉"）。识别结果按选区缓存，退出后再按 ALT 直接恢复不重跑。
+  // 识别激活期间左键拖拽划选文字、Ctrl+C 复制选中，Esc 退出
+  const exitOcrRef = useRef<() => void>(() => {});
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (e.key === "Alt" && !e.repeat) {
@@ -917,12 +1011,13 @@ export function ScreenshotOverlay() {
         if (ph === "idle" || ph === "error") {
           void runOcrRef.current();
         } else if (ph === "done") {
-          setAltActive((v) => { const nv = !v; if (!nv) applyScrSel([]); return nv; });
+          if (altActiveRef.current) exitOcrRef.current();
+          else setAltActive(true);
         }
         return;
       }
       if (e.key === "Escape" && altActiveRef.current) {
-        setAltActive(false); applyScrSel([]);
+        exitOcrRef.current();
         return;
       }
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === "c" || e.key === "C")
@@ -1203,10 +1298,7 @@ export function ScreenshotOverlay() {
   // 点击工具栏「文字识别」→ 整个选区送 Windows.Media.Ocr；
   // 结果面板出现在选区右侧，可整段复制/逐行复制；
   // 在选区内按住左键拖动可框选部分行，松手弹出 复制/翻译 按钮，Ctrl+C 亦可复制
-  type OcrPhase = "idle" | "loading" | "done" | "error";
-  const [ocrPhase, setOcrPhase] = useState<OcrPhase>("idle");
-  const ocrPhaseRef = useRef(ocrPhase);
-  useEffect(() => { ocrPhaseRef.current = ocrPhase; }, [ocrPhase]);
+  // （ocrPhase 状态已前移至重绘 effect 之前声明）
   const [ocrLines, setOcrLines] = useState<ShotOcrLine[]>([]);
   const [ocrError, setOcrError] = useState("");
   const ocrBusyRef = useRef(false);
@@ -1241,11 +1333,22 @@ export function ScreenshotOverlay() {
   ocrLinesRef.current = ocrLines;
   const runOcrRef = useRef<() => void>(() => {});
   runOcrRef.current = () => { void runOcr(); };
+  /** 识别时的选区快照：再按 Alt 重入时选区未变则直接复用结果，不重跑识别 */
+  const ocrRegionRef = useRef<Rect | null>(null);
+
+  /** 退出文字模式并收起弹窗，但保留识别结果（供 Alt 重入秒回） */
+  const hideOcrPanel = () => {
+    setOcrPhase("idle");
+    setAltActive(false);
+    applyScrSel([]);
+  };
+  exitOcrRef.current = hideOcrPanel;
 
   const resetOcr = () => {
     setOcrPhase("idle"); setOcrLines([]); setOcrError("");
     setOcrTrans(null); setOcrTranslating(false);
     setAltActive(false); applyScrSel([]);
+    ocrRegionRef.current = null;
   };
 
   // 译文逐行回填：Rust 每译完一行推一行（并发请求，完成顺序不定，按行号对上）
@@ -1271,6 +1374,14 @@ export function ScreenshotOverlay() {
     const sc = cssScale();
     const rp = { x: Math.round(r.x * sc), y: Math.round(r.y * sc), w: Math.round(r.w * sc), h: Math.round(r.h * sc) };
     if (rp.w < 2 || rp.h < 2) return;
+    // 选区未变的重复进入（Alt 退出后再按）：直接复用上次结果，不重跑识别
+    const cached = ocrRegionRef.current;
+    if (ocrLinesRef.current.length && cached &&
+        cached.x === r.x && cached.y === r.y && cached.w === r.w && cached.h === r.h) {
+      setOcrPhase("done");
+      setAltActive(true);
+      return;
+    }
     const c = document.createElement("canvas");
     c.width = rp.w; c.height = rp.h;
     c.getContext("2d")!.drawImage(bg, rp.x, rp.y, rp.w, rp.h, 0, 0, rp.w, rp.h);
@@ -1281,6 +1392,7 @@ export function ScreenshotOverlay() {
       if (!blob) throw new Error("图像编码失败");
       const lines = await shotOcrPost(blob);
       setOcrLines(lines);
+      ocrRegionRef.current = { ...r };
       setOcrPhase("done");
       // 识别完成自动进入文字选择模式（与贴图 Alt 语义一致）：用户一按 ALT
       // 即表明要选字，识别完就该立即可划选，不必再点一次按钮
@@ -1291,14 +1403,14 @@ export function ScreenshotOverlay() {
     } finally { ocrBusyRef.current = false; }
   };
 
-  /** 翻译当前框选的文字（逐行对照展示在 OCR 面板内）。
-   *  逐行送译而不是整段一次：整段只有一组方向，中英混排时英文行会被原样返回，
-   *  而且服务商会折叠换行导致译文与原文行号对不上。
-   *  点下即铺出原文 + 译文占位，后端每译完一行推事件回填一行；返回值仅作最终校准。 */
+  /** 翻译当前框选的文字（逐段对照展示在 OCR 面板内）。
+   *  送译单位是归并后的段落（而非整篇一次）：整篇只有一组方向，中英混排时英文行
+   *  会被原样返回；而成段的单元既保留上下文连贯，又与面板展示的段落一一对齐。
+   *  点下即铺出原文 + 译文占位，后端每译完一段推事件回填一段；返回值仅作最终校准。 */
   const doTranslate = async () => {
     const sel = window.getSelection?.()?.toString().trim() || "";
-    const srcs = (sel || ocrLines.map((l) => l.text).join("\n"))
-      .split("\n").map((s) => s.trim()).filter(Boolean);
+    const srcs = (sel ? sel.split("\n") : groupOcrParagraphs(ocrLines))
+      .map((s) => s.trim()).filter(Boolean);
     if (!srcs.length) return;
     setOcrTranslating(true);
     setOcrTrans({
@@ -1322,7 +1434,7 @@ export function ScreenshotOverlay() {
 
   /** 复制全部识别文本：与面板内 DOM 划选的 Ctrl+C 一致，正常记入剪贴板历史 */
   const copyAllOcr = () => {
-    const all = ocrLines.map((l) => l.text).join("\n");
+    const all = groupOcrParagraphs(ocrLines).join("\n");
     if (all) void copyText(all, true);
   };
 
@@ -1723,6 +1835,15 @@ export function ScreenshotOverlay() {
   // 否则它叠在刚出现的按钮栏旁边会造成视觉闪动）
   const phaseRef = useRef(phase);
   useEffect(() => { phaseRef.current = phase; }, [phase]);
+  // 选区确立即默认切到图形绘制（默认矩形、不弹子菜单）：圈完区域后最高频的
+  // 操作就是标注，预选工具省一次点击。仅在工具还停在初始"选择"时生效——
+  // 用户手动切过工具（包括切回选择）说明是有意为之，不再越俎代庖
+  const prevPhaseRef = useRef(phase);
+  useEffect(() => {
+    const prev = prevPhaseRef.current;
+    prevPhaseRef.current = phase;
+    if (prev !== "selected" && phase === "selected" && tool === "select") setTool("rect");
+  }, [phase]);
 
   /* ---- 原生拖拽层接管 ----
    * 拖拽/缩放热路径下沉到 Rust：原生线程高频轮询光标、把压暗+镂空+边框
@@ -1949,7 +2070,18 @@ export function ScreenshotOverlay() {
     // 手柄悬停光标反馈（手柄由画布绘制，无 CSS :hover 可用）
     if (phaseRef.current === "selected" && !dragRef.current && !resizeRef.current) {
       const el = handlersRef.current;
-      if (el) el.style.cursor = hitHandle(pt) ? "pointer" : "crosshair";
+      if (el) {
+        let cur = "crosshair";
+        if (tool === "select" && hitHandle(pt)) cur = "pointer";
+        else {
+          const es = editIdx >= 0 ? annos[editIdx] : undefined;
+          if (es && es.kind === tool && shapeEditable(es)) {
+            if (hitShapeHandle(es, pt, HANDLE_HIT) >= 0) cur = "pointer";
+            else if (shapeHit(es, pt, HANDLE_HIT)) cur = "move";
+          }
+        }
+        el.style.cursor = cur;
+      }
     }
     if (!moveRafRef.current) {
       moveRafRef.current = requestAnimationFrame(() => {
@@ -2020,6 +2152,44 @@ export function ScreenshotOverlay() {
     return snap;
   };
 
+  /** 二次编辑·移动：按住图形本体拖动，整体平移（笔画点集与对角两点同步偏移） */
+  const startShapeMove = (idx: number, start: Pt) => {
+    const orig = annos[idx];
+    const onM = (ev: MouseEvent) => {
+      const rc = bgRef.current?.getBoundingClientRect(); if (!rc) return;
+      const dx = Math.round(ev.clientX - rc.left) - start.x;
+      const dy = Math.round(ev.clientY - rc.top) - start.y;
+      setAnnos((arr) => arr.map((s, i) => i !== idx ? s : {
+        ...s,
+        x1: orig.x1 + dx, y1: orig.y1 + dy, x2: orig.x2 + dx, y2: orig.y2 + dy,
+        points: orig.points?.map((p) => ({ x: p.x + dx, y: p.y + dy })),
+      }));
+    };
+    const onU = () => { window.removeEventListener("mousemove", onM); window.removeEventListener("mouseup", onU); };
+    window.addEventListener("mousemove", onM); window.addEventListener("mouseup", onU);
+  };
+  /** 二次编辑·缩放：拖动单个手柄。线条类直接搬端点；矩形/椭圆钉住对角为锚点 */
+  const startShapeResize = (idx: number, hi: number) => {
+    const orig = annos[idx];
+    const b = annoBounds(orig);
+    // 手柄序（矩形/椭圆）：0 左上 1 右上 2 右下 3 左下 → 锚点取对角
+    const ax = (hi === 0 || hi === 3) ? b.x + b.w : b.x;
+    const ay = (hi === 0 || hi === 1) ? b.y + b.h : b.y;
+    const onM = (ev: MouseEvent) => {
+      const rc = bgRef.current?.getBoundingClientRect(); if (!rc) return;
+      const mx = Math.round(ev.clientX - rc.left), my = Math.round(ev.clientY - rc.top);
+      setAnnos((arr) => arr.map((s, i) => {
+        if (i !== idx) return s;
+        if (s.kind === "arrow" || s.kind === "line") {
+          return hi === 0 ? { ...s, x1: mx, y1: my } : { ...s, x2: mx, y2: my };
+        }
+        return { ...s, x1: ax, y1: ay, x2: mx, y2: my };
+      }));
+    };
+    const onU = () => { window.removeEventListener("mousemove", onM); window.removeEventListener("mouseup", onU); };
+    window.addEventListener("mousemove", onM); window.addEventListener("mouseup", onU);
+  };
+
   const onDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
     // 取色模式：单击 = 复制当前颜色并退出（即点即得）
@@ -2042,6 +2212,14 @@ export function ScreenshotOverlay() {
       return;
     }
     if (phase === "selected" && tool !== "select") {
+      // 二次编辑拦截：同种工具下先查正在编辑的图形——命中手柄=缩放、
+      // 命中本体=移动；否则本次落笔就是新绘制，上一个图形失去编辑权
+      const cur = editIdx >= 0 ? annos[editIdx] : undefined;
+      if (cur && cur.kind === tool && shapeEditable(cur)) {
+        const hi = hitShapeHandle(cur, pt, HANDLE_HIT);
+        if (hi >= 0) { startShapeResize(editIdx, hi); return; }
+        if (shapeHit(cur, pt, HANDLE_HIT)) { startShapeMove(editIdx, pt); return; }
+      }
       const a: Anno = { kind: tool, x1:pt.x, y1:pt.y, x2:pt.x, y2:pt.y, color, width: sw,
         points: (tool==="brush"||tool==="mosaic") ? [pt] : undefined,
         num: tool==="number" ? numCnt : undefined };
@@ -2053,7 +2231,10 @@ export function ScreenshotOverlay() {
         const snap = captureMosaicUnderlay();
         if (snap) mosaicSnapshots.set(a.sid, snap);
       }
-      setAnnos((arr)=>[...arr, a]);
+      let newIdx = annos.length;
+      // 下标在函数式更新器里取真值：onDown 入口的 commitText 可能已排入
+      // 一条文字标注，闭包里的 annos.length 会偏小
+      setAnnos((arr)=>{ newIdx = arr.length; return [...arr, a]; });
       const onM = (ev: MouseEvent) => {
         const rc = bgRef.current?.getBoundingClientRect(); if (!rc||!geom) return;
         // 与 onDown 的 toCanvas 保持一致：统一用【CSS 像素】坐标。
@@ -2064,7 +2245,12 @@ export function ScreenshotOverlay() {
         setAnnos((arr)=>{ const last=[...arr]; const s={...last[last.length-1]}; s.x2=mx;s.y2=my;
           if(s.points)s.points=[...s.points,{x:mx,y:my}]; last[last.length-1]=s; return last; });
       };
-      const onU = () => { window.removeEventListener("mousemove",onM); window.removeEventListener("mouseup",onU); };
+      const onU = () => {
+        window.removeEventListener("mousemove",onM); window.removeEventListener("mouseup",onU);
+        // 松手后图形保持可编辑（手柄/本体命中即移动/缩放），
+        // 直到下一次落笔才移交编辑权
+        if (shapeEditable(a)) setEditIdx(newIdx);
+      };
       window.addEventListener("mousemove",onM); window.addEventListener("mouseup",onU);
       return;
     }
@@ -2084,7 +2270,7 @@ export function ScreenshotOverlay() {
       setRegion(sr); regRef.current = sr;
       setSnap(null);
     }
-    dragRef.current = pt; setTextEdit(null); setPhase("idle"); setDragging(true);
+    dragRef.current = pt; setTextEdit(null); setEditIdx(-1); setPhase("idle"); setDragging(true);
     lastRectRef.current = null;
   };
 
@@ -2411,8 +2597,8 @@ export function ScreenshotOverlay() {
             return;
           }
         }
-        // 选区阶段滚轮=无级调节画笔粗细（1~24px，一格 1px，与速度无关）；
-        // 面板里的三挡位保留作为快捷预设
+        // 选区阶段滚轮=无级调节画笔粗细（1~24px，一格 1px，与速度无关），
+        // 对全部画笔统一生效；主条上序号后的棋盘格圆点是同一功能的可视入口
         if (phase !== "selected" || textEdit) return;
         const dir = ev.deltaY > 0 ? -1 : 1;
         const nv = Math.min(24, Math.max(1, sw + dir));
@@ -2533,8 +2719,8 @@ export function ScreenshotOverlay() {
       {/* toolbar：Snipaste 式单行扁平图标条，贴在选区右下角外侧；下方空间
           不足时放进选区内右下角。同类形状合并一键（再点循环切换），悬停
           按钮在条下方显示「名称 (快捷键)」提示；所有工具的二次选项（子图形/
-          颜色/粗细）统一平铺在一级图标正下方。右缘锚定不依赖实测宽度——
-          首帧即最终位置 */}
+          颜色）统一平铺在一级图标正下方，粗细由主条上的统一入口调节。右缘
+          锚定不依赖实测宽度——首帧即最终位置 */}
       {phase === "selected" && (() => {
         const vw = window.innerWidth, vh = window.innerHeight;
         // region 已是 CSS 像素，工具栏用 position:fixed 定位（CSS 像素）直接算，
@@ -2569,12 +2755,12 @@ export function ScreenshotOverlay() {
             if (ty - panelH - 4 < 8) ty = panelH + 12;
           }
         }
-        // 颜色/粗细面板：可复用片段——单工具激活时显示在主条下方；
-        // 形状/线枚举展开时拼在子图形行下方，一步选完图形+颜色
+        // 颜色面板：可复用片段——单工具激活时显示在主条下方；
+        // 形状/线枚举展开时拼在子图形行下方，一步选完图形+颜色。
+        // 粗细不再随工具挂一份：滚轮全局无级可调，主条上有一个统一入口
         const renderConfigPanel = (
           <div className="shot-toolbar-panel">
-            {/* 马赛克无颜色概念（像素化采样自原图），只保留粗细——
-                否则与画笔混淆，色板纯属误导 */}
+            {/* 马赛克无颜色概念（像素化采样自原图）——色板纯属误导 */}
             {tool !== "mosaic" && (
               <>
                 {(cfg.annotate?.colors?.length ? cfg.annotate.colors : ANNO_DEFAULT_COLORS).map((c) => (
@@ -2592,19 +2778,6 @@ export function ScreenshotOverlay() {
                   onClick={() => customColorRef.current?.click()} />
               </>
             )}
-            {/* 单圆点=当前粗细的直观映射：鼠标悬停其上滚动滚轮即无级缩放
-                （1~24px 连续等级），圆点本身随数值放大缩小 */}
-            <button className="shot-sw-wheel" title="悬停滚动滚轮调节粗细（1~24px 无级）"
-              onWheel={(ev) => {
-                ev.stopPropagation();
-                const dir = ev.deltaY > 0 ? -1 : 1;
-                const nv = Math.min(24, Math.max(1, sw + dir));
-                setSw(nv); setSwBadge(nv);
-                window.clearTimeout(swBadgeTimer.current);
-                swBadgeTimer.current = window.setTimeout(() => setSwBadge(null), 800);
-              }}>
-              <span style={{ width: Math.min(4 + sw * 1.2, 26), height: Math.min(4 + sw * 1.2, 26) }} />
-            </button>
           </div>
         );
         return (
@@ -2616,17 +2789,19 @@ export function ScreenshotOverlay() {
                 // 折线+箭头），不随激活变成子工具图标——保持主排图标稳定可认
                 const MainIcon = b.groupIcon ?? b.items[0][1];
                 const isGroup = b.items.length > 1;
+                // 马赛克既无颜色也无粗细可选——面板为空，点击只选中工具不展开
+                const hasPanel = isGroup || b.items[0][0] !== "mosaic";
                 return (
                   <div key={i} className={`shot-toolbtn${active ? " active" : ""}${isGroup ? " has-submenu" : ""}`}>
                     <button className={"shot-toolbtn-main" + (active ? " active" : "")} data-tip={btnTip(b)}
                       onClick={() => {
                         // 所有工具统一交互：点一级图标 = 选中默认工具 + 在图标
-                        // 正下方展开二次选项（子图形+颜色/粗细）；已展开再点收起。
+                        // 正下方展开二次选项（子图形+颜色）；已展开再点收起。
                         // 当前工具已在该组则保持不切换（与形状/线组行为一致）
                         if (submenuOpen === i) {
                           setSubmenuOpen(null);
                         } else {
-                          setSubmenuOpen(i);
+                          setSubmenuOpen(hasPanel ? i : null);
                           if (!b.items.some(([t]) => t === toolRef.current)) {
                             setTool(b.items[0][0]);
                           }
@@ -2635,9 +2810,9 @@ export function ScreenshotOverlay() {
                       {/* Snipaste 式单色白图标：激活反白，不按功能染色 */}
                       <span style={{ display: "inline-flex" }}><MainIcon /></span>
                     </button>
-                    {/* 二次选项枚举：平铺在一级图标正下方，子图形 + 颜色/粗细
+                    {/* 二次选项枚举：平铺在一级图标正下方，子图形 + 颜色
                         同行展示。所有工具统一此逻辑；单工具无子图形、只显示
-                        颜色/粗细。选完后面板保持展开；收起靠再点一级图标或 Esc */}
+                        颜色。选完后面板保持展开；收起靠再点一级图标或 Esc */}
                     {submenuOpen === i && (
                       <div className={`shot-toolbtn-submenu${panelAbove ? " above" : ""}`} onClick={(ev) => ev.stopPropagation()}>
                         {isGroup && b.items.map(([t, Ic, name]) => (
@@ -2653,11 +2828,25 @@ export function ScreenshotOverlay() {
                   </div>
                 );
               })}
+              {/* 统一粗细调节：滚轮对全部画笔无级生效，入口收拢为一个——
+                  棋盘格圆点紧跟序号工具之后，圆点大小即当前粗细，
+                  悬停其上滚动调节（选区任意处滚动同样生效） */}
+              <button className="shot-sw-wheel" data-tip="画笔粗细（悬停滚轮调 1~24px）"
+                onWheel={(ev) => {
+                  ev.stopPropagation();
+                  const dir = ev.deltaY > 0 ? -1 : 1;
+                  const nv = Math.min(24, Math.max(1, sw + dir));
+                  setSw(nv); setSwBadge(nv);
+                  window.clearTimeout(swBadgeTimer.current);
+                  swBadgeTimer.current = window.setTimeout(() => setSwBadge(null), 800);
+                }}>
+                <span style={{ width: Math.min(4 + sw * 1.2, 26), height: Math.min(4 + sw * 1.2, 26) }} />
+              </button>
               <div className="shot-toolbar-sep" />
               <button data-tip="撤销 (Ctrl+Z)" disabled={annos.length===0}
-                onClick={()=>{if(annos.length>0){setUndos(u=>[...u,[...annos]]);setAnnos(a=>a.slice(0,-1));}}}><IcoUndo/></button>
+                onClick={()=>{if(annos.length>0){setEditIdx(-1);setUndos(u=>[...u,[...annos]]);setAnnos(a=>a.slice(0,-1));}}}><IcoUndo/></button>
               <button data-tip="重做 (Ctrl+Shift+Z)" disabled={undos.length===0}
-                onClick={()=>{if(undos.length>0){setAnnos(undos[undos.length-1]);setUndos(u=>u.slice(0,-1));}}}><IcoRedo/></button>
+                onClick={()=>{if(undos.length>0){setEditIdx(-1);setAnnos(undos[undos.length-1]);setUndos(u=>u.slice(0,-1));}}}><IcoRedo/></button>
               <div className="shot-toolbar-sep" />
               <div className="shot-toolbar-group shot-toolbar-actions">
                 <button data-tip="长截图（自动滚动拼接长图）" onClick={startLongShot}>
@@ -2679,10 +2868,25 @@ export function ScreenshotOverlay() {
         );
       })()}
 
-      {/* 滚轮调粗细时的即时反馈徽标 */}
-      {swBadge != null && (
-        <div className="shot-sw-badge">画笔粗细 {swBadge}px</div>
-      )}
+      {/* 调粗细的即时反馈徽章：贴在【选区底部居中】（比屏幕底边显眼得多），
+          文案前带粗细图标。选区够高则收进选区内下缘，太矮则放到选区下方 */}
+      {swBadge != null && (() => {
+        const bw = 148;
+        const bx = Math.min(Math.max(region.x + region.w / 2 - bw / 2, 8), window.innerWidth - bw - 8);
+        const by = region.h >= 80
+          ? region.y + region.h - 46
+          : Math.min(region.y + region.h + 10, window.innerHeight - 46);
+        return (
+          <div className="shot-sw-badge" style={{ left: bx, top: by }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <rect x="4" y="5.6" width="16" height="1.2" rx="0.6" />
+              <rect x="4" y="10.8" width="16" height="2.6" rx="1.3" />
+              <rect x="4" y="16.2" width="16" height="4.4" rx="2" />
+            </svg>
+            画笔粗细 {swBadge}px
+          </div>
+        );
+      })()}
 
       {/* initial hint */}
       {/* 左下角固定操作提示区（Snipaste 式）：黑色半透明底 + 键帽快捷键。
@@ -2785,7 +2989,7 @@ export function ScreenshotOverlay() {
           下左键拖拽即划选，复制走 Ctrl+C。
           坐标映射：OCR 行是裁剪图【物理像素】，÷cssScale 归一到 CSS 像素后
           再加选区左上角（region 已是 CSS 像素），与底层冻结帧严格对齐 */}
-      {ocrPhase === "done" && ocrLines.length > 0 && (() => {
+      {altActive && ocrPhase === "done" && ocrLines.length > 0 && (() => {
         const sc = cssScale();
         const bx = region.x, by = region.y;
         const selRects = scrSel.map((p) => {

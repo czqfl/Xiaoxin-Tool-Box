@@ -6,17 +6,22 @@
  *  - 纯展示 + 回调，不持有任何 OCR/翻译状态；所有数据与动作由调用方注入，
  *    因此贴图与截图各自用自己的 OCR 引擎（pin_ocr / shot_ocr）与翻译后端，
  *    但弹窗长相一致。
+ *  - 原文展示前经 groupOcrParagraphs 按版面几何归并成段落——识别引擎只给
+ *    行级框，一段换行文字会碎成多块，归并后按阅读结构成段显示（复制全部
+ *    与翻译输入在调用方用同一工具归并，三处口径一致）。
  *  - 定位由调用方通过 style 注入（截图：相对选区 right/left 绝对定位；
  *    贴图：相对贴图窗 top-right 绝对定位），本组件只定 `position:absolute`
- *    与玻璃卡片外观，便于两种窗口复用。
- *  - 主题变量全部带兜底（贴图窗不加载 base/theme.css，必须用 fallback
- *    才能拿到可读配色），与截图窗用同一套 --accent-rgb 等变量。
+ *    与卡片外观，便于两种窗口复用。
+ *  - 外观为不透明实色卡片（无毛玻璃），扁平紧凑按钮；主题变量全部带兜底
+ *    （贴图窗不加载 base/theme.css，必须用 fallback 才能拿到可读配色）。
  */
+import { useMemo } from "react";
 import type { CSSProperties } from "react";
 import type { ShotOcrLine } from "../../core/tauri";
+import { groupOcrParagraphs } from "./ocr-group";
 import "./ocr-panel.css";
 
-/** 逐行对照结果：pairs 与送译的原文行一一对齐 */
+/** 逐段对照结果：pairs 与送译的原文段落一一对齐 */
 export interface OcrTransPair { src: string; out: string; ok: boolean; pending: boolean }
 export interface OcrTransState { pairs: OcrTransPair[]; err: string }
 
@@ -45,21 +50,26 @@ export function OcrPanel(p: OcrPanelProps) {
   const tTotal = trans?.pairs.length ?? 0;
   const tDone = trans?.pairs.filter((x) => !x.pending).length ?? 0;
   const hasLines = lines.length > 0;
+  // 原文按版面几何归并成段落展示（与复制/翻译同一工具，口径一致）
+  const paras = useMemo(() => groupOcrParagraphs(lines), [lines]);
   return (
     <div className="ocr-panel" style={style}>
       <div className="ocr-head">
         <b>文字识别</b>
-        <span style={{ flex: 1 }} />
         {phase === "done" && hasLines && (
-          <>
-            {trans && <button onClick={onReturn}>返回原文</button>}
-            {trans
-              ? (tDone > 0 && <button onClick={onCopyTrans}>复制译文</button>)
-              : <button onClick={onCopyAll}>复制全部</button>}
-            {!trans && <button onClick={onTranslate}>翻译</button>}
-          </>
+          trans ? (
+            <>
+              {tDone > 0 && <button className="ocr-btn ocr-primary" onClick={onCopyTrans}>复制译文</button>}
+              <button className="ocr-btn" onClick={onReturn}>返回原文</button>
+            </>
+          ) : (
+            <>
+              <button className="ocr-btn ocr-primary" onClick={onCopyAll}>复制全部</button>
+              <button className="ocr-btn" onClick={onTranslate}>翻译</button>
+            </>
+          )
         )}
-        <button onClick={onClose}>关闭</button>
+        <button className="ocr-btn ocr-close" onClick={onClose} aria-label="关闭">✕</button>
       </div>
       {phase === "loading" && <div className="ocr-body ocr-muted">识别中…</div>}
       {phase === "error" && <div className="ocr-body ocr-err">{error}</div>}
@@ -92,21 +102,12 @@ export function OcrPanel(p: OcrPanelProps) {
           )
         ) : (
           <div className="ocr-lines">
-            {lines.length === 0 && (
-              <div className="ocr-body ocr-muted">未识别到文字（可调整选区后重新点击识别）</div>
-            )}
-            {lines.map((l, i) => (
-              <div key={i} className="ocr-line">{l.text}</div>
+            {paras.length === 0 && <div className="ocr-muted">未识别到文字（可调整选区后重新点击识别）</div>}
+            {paras.map((t, i) => (
+              <div key={i} className="ocr-line">{t}</div>
             ))}
           </div>
         )
-      )}
-      {phase === "done" && hasLines && (
-        <div className="ocr-selbar">
-          {trans
-            ? "划选任一列文字后 Ctrl+C 复制，或点上方「复制译文」"
-            : "划选文字后 Ctrl+C 复制，或点上方「复制全部」"}
-        </div>
       )}
     </div>
   );

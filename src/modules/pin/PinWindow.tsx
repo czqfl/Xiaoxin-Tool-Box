@@ -15,6 +15,7 @@ import {
 import { EVT_TRANSLATE_LINE } from "../../core/events";
 import { usePinOcrSelect } from "./usePinOcrSelect";
 import { type OcrTransState } from "../shared/OcrPanel";
+import { groupOcrParagraphs } from "../shared/ocr-group";
 import "./pin.css";
 
 /** 贴图边框随机定格色板（Snipaste 式：贴图瞬间彩闪几下，随后定格其中一色） */
@@ -267,7 +268,7 @@ export function PinWindow() {
   const [pinOcrTranslating, setPinOcrTranslating] = useState(false);
   const pinOcrTranslatingRef = useRef(false);
   const pinCopyAllOcr = () => {
-    const all = ocr.lines.map((l) => l.text).join("\n");
+    const all = groupOcrParagraphs(ocr.lines).join("\n");
     if (all) void copyText(all, true);
   };
   const pinCopyTransOut = () => {
@@ -275,10 +276,10 @@ export function PinWindow() {
     const all = pinOcrTrans.pairs.filter((p) => !p.pending).map((p) => p.out).join("\n");
     if (all) void copyText(all, true);
   };
-  /** 翻译当前贴图文字（逐行对照，与截图同款）：点下即铺原文+译文占位，
-   *  后端每译完一行推事件回填一行 */
+  /** 翻译当前贴图文字（逐段对照，与截图同款）：点下即铺原文+译文占位，
+   *  后端每译完一段推事件回填一段 */
   const pinDoTranslate = async () => {
-    const srcs = ocr.lines.map((l) => l.text).join("\n").split("\n").map((s) => s.trim()).filter(Boolean);
+    const srcs = groupOcrParagraphs(ocr.lines).map((s) => s.trim()).filter(Boolean);
     if (!srcs.length) return;
     pinOcrTranslatingRef.current = true;
     setPinOcrTranslating(true);
@@ -458,19 +459,42 @@ export function PinWindow() {
   }, []);
 
   // 热键整体显示贴图时自动解除鼠标穿透：穿透中的 webview 收不到任何
-  // 事件、无法自救，由本监听代劳（Rust 侧显隐已精简为纯 show/hide）
+  // 事件、无法自救，由本监听代劳（Rust 侧显隐已精简为纯 show/hide）。
+  // 同步维护 OCR 弹窗：整批隐藏时随之隐藏（别在屏幕上留孤儿浮窗），
+  // 唤回时若仍在文字模式则推送几何恢复显示
   const clickThroughRef = useRef(clickThrough);
   clickThroughRef.current = clickThrough;
   useEffect(() => {
     let un: (() => void) | undefined;
     void listen<boolean>("pin://visibility-changed", (e) => {
-      if (e.payload === true && clickThroughRef.current && idRef.current) {
-        setClickThrough(false);
-        pinSetClickThrough(false).catch(() => {});
-        void persistNowRef.current();
+      if (e.payload === true) {
+        if (clickThroughRef.current && idRef.current) {
+          setClickThrough(false);
+          pinSetClickThrough(false).catch(() => {});
+          void persistNowRef.current();
+        }
+        if (altActiveRef.current) ocrPushRef.current();
+      } else {
+        void WebviewWindow.getByLabel("pin-ocr").then((w) => { if (w) void w.hide().catch(() => {}); }).catch(() => {});
       }
     }).then((f) => { un = f; });
     return () => { un?.(); };
+  }, []);
+
+  // 本贴图窗自身被任意途径隐藏（兜底隐藏、系统级 Esc 隐藏前台贴图等，
+  // 这些路径不发广播事件）：随之隐藏 OCR 弹窗；重新可见且仍在文字模式则恢复
+  useEffect(() => {
+    const h = () => {
+      if (document.hidden) {
+        if (altActiveRef.current) {
+          void WebviewWindow.getByLabel("pin-ocr").then((w) => { if (w) void w.hide().catch(() => {}); }).catch(() => {});
+        }
+      } else if (altActiveRef.current) {
+        ocrPushRef.current();
+      }
+    };
+    document.addEventListener("visibilitychange", h);
+    return () => document.removeEventListener("visibilitychange", h);
   }, []);
 
   // keyboard

@@ -13,9 +13,11 @@
 //   （等效距离 上×0.4 / 左右×1.0 / 下×1.8）；幂函数蔓延（先慢后快）；
 //   花瓣状角度调制 → 扩散形状不规则（非圆形）；取 min 叠加 → 各区域前沿先后推进。
 // - 动画后 50%：便签整体透明度 100% → 50% 淡出（不必等 mask 铺满全窗）。
-// - **粒子自由飘散、无矩形边界约束**：等加速上升（speed = v0 + a·t）+ 随机左右偏转 ±55°
-//   + 横向恒定向漂移 ±30px/s + 水平轻摆 ±40px/s；粒子越过便签原本的矩形边界后继续
-//   向外飘散，**不因越界而销毁/受限**，仅按自身寿命（1800~3400ms）末段透明度衰减自然淡出。
+// - **粒子沿前沿物理飘散、无矩形边界约束**：初速取自消散前沿的 ∇T 方向与局部速度
+//   （同一波前邻居方向/速度一致 → "被一股波推出去"的整体感），起爆冲量按指数阻力
+//   衰减约 1s，随后转入浮力 + 风的终端漂移；湍流相位取自粒子位置（空间相干，
+//   相邻粒子近似同受力）。越过便签矩形边界继续飘散，**不因越界销毁**，仅按自身寿命
+//   末段透明度衰减自然淡出。运动模型在 particle-motion.ts，与 remote 粒子层同源共用。
 // - 颜色（动态主题采样）：构建便签"区域颜色场"（--bg 底色 + has-bg 背景图 cover 为主导，
 //   底色仅轻量调和），按粒子**生成区域**采样对应背景颜色（背景是什么颜色粒子就是什么颜色），
 //   additive 叠加出辉光，边升边变淡直至自然消散。
@@ -28,6 +30,7 @@ import { emit } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { newPool, spawnParticle, stepAndPaint, type MotionCfg } from "./particle-motion";
 
 /** 查询粒子层前端是否已就绪（Rust 侧跟踪 sticky://particles-layer-ready，见 sticky.rs）。
  *  window "particles" 存在 ≠ 前端就绪：conf 声明的窗口 visible:false → WebView 可能
@@ -48,7 +51,7 @@ let glowActive = false;
 let glowGen = 0;
 
 /** remote 模式（粒子交给全屏透明粒子层窗口）时，最近一次构建的消散时间场（供转发给粒子层）。 */
-let lastTField: { tW: number; tH: number; data: number[] } | null = null;
+let lastTField: { tW: number; tH: number; data: number[]; flow: number[] } | null = null;
 
 /** 当前粒子动画的“立即中止”句柄（由 runGlow 注册；cancelGlowParticles 调用）。 */
 let cancelGlowFn: (() => void) | null = null;
@@ -258,6 +261,7 @@ export function requestGlowDissolveClose(
           tW: tfield?.tW ?? 8,
           tH: tfield?.tH ?? 8,
           tField: tfield?.data ?? [],
+          flowField: tfield?.flow ?? [],
           density: particleDensity,
           speed,
           // 风偏（CSS px/s，正右/负左/0 无风）：粒子层 ×noteDpr 转物理，粒子整体朝（左/右）上方飘
@@ -724,9 +728,35 @@ function runGlow(
       Tfield[my * mw + mx] = dissolveTimeAt(nx, ny);
     }
   }
-  // remote 模式：把 T 场交给全屏粒子层窗口，使粒子生成时机与便签 mask 消散同步
+  // ---- flow 场：∇T → 每格"前沿推进方向 × 局部前沿速度"（CSS px/s，2 float/格）----
+  // 粒子初速从这里采样：同一波前的邻居方向几乎一致、速度同档 →
+  // 观感是"从起爆点被同一股波推出去"，而非各自乱飘（旧模型的根本缺陷）
+  const flow = new Float32Array(mw * mh * 2);
+  {
+    const stepPx = 2 / maskScale; // 中心差分的物理间距（CSS px）
+    for (let my = 0; my < mh; my++) {
+      for (let mx = 0; mx < mw; mx++) {
+        const gx = Tfield[my * mw + Math.min(mw - 1, mx + 1)] - Tfield[my * mw + Math.max(0, mx - 1)];
+        const gy = Tfield[Math.min(mh - 1, my + 1) * mw + mx] - Tfield[Math.max(0, my - 1) * mw + mx];
+        const mag = Math.hypot(gx, gy) / stepPx; // ms/CSS px
+        if (mag < 0.25) {
+          const o = (my * mw + mx) * 2;
+          flow[o] = 0;
+          flow[o + 1] = -170; // 平坦区（各前沿抵消）：温和向上
+          continue;
+        }
+        // 前沿速度 = 1/|∇T|；×0.8 稍作压制（粒子起爆再乘 burst），限 40~360 防噪声尖峰
+        const sp = Math.min(360, Math.max(40, 800 / mag));
+        const o = (my * mw + mx) * 2;
+        flow[o] = (gx / mag) * sp;
+        flow[o + 1] = (gy / mag) * sp;
+      }
+    }
+  }
+  // remote 模式：把 T 场 + flow 场交给全屏粒子层窗口，粒子生成时机与速度方向
+  // 都与便签 mask 消散严格同步
   if (remote) {
-    lastTField = { tW: mw, tH: mh, data: Array.from(Tfield) };
+    lastTField = { tW: mw, tH: mh, data: Array.from(Tfield), flow: Array.from(flow) };
   }
 
   // ---- mask 裁切：把 T 场逐像素 alpha 渲染到蒙版 canvas，驱动便签平滑消散 ----
@@ -807,49 +837,14 @@ function runGlow(
     binPts[b].push(i);
   }
 
-  // ---- 粒子池（SoA + swap-remove；初速度/加速度全粒子一致，等加速上升）----
-  // 粒子数量（density）真正控制存活粒子数：peakAlive 占发射点总数的比例随 density 变化；
-  // 发射点网格（ecount，极密）仅决定每个粒子的出生位置，不直接决定粒子数。
+  // ---- 粒子池：生成与物理统一走 particle-motion 共享模型（与 remote 粒子层同源）----
   const peakAlive = Math.round(ecount * (0.03 + 0.97 * density));
   const maxP = peakAlive + 1500;
-  const px = new Float32Array(maxP);
-  const py = new Float32Array(maxP);
-  const pang = new Float32Array(maxP);
-  const pv0 = new Float32Array(maxP);
-  const pv1 = new Float32Array(maxP);
-  const plife = new Float32Array(maxP);
-  const page = new Float32Array(maxP);
-  const psize = new Float32Array(maxP);
-  const pseed = new Float32Array(maxP);
-  const psway = new Float32Array(maxP);
-  const pr = new Float32Array(maxP);
-  const pg = new Float32Array(maxP);
-  const pb = new Float32Array(maxP);
+  const ps = newPool(maxP);
   const glData = new Float32Array(maxP * 7);
-  let pcount = 0;
-
-  // 在 (x,y) 生成一粒发光微粒；颜色采样自该生成区域的主题色。
-  const spawn = (x: number, y: number, age: number): void => {
-    if (pcount >= maxP) return;
-    // 寿命加长（1800~3400ms，随速度缩放）：粒子有充足时间飘出便签矩形边界，
-    // 越过原始区域向外扩散，靠自身寿命/透明度衰减自然消散（无矩形边界销毁约束）
-    let life = Math.round((1800 + Math.random() * 1600) * k);
-    const fit = duration - age - 40;
-    if (fit < 120) return;
-    if (life > fit) life = fit;
-    const i = pcount++;
-    px[i] = x;
-    py[i] = y;
-    pang[i] = (Math.random() - 0.5) * ((110 * Math.PI) / 180); // 随机左右偏转 ±55°
-    pv0[i] = 20 + Math.random() * 15; // 初速度（px/s，适中起飘：快于前沿形成重叠纵深；原 6~16 太慢）
-    pv1[i] = 150; // 加速度（px/s²，中等上浮；原 650 直线冲走、180 偏慢）
-    plife[i] = life;
-    page[i] = 0;
-    psize[i] = 1.8; // 亮核 1.8px
-    pseed[i] = Math.random() * Math.PI * 2;
-    psway[i] = (Math.random() - 0.5) * 60; // ±30 px/s 恒定向漂移（横向更自由）
-    const [r, g, b] = sampleThemeColor(x, y);
-    pr[i] = r / 255; pg[i] = g / 255; pb[i] = b / 255;
+  // 坐标约定：self 网格是局部 CSS px，spawn 时 ×dpr 转物理（stepAndPaint 全程物理 px）
+  const motion: MotionCfg = {
+    dpr, flow, tW: mw, tH: mh, rectW: w, rectH: h, ox: 0, oy: 0, wind: windPx, k,
   };
 
   // ---- 帧循环控制 ----
@@ -933,67 +928,19 @@ function runGlow(
           const idx = pts[z];
           if (emitDone[idx] === 0) {
             emitDone[idx] = 1;
-            if (Math.random() < keepProb) spawn(emitX[idx], emitY[idx], age);
+            if (Math.random() < keepProb) {
+              const [cr, cg, cb] = sampleThemeColor(emitX[idx], emitY[idx]);
+              spawnParticle(ps, motion, emitX[idx] * dpr, emitY[idx] * dpr, age, duration, cr, cg, cb);
+            }
           }
         }
       }
 
-      // ---- 粒子：物理更新 + GPU 单次 draw call 绘制（additive 辉光）----
+      // ---- 粒子：共享物理积分 + GPU 单次 draw call 绘制（additive 辉光）----
       gl!.clearColor(0, 0, 0, 0);
       gl!.clear(gl!.COLOR_BUFFER_BIT);
       const globalFade = age > duration - 200 ? Math.max(0, (duration - age) / 200) : 1;
-      let drawCount = 0;
-      for (let i = 0; i < pcount; i++) {
-        const a = page[i] + dt * 1000;
-        page[i] = a;
-        const life = plife[i];
-        const u = a / life;
-        if (u >= 1) {
-          const last = --pcount;
-          if (i !== last) {
-            px[i] = px[last]; py[i] = py[last]; pang[i] = pang[last];
-            pv0[i] = pv0[last]; pv1[i] = pv1[last]; plife[i] = plife[last];
-            page[i] = page[last]; psize[i] = psize[last]; pseed[i] = pseed[last];
-            psway[i] = psway[last]; pr[i] = pr[last]; pg[i] = pg[last]; pb[i] = pb[last];
-          }
-          i--;
-          continue;
-        }
-        // 等加速上升 + 轻柔水平摆动：粒子越过便签矩形边界后继续自由飘散，
-        // 无边界销毁约束，仅靠寿命末段透明度衰减自然淡出
-        // 慢速漂浮上升 + 多频强摆动（与 remote 粒子层同一套运动模型，观感一致）：
-        // 速度包络走缓避免直线冲走；横向三频正弦叠加出复杂曲线路径，纵向起伏漂浮。
-        const aSec = a / 1000;
-        // 被风轻轻吹走的飘速曲线（与 remote 粒子层同款）：前期快速起飘、后期缓慢回落
-        const tLife = life / 1000;
-        const rise = 1 - Math.exp(-aSec / 0.3);
-        const ease = 1 - 0.3 * Math.min(1, aSec / Math.max(0.6, tLife));
-        const speed = (pv0[i] + pv1[i] * rise * ease) * (1 + 0.3 * Math.sin(a * 0.0021 + pseed[i] * 3));
-        const dx = Math.sin(pang[i]);
-        const dy = -Math.cos(pang[i]); // 向上为负 y
-        const s1 = Math.sin(a * 0.0025 + pseed[i]) * 85;
-        const s2 = Math.sin(a * 0.009 + pseed[i] * 2.3) * 55;
-        const s3 = Math.sin(a * 0.024 + pseed[i] * 4.1) * 20;
-        const swayX = psway[i] + s1 + s2 + s3 + windPx; // 整体风偏：粒子朝（左/右）上飘
-        const bobY = Math.sin(a * 0.0062 + pseed[i] * 1.7) * 55 * (0.35 + 0.65 * rise);
-        px[i] += (dx * speed + swayX) * dt;
-        py[i] += (dy * speed + bobY) * dt;
-        const t = 1 - u;
-        const twinkle = 0.8 + 0.2 * Math.sin(a * 0.02 + pseed[i] * 5);
-        const alpha = t * Math.pow(t, 0.2) * globalFade * twinkle;
-        if (alpha < 0.02) continue;
-        const pulse = 1 + 0.22 * Math.sin(a * 0.007 + pseed[i] * 2);
-        const haloR = psize[i] * pulse * 1.3;
-        const o = drawCount * 7;
-        glData[o] = px[i] * dpr;
-        glData[o + 1] = py[i] * dpr;
-        glData[o + 2] = haloR * 2 * dpr;
-        glData[o + 3] = alpha;
-        glData[o + 4] = pr[i];
-        glData[o + 5] = pg[i];
-        glData[o + 6] = pb[i];
-        drawCount++;
-      }
+      const drawCount = stepAndPaint(ps, motion, dt, globalFade, glData, 0);
       if (drawCount > 0) {
         gl!.bindBuffer(gl!.ARRAY_BUFFER, glBuf);
         gl!.bufferData(gl!.ARRAY_BUFFER, glData.subarray(0, drawCount * 7), gl!.DYNAMIC_DRAW);
