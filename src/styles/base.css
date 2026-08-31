@@ -245,10 +245,19 @@ button {
 .icon-btn:active {
   transform: scale(0.9);
 }
-/* 图标按钮不显示焦点外环：hover 底色反馈已足够，避免 WebView2 中
-   点击后按钮保持焦点、常驻一圈边框（用户反馈"关闭按钮一直有边框"） */
+/* 图标按钮关掉默认外环：全局 :focus-visible 的 2px 矩形 outline 外扩 2px
+   套在 28px 圆角图标上既不跟形又太抢眼，且 WebView2 中鼠标点击后
+   :focus-visible 仍然命中（用户反馈"关闭按钮一直有边框"）。
+   键盘导航的焦点反馈改由下方 data-kbd 模态规则承担：
+   只有真的按过 Tab / 方向键才会亮环，鼠标点击绝不会。 */
+.icon-btn:focus,
 .icon-btn:focus-visible {
   outline: none;
+}
+html[data-kbd="1"] .icon-btn:focus {
+  background: var(--bg-item-active);
+  color: var(--text-primary);
+  box-shadow: var(--ring);
 }
 .icon-btn.active {
   color: var(--accent);

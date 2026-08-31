@@ -275,16 +275,24 @@
   white-space: nowrap;
 }
 
-/* hover 时显示操作按钮：每个图标带小胶囊底，更精致 */
+/* hover 时显示操作按钮：每个图标带小胶囊底，更精致。
+   关键：必须用 visibility 而非仅 opacity 行制隐藏——opacity:0 的按钮
+   仍在 Tab 序列里，键盘用户会 Tab 进一排"看不见的按钮"（且焦点环
+   已被 .icon-btn:focus-visible 关掉，完全无反馈）。与 quickfiles 的
+   .qf-item-actions 保持同一套写法。 */
 .clip-actions {
   display: flex;
   gap: 4px;
   opacity: 0;
-  transition: opacity var(--dur-fast) var(--ease-out);
+  visibility: hidden;
+  transition: opacity var(--dur-fast) var(--ease-out),
+    visibility var(--dur-fast) var(--ease-out);
 }
 .clip-item:hover .clip-actions,
-.clip-item.selected .clip-actions {
+.clip-item.selected .clip-actions,
+.clip-item:focus-within .clip-actions {
   opacity: 1;
+  visibility: visible;
 }
 .clip-actions .icon-btn {
   width: 26px;

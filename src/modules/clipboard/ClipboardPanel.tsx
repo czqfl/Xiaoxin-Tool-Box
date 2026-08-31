@@ -94,6 +94,8 @@ function ClipboardPanelInner() {
     y: number;
   } | null>(null);
   const ghostRef = useRef<HTMLDivElement>(null);
+  /** 列表滚动容器：用于方向键导航时把选中项滚进可视区 */
+  const listRef = useRef<HTMLDivElement>(null);
   /** 拖拽结束后的那次 click 应被忽略，避免拖动误触发粘贴 */
   const suppressClickRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -208,6 +210,14 @@ function ClipboardPanelInner() {
     await rollbackPaste();
     // 事件广播会触发 refresh，这里不再手动刷新
   };
+
+  // 选中项变化时滚入可视区：方向键跨过一屏后选中项会跑到屏外，
+  // 没有这一步镜头就会“不跟手”——用户以为没选中。
+  // block:/u201cnearest/u201d 保证已在视区内时不产生多余滚动（鼠标点选也会走这条，同样无害）
+  useEffect(() => {
+    const el = listRef.current?.querySelector<HTMLElement>(".clip-item.selected");
+    el?.scrollIntoView({ block: "nearest" });
+  }, [selectedIdx]);
 
   // 全局键盘：方向键导航 / Enter 粘贴（Esc 由 useEscLayer 层叠栈接管）。
   // 输入框内按键规则：搜索框内方向键仅导航列表（阻止光标跳动）、Enter 粘贴；
@@ -519,6 +529,7 @@ function ClipboardPanelInner() {
         </div>
 
         <div
+          ref={listRef}
           className={`panel-body${dragState?.overId === "__end__" ? " drop-end" : ""}`}
           onPointerMove={(e) => {
             // 自实现拖拽：超过位移阈值进入拖动，并计算当前悬停目标

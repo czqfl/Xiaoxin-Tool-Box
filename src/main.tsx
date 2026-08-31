@@ -31,6 +31,27 @@ function syncToolboxTheme(): void {
     .catch(() => {});
 }
 
+/** 键盘模态标记：仅当用户真的按过 Tab / 方向键时，才给 <html> 挂 data-kbd="1"，
+ *  鼠标按下立即摘掉。
+ *  用途：焦点环只在键盘导航时出现。不直接依赖 :focus-visible 是因为
+ *  WebView2 中鼠标点击按钮后它依然会命中，导致"点完一直留一圈边框"
+ *  （已收到过该反馈，见 b7b343a）。 */
+function trackKeyboardModality(): void {
+  const root = document.documentElement;
+  const on = () => root.setAttribute("data-kbd", "1");
+  const off = () => root.removeAttribute("data-kbd");
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.key === "Tab" || e.key.startsWith("Arrow")) on();
+    },
+    true
+  );
+  window.addEventListener("mousedown", off, true);
+  window.addEventListener("pointerdown", off, true);
+  window.addEventListener("blur", off, true);
+}
+
 /** 全局入口：按窗口 label 分流——
  *  便签相关窗口（note_* / sticky-*）挂载 vanilla 便签应用（样式完全隔离），
  *  其余窗口挂载工具箱 React 应用。
@@ -39,6 +60,8 @@ function syncToolboxTheme(): void {
  *  【设置归属】便签设置存于便签自己的 sticky_settings.json，不进工具箱
  *  AppConfig——界面统一挂在工具箱设置里，底层配置保持独立。 */
 async function bootstrap() {
+  // 焦点环与键盘导航的前提：必须先于任何组件挂载
+  trackKeyboardModality();
   const label = getCurrentWindow().label;
 
   // 【仅开发模式】便签/历史/截图遮罩等窗口都是"预热创建、隐藏复用"的常驻窗口，
