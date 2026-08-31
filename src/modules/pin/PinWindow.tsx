@@ -301,6 +301,12 @@ export function PinWindow() {
     setPinOcrTrans(null);
     setPinOcrTranslating(false);
   };
+  // 关闭来源贴图窗时，连带销毁独立 OCR 弹窗(它无父窗，不会随贴图自动关闭)
+  const closePinOcrWindow = () => {
+    void WebviewWindow.getByLabel("pin-ocr").then((w) => {
+      if (w) void w.destroy().catch(() => {});
+    }).catch(() => {});
+  };
 
   // OCR 弹窗始终渲染在独立 pin-ocr 窗（贴图外侧），不再按贴图尺寸决定是否停靠窗内
   const altActiveRef = useRef(false); altActiveRef.current = ocr.altActive;
@@ -480,6 +486,7 @@ export function PinWindow() {
       if (e.key === "Delete" || e.key === "Escape") {
         // 关闭失败（贴图已成幽灵条目：窗口与存储脱节）时回退为隐藏窗口——
         // 保证 Esc 永远能退出贴图
+        closePinOcrWindow();
         pinClose(idRef.current).catch(() => { void pinHideOne().catch(() => {}); });
       } else if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === "c" || e.key === "C")) {
         // 【默认复制为图片（贴图视觉）】：文本/富文本贴图经 DOM 渲染导出 PNG；
@@ -590,6 +597,25 @@ export function PinWindow() {
     return () => { un?.(); window.clearTimeout(dragClearRef.current); };
   }, []);
 
+  // 贴图缩放(滚轮)实时同步 OCR 弹窗几何：窗口尺寸变化即推送最新几何，
+  // 弹窗据此贴着贴图对应边重定位(只重定位、不重跑翻译)。仅文字模式需要。
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    void getCurrentWindow().onResized(() => {
+      if (altActiveRef.current) ocrPushRef.current();
+    }).then((f) => { un = f; }).catch(() => {});
+    return () => { un?.(); };
+  }, []);
+
+  // 贴图窗关闭(任意路径：右键菜单/双击/Esc·Delete) → 销毁 OCR 弹窗，避免残留幽灵窗
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    void getCurrentWindow().onCloseRequested(() => {
+      closePinOcrWindow();
+    }).then((f) => { un = f; }).catch(() => {});
+    return () => { un?.(); };
+  }, []);
+
   // persist position on move end
   useEffect(() => {
     const h = () => { void persistNowRef.current(); };
@@ -660,6 +686,7 @@ export function PinWindow() {
         break;
       }
       case "close":
+        closePinOcrWindow();
         pinClose(pid).catch(() => {});
         break;
     }
