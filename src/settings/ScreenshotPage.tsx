@@ -54,7 +54,10 @@ function OcrModelRows() {
       }
       setBusy(null);
     }
-    void update({ ...config, shot: { ...config.shot, ocr_model: m.id } });
+    // 等配置写入+广播完成，Rust 侧 set_model 才会生效；
+    // 之后再刷一次状态列表，让"使用中"标记即时更新
+    await update({ ...config, shot: { ...config.shot, ocr_model: m.id } });
+    setModels(await ocrModelStatus());
   };
 
   if (!models) return null;

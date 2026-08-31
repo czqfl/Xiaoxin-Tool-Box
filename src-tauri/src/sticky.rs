@@ -739,8 +739,11 @@ pub fn toggle_sticky_notes(
         }
         // 全部可见：收起全部便签（历史窗口保持原样）：统一走 dismiss_note
         // （立即置 Closing + 广播消散动画 + 可取消的强制隐藏兜底）。
+        // 【关键】只收起真正可见/打开的便签，已隐藏的不应触发动画
         for (l, _) in &note_wins {
-            dismiss_note(&app, l);
+            if note_on_screen(l) {
+                dismiss_note(&app, l);
+            }
         }
         crate::storage::diag_write("[sticky] toggle: dismissing all notes");
         return Ok(false);

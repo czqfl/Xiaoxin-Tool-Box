@@ -168,6 +168,14 @@ function agoLabel(ts: number): string {
   return dateLabel(ts);
 }
 
+/** 完整日期时间（带时分秒），用于最近打开卡片的精确时间戳 */
+function dateTimeLabel(ts: number): string {
+  if (!ts) return "";
+  const d = new Date(ts);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 /** 去掉路径尾部反斜杠，取所在目录用于次级文案 */
 function parentLabel(path: string): string {
   const i = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
@@ -248,17 +256,23 @@ function RecentTab({
               title={`${r.path}\n双击再次打开`}
               onDoubleClick={() => open(r)}
             >
-              <span className="qf-ext-badge" style={{ ["--c" as string]: typeColor(fileTypes, r.ext) }}>
-                {r.ext ? r.ext.toUpperCase().slice(0, 4) : "文件"}
-              </span>
+              {/* 左侧格式角标 + 打开次数（角标正下方） */}
+              <div className="qf-badge-stack">
+                <span className="qf-ext-badge" style={{ ["--c" as string]: typeColor(fileTypes, r.ext) }}>
+                  {r.ext ? r.ext.toUpperCase().slice(0, 4) : "文件"}
+                </span>
+                {sort === "count" && r.count >= 1 && (
+                  <span className="qf-row-count">{r.count}次</span>
+                )}
+              </div>
+              {/* 主内容区：文件名 + 路径上下排列 */}
               <span className="qf-row-main">
                 <span className="qf-row-name">{r.name}</span>
-                <span className="qf-row-meta">
-                  {parentLabel(r.path)}
-                  {sort === "count" && r.count > 1 ? ` · 打开 ${r.count} 次` : ""}
-                </span>
+                <span className="qf-row-meta">{parentLabel(r.path)}</span>
               </span>
-              <span className="qf-row-time">{agoLabel(r.last_open)}</span>
+              {/* 右侧时间（带时分秒） */}
+              <span className="qf-row-time">{dateTimeLabel(r.last_open)}</span>
+              {/* 悬停操作按钮 */}
               <span className="qf-row-actions" onClick={(e) => e.stopPropagation()}>
                 <button
                   className="qf-act"

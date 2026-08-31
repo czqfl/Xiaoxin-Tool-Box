@@ -593,6 +593,7 @@
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out),
     border-color var(--dur-fast) var(--ease-out);
+  position: relative; /* 为 .qf-row-count 绝对定位提供参照 */
 }
 /* 键盘导航当前项：与 hover 同语言，让"Enter 打开的是哪条"有视觉答案 */
 .qf-row.active {
@@ -608,15 +609,47 @@
   position: static;
   flex: none;
 }
+
+/* 角标+次数堆叠容器：左侧静态排列，内部垂直堆叠 */
+.qf-badge-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* 固定角标最小宽度，保证所有角标等宽 */
+.qf-badge-stack .qf-ext-badge {
+  min-width: 44px;
+  text-align: center;
+  padding: 3px 8px;
+}
+
+/* 打开次数：紧贴角标正下方，小字灰色 */
+.qf-row-count {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+/* ---- 最近打开页签专属：文件名/路径上下堆叠 + 右侧精确时间 ---- */
+/* 角标保持 .qf-ext-badge 的绝对定位右上角样式（与常用文件 FileItem 一致），
+   不需要额外覆盖；这里只调整主内容区和时间的布局 */
 .qf-row-main {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 3px;
+  justify-content: center;
+  padding-right: 48px; /* 给右上角角标留出空间 */
 }
 .qf-row-name {
   font-size: 13px;
+  font-weight: 500;
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -628,12 +661,16 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  direction: rtl; /* 长路径优先显示尾部（更能区分同名文件所在目录） */
+  direction: rtl;
 }
+/* 时间在右侧，垂直居中 */
 .qf-row-time {
   flex: none;
   font-size: 11px;
   color: var(--text-tertiary);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  align-self: center;
 }
 /* 悬停才露操作按钮，平时列表保持干净（与 .qf-item 的操作区同策略） */
 .qf-row-actions {

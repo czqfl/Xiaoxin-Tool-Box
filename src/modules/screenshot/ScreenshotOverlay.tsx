@@ -913,7 +913,7 @@ export function ScreenshotOverlay() {
         void shotSaveRegion([s.x*sc + (g?.x ?? 0), s.y*sc + (g?.y ?? 0), s.w*sc, s.h*sc]).catch(() => {});
         void doOutput("copy");
       }
-      else if (e.code === "KeyC" && e.ctrlKey && phase === "selected") {
+      else if (e.code === "KeyC" && e.ctrlKey && phase === "selected" && !altActiveRef.current) {
         const sel = ocrActiveRef.current ? (window.getSelection?.()?.toString() ?? "") : "";
         if (sel.trim()) return;
         e.preventDefault();
@@ -1024,9 +1024,10 @@ export function ScreenshotOverlay() {
       }
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === "c" || e.key === "C")
         && altActiveRef.current && hasScrSelRef.current) {
-        e.preventDefault();
         const t = buildScrText(scrSelRef.current);
-        if (t) void copyText(t, true).catch(() => {});
+        if (!t) return; // 有划选但无文字 → 放行，不要触发复制/关闭
+        e.preventDefault();
+        void copyText(t, true).catch(() => {});
       }
     };
     window.addEventListener("keydown", h);

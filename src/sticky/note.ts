@@ -2063,19 +2063,12 @@ export function mountNoteApp(noteId: string, preset = "") {
 
   // “全部关闭（全局）”快捷键由后端向每个便签窗口广播该事件：走与手动点击关闭
   // 按钮【完全相同的路径】——requestAnimatedClose()，先播粒子消散动画再隐藏。
-  // 不做任何"是否当前查看/焦点"判断：全局快捷键收起便签时，每个便签都播自己的
-  // 消散动画，跟点关闭按钮效果一致（用户明确要求；此前 isFocused/payload 判断
-  // 任一环节失误都会吞掉动画，是"快捷键关闭无动画"的反复根因）。
-  // 若本窗口正在播放关闭动画（closing）：快捷键"全部关闭"再次到来 → 立即完成——
-  // 清掉粒子层本便签实例 + 立即隐藏，避免历史便签位置的粒子动画继续播放/叠加。
+  // 【关键】已隐藏的窗口不再响应：wasHidden 标记在 finishClose 中设置，
+  // 避免"关闭后再次触发快捷键时，隐藏窗口仍播放粒子动画"的问题。
   getCurrentWindow()
-    .listen("play-close-anim", () => {
-      if (closing) {
-        // 已在关闭中：重复的关闭指令【不打断】进行中的动画，让动画自然播完
-        // ——此前立即 finishClose() 会把动画掐断（"播放不完"的另一条路径）。
-        // 动画模块自身 watchdog + closeFailSafe 兜底，不会卡住关不掉。
-        return;
-      }
+    .listen("play-close-anim", async () => {
+      if (closing) return; // 已在关闭中，不打断进行中的动画
+      if (wasHidden) return; // 已隐藏的窗口不响应，避免重复触发动画
       requestAnimatedClose();
     })
     .catch((e) => console.error("监听关闭动画事件失败:", e));
