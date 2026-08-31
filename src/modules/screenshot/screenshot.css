@@ -277,7 +277,7 @@ html[data-theme="dark"] {
    一眼可辨「这是调画笔粗细的」；配色沿用色板描边 var(--tb-line) */
 .shot-sw-wheel::before {
   content: ""; position: absolute; inset: 0; margin: auto;
-  width: 22px; height: 22px; border: 2px solid color-mix(in srgb, var(--tb-fg) 65%, transparent); border-radius: 6px;
+  width: 22px; height: 22px; border: 2px solid var(--tb-fg); border-radius: 6px;
   pointer-events: none;
 }
 .shot-sw-wheel span {
