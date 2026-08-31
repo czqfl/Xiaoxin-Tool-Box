@@ -49,7 +49,8 @@
   border-radius: 8px;
   background: transparent;
   cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-out);
+  transition: background var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
 }
 /* 彩色图标：每个工具一份辨识色（各主题各自调过深浅，实心底上也保证对比度）。
    hover 提亮一档，active 额外靠底部指示条 + 品牌色淡底区分——颜色只表"是哪个
@@ -69,6 +70,16 @@
    一块"脏矩形"（反馈里说的"图标后面有更深颜色矩形"） */
 .toolbar-btn:hover {
   background: rgba(var(--accent-rgb), 0.1);
+}
+/* 键盘焦点环：工具栏按钮只有图标没有文字，缺焦点环时 Tab 聚焦完全看不出来。
+   用 --ring（品牌色双环）而非 outline：outline 不跟随圆角，在 8px 圆角按钮上会顶出直角 */
+.toolbar-btn:focus-visible {
+  background: rgba(var(--accent-rgb), 0.14);
+  box-shadow: var(--ring);
+}
+/* 鼠标点击不显示焦点环（视觉噪音），键盘导航必须显示 */
+.toolbar-btn:focus:not(:focus-visible) {
+  box-shadow: none;
 }
 /* 面板打开中（active）：品牌色浅底 + 底部辨识色指示条。
    指示条用 ::after 绝对定位，不受磁吸 transform（写在按钮 inline style）影响 */

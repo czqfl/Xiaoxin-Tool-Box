@@ -61,6 +61,8 @@
   --tool-files: light-dark(#0ea5e9, #14b8a6);
   --tool-snippets: light-dark(#ec4899, #f472b6);
   --tool-sticky: light-dark(#8b5cf6, #a78bfa);
+  --tool-screenshot: light-dark(#0891b2, #22d3ee);
+  --tool-recorder: light-dark(#dc2626, #ff6b6b);
 
   /* 品牌 RGB 三元组（供轻渐变/半透明叠加使用）：深色侧由微开关切换 */
   --accent-rgb: 47, 128, 237;
@@ -229,6 +231,8 @@
   --tool-files: #0284c7;
   --tool-snippets: #be185d;
   --tool-sticky: #7c3aed;
+  --tool-screenshot: #0e7490;
+  --tool-recorder: #e11d48;
   --accent-rgb: 15, 159, 140;
 
   /* 背景：淡青灰（app 底与面板拉开明度差） */
@@ -312,6 +316,8 @@
   --tool-files: #0284c7;
   --tool-snippets: #ec4899;
   --tool-sticky: #7c3aed;
+  --tool-screenshot: #0e7490;
+  --tool-recorder: #e11d48;
   --accent-rgb: 22, 119, 255;
 
   /* 背景：明显淡蓝（与浅色的中性灰一眼区分） */
@@ -396,6 +402,8 @@
   --tool-files: #e0598b;
   --tool-snippets: #d6537f;
   --tool-sticky: #b8426f;
+  --tool-screenshot: #1f8a9b;
+  --tool-recorder: #b02a33;
   --accent-rgb: 207, 58, 67;
 
   /* 背景：极淡暖白玫瑰灰（红韵但不抢内容，与浅青/浅蓝同构） */
@@ -481,6 +489,8 @@
   --tool-files: #dd7a4a;
   --tool-snippets: #cf5b6e;
   --tool-sticky: #7c3aed;
+  --tool-screenshot: #1f8a9b;
+  --tool-recorder: #bf3a44;
   --accent-rgb: 224, 120, 10;
 
   /* 背景：暖调奶油灰（橙韵不抢内容，与红/青/蓝主题同构） */

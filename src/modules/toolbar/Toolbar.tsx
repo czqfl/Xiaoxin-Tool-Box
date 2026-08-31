@@ -93,7 +93,7 @@ export const TOOLS: Record<ToolKey, { label: string; color: string; icon: React.
   },
   recorder: {
     label: "屏幕录制",
-    color: "#ff5c5c",
+    color: "var(--tool-recorder)",
     icon: <IconRecord size={14} />,
   },
   settings: {
@@ -480,11 +480,8 @@ export function Toolbar() {
     }
   };
 
-  /** 鼠标离开：图标复位 + 贴边收起（事件驱动——离开窗口即延时收起） */
-  const handleLeave = () => {
-    mouseRef.current = null;
-    if (!rafRef.current) rafRef.current = requestAnimationFrame(applyMagnet);
-    pointerInsideRef.current = false;
+  /** 延时贴边收起（鼠标离开 / 键盘焦点移出 共用） */
+  const scheduleCollapse = () => {
     if (
       !collapsedRef.current &&
       pinnedEdgeRef.current &&
@@ -500,7 +497,15 @@ export function Toolbar() {
     }
   };
 
-  // 鍗歌浇鏃跺彇娑?rAF
+  /** 鼠标离开：图标复位 + 贴边收起（事件驱动——离开窗口即延时收起） */
+  const handleLeave = () => {
+    mouseRef.current = null;
+    if (!rafRef.current) rafRef.current = requestAnimationFrame(applyMagnet);
+    pointerInsideRef.current = false;
+    scheduleCollapse();
+  };
+
+  // 卸载时取消未完成的磁吸 rAF（防泄露）
   useEffect(
     () => () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -699,9 +704,32 @@ export function Toolbar() {
             type="button"
             className={`toolbar-btn${active ? " active" : ""}`}
             data-key={key}
+            aria-label={active ? `${tool.label}（面板已打开）` : tool.label}
+            aria-pressed={active}
             onMouseEnter={() =>
               void showTipAt(active ? `${tool.label}（面板已打开）` : tool.label, i)}
             onMouseLeave={hideTip}
+            onFocus={() => {
+              // 键盘聚焦：收起态必须先展开，否则 Tab 过来什么也看不见
+              handleEnter();
+              void showTipAt(
+                active ? `${tool.label}（面板已打开）` : tool.label,
+                i,
+              );
+            }}
+            onBlur={() => {
+              hideTip();
+              pointerInsideRef.current = false;
+              scheduleCollapse();
+            }}
+            onClick={(e) => {
+              // 鼠标点击由容器 onMouseUp 统一派发（避免拖动误触）；
+              // detail === 0 即键盘（Enter / Space）触发的 click，在此补上，
+              // 否则工具栏对键盘用户完全不可用。
+              if (e.detail !== 0) return;
+              void diagLog(`[toolbar] keyboard-activate ${key}`);
+              void panelToggle(key);
+            }}
             style={{
               width: BTN,
               height: BTN,
