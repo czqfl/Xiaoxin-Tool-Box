@@ -70,11 +70,12 @@ const IcoEllipse = () => (
   </svg>
 );
 // 形状组图标：矩形（圆角）+ 椭圆叠合（Snipaste 第一格风格）。统一 22×22，
-// 矩形加 rx 与其他自绘图标保持一致的圆润观感；viewBox 24×24，几何稍外推
+// 矩形加 rx 与其他自绘图标保持一致的圆润观感；viewBox 24×24，几何稍外推。
+// 比例按用户要求：矩形放大一号（14×11→15×12），圆形压扁为椭圆（r5→rx5/ry4）
 const IcoShape = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="2.5" y="4.5" width="14" height="11" rx="3.5"/>
-    <circle cx="17" cy="16.5" r="5"/>
+    <rect x="2" y="3.5" width="15" height="12" rx="4"/>
+    <ellipse cx="17" cy="16.5" rx="5" ry="4"/>
   </svg>
 );
 // 箭头：翼形流线箭头（尾部窄、头部宽），来自用户提供的企微风格箭头 PNG；
@@ -2739,11 +2740,15 @@ export function ScreenshotOverlay() {
         let ty = bottomEdge + 8;   // 默认：条放选区下方
         let tipsAbove = false;
         if (ty + barH > vh - 6) {
-          // 条在选区下方放不下 → 收进选区内并【贴选区下缘】。二级选项从条
-          // 上方向上展开（旧版把条+面板整组上移，条悬在选区中间、面板反而
-          // 在条下方——即"一级跑上方、二级在下方"；现改为条贴底、面板上翻）
-          tipsAbove = true;
-          ty = Math.max(bottomEdge - barH - 6, 8);
+          // 条在选区下方放不下 → 优先放选区【上方】（窄选区贴屏底时不再盖住
+          // 选区内容）；上下都放不下（选区几乎占满全屏）才收进选区内贴下缘，
+          // 此时提示上翻（tips-above）。二级选项面板方向仍由下方余量独立判定
+          if (region.y - barH - 8 >= 8) {
+            ty = region.y - barH - 8;
+          } else {
+            tipsAbove = true;
+            ty = Math.max(bottomEdge - barH - 6, 8);
+          }
         }
         let panelAbove = false;
         if (menuOpen) {
