@@ -375,12 +375,7 @@ export function TranslatePopup() {
 
         {/* 上方：原始内容（可编辑）；Enter 翻译，Shift+Enter 换行；复制按钮浮在框内。
             反向翻译中（结果回原文区）→ 上方显示"翻译中" */}
-        {busy === "src" ? (
-          <div className="translate-src-hint">
-            <span className="translate-hint-spin" />
-            反向翻译中…
-          </div>
-        ) : (
+        {(
           <div className="translate-src-wrap">
             <textarea
               ref={inputRef}
@@ -406,16 +401,17 @@ export function TranslatePopup() {
             )}
           </div>
         )}
+        {busy === "src" && (
+          <div className="translate-src-hint translate-hint-overlay">
+            <span className="translate-hint-spin" />
+            反向翻译中…
+          </div>
+        )}
 
         {/* 下方：译文（可编辑，Enter 反向翻译回原文）；复制按钮浮在结果框内。
             正向翻译/划词等待（结果到译文区）→ 下方显示"翻译中" */}
         <div className="translate-dst">
-          {loading || busy === "dst" ? (
-            <div className="translate-dst-hint">
-              <span className="translate-hint-spin" />
-              翻译中…
-            </div>
-          ) : (
+          {(
             <textarea
               ref={dstRef}
               className="translate-dst-input"
@@ -429,6 +425,12 @@ export function TranslatePopup() {
                 }
               }}
             />
+          )}
+          {(loading || busy === "dst") && (
+            <div className="translate-dst-hint translate-hint-overlay">
+              <span className="translate-hint-spin" />
+              翻译中…
+            </div>
           )}
           {busy !== "dst" && !loading && dst.trim() && (
             <button

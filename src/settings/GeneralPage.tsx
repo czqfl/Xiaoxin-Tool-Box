@@ -11,7 +11,6 @@ import { broadcastConfigChanged } from "../core/events";
 import { GlassSelect } from "../components/GlassSelect";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import {
-  Segmented,
   SettingGroup,
   SettingRow,
   Slider,
@@ -88,6 +87,8 @@ export function GeneralPage() {
       setAutostart(next);
     } catch (err) {
       console.error("切换开机自启失败", err);
+      // 失败必须可见：开关会回弹，但不提示的话用户不知道是失败还是没生效
+      setConfigMsg(`开机自启切换失败：${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setAutostartBusy(false);
     }
@@ -130,11 +131,8 @@ export function GeneralPage() {
         </SettingRow>
 
         <SettingRow title="界面语言" desc="更多语言支持即将推出">
-          <Segmented
-            value={config.general.language}
-            options={[{ value: "zh-CN", label: "简体中文" }]}
-            onChange={(v) => patchGeneral({ language: v })}
-          />
+          {/* 只有一个可选值，分段控件会让人以为"还有别的可切"——改静态文本 */}
+          <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>简体中文</span>
         </SettingRow>
       </SettingGroup>
 

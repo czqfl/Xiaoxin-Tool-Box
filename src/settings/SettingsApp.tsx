@@ -1,10 +1,12 @@
 /** 设置中心：左侧边栏导航 + 右侧内容区。
  *  菜单以功能模块划分（每个模块一页，含各自的功能开关与快捷键设置）；
  *  停用的功能其模块页从侧栏隐藏（重新启用走「功能开关」页）。 */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { useConfigStore } from "../stores/configStore";
+import { Spinner } from "../components/Spinner";
+import { IconClose } from "../components/icons";
 import { EVT_SHORTCUT_FAILED, onEvent } from "../core/events";
 import { ClipboardPage } from "./ClipboardPage";
 import { FolderPage } from "./FolderPage";
@@ -137,7 +139,16 @@ export function SettingsApp() {
   const [shortcutFailed, setShortcutFailed] = useState<string | null>(null);
   const shortcuts = useConfigStore((s) => s.config.shortcuts);
   // 任一快捷键保存成功（配置变化）即清除"注册失败"横幅
-  useEffect(() => { setShortcutFailed(null); }, [shortcuts]);
+  // 仅当快捷键【内容】真正变化时才清掉失败横幅：任意配置刷新都会产生新的
+  // shortcuts 对象引用，按引用清会让"注册仍失败"的横幅被误抹掉
+  const shortcutsJsonRef = useRef("");
+  useEffect(() => {
+    const j = JSON.stringify(shortcuts);
+    if (shortcutsJsonRef.current && j !== shortcutsJsonRef.current) {
+      setShortcutFailed(null);
+    }
+    shortcutsJsonRef.current = j;
+  }, [shortcuts]);
 
   useEffect(() => {
     load();
@@ -195,7 +206,14 @@ export function SettingsApp() {
     return () => mq.removeEventListener("change", apply);
   }, [loaded, theme]);
 
-  if (!loaded) return null;
+  if (!loaded) {
+    // 配置加载期间给个居中 Spinner，替代"整窗空白"
+    return (
+      <div style={{ height: "100vh", display: "grid", placeItems: "center" }}>
+        <Spinner size="lg" />
+      </div>
+    );
+  }
 
   // 停用功能的模块页从侧栏隐藏；当前页若被停用则回落到「功能开关」
   const moduleItems = MODULE_ITEMS.filter((it) => featureEnabled(config, it.feature));
@@ -262,12 +280,31 @@ export function SettingsApp() {
                   「{shortcutFailed}」的快捷键已被系统或其他应用占用，请在下方更换组合后保存。
                 </div>
               </div>
+              <button
+                className="icon-btn"
+                title="关闭"
+                onClick={() => setShortcutFailed(null)}
+              >
+                <IconClose size={14} />
+              </button>
             </div>
           </div>
         )}
 
         {currentPageDisabled ? (
-          <FeaturePage onNavigate={setPage} />
+          <>
+            {/* 回落必须留痕：静默换页时用户不知道自己点的页去哪了 */}
+            <div className="setting-group" style={{ borderColor: "var(--warning, #f5a524)" }}>
+              <div className="setting-row">
+                <div className="setting-info">
+                  <div className="setting-desc">
+                    当前页对应的功能已被停用，以下为「功能开关」页；可在下方重新开启后返回。
+                  </div>
+                </div>
+              </div>
+            </div>
+            <FeaturePage onNavigate={setPage} />
+          </>
         ) : (
           <>
             {page === "clipboard" && <ClipboardPage />}

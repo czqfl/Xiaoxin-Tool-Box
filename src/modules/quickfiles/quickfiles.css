@@ -594,6 +594,11 @@
   transition: background var(--dur-fast) var(--ease-out),
     border-color var(--dur-fast) var(--ease-out);
 }
+/* 键盘导航当前项：与 hover 同语言，让"Enter 打开的是哪条"有视觉答案 */
+.qf-row.active {
+  background: color-mix(in srgb, var(--c) 13%, transparent);
+  border-color: color-mix(in srgb, var(--c) 34%, transparent);
+}
 .qf-row:hover {
   background: color-mix(in srgb, var(--c) 13%, transparent);
   border-color: color-mix(in srgb, var(--c) 34%, transparent);
@@ -695,4 +700,27 @@
   text-align: center;
   font-size: 12px;
   color: var(--text-tertiary);
+}
+
+/* ---- 全盘索引不确定进度条：后端无总数可估，扫动条给出"确实在动"的证据 ---- */
+.qf-progress {
+  position: relative;
+  height: 4px;
+  margin: 0 2px 14px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent, var(--c-accent, #6b9fd9)) 14%, transparent);
+}
+.qf-progress-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40%;
+  border-radius: 999px;
+  background: var(--accent, var(--c-accent, #6b9fd9));
+  animation: qf-progress-sweep 1.2s ease-in-out infinite;
+}
+@keyframes qf-progress-sweep {
+  from { left: -40%; }
+  to { left: 100%; }
 }

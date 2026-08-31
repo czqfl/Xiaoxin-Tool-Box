@@ -300,6 +300,14 @@
   flex: 1;
   min-height: 0;
 }
+/* 叠加式加载层：替代旧的"替换 textarea"方案——翻译中原文/译文保持可见
+   （内容不再凭空消失），覆盖层拦截输入避免与结果回填打架 */
+.translate-hint-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  margin: 0;
+}
 .translate-src-hint {
   flex: 1.1;
   min-height: 0;

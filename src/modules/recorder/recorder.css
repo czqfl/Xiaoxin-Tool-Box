@@ -95,22 +95,6 @@ html[data-window="panel"] body {
   pointer-events: none;
   white-space: nowrap;
 }
-/* 键位胶囊：提示里的 Enter/Esc 等 */
-.rec-hint kbd,
-.rec-panel-hint kbd {
-  display: inline-block;
-  padding: 1px 6px;
-  border-radius: 5px;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-bottom-width: 2px;
-  color: rgba(255, 255, 255, 0.9);
-  font-family: var(--font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
-  font-size: 10.5px;
-  font-weight: 600;
-  line-height: 1.4;
-  text-shadow: none;
-}
 .rec-hint-error {
   top: 76px;
   border-color: color-mix(in srgb, var(--danger) 35%, transparent);
@@ -233,6 +217,7 @@ html[data-window="panel"] body {
    2. 完成后：右下角通知卡（信息 + 打开 + 关闭），6 秒自动消失
    ========================================================================== */
 .recb-root {
+  position: relative;
   width: 100vw;
   height: 100vh;
   display: flex;
@@ -367,8 +352,14 @@ html[data-window="panel"] body {
 }
 /* 切换失败提示：内联在录音按钮旁。窗口仅 36px 高，绝对定位到条外会被裁掉，
    只能内联；文案刻意极短（"无音频设备"）以省下紧张的横向空间 */
+/* 绝对定位浮在条中央：内联插在按钮之间会把后面的按钮整体挤走，
+   鼠标下的目标跟着漂移（误触风险）；浮层不占布局 */
 .recb-rec-tip {
-  flex: none;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 5;
   font-size: 11px;
   line-height: 1;
   padding: 4px 8px;
@@ -379,8 +370,8 @@ html[data-window="panel"] body {
   animation: recb-tip-in 160ms ease-out both;
 }
 @keyframes recb-tip-in {
-  from { opacity: 0; transform: translateX(-3px); }
-  to { opacity: 1; transform: none; }
+  from { opacity: 0; transform: translate(-50%, -50%) translateY(3px); }
+  to { opacity: 1; transform: translate(-50%, -50%); }
 }
 /* 未静音时用次要前景色，避免抢走「停止/暂停」的视觉重点 */
 .recb-btn.recb-icon:has(> svg):not(.recb-stop):not(.recb-cancel):not(.recb-rec-on) {

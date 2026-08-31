@@ -201,6 +201,12 @@
   border: 1px solid var(--border-subtle);
   background: var(--bg-badge);
 }
+/* 缩略图加载失败角标：点击整块重试 */
+.clip-thumb-retry {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
 .clip-thumb-placeholder {
   display: flex;
   align-items: center;

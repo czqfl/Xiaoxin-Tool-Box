@@ -31,6 +31,9 @@ function ImageThumb({ entryId }: { entryId: string }) {
   const fetchImage = useClipboardStore((s) => s.fetchImage);
   const cached = useClipboardStore((s) => s.imageCache[entryId]);
   const [src, setSrc] = useState(cached ?? "");
+  // 缩略图加载失败态：重试 6 次仍失败不再静默停在占位图标，给可点的重试入口
+  const [thumbFailed, setThumbFailed] = useState(false);
+  const [thumbRetry, setThumbRetry] = useState(0);
 
   // entryId 变化时必须重置 src：组件实例可能被 React 复用到另一条目上
   // （列表渲染漏 key 等场景），残留旧 data-url 会显示不相干的图片
@@ -51,6 +54,8 @@ function ImageThumb({ entryId }: { entryId: string }) {
         } else if (attempts < 6) {
           attempts += 1;
           setTimeout(tryLoad, 400);
+        } else {
+          setThumbFailed(true);
         }
       });
     };
@@ -58,12 +63,25 @@ function ImageThumb({ entryId }: { entryId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [entryId, src, fetchImage]);
+  }, [entryId, src, fetchImage, thumbRetry]);
 
   if (!src) {
     return (
-      <div className="clip-thumb clip-thumb-placeholder">
+      <div
+        className="clip-thumb clip-thumb-placeholder"
+        title={thumbFailed ? "加载失败，点击重试" : undefined}
+        style={thumbFailed ? { cursor: "pointer" } : undefined}
+        onClick={
+          thumbFailed
+            ? () => {
+                setThumbFailed(false);
+                setThumbRetry((t) => t + 1);
+              }
+            : undefined
+        }
+      >
         <IconImage size={18} />
+        {thumbFailed && <span className="clip-thumb-retry">重试</span>}
       </div>
     );
   }
@@ -138,8 +156,14 @@ export function ClipboardItem({
       toast.show("内容不能为空", "error");
       return;
     }
-    setEditing(false);
-    await updateText(entry.id, t);
+    // 先等保存成功再退出编辑态：旧写法先退编辑再 await，失败后改动
+    // 被静默丢弃，用户以为存上了
+    try {
+      await updateText(entry.id, t);
+      setEditing(false);
+    } catch (err) {
+      toast.show(`保存失败：${String(err)}`, "error");
+    }
   };
 
   /** 执行转换：写回系统剪贴板（不重复记录）并同步更新条目 */

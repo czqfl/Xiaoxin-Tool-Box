@@ -324,6 +324,9 @@ function SearchTab({
   const [hits, setHits] = useState<FsHit[]>([]);
   const [err, setErr] = useState("");
   const [searching, setSearching] = useState(false);
+  // 键盘导航：↑↓ 在结果间移动 active，Enter 打开当前项（此前只能打开第一条）
+  const [active, setActive] = useState(0);
+  const rowsRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const refresh = () => fsIndexStatus().then(setStatus);
 
@@ -348,6 +351,13 @@ function SearchTab({
     };
   }, []);
 
+  // active 变化时保持可见行滚动跟随（与命令面板同一套写法）
+  useEffect(() => {
+    rowsRef.current
+      ?.querySelector<HTMLElement>(".qf-row.active")
+      ?.scrollIntoView({ block: "nearest" });
+  }, [active]);
+
   // 输入防抖：中文输入法连续上屏时不要每个字符打一次后端
   useEffect(() => {
     const key = q.trim();
@@ -361,6 +371,7 @@ function SearchTab({
       fsIndexSearch(key)
         .then((v) => {
           setHits(v);
+          setActive(0);
           setErr("");
         })
         .catch((e) => {
@@ -394,7 +405,17 @@ function SearchTab({
             name="qf-fulltext-search"
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && hits.length) open(hits[0]);
+              // React 合成事件类型缺 isComposing 声明，用原生事件兜底（IME 选词期间不劫持按键）
+              if ((e.nativeEvent as KeyboardEvent).isComposing) return;
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setActive((i) => (hits.length ? (i + 1) % hits.length : 0));
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setActive((i) => (hits.length ? (i - 1 + hits.length) % hits.length : 0));
+              } else if (e.key === "Enter" && hits.length) {
+                open(hits[Math.min(active, hits.length - 1)]);
+              }
             }}
           />
         </span>
@@ -441,11 +462,18 @@ function SearchTab({
       <div className="panel-body qf-body">
         {err && <div className="qf-error">{err}</div>}
         {building && (
-          <EmptyState
-            icon={<Spinner size="lg" />}
-            title="正在建立全盘索引"
-            description={`已扫描 ${scanned.toLocaleString()} 条。首次扫描需要十几秒到几分钟，期间可继续使用其他页签。`}
-          />
+          <>
+            {/* 不确定进度条：后端只能给出已扫描条数、无法预估总数，
+                确定性百分比会误导；扫动条至少给出"确实在动"的证据 */}
+            <div className="qf-progress" aria-hidden="true">
+              <div className="qf-progress-fill" />
+            </div>
+            <EmptyState
+              icon={<Spinner size="lg" />}
+              title="正在建立全盘索引"
+              description={`已扫描 ${scanned.toLocaleString()} 条。首次扫描需要十几秒到几分钟，期间可继续使用其他页签。`}
+            />
+          </>
         )}
         {!building && status && status.entries === 0 && !err && (
           <EmptyState
@@ -470,11 +498,11 @@ function SearchTab({
           <EmptyState icon={<IconSearch size={22} />} title="输入要查找的文件名" description="例如 report、.rs、src-tauri\ocr" />
         )}
         {!building && hits.length > 0 && (
-          <div className="qf-rows">
-            {hits.map((h) => (
+          <div className="qf-rows" ref={rowsRef}>
+            {hits.map((h, i) => (
               <div
                 key={h.path}
-                className="qf-row"
+                className={`qf-row${i === active ? " active" : ""}`}
                 title={`${h.path}\n双击打开`}
                 onDoubleClick={() => open(h)}
               >
