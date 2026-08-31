@@ -71,11 +71,11 @@ const IcoEllipse = () => (
 );
 // 形状组图标：矩形（圆角）+ 椭圆叠合（Snipaste 第一格风格）。统一 22×22，
 // 矩形加 rx 与其他自绘图标保持一致的圆润观感；viewBox 24×24，几何稍外推。
-// 比例按用户要求：矩形放大一号（14×11→15×12），圆形压扁为椭圆（r5→rx5/ry4）
+// 比例按用户要求（二轮放大）：矩形 16×13、椭圆 rx5.5/ry4.5，总尺寸 22×22 不变
 const IcoShape = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="2" y="3.5" width="15" height="12" rx="4"/>
-    <ellipse cx="17" cy="16.5" rx="5" ry="4"/>
+    <rect x="1.5" y="3" width="16" height="13" rx="4.5"/>
+    <ellipse cx="17" cy="16.5" rx="5.5" ry="4.5"/>
   </svg>
 );
 // 箭头：翼形流线箭头（尾部窄、头部宽），来自用户提供的企微风格箭头 PNG；
