@@ -22,6 +22,7 @@ import {
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useConfigStore } from "../../stores/configStore";
 import {
+  fsIndexCancel,
   fsIndexRebuild,
   fsIndexSearch,
   fsIndexStatus,
@@ -335,9 +336,10 @@ function SearchTab({
     onEvent<{ entries: number }>(EVT_FSINDEX_PROGRESS, (p) => {
       setScanned(p.entries);
     }).then((u) => { if (dead) u(); else un1 = u; });
-    onEvent<{ ok: boolean }>(EVT_FSINDEX_DONE, () => {
+    onEvent<{ ok: boolean; cancelled?: boolean }>(EVT_FSINDEX_DONE, (p) => {
       setScanned(0);
       void refresh();
+      if (p.cancelled) onToast("已取消建立索引", "success");
     }).then((u) => { if (dead) u(); else un2 = u; });
     return () => {
       dead = true;
@@ -410,7 +412,19 @@ function SearchTab({
                 )
                 : "尚未建立索引"}
           </span>
-          {!building && (
+          {building ? (
+            <button
+              className="btn btn-sm"
+              title="停止扫描；已扫描部分不会保留"
+              onClick={() => {
+                fsIndexCancel()
+                  .then((ok) => { if (!ok) onToast("没有进行中的扫描", "error"); })
+                  .catch((e) => onToast(String(e), "error"));
+              }}
+            >
+              取消
+            </button>
+          ) : (
             <button
               className="btn btn-sm"
               onClick={() => {

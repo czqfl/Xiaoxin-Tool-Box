@@ -248,6 +248,9 @@ pub struct FsIndexStatus {
 // ---------- 全局状态 ----------
 static INDEX: Mutex<Option<Arc<Index>>> = Mutex::new(None);
 static BUILDING: AtomicBool = AtomicBool::new(false);
+/// 取消当前扫描：visit 里置位后对后续条目一律 Skip（目录不再下钻），
+/// walker 把已入队目录排空即退出，等效快速中止。
+static CANCEL: AtomicBool = AtomicBool::new(false);
 pub const EVT_FSINDEX_PROGRESS: &str = "fsindex://progress";
 pub const EVT_FSINDEX_DONE: &str = "fsindex://done";
 const STALE_SECS: i64 = 3 * 86400;
@@ -408,7 +411,10 @@ fn score(ix: &Index, e: &Entry, q: &str, ql: &str) -> Option<i64> {
 ///
 /// 目录遍历整体复用 ripgrep 的 `ignore` 并行 walker（跨线程分派目录、
 /// 跳过符号链接防环），本函数只负责把 DirEntry 折叠成紧凑存储。
-pub fn scan(progress: &(dyn Fn(usize) + Send + Sync)) -> Result<Index, String> {
+pub fn scan(
+    progress: &(dyn Fn(usize) + Send + Sync),
+    is_cancelled: &(dyn Fn() -> bool + Send + Sync),
+) -> Result<Index, String> {
     use ignore::{ParallelVisitor, ParallelVisitorBuilder, WalkBuilder, WalkState};
 
     let roots = fixed_roots();
@@ -423,6 +429,7 @@ pub fn scan(progress: &(dyn Fn(usize) + Send + Sync)) -> Result<Index, String> {
         sink: &'a Mutex<Index>,
         counter: &'a std::sync::atomic::AtomicUsize,
         progress: &'a (dyn Fn(usize) + Send + Sync),
+        is_cancelled: &'a (dyn Fn() -> bool + Send + Sync),
         buf: Vec<(String, String, bool)>,
         last_emit: std::time::Instant,
     }
@@ -432,6 +439,7 @@ pub fn scan(progress: &(dyn Fn(usize) + Send + Sync)) -> Result<Index, String> {
         sink: &'a Mutex<Index>,
         counter: &'a std::sync::atomic::AtomicUsize,
         progress: &'a (dyn Fn(usize) + Send + Sync),
+        is_cancelled: &'a (dyn Fn() -> bool + Send + Sync),
     }
     impl<'a> ParallelVisitorBuilder<'a> for VisitorBuilder<'a> {
         fn build(&mut self) -> Box<dyn ParallelVisitor + 'a> {
@@ -439,6 +447,7 @@ pub fn scan(progress: &(dyn Fn(usize) + Send + Sync)) -> Result<Index, String> {
                 sink: self.sink,
                 counter: self.counter,
                 progress: self.progress,
+                is_cancelled: self.is_cancelled,
                 buf: Vec::with_capacity(FLUSH_BATCH),
                 last_emit: std::time::Instant::now(),
             })
@@ -459,6 +468,10 @@ pub fn scan(progress: &(dyn Fn(usize) + Send + Sync)) -> Result<Index, String> {
     }
     impl ParallelVisitor for Visitor<'_> {
         fn visit(&mut self, res: Result<ignore::DirEntry, ignore::Error>) -> WalkState {
+            if (self.is_cancelled)() {
+                // Skip：对目录意味着不下钻，已入队目录被排空后 walker 即结束
+                return WalkState::Skip;
+            }
             let Ok(de) = res else { return WalkState::Continue };
             let Some(name) = de.file_name().to_str() else {
                 return WalkState::Continue;
@@ -511,9 +524,12 @@ pub fn scan(progress: &(dyn Fn(usize) + Send + Sync)) -> Result<Index, String> {
             .max_depth(None)
             .build_parallel()
     };
-    let mut vb = VisitorBuilder { sink: &sink, counter: &counter, progress };
+    let mut vb = VisitorBuilder { sink: &sink, counter: &counter, progress, is_cancelled };
     mpb.visit(&mut vb);
 
+    if (is_cancelled)() {
+        return Err("__cancelled__".into());
+    }
     let mut ix = sink.into_inner().map_err(|_| "索引构建状态异常".to_string())?;
     ix.built_at = now_ms();
     ix.roots = root_strs;
@@ -545,12 +561,16 @@ pub fn fs_index_rebuild(app: AppHandle, paths: State<'_, AppPaths>) -> Result<()
     if BUILDING.swap(true, Ordering::SeqCst) {
         return Err("索引正在构建中，请稍候".into());
     }
+    CANCEL.store(false, Ordering::SeqCst);
     let paths = paths.inner().clone();
     std::thread::spawn(move || {
         let app2 = app.clone();
-        let r = scan(&move |n| {
-            let _ = app2.emit(EVT_FSINDEX_PROGRESS, serde_json::json!({ "entries": n }));
-        })
+        let r = scan(
+            &move |n| {
+                let _ = app2.emit(EVT_FSINDEX_PROGRESS, serde_json::json!({ "entries": n }));
+            },
+            &|| CANCEL.load(Ordering::Relaxed),
+        )
         .and_then(|ix| {
             let count = ix.len();
             ix.save(&paths.fs_index_file)?;
@@ -558,13 +578,31 @@ pub fn fs_index_rebuild(app: AppHandle, paths: State<'_, AppPaths>) -> Result<()
             crate::storage::diag_write(&format!("[fsindex] built {count} entries"));
             Ok(())
         });
+        let cancelled = matches!(&r, Err(e) if e == "__cancelled__");
         if let Err(ref e) = r {
-            crate::storage::diag_write(&format!("[fsindex] rebuild failed: {e}"));
+            crate::storage::diag_write(&format!(
+                "[fsindex] rebuild {}: {e}",
+                if cancelled { "cancelled" } else { "failed" }
+            ));
         }
-        let _ = app.emit(EVT_FSINDEX_DONE, serde_json::json!({ "ok": r.is_ok() }));
+        let _ = app.emit(
+            EVT_FSINDEX_DONE,
+            serde_json::json!({ "ok": r.is_ok(), "cancelled": cancelled }),
+        );
         BUILDING.store(false, Ordering::SeqCst);
     });
     Ok(())
+}
+
+/// 取消进行中的索引扫描。返回是否成功发出取消请求（没有扫描在进行时为 false）。
+/// 取消是异步生效的：DONE 事件（cancelled: true）到达前 building 仍为 true。
+#[tauri::command]
+pub fn fs_index_cancel() -> bool {
+    if !BUILDING.load(Ordering::SeqCst) {
+        return false;
+    }
+    CANCEL.store(true, Ordering::SeqCst);
+    true
 }
 
 /// 搜索文件名/目录名。至少 2 个字符：单字符在这套打分里几乎没有区分度，

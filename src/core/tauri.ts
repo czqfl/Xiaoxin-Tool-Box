@@ -293,6 +293,7 @@ export const fsIndexStatus = () =>
   } as FsIndexStatus);
 /** 后台建立/重建索引；进度经 fsindex://progress 事件推送 */
 export const fsIndexRebuild = () => invoke<void>("fs_index_rebuild");
+export const fsIndexCancel = () => invoke<boolean>("fs_index_cancel");
 /** 搜索文件名/目录名（错误信息需原样透出给面板，如"尚未建立索引"） */
 export const fsIndexSearch = (query: string) =>
   invoke<FsHit[]>("fs_index_search", { query });

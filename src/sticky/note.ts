@@ -14,7 +14,9 @@ import {
 } from "./api";
 import { NoteData, Settings } from "./types";
 import { renderMarkdown } from "./markdown";
-import { DEFAULT_MD_CSS, DEFAULT_MD_CSS_DARK, getThemeCss, MD_BG_CSS } from "./md-style";
+import {
+  DEFAULT_MD_CSS, DEFAULT_MD_CSS_DARK, getThemeCss, MD_BG_CSS, applyAccent,
+} from "./md-style";
 import { anim } from "./anim-loader";
 import { MAX_BLUR_PX, applyGlassBlur, parseColorToRgbInt } from "./glass";
 import { applyPanelBackground } from "./panel-bg";
@@ -1341,8 +1343,15 @@ export function mountNoteApp(noteId: string, preset = "") {
     if (!doc) return;
     const base = doc.getElementById("md-base") as HTMLStyleElement | null;
     const themeEl = doc.getElementById("md-theme") as HTMLStyleElement | null;
-    // 默认预览在“便签整体深色”时自动转深，避免亮底预览嵌在暗窗里的割裂感
-    const baseCss = theme === "default" && noteDark ? DEFAULT_MD_CSS_DARK : DEFAULT_MD_CSS;
+    // 默认预览在“便签整体深色”时自动转深，避免亮底预览嵌在暗窗里的割裂感；
+    // accent 用窗口上已解析的工具箱主题色（syncToolboxTheme 写入的具体值），
+    // 让 mint/skyblue/red/orange 等主题色进入预览区（iframe 读不到 theme.css）
+    const accent = getComputedStyle(document.documentElement)
+      .getPropertyValue("--accent").trim();
+    const baseCss = applyAccent(
+      theme === "default" && noteDark ? DEFAULT_MD_CSS_DARK : DEFAULT_MD_CSS,
+      accent || "",
+    );
     if (base) base.textContent = baseCss;
     // 自定义主题：从磁盘上的 md_custom.css 读取（settings.json 只存路径），
     // 这样用户可在外部编辑器修改文件后通过“重新载入”即时生效。

@@ -146,82 +146,6 @@ html[data-window="panel"] body {
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-/* ---- 面板标题栏 ---- */
-.rec-panel-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-bottom: 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-.rec-panel-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #fff;
-}
-.rec-panel-hint {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.45);
-  white-space: nowrap;
-}
-
-/* ---- 配置字段行 ---- */
-.rec-field {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  white-space: nowrap;
-}
-.rec-label {
-  color: rgba(255, 255, 255, 0.7);
-  flex-shrink: 0;
-  font-size: 12px;
-  font-weight: 500;
-}
-
-/* ---- 分段选择器：与各面板外壳同一语言（主题中性玻璃） ---- */
-.rec-seg {
-  display: inline-flex;
-  gap: 2px;
-  padding: 3px;
-  border-radius: 9px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.2);
-}
-.rec-seg button {
-  padding: 4px 12px;
-  border-radius: 6px;
-  border: none;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.65);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur-fast) var(--ease-out);
-}
-.rec-seg button:hover:not(.active) {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.1);
-}
-.rec-seg button.active {
-  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.95), rgba(var(--accent-rgb), 0.82));
-  color: var(--accent-text);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.12),
-    0 1px 6px rgba(var(--accent-rgb), 0.4);
-  font-weight: 600;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-}
-.rec-seg button.active:hover {
-  background: linear-gradient(180deg, rgba(var(--accent-rgb), 1), rgba(var(--accent-rgb), 0.9));
-}
-
 /* ---- 单行操作区：格式平铺点选 + 分隔线 + 开始录制，一步到位 ---- */
 .rec-quick-row {
   display: flex;
@@ -423,15 +347,6 @@ html[data-window="panel"] body {
 .recb-btn.recb-icon.recb-resume:hover:not(:disabled) {
   background: rgba(var(--accent-rgb), 0.32);
 }
-/* 静音：琥珀色标记"已静音"，与暂停（品牌色）、停止（危险色）区分开 */
-.recb-btn.recb-icon.recb-muted {
-  background: color-mix(in srgb, var(--warning) 20%, transparent);
-  border-color: color-mix(in srgb, var(--warning) 42%, transparent);
-  color: var(--warning);
-}
-.recb-btn.recb-icon.recb-muted:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--warning) 32%, transparent);
-}
 /* 录音开关：开启=红色描边高亮（呼应顶部 REC 红点，一眼看出正在收声），
    与「停止」的实心红靠形状与填充区分；关闭=次要幽灵态（由本条规则统一着色）
    ——注意必须把 .recb-rec-on 排除在外，否则本条更高特异性的 color 会把它
@@ -468,7 +383,7 @@ html[data-window="panel"] body {
   to { opacity: 1; transform: none; }
 }
 /* 未静音时用次要前景色，避免抢走「停止/暂停」的视觉重点 */
-.recb-btn.recb-icon:has(> svg):not(.recb-stop):not(.recb-cancel):not(.recb-muted):not(.recb-rec-on) {
+.recb-btn.recb-icon:has(> svg):not(.recb-stop):not(.recb-cancel):not(.recb-rec-on) {
   color: color-mix(in srgb, var(--tb-fg) 72%, transparent);
 }
 /* 取消：中性幽灵圆钮，hover 泛红示意"丢弃" */

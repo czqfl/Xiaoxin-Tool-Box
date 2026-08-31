@@ -171,10 +171,11 @@ export function RecorderSelect() {
     }
   };
 
-  // P1#5: 错误提示 3 秒后自动消失
+  // P1#5: 错误提示 10 秒后自动消失（3 秒根本来不及看完报错原因），
+  // 点击提示条可立即清除。
   useEffect(() => {
     if (!error) return;
-    const t = setTimeout(() => setError(""), 3000);
+    const t = setTimeout(() => setError(""), 10000);
     return () => clearTimeout(t);
   }, [error]);
 
@@ -347,7 +348,16 @@ export function RecorderSelect() {
         </>
       )}
       {!valid && <div className="rec-hint">拖拽框选录制区域</div>}
-      {error && <div className="rec-hint rec-hint-error">启动失败：{error}</div>}
+      {error && (
+        <div
+          className="rec-hint rec-hint-error"
+          style={{ cursor: "pointer" }}
+          title="点击关闭"
+          onClick={() => setError("")}
+        >
+          启动失败：{error}
+        </div>
+      )}
       {starting && <div className="rec-hint">正在启动录制…</div>}
     </div>
   );

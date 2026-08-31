@@ -499,6 +499,7 @@ pub fn run() {
             // 全盘文件名索引（Everything 式秒查）
             fsindex::fs_index_status,
             fsindex::fs_index_rebuild,
+            fsindex::fs_index_cancel,
             fsindex::fs_index_search,
             snippets::snippets_list,
             snippets::snippets_create,

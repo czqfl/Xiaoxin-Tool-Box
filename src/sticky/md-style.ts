@@ -6,6 +6,24 @@
 // 覆盖整个便签窗口，在暗色模式下被染成深蓝（见 issue 反馈“便签周围一层蓝色背景”）。
 // 改为独立 iframe 后，这份 CSS 只作用于 iframe 内部文档，问题根治。
 
+/**
+ * 默认排版的 accent 字面量：iframe 是独立文档、不加载 theme.css，只能写死兜底值。
+ * 注入前由 note.ts 调 applyAccent() 换成工具箱主题色（syncToolboxTheme 已把
+ * 窗口上的 --accent 解析为具体色值）——mint/skyblue/red/orange 因此能进预览区。
+ */
+export const MD_ACCENT_LIGHT = "#6b9fd9";
+export const MD_ACCENT_DARK = "#7fb0e6";
+
+/** 把默认排版里的 accent 字面量替换为主题色（仅 default 主题的两份 CSS 使用）。
+ *  accent 为空（同步链路异常）时不替换，保留写死的兜底蓝——绝不能产出
+ *  `--accent: ` 这种空值声明，否则 color-mix/var 全链失效。 */
+export function applyAccent(css: string, accent: string): string {
+  if (!accent) return css;
+  return css
+    .replaceAll(`--accent: ${MD_ACCENT_LIGHT}`, `--accent: ${accent}`)
+    .replaceAll(`--accent: ${MD_ACCENT_DARK}`, `--accent: ${accent}`);
+}
+
 /** 默认（暖色）预览排版，对应原先 styles.css 里 .md-preview 的作用域规则。 */
 export const DEFAULT_MD_CSS = `
 :root {
@@ -14,7 +32,7 @@ export const DEFAULT_MD_CSS = `
   --border: #ebe5da;
   --text: #3a3a3a;
   --text-sub: #a39c90;
-  --accent: #6b9fd9;
+  --accent: ${MD_ACCENT_LIGHT};
 }
 * { box-sizing: border-box; }
 body {
@@ -66,7 +84,7 @@ export const DEFAULT_MD_CSS_DARK = `
   --border: #3c3c45;
   --text: #e6e4df;
   --text-sub: #9a948b;
-  --accent: #7fb0e6;
+  --accent: ${MD_ACCENT_DARK};
 }
 * { box-sizing: border-box; }
 body {

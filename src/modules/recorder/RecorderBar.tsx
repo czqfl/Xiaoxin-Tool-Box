@@ -131,7 +131,9 @@ export function RecorderBar() {
       } catch { /* 定位失败不应阻塞弹窗内容 */ }
     };
     void place();
-    if (phase === "done" || phase === "error") {
+    // 仅成功卡 6 秒自动消失；失败卡绝不自动关——错误信息看半眼就被收走
+    // 等于没报错，必须留到用户点右下角「关闭」为止。
+    if (phase === "done") {
       autoCloseRef.current = setTimeout(() => {
         void recDismiss().catch(() => {});
       }, 6000);
