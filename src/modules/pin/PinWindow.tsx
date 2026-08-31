@@ -607,15 +607,6 @@ export function PinWindow() {
     return () => { un?.(); };
   }, []);
 
-  // 贴图窗关闭(任意路径：右键菜单/双击/Esc·Delete) → 销毁 OCR 弹窗，避免残留幽灵窗
-  useEffect(() => {
-    let un: (() => void) | undefined;
-    void getCurrentWindow().onCloseRequested(() => {
-      closePinOcrWindow();
-    }).then((f) => { un = f; }).catch(() => {});
-    return () => { un?.(); };
-  }, []);
-
   // persist position on move end
   useEffect(() => {
     const h = () => { void persistNowRef.current(); };
@@ -838,6 +829,7 @@ export function PinWindow() {
       onDoubleClick={() => {
         // 文字模式/有选区时双击是划选操作的一部分，绝不能关贴图
         if (ocr.altActive || ocr.hasSelectionRef.current || !idRef.current) return;
+        closePinOcrWindow();
         pinClose(idRef.current).catch(() => {});
       }}>
       {src && kind === "image" && (
