@@ -20,7 +20,9 @@ export const DEFAULT_MD_CSS = `
 body {
   margin: 0;
   padding: 16px;
-  font-family: "Microsoft YaHei UI", "PingFang SC", system-ui, -apple-system, sans-serif;
+  font-family: "Segoe UI Variable Text", "Segoe UI", "MiSans",
+    "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei UI",
+    "Microsoft YaHei", system-ui, -apple-system, sans-serif;
   font-size: 14px;
   line-height: 1.75;
   color: var(--text);
@@ -40,7 +42,7 @@ ul, ol { margin: 8px 0; padding-left: 22px; }
 li { margin: 3px 0; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
-code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 12.5px; background: var(--bg-bar); border: 1px solid var(--border); border-radius: 4px; padding: 1px 4px; color: #b5553a; }
+code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12.5px; background: var(--bg-bar); border: 1px solid var(--border); border-radius: 4px; padding: 1px 4px; color: #b5553a; }
 pre { margin: 10px 0; background: var(--bg-bar); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; overflow-x: auto; }
 pre code { background: transparent; border: none; padding: 0; color: var(--text); font-size: 12.5px; line-height: 1.5; }
 blockquote { margin: 10px 0; padding: 6px 12px; border-left: 3px solid var(--accent); background: var(--bg-bar); border-radius: 0 6px 6px 0; color: var(--text-sub); }
@@ -70,7 +72,9 @@ export const DEFAULT_MD_CSS_DARK = `
 body {
   margin: 0;
   padding: 16px;
-  font-family: "Microsoft YaHei UI", "PingFang SC", system-ui, -apple-system, sans-serif;
+  font-family: "Segoe UI Variable Text", "Segoe UI", "MiSans",
+    "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei UI",
+    "Microsoft YaHei", system-ui, -apple-system, sans-serif;
   font-size: 14px;
   line-height: 1.75;
   color: var(--text);
@@ -91,7 +95,7 @@ ul, ol { margin: 8px 0; padding-left: 22px; }
 li { margin: 3px 0; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
-code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 12.5px; background: var(--bg-bar); border: 1px solid var(--border); border-radius: 4px; padding: 1px 4px; color: #e89b7d; }
+code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12.5px; background: var(--bg-bar); border: 1px solid var(--border); border-radius: 4px; padding: 1px 4px; color: #e89b7d; }
 pre { margin: 10px 0; background: var(--bg-bar); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; overflow-x: auto; }
 pre code { background: transparent; border: none; padding: 0; color: var(--text); font-size: 12.5px; line-height: 1.5; }
 blockquote { margin: 10px 0; padding: 6px 12px; border-left: 3px solid var(--accent); background: var(--bg-bar); border-radius: 0 6px 6px 0; color: var(--text-sub); }

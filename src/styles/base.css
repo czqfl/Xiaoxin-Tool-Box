@@ -15,10 +15,9 @@ body,
 }
 
 body {
-  /* 优先可变字体，中文回退到现代无衬线（MiSans/鸿蒙黑/苹方/雅黑） */
-  font-family: "Segoe UI Variable Text", "Segoe UI", "MiSans",
-    "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei UI",
-    "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  /* 优先可变字体，中文回退到现代无衬线（MiSans/鸿蒙黑/苹方/雅黑）。
+     字体栈统一走 --font-sans 令牌（theme.css），此处不再自备一份 */
+  font-family: var(--font-sans);
   font-size: var(--font-base);
   line-height: 1.55;
   letter-spacing: 0.01em;

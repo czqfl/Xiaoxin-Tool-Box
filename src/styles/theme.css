@@ -142,6 +142,12 @@
   --font-sm: 12px;
   --font-base: 13px;
   --font-title: 15px;
+  /* 正文字体栈：全局唯一来源。
+     注：Markdown 预览是 iframe 独立文档，不加载本文件，
+     因此其内部需自带字面量副本—见 src/sticky/md-style.ts */
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", "MiSans",
+    "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei UI",
+    "Microsoft YaHei", system-ui, -apple-system, sans-serif;
   /* 等宽字体：命令行路径/代码片段等场景统一消费，勿在各处自备字体栈 */
   --font-mono: ui-monospace, "Cascadia Code", Consolas, monospace;
 
