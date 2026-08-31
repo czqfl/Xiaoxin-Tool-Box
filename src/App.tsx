@@ -19,6 +19,7 @@ import { TIP_WINDOW } from "./modules/toolbar/tip";
 import { ScreenshotOverlay } from "./modules/screenshot/ScreenshotOverlay";
 import { PinWindow } from "./modules/pin/PinWindow";
 import PinMenu from "./modules/pin/PinMenu";
+import PinOcrWindow from "./modules/pin/PinOcrWindow";
 import { ScrollShotBar } from "./modules/scrollshot/ScrollShotBar";
 import { ScrollShotFrame } from "./modules/scrollshot/ScrollShotFrame";
 import { RecorderSelect } from "./modules/recorder/RecorderSelect";
@@ -126,6 +127,9 @@ export default function App() {
   }
   if (label.startsWith("pin-menu")) {
     return <PinMenu />;
+  }
+  if (label.startsWith("pin-ocr")) {
+    return <PinOcrWindow />;
   }
   if (label.startsWith("pin-")) {
     return <PinWindow />;
