@@ -150,7 +150,8 @@ button {
 .btn:hover {
   background: var(--bg-item-hover);
   border-color: var(--border-strong);
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08);
+  /* 走阴影令牌：原硬编码的 rgba(0,0,0,.08) 在深色主题下完全看不见，悬停反馈丢失 */
+  box-shadow: var(--shadow-item);
 }
 .btn:active {
   transform: scale(0.97);

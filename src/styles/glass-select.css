@@ -66,7 +66,11 @@
   height: 14px;
   flex-shrink: 0;
   border-radius: 4px;
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2), 0 1px 1px rgba(0, 0, 0, 0.14);
+  /* light-dark() 只能包裹单个颜色值，不能包整个 box-shadow 列表：
+     逐个颜色分别包，深色下内描边改亮边、外投影加深 */
+  box-shadow: inset 0 0 0 1px
+      light-dark(rgba(0, 0, 0, 0.2), rgba(255, 255, 255, 0.18)),
+    0 1px 1px light-dark(rgba(0, 0, 0, 0.14), rgba(0, 0, 0, 0.45));
 }
 .glass-select-btn .glass-select-swatch {
   margin-right: -2px;

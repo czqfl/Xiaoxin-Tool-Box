@@ -162,7 +162,10 @@ html[data-window="panel"] body {
   color: var(--text-secondary);
   font-size: 10px;
   font-family: inherit;
-  box-shadow: 0 1px 0 var(--border-subtle) inset, 0 1px 1px rgba(15, 23, 42, 0.04);
+  /* 第一层用 --border-subtle（本身已适配深浅）；
+     第二层原为固定 slate-900 4%，深色下等于无，改为深色下反转白色微光 */
+  box-shadow: 0 1px 0 var(--border-subtle) inset,
+    0 1px 1px light-dark(rgba(15, 23, 42, 0.04), rgba(255, 255, 255, 0.07));
 }
 
 /* 分段选择器（粘贴模式等）：选中项为实心品牌色胶囊，对比强烈 */
