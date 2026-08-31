@@ -1118,9 +1118,11 @@ pub(crate) fn history_commit<R: Runtime>(app: &AppHandle<R>, idx: usize) {
             if let Some(img) = image::RgbaImage::from_raw(w, h, rgba) {
                 // Fast 压缩级别：编码 CPU 降到 ~1/3——历史档速度远比体积重要
                 save_png_fast(&img, &path);
-                let thumb = image::imageops::thumbnail(&img, 320, 320);
-                let _ = image::DynamicImage::ImageRgba8(thumb)
-                    .save(dir.join(format!("{ts}_{}.thumb.png", geom.index)));
+                // 缩略图必须走 DynamicImage::thumbnail（等比缩到 320 内）；底层
+                // imageops::thumbnail 是「精确缩放到指定尺寸」不保比——曾把
+                // 16:9 整屏压成 320×320 正方形，列表缩略图横向压扁
+                let thumb = image::DynamicImage::ImageRgba8(img).thumbnail(320, 320);
+                let _ = thumb.save(dir.join(format!("{ts}_{}.thumb.png", geom.index)));
             }
         }
         // 选区 sidecar 随每次输出刷新为最终框选范围

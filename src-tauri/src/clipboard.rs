@@ -686,7 +686,9 @@ fn save_original(bytes: &[u8], width: u32, height: u32, path: PathBuf) -> std::i
 fn save_thumbnail(bytes: &[u8], width: u32, height: u32, path: PathBuf) -> std::io::Result<()> {
     let rgba = image::RgbaImage::from_raw(width, height, bytes.to_vec())
         .ok_or_else(|| std::io::Error::other("图片数据无效"))?;
-    let thumb = image::imageops::thumbnail(&rgba, 200, 200);
+    // DynamicImage::thumbnail 等比缩到 200 内；imageops::thumbnail 是精确
+    // 缩放到指定尺寸不保比，会把横图/竖图硬压成正方形
+    let thumb = image::DynamicImage::ImageRgba8(rgba).thumbnail(200, 200).to_rgba8();
     save_png_fast(&thumb, path)
 }
 

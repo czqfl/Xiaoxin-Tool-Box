@@ -273,6 +273,13 @@ html[data-theme="dark"] {
   padding: 2px !important;
   display: inline-flex !important; align-items: center !important; justify-content: center !important;
 }
+/* 圆点外套固定大小圆角方框（描边预览框）：框不动、点的大小即笔画粗细，
+   一眼可辨「这是调画笔粗细的」；配色沿用色板描边 var(--tb-line) */
+.shot-sw-wheel::before {
+  content: ""; position: absolute; inset: 0; margin: auto;
+  width: 22px; height: 22px; border: 1.5px solid var(--tb-line); border-radius: 6px;
+  pointer-events: none;
+}
 .shot-sw-wheel span {
   display: block; border-radius: 50%; background: var(--tb-fg);
   box-shadow: 0 0 0 1.5px var(--tb-bg);
