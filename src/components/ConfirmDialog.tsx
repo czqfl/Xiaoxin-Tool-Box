@@ -28,13 +28,21 @@ export function ConfirmDialog({
   danger = false,
 }: ConfirmDialogProps) {
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   const handleConfirm = async () => {
     if (busy) return;
     setBusy(true);
+    setErr(null);
     try {
       await onConfirm();
       onClose();
+    } catch (e) {
+      // 必须捕获：否则异常会变成 unhandledrejection，
+      // finally 虽然复位了 busy，但弹窗会静默卡住——既不关闭也不报错，
+      // 用户只能反复点确认却永远不知道失败原因。
+      console.error("[ConfirmDialog] 确认操作失败:", e);
+      setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -66,6 +74,11 @@ export function ConfirmDialog({
       }
     >
       {message}
+      {err && (
+        <p className="inline-error" role="alert">
+          {err}
+        </p>
+      )}
     </Modal>
   );
 }

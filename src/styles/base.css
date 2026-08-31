@@ -258,6 +258,19 @@ button {
   opacity: 0.4;
   cursor: default;
 }
+/* 通用内联错误文本（弹窗 / 表单内的操作失败回显）。
+   role="alert" 配合使用，读屏会立即播报。 */
+.inline-error {
+  margin: 8px 0 0;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-sm);
+  line-height: 1.5;
+  color: var(--danger);
+  background: var(--danger-soft);
+  word-break: break-word;
+}
+
 /* 危险操作图标（删除等）：hover 变红 */
 .icon-btn.icon-btn-danger:hover {
   color: var(--danger);
