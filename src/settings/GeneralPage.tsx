@@ -9,6 +9,7 @@ import {
 } from "../core/tauri";
 import { broadcastConfigChanged } from "../core/events";
 import { GlassSelect } from "../components/GlassSelect";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import {
   Segmented,
   SettingGroup,
@@ -26,6 +27,8 @@ export function GeneralPage() {
   const [autostart, setAutostart] = useState(false);
   const [autostartBusy, setAutostartBusy] = useState(false);
   const [configMsg, setConfigMsg] = useState<string | null>(null);
+  /** 导入会整体覆盖现有配置（含快捷键/翻译凭证/面板位置），且不可撤销，必须二次确认 */
+  const [confirmImport, setConfirmImport] = useState(false);
 
   useEffect(() => {
     isEnabled()
@@ -190,13 +193,23 @@ export function GeneralPage() {
             <button className="btn" onClick={() => void doExport()}>
               导出配置
             </button>
-            <button className="btn" onClick={() => void doImport()}>
+            <button className="btn" onClick={() => setConfirmImport(true)}>
               导入配置
             </button>
           </div>
         </SettingRow>
         {configMsg && <div className="shortcut-hint">{configMsg}</div>}
       </SettingGroup>
+
+      <ConfirmDialog
+        open={confirmImport}
+        onClose={() => setConfirmImport(false)}
+        onConfirm={doImport}
+        title="导入配置"
+        message="将用备份文件整体覆盖当前的全部设置（快捷键、翻译凭据、面板位置、主题等），导入后无法撤销。建议先「导出配置」保存一份现有配置。"
+        confirmLabel="覆盖导入"
+        danger
+      />
     </div>
   );
 }

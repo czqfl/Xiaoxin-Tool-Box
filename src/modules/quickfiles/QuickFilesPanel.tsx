@@ -184,6 +184,8 @@ function RecentTab({
   const [sort, setSort] = useState<"time" | "count">("time");
   const [items, setItems] = useState<RecentFile[]>([]);
   const [loaded, setLoaded] = useState(false);
+  /** 清空会一次性删掉全部打开记录且不可撤，必须二次确认 */
+  const [confirmClear, setConfirmClear] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -223,14 +225,7 @@ function RecentTab({
             </button>
           </div>
           {items.length > 0 && (
-            <button
-              className="btn btn-sm"
-              onClick={() => {
-                recentFilesClear()
-                  .then(() => setItems([]))
-                  .catch(() => undefined);
-              }}
-            >
+            <button className="btn btn-sm" onClick={() => setConfirmClear(true)}>
               清空
             </button>
           )}
@@ -286,6 +281,30 @@ function RecentTab({
           ))}
         </div>
       </div>
+
+      {/* 清空记录确认（共享 ConfirmDialog，portal 到 body） */}
+      <ConfirmDialog
+        open={confirmClear}
+        onClose={() => setConfirmClear(false)}
+        onConfirm={async () => {
+          await recentFilesClear();
+          setItems([]);
+          onToast("已清空打开记录", "success");
+        }}
+        title="清空打开记录？"
+        message={
+          <>
+            <div>
+              将删除全部 {items.length} 条打开记录，清空后无法恢复。
+            </div>
+            <div className="qf-modal-warn">
+              注意：这里只清记录，不会删除任何实际文件。
+            </div>
+          </>
+        }
+        confirmLabel="清空记录"
+        danger
+      />
     </>
   );
 }

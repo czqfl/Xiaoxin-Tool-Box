@@ -284,12 +284,40 @@ export function RecorderBar() {
     return () => clearTimeout(t);
   }, [recErr]);
 
-  // 取消：丢弃本次录制（不保存）
+  // 取消紧邻「停止」（两键仅隔 26px），一次误触就丢掉整段录制 → 两步确认：
+  // 第一击只进入「待确认」态（红色呼吸提示，3 秒自动解除），第二击才真正取消。
+  const [cancelArmed, setCancelArmed] = useState(false);
+  const cancelArmTimer = useRef<number | null>(null);
+  const clearCancelArm = () => {
+    if (cancelArmTimer.current !== null) {
+      window.clearTimeout(cancelArmTimer.current);
+      cancelArmTimer.current = null;
+    }
+  };
+  // 取消：丢弃本次录制（不保存）。两步确认防误触。
   const cancel = () => {
     if (stoppingRef.current) return;
+    if (!cancelArmed) {
+      clearCancelArm();
+      setCancelArmed(true);
+      cancelArmTimer.current = window.setTimeout(() => setCancelArmed(false), 3000);
+      return;
+    }
+    clearCancelArm();
+    setCancelArmed(false);
     stoppingRef.current = true;
     void recorderCancel().catch(() => {});
   };
+
+  // 离开录制态即解除「待确认」（停止/出错/通知卡/新一次录制开始）
+  useEffect(() => {
+    if (phase !== "recording") {
+      clearCancelArm();
+      setCancelArmed(false);
+    }
+  }, [phase]);
+  // 卸载兜底：清掉待确认定时器
+  useEffect(() => clearCancelArm, []);
 
   // 用系统默认程序直接打开（播放）视频/动图；失败回退到打开所在文件夹
   const openVideo = (path: string) => {
@@ -363,9 +391,9 @@ export function RecorderBar() {
             <Square size={10} fill="currentColor" stroke="none" />
           </button>
           <button
-            className="recb-btn recb-icon recb-cancel"
+            className={`recb-btn recb-icon recb-cancel${cancelArmed ? " recb-armed" : ""}`}
             onClick={cancel}
-            title="取消录制（不保存）"
+            title={cancelArmed ? "再点一次确认取消（3 秒内）" : "取消录制（不保存）"}
           >
             <X size={12} />
           </button>
