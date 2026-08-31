@@ -63,7 +63,7 @@ export interface Settings {
   transparent_opacity?: number;
   /** 粒子数量 0~100（同时控制“粒子消散”与“粒子吸入”两种动画的粒子规模），默认 50 */
   particle_count?: number;
-  /** 粒子效果风格：particle=粒子（呼出+关闭·默认，鸿蒙通知删除同款，颜色采样自背景主题色）/ erode=火焰（呼出+关闭，橙黄火舌贴燃烧边；设置值 "erode" 为历史命名，沿用旧值避免破坏已保存设置）。旧值 flame 已移除，归入 particle */
+  /** 粒子效果风格：particle=粒子（呼出+关闭·默认，鸿蒙通知删除同款，颜色采样自背景主题色）/ inhale=粒子吸入（呼出+关闭）。erode（火焰侵蚀）/ glass（玻璃破碎）两种动画已移除，历史保存的该值会回退为默认粒子消散 */
   particle_mode?: string;
   /** 粒子动画速度（百分比，100=原速，50=半速，200=2倍速）；对所有粒子动画生效 */
   animation_speed?: number;

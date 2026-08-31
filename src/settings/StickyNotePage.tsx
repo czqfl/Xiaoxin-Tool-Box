@@ -70,8 +70,6 @@ const MD_THEMES: { value: string; label: string }[] = [
 const PARTICLE_MODES: { value: string; label: string }[] = [
   { value: "particle", label: "粒子消散" },
   { value: "inhale", label: "粒子吸入" },
-  { value: "erode", label: "火焰侵蚀" },
-  { value: "glass", label: "玻璃碎裂" },
   { value: "none", label: "无动画（直接显示/隐藏）" },
 ];
 
@@ -326,7 +324,7 @@ export function StickyNotePage() {
             ))}
           </select>
         </SettingRow>
-        <SettingRow title="粒子强度" desc="0~100（粒子消散/吸入/侵蚀的规模）">
+        <SettingRow title="粒子强度" desc="0~100（粒子消散/吸入的规模）">
           <Slider
             value={settings.particle_count}
             min={1}
