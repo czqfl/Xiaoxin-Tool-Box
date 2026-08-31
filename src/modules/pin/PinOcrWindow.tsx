@@ -11,9 +11,11 @@
  *  - 数据由来源贴图窗 emitTo("pin-ocr-show") 推送（识别行 / 译文 / 翻译态 / 贴图几何）；
  *    本窗仅据几何重新定位，【不】重跑翻译——翻译只由用户点「翻译」按钮触发。
  *  - 按钮动作 emitTo 回传来源贴图窗（pin-ocr-action），由贴图窗执行。
- *  - 始终置顶显示（不随失焦隐藏），仅在退出文字模式（PinWindow 隐藏本窗）时收起。 */
+ *  - 始终置顶显示（不随失焦隐藏）；来源贴图退出文字模式时由 PinWindow 隐藏本窗，
+ *    来源贴图被销毁时本窗自动销毁(手动关也直接销毁自身，避免孤儿窗关不掉)。 */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
 import { emitTo } from "@tauri-apps/api/event";
 import { OcrPanel, type OcrTransState } from "../shared/OcrPanel";
@@ -80,6 +82,12 @@ export default function PinOcrWindow() {
   const emit = (action: string) => {
     if (data?.pin) void emitTo(data.pin, "pin-ocr-action", { action, pin: data.pin }).catch(() => {});
   };
+  // 关闭本弹窗：先通知来源贴图退出文字模式(来源在则生效，已关则无监听、忽略)；
+  // 再直接销毁本窗自身——绝不能依赖来源贴图来关自己(来源已销毁→孤儿窗，手动关失效)
+  const selfClose = () => {
+    emit("close");
+    void getCurrentWindow().destroy().catch(() => {});
+  };
 
   // 数据/几何变化 → 量尺寸、按"选侧规则"贴边定位、显示。
   //   滚轮缩放贴图时本窗经 pin-ocr-show 实时收到新几何 → 始终贴着贴图对应边；
@@ -143,10 +151,22 @@ export default function PinOcrWindow() {
   // Esc 关闭（回传 close，由贴图窗退出文字模式）；不随失焦隐藏——始终置顶可见
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { e.preventDefault(); emit("close"); }
+      if (e.key === "Escape") { e.preventDefault(); selfClose(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, [data?.pin]);
+
+  // 安全网：若来源贴图窗已被销毁(任意关闭途径)，本弹窗应在极短时间内自我销毁，
+  // 避免残留孤儿窗——且孤儿窗的手动关会失效(其关闭事件发往已销毁的来源贴图)
+  useEffect(() => {
+    if (!data?.pin) return;
+    const t = window.setInterval(() => {
+      void WebviewWindow.getByLabel(data.pin).then((src) => {
+        if (!src) void getCurrentWindow().destroy().catch(() => {});
+      }).catch(() => {});
+    }, 300);
+    return () => window.clearInterval(t);
   }, [data?.pin]);
 
   if (!data) return null;
@@ -157,7 +177,7 @@ export default function PinOcrWindow() {
         phase={data.phase}
         trans={data.trans}
         translating={data.translating}
-        onClose={() => emit("close")}
+        onClose={selfClose}
         onCopyAll={() => emit("copyAll")}
         onCopyTrans={() => emit("copyTrans")}
         onTranslate={() => emit("translate")}
