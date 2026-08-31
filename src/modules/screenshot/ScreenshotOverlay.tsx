@@ -122,14 +122,14 @@ const IcoNumber = () => (
     <path d="M12.5 8.2V16"/><path d="M12.5 8.2L10.3 9.8"/>
   </svg>
 );
-// OCR 文字识别：四角取景框 + 文本行（自绘描线风格，Lucide 无对应）
+// OCR 文字识别：四角取景框 + 三行左对齐渐短文本（模拟文字段落；Lucide 无对应）
 const IcoOcr = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M3 8V5.5A2.5 2.5 0 0 1 5.5 3H8" />
     <path d="M16 3h2.5A2.5 2.5 0 0 1 21 5.5V8" />
     <path d="M21 16v2.5A2.5 2.5 0 0 1 18.5 21H16" />
     <path d="M8 21H5.5A2.5 2.5 0 0 1 3 18.5V16" />
-    <path d="M7 9h4M13 9h4M7 12.5h2.5M14.5 12.5H17M7 16h4M13 16h4" />
+    <path d="M7 9h10M7 12.5h10M7 16h6" />
   </svg>
 );
 const IcoUndo = () => <Undo2 {...IC} />;const IcoRedo = () => <Redo2 {...IC} />;
@@ -144,12 +144,12 @@ const IcoPin = () => (
 );
 const IcoSaveAs = () => <Download {...IC} />;
 const IcoCopy = () => <Copy {...IC} />;
-// 长截图：竖向长页面 + 一个向下箭头（表示继续往下滚动拼接）
+// 长截图：上下两段页面 + 中间向下箭头（滚动拼接长图的经典隐喻）
 const IcoLongShot = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M7 3.5h10a2.5 2.5 0 0 1 2.5 2.5V19a2.5 2.5 0 0 1-2.5 2.5H7a2.5 2.5 0 0 1-2.5-2.5V6a2.5 2.5 0 0 1 2.5-2.5Z"/>
-    <path d="M12 8v5"/>
-    <path d="m9.5 11.5 2.5 2.5 2.5-2.5"/>
+    <rect x="6" y="3.5" width="12" height="5.5" rx="2" />
+    <path d="m9.5 10.75 2.5 2.5 2.5-2.5" />
+    <rect x="6" y="15" width="12" height="5.5" rx="2" />
   </svg>
 );
 
@@ -2829,7 +2829,7 @@ export function ScreenshotOverlay() {
                 );
               })}
               {/* 统一粗细调节：滚轮对全部画笔无级生效，入口收拢为一个——
-                  棋盘格圆点紧跟序号工具之后，圆点大小即当前粗细，
+                  纯色圆点紧跟序号工具之后，圆点大小即当前粗细，
                   悬停其上滚动调节（选区任意处滚动同样生效） */}
               <button className="shot-sw-wheel" data-tip="画笔粗细（悬停滚轮调 1~24px）"
                 onWheel={(ev) => {

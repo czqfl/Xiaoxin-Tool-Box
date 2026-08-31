@@ -266,25 +266,19 @@ html[data-theme="dark"] {
   transition: transform 80ms ease, box-shadow var(--dur-fast) var(--ease-out);
 }
 .shot-color-custom:hover { transform: scale(1.14); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25), 0 0 8px rgba(var(--accent-rgb), 0.45); }
-/* 粗细调节轮：棋盘格（马赛克）背景提示「此处滚轮调粗细」；
-   圆点双层描边，当前画笔大小一眼可辨 */
+/* 粗细调节：与相邻描线图标同语言——纯色圆点，直径随当前画笔粗细变化，
+   外圈以工具栏底色描边与截图背景隔离；悬停滚轮 1~24px 无级调节 */
 .shot-sw-wheel {
   width: 30px !important; height: 30px !important; min-width: 30px !important; min-height: 30px !important;
+  padding: 2px !important;
   display: inline-flex !important; align-items: center !important; justify-content: center !important;
-  background: repeating-conic-gradient(rgba(255,255,255,0.30) 0% 25%, rgba(0,0,0,0.30) 0% 50%) 0 0 / 10px 10px !important;
-  border: 1px solid rgba(255,255,255,0.35);
-  border-radius: 3px;
-  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25);
 }
-/* 主条按钮的 hover 背景会整体覆盖 background，这里保住棋盘格 */
-.shot-sw-wheel:hover { background: repeating-conic-gradient(rgba(255,255,255,0.34) 0% 25%, rgba(0,0,0,0.34) 0% 50%) 0 0 / 10px 10px !important; }
 .shot-sw-wheel span {
-  display: block; border-radius: 50%; background: #f4f4f5;
-  box-shadow: 0 0 0 2px rgba(255,255,255,0.92), 0 0 0 3.5px rgba(0,0,0,0.55);
+  display: block; border-radius: 50%; background: var(--tb-fg);
+  box-shadow: 0 0 0 1.5px var(--tb-bg);
   pointer-events: none;
   transition: width 80ms ease, height 80ms ease;
 }
-.shot-sw-wheel:hover span { background: #fff; }
 
 /* 截图工具栏明暗两态（见上方 --tb-* 令牌）：浅色白底深字 / 深色黑底浅字，
    system 模式靠 prefers-color-scheme 兜底；图标颜色随之翻转保证可读 */
