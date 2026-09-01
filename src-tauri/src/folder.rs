@@ -554,6 +554,7 @@ pub async fn folder_git_run_stream(
     if !Path::new(&path).is_dir() {
         return Err("文件夹不存在或已被移动".into());
     }
+    crate::storage::diag_write("[git-run] rust stream start");
     tauri::async_runtime::spawn_blocking(move || {
         let mut index = 0usize;
         for raw in commands {

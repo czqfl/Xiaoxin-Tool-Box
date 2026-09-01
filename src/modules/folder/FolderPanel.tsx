@@ -269,6 +269,7 @@ function FolderPanelInner() {
     let a: (() => void) | undefined;
     let disposed = false;
     onEvent<boolean>("git-run-ready", () => {
+      invoke("diag_log", { msg: "[git-run] panel got ready, push back snap=" + (gitRunRef.current ? gitRunRef.current.results.length : "null") }).catch(() => {});
       // 窗口 webview 已挂载：顺手把窗口效果再刷一遍（开发模式隐藏转可见会整页
       // 重载、效果随之丢失，这里是效果重刷的最稳兜底时机）
       invoke("panel_refresh_acrylic", { label: GITRUN_LABEL }).catch(() => {});
@@ -508,6 +509,7 @@ function FolderPanelInner() {
       .split("\n")
       .map((s) => s.trim())
       .filter(Boolean);
+    invoke("diag_log", { msg: "[git-run] exec start cmds=" + commands.length }).catch(() => {});
     const snap = (results: GitRunResult[], running: boolean): GitRunSnapshot => ({
       folder,
       results,
@@ -534,6 +536,7 @@ function FolderPanelInner() {
       running: i === 0,
     }));
     pushGitRun(snap(results, true));
+    invoke("diag_log", { msg: "[git-run] placeholder pushed results=" + results.length }).catch(() => {});
     // 节流合并推送：line 事件可能高频（git 大输出），30ms 内只推一次快照
     let timer: number | undefined;
     const flush = () => {
@@ -595,6 +598,7 @@ function FolderPanelInner() {
       window.clearTimeout(timer);
       timer = undefined;
     }
+    invoke("diag_log", { msg: "[git-run] stream done results=" + results.length }).catch(() => {});
     pushGitRun(snap(results, false));
   };
 

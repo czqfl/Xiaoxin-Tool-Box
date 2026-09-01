@@ -54,13 +54,20 @@ export function GitRunWindow() {
   useEffect(() => {
     let un: (() => void) | undefined;
     let disposed = false;
-    void onEvent<GitRunSnapshot | null>("git-run-update", (s) => setSnap(s))
+    void invoke("diag_log", { msg: "[git-run] win mounted" }).catch(() => {});
+    void onEvent<GitRunSnapshot | null>("git-run-update", (s) => {
+      void invoke("diag_log", {
+        msg: "[git-run] win update snap=" + (s ? s.results.length + " running=" + s.running : "null"),
+      }).catch(() => {});
+      setSnap(s);
+    })
       .then((f) => {
         if (disposed) {
           f();
           return;
         }
         un = f;
+        void invoke("diag_log", { msg: "[git-run] win ready sent" }).catch(() => {});
         void emitTo("folder-panel", "git-run-ready", true).catch(() => {});
       })
       .catch(() => {});
