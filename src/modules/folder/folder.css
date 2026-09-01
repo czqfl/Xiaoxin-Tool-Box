@@ -421,23 +421,22 @@
   background-size: 6px 6px;
 }
 
-/* ---- Git 命令执行结果浮层（面板内展示，逐条友好呈现） ---- */
-/* 独立浮窗：右下角浮动卡片，不铺满、无全屏遮罩——面板标题栏拖拽区不再被遮挡，
-   浮窗自身标题栏带 data-tauri-drag-region，可独立拖动整个窗口。 */
-.git-run-float {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  width: min(440px, calc(100vw - 32px));
-  max-height: 62vh;
-  z-index: var(--z-modal, 1000);
+/* ---- Git 命令执行结果：独立窗口（label: git-run），不再挂在面板内 ----
+   面板内任何浮层（含 createPortal 挂到 body）都锁在同一 WebView 里：既拖不出
+   面板，执行期间也会挡住面板操作。改为独立 Tauri 窗口后两点同时满足。
+   窗口是 transparent + 无装饰的，圆角与阴影全由 CSS 画；根容器必须留 10px
+   内边距，否则透明窗口边缘会把 box-shadow 整圈裁掉（对应 GitRunWindow 的 PAD）。 */
+.git-run-root {
+  height: 100vh;
+  box-sizing: border-box;
+  padding: 10px;
   display: flex;
-  animation: panel-in var(--dur-base) var(--ease-out);
-  pointer-events: auto;
+  /* 顶部对齐而非拉伸：外壳高度由内容决定，窗口高度再按内容收缩 */
+  align-items: flex-start;
 }
-.git-run-float .git-run-panel {
+.git-run-root .git-run-panel {
   width: 100%;
-  max-height: 62vh;
+  animation: panel-in var(--dur-base) var(--ease-out);
 }
 .git-run-progress {
   margin-left: 6px;
@@ -450,7 +449,6 @@
 }
 .git-run-panel {
   width: 100%;
-  max-height: 100%;
   display: flex;
   flex-direction: column;
   border-radius: var(--radius-lg);
@@ -485,6 +483,11 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex: 1 1 auto;
+  min-height: 0;
+  /* 窗口高度随内容自适应，但必须设上限：命令输出很长时改为窗口内滚动，
+     否则窗口会一路长到超出屏幕（与 GitRunWindow 的 MAX_H 配套） */
+  max-height: 520px;
 }
 .git-run-loading {
   padding: 24px 0;

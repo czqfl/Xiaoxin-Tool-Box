@@ -1,8 +1,11 @@
 /** 文件夹快捷面板：固定/最常访问双分区、各自分页、搜索、右键菜单、拖拽添加与排序 */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
+import { emitTo } from "@tauri-apps/api/event";
 import type { EditorInfo, FolderEntry, FolderLayout, GitRunResult } from "../../types";
+import type { GitRunSnapshot } from "./GitRunWindow";
 import { hideCurrentWindow, usePanelCommon, withNativeDialog } from "../../core/usePanel";
 import { EVT_FOLDER_CHANGED, onEvent } from "../../core/events";
 import { useFolderStore, sortFolders } from "../../stores/folderStore";
@@ -54,6 +57,14 @@ const GIT_COMMANDS: Array<{ label: string; cmd: string }> = [
   { label: "git log --oneline", cmd: "git log --oneline" },
   { label: "git stash", cmd: "git stash" },
 ];
+
+/** Git 执行状态独立窗口的标签（单例创建、隐藏复用） */
+const GITRUN_LABEL = "git-run";
+/** 窗口初始逻辑尺寸（高度随后由窗口内按内容自适应，见 GitRunWindow） */
+const GITRUN_W = 460;
+const GITRUN_H = 300;
+/** 窗口与文件夹面板之间的间距（逻辑像素） */
+const GITRUN_GAP = 12;
 
 interface MenuState {
   x: number;
@@ -150,9 +161,6 @@ function FolderPanelInner() {
   const toast = useToast();
   // 置顶开启时面板常驻：失焦不再自动隐藏
   usePanelCommon(config.folder.always_on_top);
-  // Esc 层叠：Git 结果浮层/右键菜单打开时优先关闭它们，否则关闭面板
-  useEscLayer(true, hideCurrentWindow);
-
   const [query, setQuery] = useState("");
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -161,22 +169,156 @@ function FolderPanelInner() {
   const [pinnedPage, setPinnedPage] = useState(1);
   const [frequentPage, setFrequentPage] = useState(1);
   const inputRef = useRef<HTMLInputElement>(null);
+  /** 最近一次右键的文件夹卡片中心 X（逻辑像素，相对面板窗口）——Git 状态窗停靠在
+   *  哪一侧的判据。菜单项点击时读取，无需触发渲染，故用 ref 而非 state。 */
+  const gitAnchorRef = useRef<number | null>(null);
   /** 文件夹 id → Git 当前分支（非仓库无条目） */
   const [branches, setBranches] = useState<Record<string, string>>({});
   /** 已安装编辑器列表（null = 尚未检测完成） */
   const [editors, setEditors] = useState<EditorInfo[] | null>(null);
-  /** Git 命令面板内执行结果（浮层展示；null = 无执行） */
-  const [gitRun, setGitRun] = useState<{
-    folder: FolderEntry;
-    results: GitRunResult[];
-    running: boolean;
-    total: number;
-    done: number;
-  } | null>(null);
+  /** Git 命令执行结果：面板内只持有快照，展示交给独立窗口 git-run（null = 无执行） */
+  const [gitRun, setGitRun] = useState<GitRunSnapshot | null>(null);
   /** 待删除确认的文件夹（null = 无确认弹窗） */
   const [deleteTarget, setDeleteTarget] = useState<FolderEntry | null>(null);
-  // Git 结果浮层打开时，Esc 优先关闭浮层而非面板（后激活的层在上）
-  useEscLayer(gitRun !== null, () => setGitRun(null));
+
+  /** 最新快照镜像：供窗口（重）挂载时的 ready 握手回推——
+   *  监听器只在挂载时注册一次，闭包里直接读 state 会拿到注册那一刻的陈旧值 */
+  const gitRunRef = useRef<GitRunSnapshot | null>(null);
+  useEffect(() => {
+    gitRunRef.current = gitRun;
+  }, [gitRun]);
+
+  /** 推送快照：面板 state 同步更新（Esc 层判定用）+ 定向发给独立窗口实时上屏 */
+  const pushGitRun = (snap: GitRunSnapshot) => {
+    setGitRun(snap);
+    void emitTo(GITRUN_LABEL, "git-run-update", snap).catch(() => {});
+  };
+
+  /** 关闭独立窗口：清空快照 + 隐藏窗口（隐藏而非销毁，下次执行瞬时复用） */
+  const closeGitRun = () => {
+    setGitRun(null);
+    void WebviewWindow.getByLabel(GITRUN_LABEL)
+      .then((w) => w?.hide())
+      .catch(() => {});
+  };
+
+  /** 智能定位：算出 Git 状态窗应停靠的物理坐标。
+   *  判据是被操作文件夹卡片的中心 X（逻辑像素）——落在面板左半则左侧优先，
+   *  右半则右侧优先；该侧剩余空间不足就换另一侧；两侧都放不下则覆盖面板、
+   *  居中于被操作的卡片。纵向一律与面板顶部对齐，且始终夹在工作区内（不压任务栏）。 */
+  const placeGitRunWindow = async (anchorCx: number) => {
+    try {
+      const win = getCurrentWindow();
+      const [pos, size, mon] = await Promise.all([
+        win.outerPosition(),
+        win.outerSize(),
+        currentMonitor(),
+      ]);
+      const sf = mon?.scaleFactor ?? 1;
+      const w = Math.round(GITRUN_W * sf);
+      const h = Math.round(GITRUN_H * sf);
+      const gap = Math.round(GITRUN_GAP * sf);
+      const panelLeft = pos.x;
+      const panelRight = pos.x + size.width;
+      const panelTop = pos.y;
+      // 工作区＝显示器区域排除任务栏，窗口绝不许压到任务栏或被裁到屏幕外
+      const wa = mon?.workArea;
+      const waX = wa?.position?.x ?? 0;
+      const waY = wa?.position?.y ?? 0;
+      const waW = wa?.size?.width ?? mon?.size?.width ?? 1920;
+      const waH = wa?.size?.height ?? mon?.size?.height ?? 1080;
+      const waRight = waX + waW;
+      const waBottom = waY + waH;
+      const fits = (x: number) => x >= waX && x + w <= waRight;
+      const atLeft = () => panelLeft - w - gap;
+      const atRight = () => panelRight + gap;
+      const preferLeft = anchorCx < size.width / sf / 2;
+      let x: number;
+      if (preferLeft && fits(atLeft())) x = atLeft();
+      else if (!preferLeft && fits(atRight())) x = atRight();
+      else if (fits(atRight())) x = atRight();
+      else if (fits(atLeft())) x = atLeft();
+      else x = Math.round(panelLeft + anchorCx * sf - w / 2);
+      x = Math.min(Math.max(x, waX), Math.max(waX, waRight - w));
+      const y = Math.min(Math.max(panelTop, waY), Math.max(waY, waBottom - h));
+      return { pos: new PhysicalPosition(x, y), size: new PhysicalSize(w, h) };
+    } catch {
+      return null;
+    }
+  };
+
+  /** 打开（或复用）Git 状态独立窗口。
+   *  【何时重排位置】窗口已可见时不动——用户可能刚手动把它拖到顺手的地方；
+   *  只有首次创建 / 上次已关闭，才按当前面板位置重新智能定位一次。 */
+  const openGitRunWindow = async (anchorCx: number) => {
+    let win = await WebviewWindow.getByLabel(GITRUN_LABEL).catch(() => null);
+    if (!win) {
+      const geo = await placeGitRunWindow(anchorCx);
+      try {
+        new WebviewWindow(GITRUN_LABEL, {
+          url: "index.html",
+          width: GITRUN_W,
+          height: GITRUN_H,
+          decorations: false,
+          transparent: true,
+          alwaysOnTop: true,
+          focus: true,
+          resizable: true,
+          shadow: false,
+          visible: false,
+          skipTaskbar: true,
+        });
+      } catch {
+        /* 并发下已存在则忽略 */
+      }
+      // 建窗是异步的：轮询拿到实例后先校正物理尺寸再定位（visible:false 期间不闪现错位）
+      for (let i = 0; i < 40; i++) {
+        win = await WebviewWindow.getByLabel(GITRUN_LABEL).catch(() => null);
+        if (win) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      if (win && geo) {
+        await win.setSize(geo.size).catch(() => {});
+        await win.setPosition(geo.pos).catch(() => {});
+      }
+    } else if (!(await win.isVisible().catch(() => false))) {
+      const geo = await placeGitRunWindow(anchorCx);
+      if (geo) await win.setPosition(geo.pos).catch(() => {});
+    }
+    if (win) await win.show().catch(() => {});
+  };
+
+  // 独立窗口的握手 / 关闭通道。窗口挂载（开发模式下由隐藏转可见会整页重载，
+  // 等同重新挂载）时发 git-run-ready 索取快照，此时把最新状态整体回推——
+  // 首帧 emit 必然丢失，握手是唯一能保证"任何时刻挂载都看到全量结果"的通道。
+  useEffect(() => {
+    let a: (() => void) | undefined;
+    let b: (() => void) | undefined;
+    let disposed = false;
+    onEvent<boolean>("git-run-ready", () => {
+      void emitTo<GitRunSnapshot | null>(
+        GITRUN_LABEL,
+        "git-run-update",
+        gitRunRef.current,
+      ).catch(() => {});
+    }).then((f) => (disposed ? f() : (a = f)));
+    onEvent<boolean>("git-run-close", () => closeGitRun()).then((f) =>
+      disposed ? f() : (b = f),
+    );
+    return () => {
+      disposed = true;
+      a?.();
+      b?.();
+    };
+  }, []);
+
+  // Esc 层叠：Git 结果窗口打开时优先关它，否则关闭面板。
+  // 关闭面板时同步收起 Git 窗口——它虽是独立窗口，终究由本面板唤起。
+  useEscLayer(true, () => {
+    closeGitRun();
+    hideCurrentWindow();
+  });
+  useEscLayer(gitRun !== null, () => closeGitRun());
 
   // 列表变化时批量读取 Git 分支（读 .git/HEAD，毫秒级）
   useEffect(() => {
@@ -384,18 +526,26 @@ function FolderPanelInner() {
     }
   };
 
-  /** 面板内逐条执行 Git 命令并友好展示结果：
-   *  不再开新终端（多条命令拼一行滚动太快只能看到末尾，用户反馈），
-   *  改为在面板内逐条执行、每条独立展示成功/失败与输出。 */
-  /** 逐条串行执行 Git 命令并实时刷新结果：每条命令单独调用后端，完成一条立即上屏一条，
-   *  而非全部跑完才一起显示。add→commit→push 有顺序依赖必须串行 await；各命令在各自
-   *  进程里于同一 .git 目录执行，状态互相可见。 */
+  /** 逐条串行执行 Git 命令，每条完成立刻推给独立窗口上屏一条，而不是全部跑完才
+   *  一起显示（add→commit→push 有顺序依赖必须串行 await；各命令在各自进程里于同一
+   *  .git 目录执行，状态互相可见）。既不再开终端（多条拼一行滚动太快只看得到末尾），
+   *  也不再是面板内浮层（锁在同一 WebView 里，拖不动也挡住面板）。 */
   const execGitCommand = async (folder: FolderEntry, cmd: string) => {
     const commands = cmd
       .split("\n")
       .map((s) => s.trim())
       .filter(Boolean);
-    setGitRun({ folder, results: [], running: true, total: commands.length, done: 0 });
+    const snap = (results: GitRunResult[], running: boolean): GitRunSnapshot => ({
+      folder,
+      results,
+      running,
+      total: commands.length,
+      done: results.length,
+    });
+    // 窗口先就位再执行：首条命令的输出要落在已经显示出来的窗口里。
+    // 锚点缺失（非右键入口触发）时传 +∞，等价于"右侧优先"。
+    await openGitRunWindow(gitAnchorRef.current ?? Number.POSITIVE_INFINITY);
+    pushGitRun(snap([], true));
     const all: GitRunResult[] = [];
     try {
       for (const c of commands) {
@@ -403,14 +553,14 @@ function FolderPanelInner() {
         const r: GitRunResult =
           res[0] ?? { command: c, ok: false, code: null, stdout: "", stderr: "执行失败：无返回结果" };
         all.push(r);
-        setGitRun({ folder, results: [...all], running: true, total: commands.length, done: all.length });
+        pushGitRun(snap([...all], true));
       }
     } catch (e) {
       all.push({ command: "—", ok: false, code: null, stdout: "", stderr: String(e) });
-      setGitRun({ folder, results: [...all], running: false, total: commands.length, done: all.length });
+      pushGitRun(snap([...all], false));
       return;
     }
-    setGitRun({ folder, results: all, running: false, total: commands.length, done: all.length });
+    pushGitRun(snap(all, false));
   };
 
   const menuItems = (folder: FolderEntry): MenuItem[] => [
@@ -466,7 +616,7 @@ function FolderPanelInner() {
             children: GIT_COMMANDS.map(({ label, cmd }) => ({
               label,
               icon: <IconBranch size={13} />,
-              onClick: () => execGitCommand(folder, cmd),
+              onClick: () => void execGitCommand(folder, cmd),
             })),
           },
         ]
@@ -530,6 +680,8 @@ function FolderPanelInner() {
       }
       onContextMenu={(e) => {
         e.preventDefault();
+        const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        gitAnchorRef.current = r.left + r.width / 2;
         refreshEditors();
         setMenu({ x: e.clientX, y: e.clientY, folder });
       }}
@@ -581,6 +733,8 @@ function FolderPanelInner() {
                     onClick={() => void openFolderItem(f)}
                     onContextMenu={(e) => {
                       e.preventDefault();
+                      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                      gitAnchorRef.current = r.left + r.width / 2;
                       refreshEditors();
                       setMenu({ x: e.clientX, y: e.clientY, folder: f });
                     }}
@@ -723,50 +877,6 @@ function FolderPanelInner() {
           </span>
         </div>
 
-        {gitRun &&
-          createPortal(
-            <div className="git-run-float">
-              <div className="git-run-panel">
-                <div className="git-run-head" data-tauri-drag-region>
-                  <span className="git-run-title">
-                    <IconBranch size={13} />
-                    {gitRun.running ? "Git 执行中" : "Git 执行结果"} · {gitRun.folder.name}
-                    {gitRun.total > 1 && (
-                      <span className="git-run-progress">{gitRun.done}/{gitRun.total}</span>
-                    )}
-                  </span>
-                  <button className="icon-btn" title="关闭" onClick={() => setGitRun(null)}>
-                    <IconClose size={14} />
-                  </button>
-                </div>
-                <div className="git-run-body">
-                  {gitRun.results.length === 0 ? (
-                    <div className="git-run-loading">
-                      {gitRun.running ? "正在执行命令…" : "没有可执行的命令"}
-                    </div>
-                  ) : (
-                    gitRun.results.map((r, i) => (
-                      <div className={`git-run-item ${r.ok ? "ok" : "fail"}`} key={i}>
-                        <div className="git-run-cmd">
-                          <span className="git-run-status">{r.ok ? "✔" : "✘"}</span>
-                          <code>{r.command}</code>
-                          {!r.ok && r.code != null && (
-                            <span className="git-run-code">退出码 {r.code}</span>
-                          )}
-                        </div>
-                        {r.stdout && <pre className="git-run-out">{r.stdout}</pre>}
-                        {r.stderr && <pre className="git-run-err">{r.stderr}</pre>}
-                      </div>
-                    ))
-                  )}
-                  {gitRun.running && gitRun.results.length > 0 && (
-                    <div className="git-run-loading">正在执行下一条命令…</div>
-                  )}
-                </div>
-              </div>
-            </div>,
-            document.body,
-          )}
 
         {menu && (
           <ContextMenu
