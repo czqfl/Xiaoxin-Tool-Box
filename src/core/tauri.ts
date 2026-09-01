@@ -1,5 +1,5 @@
 /** Rust command 统一封装层：所有 invoke 调用经此收口，便于错误兜底 */
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
   AppConfig,
@@ -8,6 +8,7 @@ import type {
   EditorInfo,
   FolderEntry,
   GitRunResult,
+  GitStreamEvent,
   InstalledApp,
   PaletteStatEntry,
   PortProcess,
@@ -125,6 +126,23 @@ export const gitExec = (path: string, command: string, shell: string) =>
 /** 面板内逐条执行命令并捕获输出（友好展示每条结果） */
 export const gitRun = (path: string, commands: string[]) =>
   safe(invoke<GitRunResult[]>("folder_git_run", { path, commands }), []);
+
+/** 面板内【流式】执行命令：stdout/stderr 逐行实时回调（弹窗动态上屏），
+ *  全部命令结束后 resolve。Rust 侧 folder_git_run_stream 每读到一行就经
+ *  Channel 推送一次，前端 onEvent 收到即更新界面，无需等命令跑完。 */
+export const gitRunStream = (
+  path: string,
+  commands: string[],
+  onEvent: (ev: GitStreamEvent) => void,
+): Promise<void> => {
+  const channel = new Channel<GitStreamEvent>();
+  channel.onmessage = onEvent;
+  return invoke<void>("folder_git_run_stream", {
+    path,
+    commands,
+    onEvent: channel,
+  });
+};
 /** 批量读取文件夹的 Git 当前分支（非仓库为 null） */
 export const folderGitBranches = (paths: string[]) =>
   safe(invoke<(string | null)[]>("folder_git_branches", { paths }), []);

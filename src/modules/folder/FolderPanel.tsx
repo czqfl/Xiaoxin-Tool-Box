@@ -494,10 +494,15 @@ function FolderPanelInner() {
     }
   };
 
-  /** 逐条串行执行 Git 命令，每条完成立刻推给独立窗口上屏一条，而不是全部跑完才
-   *  一起显示（add→commit→push 有顺序依赖必须串行 await；各命令在各自进程里于同一
-   *  .git 目录执行，状态互相可见）。既不再开终端（多条拼一行滚动太快只看得到末尾），
-   *  也不再是面板内浮层（锁在同一 WebView 里，拖不动也挡住面板）。 */
+  /** 【流式】逐条串行执行 Git 命令，输出在弹窗里动态上屏——不是等全部跑完才
+   *  一次性显示（add→commit→push 有顺序依赖必须串行 await；各命令在各自进程里
+   *  于同一 .git 目录执行，状态互相可见）。
+   *
+   *  实现：Rust 侧 folder_git_run_stream 用 Channel 把每条命令的 stdout/stderr
+   *  逐行实时推过来（line 事件）；前端先把所有命令建占位条目（首条 running），
+   *  输出行到达即原地累积、30ms 节流合并推给独立窗口——命令还没结束时，它的
+   *  输出就已经一行一行出现在弹窗里。既不再开终端（多条拼一行滚动太快只看得到
+   *  末尾），也不再是面板内浮层（锁在同一 WebView 里，拖不动也挡住面板）。 */
   const execGitCommand = async (folder: FolderEntry, cmd: string) => {
     const commands = cmd
       .split("\n")
@@ -508,7 +513,7 @@ function FolderPanelInner() {
       results,
       running,
       total: commands.length,
-      done: results.length,
+      done: results.filter((r) => !r.running).length,
     });
     // 窗口先就位再执行：首条命令的输出要落在已经显示出来的窗口里。
     // 锚点缺失（非右键入口触发）时传 +∞，等价于"右侧优先"。
@@ -519,22 +524,78 @@ function FolderPanelInner() {
       toast.show("Git 状态窗口创建失败，命令未执行", "error");
       return;
     }
-    pushGitRun(snap([], true));
-    const all: GitRunResult[] = [];
+    // 占位条目：所有命令先建好（首条 running），输出行逐条累积其上
+    const results: GitRunResult[] = commands.map((command, i) => ({
+      command,
+      ok: false,
+      stdout: "",
+      stderr: "",
+      code: null,
+      running: i === 0,
+    }));
+    pushGitRun(snap(results, true));
+    // 节流合并推送：line 事件可能高频（git 大输出），30ms 内只推一次快照
+    let timer: number | undefined;
+    const flush = () => {
+      timer = undefined;
+      pushGitRun(snap(results, true));
+    };
+    const schedule = () => {
+      if (timer === undefined) timer = window.setTimeout(flush, 30);
+    };
     try {
-      for (const c of commands) {
-        const res = await api.gitRun(folder.path, [c]);
-        const r: GitRunResult =
-          res[0] ?? { command: c, ok: false, code: null, stdout: "", stderr: "执行失败：无返回结果" };
-        all.push(r);
-        pushGitRun(snap([...all], true));
-      }
+      await api.gitRunStream(folder.path, commands, (ev) => {
+        switch (ev.type) {
+          case "start": {
+            const r = results[ev.index];
+            if (r) r.running = true;
+            break;
+          }
+          case "line": {
+            const r = results[ev.index];
+            if (!r) break;
+            if (ev.stream === "stdout") r.stdout += ev.text + "\n";
+            else r.stderr += ev.text + "\n";
+            break;
+          }
+          case "done": {
+            const r = results[ev.index];
+            if (r) {
+              r.ok = ev.ok;
+              r.code = ev.code;
+              r.running = false;
+            }
+            break;
+          }
+          case "fail": {
+            const r = results[ev.index];
+            if (r) {
+              r.ok = false;
+              r.code = null;
+              r.running = false;
+              r.stderr = r.stderr ? `${r.stderr}\n${ev.message}` : ev.message;
+            }
+            break;
+          }
+          case "finished":
+            break;
+        }
+        schedule();
+      });
     } catch (e) {
-      all.push({ command: "—", ok: false, code: null, stdout: "", stderr: String(e) });
-      pushGitRun(snap([...all], false));
-      return;
+      // invoke 整体失败（如文件夹已不存在）：把所有未结束的条目标失败
+      for (const r of results) {
+        if (r.running) {
+          r.running = false;
+          r.stderr = String(e);
+        }
+      }
     }
-    pushGitRun(snap(all, false));
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      timer = undefined;
+    }
+    pushGitRun(snap(results, false));
   };
 
   const menuItems = (folder: FolderEntry): MenuItem[] => [

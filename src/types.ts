@@ -391,13 +391,23 @@ export interface GitRunResult {
   command: string;
   /** 是否执行成功（退出码 0） */
   ok: boolean;
-  /** 标准输出 */
+  /** 标准输出（流式执行时逐行累积） */
   stdout: string;
-  /** 标准错误 */
+  /** 标准错误（流式执行时逐行累积） */
   stderr: string;
   /** 退出码；启动失败为 null */
   code: number | null;
+  /** 是否仍在执行中（流式输出累积阶段；命令结束为 false） */
+  running?: boolean;
 }
+
+/** Git 流式执行事件（folder_git_run_stream 的 Channel 载荷，逐行实时推送） */
+export type GitStreamEvent =
+  | { type: "start"; index: number; command: string }
+  | { type: "line"; index: number; stream: "stdout" | "stderr"; text: string }
+  | { type: "done"; index: number; ok: boolean; code: number | null }
+  | { type: "fail"; index: number; command: string; message: string }
+  | { type: "finished" };
 
 /** 端口工具：占用指定端口的进程信息 */
 export interface PortProcess {

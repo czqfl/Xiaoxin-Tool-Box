@@ -19,7 +19,7 @@
  *  【数据来源】由 folder-panel 通过 emitTo("git-run", "git-run-update")
  *  逐条推送。订阅落地后发 git-run-ready 索取全量快照（emit 首帧必丢，
  *  握手是唯一能保证"任何时刻挂载都看到全量结果"的通道）。 */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emitTo } from "@tauri-apps/api/event";
 import type { FolderEntry, GitRunResult } from "../../types";
@@ -70,6 +70,15 @@ export function GitRunWindow() {
     };
   }, []);
 
+  // 新输出到达时跟随滚动到底（流式输出逐行上屏）；用户上翻查看时不打断
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    if (nearBottom) el.scrollTop = el.scrollHeight;
+  }, [snap]);
+
   // 关闭三重保险：前端 hide（emit 广播 + window.hide）+ Rust panel_hide 兜底
   // + diag 日志（点击是否到达、hide 是否生效，全部落盘可查）
   const closePanel = () => {
@@ -94,23 +103,12 @@ export function GitRunWindow() {
               </span>
             )}
           </span>
-          <button
-            className="icon-btn"
-            title="关闭（Esc）"
-            onClick={closePanel}
-            onPointerDown={(e) => {
-              // 视觉反馈：点击到达按钮会闪一下红（区分"没点到"与"点了没关"）
-              e.currentTarget.style.background = "#e5484d";
-              window.setTimeout(() => {
-                e.currentTarget.style.background = "";
-              }, 180);
-            }}
-          >
+          <button className="icon-btn" title="关闭（Esc）" onClick={closePanel}>
             <IconClose size={15} />
           </button>
         </div>
 
-        <div className="panel-body">
+        <div className="panel-body" ref={bodyRef}>
           {!snap && <div className="git-run-loading">暂无执行记录</div>}
           {snap && snap.results.length === 0 && (
             <div className="git-run-loading">
@@ -119,21 +117,26 @@ export function GitRunWindow() {
           )}
           {snap &&
             snap.results.map((r, i) => (
-              <div className={`git-run-item ${r.ok ? "ok" : "fail"}`} key={i}>
+              <div
+                className={`git-run-item ${r.running ? "run" : r.ok ? "ok" : "fail"}`}
+                key={i}
+              >
                 <div className="git-run-cmd">
-                  <span className="git-run-status">{r.ok ? "✔" : "✘"}</span>
+                  <span className={`git-run-status ${r.running ? "run" : ""}`}>
+                    {r.running ? <span className="git-run-spinner" /> : r.ok ? "✔" : "✘"}
+                  </span>
                   <code>{r.command}</code>
-                  {!r.ok && r.code != null && (
-                    <span className="git-run-code">退出码 {r.code}</span>
+                  {r.running ? (
+                    <span className="git-run-code run">执行中…</span>
+                  ) : (
+                    !r.ok &&
+                    r.code != null && <span className="git-run-code">退出码 {r.code}</span>
                   )}
                 </div>
                 {r.stdout && <pre className="git-run-out">{r.stdout}</pre>}
                 {r.stderr && <pre className="git-run-err">{r.stderr}</pre>}
               </div>
             ))}
-          {snap && snap.running && snap.results.length > 0 && (
-            <div className="git-run-loading">正在执行下一条命令…</div>
-          )}
         </div>
       </div>
     </div>

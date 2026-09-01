@@ -3,6 +3,7 @@ use crate::clipboard::SUPPRESS_WATCH;
 use crate::config::ConfigState;
 use crate::storage::{save_json, AppPaths};
 use serde::{Deserialize, Serialize};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
@@ -371,6 +372,41 @@ pub struct GitRunResult {
     pub code: Option<i32>,
 }
 
+/// 流式执行事件（folder_git_run_stream 的 Channel 载荷，逐行实时推送）
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum GitStreamEvent {
+    /// 一条命令开始执行
+    Start {
+        /// 命令序号（与传入 commands 的下标一致）
+        index: usize,
+        /// 命令原文
+        command: String,
+    },
+    /// 一行输出（stdout 或 stderr，命令结束前逐行实时到达）
+    Line {
+        index: usize,
+        /// "stdout" | "stderr"
+        stream: String,
+        /// 单行文本（已去除行尾 \r\n）
+        text: String,
+    },
+    /// 一条命令正常结束
+    Done {
+        index: usize,
+        ok: bool,
+        code: Option<i32>,
+    },
+    /// 一条命令异常结束（启动失败 / 超时强制终止）
+    Fail {
+        index: usize,
+        command: String,
+        message: String,
+    },
+    /// 全部命令执行完毕
+    Finished,
+}
+
 /// 【面板内】逐条执行命令（git 等）并捕获输出，返回每条结果——
 /// 替代"开新终端看输出"：终端方式多条命令拼一行滚动太快只能看到末尾，
 /// 面板内逐条执行、每条独立展示结果，看得更清楚（用户反馈）。
@@ -467,6 +503,135 @@ pub async fn folder_git_run(
     .await
     .map_err(|e| format!("后台执行线程异常：{e}"))?;
     Ok(results)
+}
+
+/// 流式读线程辅助：把一条管道（stdout/stderr）逐块读成行并实时经 Channel
+/// 推给前端。read_until + from_utf8_lossy：非 UTF-8（GBK 中文等）不丢行。
+fn spawn_stream_reader<R: Read + Send + 'static>(
+    mut reader: BufReader<R>,
+    on_ev: tauri::ipc::Channel<GitStreamEvent>,
+    index: usize,
+    stream: &'static str,
+) {
+    thread::spawn(move || {
+        let mut buf: Vec<u8> = Vec::new();
+        loop {
+            buf.clear();
+            match reader.read_until(b'\n', &mut buf) {
+                Ok(0) => break,
+                Ok(_) => {
+                    let text = String::from_utf8_lossy(&buf)
+                        .trim_end_matches(&['\r', '\n'][..])
+                        .to_string();
+                    if !text.is_empty() {
+                        let _ = on_ev.send(GitStreamEvent::Line {
+                            index,
+                            stream: stream.to_string(),
+                            text,
+                        });
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+}
+
+/// 【流式】逐条执行命令并把输出逐行实时推给前端（Channel 通道）——
+/// 与 folder_git_run 一次性返回不同：每条命令的 stdout/stderr 在产生的
+/// 瞬间就通过 on_event 推送（Line 事件），前端弹窗里"命令输出动态显示"
+/// 而不是等命令结束才整块出现（用户需求）。
+///
+/// 事件流：每条命令 Start →（若干 Line）→ Done/Fail；全部结束发 Finished。
+/// 行文本用 read_until + from_utf8_lossy 逐块读：非 UTF-8（GBK 中文等）
+/// 输出也不会丢；120 秒超时强制 kill（与原 folder_git_run 一致）。
+#[tauri::command]
+pub async fn folder_git_run_stream(
+    path: String,
+    commands: Vec<String>,
+    on_event: tauri::ipc::Channel<GitStreamEvent>,
+) -> Result<(), String> {
+    if !Path::new(&path).is_dir() {
+        return Err("文件夹不存在或已被移动".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut index = 0usize;
+        for raw in commands {
+            let line = raw.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let on_ev = on_event.clone();
+            let _ = on_ev.send(GitStreamEvent::Start {
+                index,
+                command: line.to_string(),
+            });
+            // powershell -NoLogo -Command <line>：与用户手动执行的环境一致
+            // （加载 $PROFILE，代理等网络配置生效）。
+            let mut child = match Command::new("powershell")
+                .args(["-NoLogo", "-Command", line])
+                .current_dir(&path)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    let _ = on_ev.send(GitStreamEvent::Fail {
+                        index,
+                        command: line.to_string(),
+                        message: format!("命令启动失败：{e}"),
+                    });
+                    index += 1;
+                    continue;
+                }
+            };
+            // stdout / stderr 各起一个读线程：逐块读（read_until '\n'）并实时推送，
+            // 命令还没结束时输出就已经逐行上屏。两条管道类型不同
+            // （ChildStdout / ChildStderr），统一走泛型辅助函数起线程。
+            if let Some(so) = child.stdout.take() {
+                spawn_stream_reader(BufReader::new(so), on_event.clone(), index, "stdout");
+            }
+            if let Some(se) = child.stderr.take() {
+                spawn_stream_reader(BufReader::new(se), on_event.clone(), index, "stderr");
+            }
+            // 等待退出码（120 秒超时强制 kill，避免 push 等命令卡死）
+            let child_arc = Arc::new(Mutex::new(Some(child)));
+            let waiter = Arc::clone(&child_arc);
+            let (tx, rx) = mpsc::channel::<std::process::ExitStatus>();
+            thread::spawn(move || {
+                if let Some(mut c) = waiter.lock().unwrap().take() {
+                    if let Ok(st) = c.wait() {
+                        let _ = tx.send(st);
+                    }
+                }
+            });
+            match rx.recv_timeout(Duration::from_secs(120)) {
+                Ok(status) => {
+                    let _ = on_ev.send(GitStreamEvent::Done {
+                        index,
+                        ok: status.success(),
+                        code: status.code(),
+                    });
+                }
+                Err(_) => {
+                    if let Some(mut c) = child_arc.lock().unwrap().take() {
+                        let _ = c.kill();
+                    }
+                    let _ = on_ev.send(GitStreamEvent::Fail {
+                        index,
+                        command: line.to_string(),
+                        message: "命令执行超时（120 秒），已强制终止".into(),
+                    });
+                }
+            }
+            index += 1;
+        }
+        let _ = on_event.send(GitStreamEvent::Finished);
+    })
+    .await
+    .map_err(|e| format!("后台执行线程异常：{e}"))?;
+    Ok(())
 }
 
 /// 拉起终端并执行命令：复用 open_in_shell 的壳，进入目录后追加命令。

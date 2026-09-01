@@ -17,6 +17,7 @@ export {
   detectEditors,
   gitExec,
   gitRun,
+  gitRunStream,
   folderGitBranches,
   copyFolderPath,
   pickFolder,
