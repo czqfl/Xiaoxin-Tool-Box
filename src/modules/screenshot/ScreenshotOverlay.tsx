@@ -154,6 +154,13 @@ const IcoLongShot = () => (
     <path d="m9.8 18.8 2.2 2.2 2.2-2.2" />
   </svg>
 );
+// 选择 / 移动：经典光标箭头（与 Lucide MousePointer 一致的描线风格），
+// 激活时高亮表示当前处于"选区/移动"模式，点击图形图标才进入绘制
+const IcoSelect = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 3l7.07 16.97 2.51-7.39 7.39-2.51L4 3z" />
+  </svg>
+);
 
 /** 工具条按钮（Snipaste 式）：同类形状合并为一键，重复点击在组内循环切换
  *  （矩形→椭圆→矩形…），悬停提示「名称、名称 (Ctrl+N)」，Ctrl+数字直达。
@@ -1838,15 +1845,8 @@ export function ScreenshotOverlay() {
   // 否则它叠在刚出现的按钮栏旁边会造成视觉闪动）
   const phaseRef = useRef(phase);
   useEffect(() => { phaseRef.current = phase; }, [phase]);
-  // 选区确立即默认切到图形绘制（默认矩形、不弹子菜单）：圈完区域后最高频的
-  // 操作就是标注，预选工具省一次点击。仅在工具还停在初始"选择"时生效——
-  // 用户手动切过工具（包括切回选择）说明是有意为之，不再越俎代庖
-  const prevPhaseRef = useRef(phase);
-  useEffect(() => {
-    const prev = prevPhaseRef.current;
-    prevPhaseRef.current = phase;
-    if (prev !== "selected" && phase === "selected" && tool === "select") setTool("rect");
-  }, [phase]);
+  // 选区确认后【保持"选择"工具】：不自动进入绘制，工具栏照常出现，
+  // 由用户点击图形图标才进入绘制步骤；选区边框在"选择"模式下可拖动缩放。
 
   /* ---- 原生拖拽层接管 ----
    * 拖拽/缩放热路径下沉到 Rust：原生线程高频轮询光标、把压暗+镂空+边框
@@ -2790,6 +2790,14 @@ export function ScreenshotOverlay() {
         return (
           <div className={`shot-toolbar-float${tipsAbove ? " tips-above" : ""}${panelAbove ? " panel-above" : ""}`} style={{ right: rightPx, top: ty }}>
             <div className="shot-toolbar">
+              <button
+                className={"shot-toolbtn-main" + (tool === "select" ? " active" : "")}
+                data-tip="选择 / 移动区域"
+                onClick={() => { setTool("select"); setSubmenuOpen(null); }}
+              >
+                <span style={{ display: "inline-flex" }}><IcoSelect /></span>
+              </button>
+              <div className="shot-toolbar-sep" />
               {TOOL_BUTTONS.map((b, i) => {
                 const active = b.items.some(([t]) => t === tool);
                 // 一级图标【恒定不变】：形状/线组固定显示类别图标（矩形+椭圆、
