@@ -1355,20 +1355,14 @@ body,
 }
 
 /* ===== 壁纸模式文字可读性 =====
-   垫底不透明度默认只有 30%（壁纸清晰为主），文字可读性由投影保证：
-   亮壁纸 → 白字黑影的补集：深字+浅描影；暗壁纸（on-dark-bg）→ 浅字+深投影 */
-.note-window.has-bg .editor {
-  /* 去掉发光光晕（0 0 Npx 大模糊），仅保留 1px 紧实投影保证壁纸可读性，文字清晰不发虚 */
-  text-shadow: 0 1px 1px rgba(255, 255, 255, 0.6);
-}
-.note-window.has-bg .editor:empty:before {
-  text-shadow: 0 1px 1px rgba(255, 255, 255, 0.6);
-}
+   暗壁纸（on-dark-bg）→ 浅色文字保证对比度。
+   【不加任何 text-shadow】带偏移的投影在文字下方形成第二条字迹 = 用户反馈的
+   "文字重影"（此前透明窗口灰度抗锯齿时整体发虚、影字糊在一起看不出；窗口改
+   不透明后文字锐利，1px 偏移影子显形为重影）。可读性完全交给文字颜色与壁纸
+   自身的对比度；需要更强可读性应调亮/调暗壁纸或换图，而不是加影子。 */
 .note-window.has-bg.on-dark-bg .editor {
   color: #f2f2f2;
   caret-color: #f2f2f2;
-  /* 去掉发光光晕，仅保留 1px 紧实投影 */
-  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.6);
 }
 .note-window.has-bg.on-dark-bg .editor:empty:before {
   color: rgba(255, 255, 255, 0.55);

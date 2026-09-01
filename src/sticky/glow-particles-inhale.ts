@@ -130,7 +130,11 @@ export function requestInhaleDissolveClose(onDone: () => void, particleDensity =
 }
 
 /** 播放「粒子光效成形」呼出动画（自顶向下，关闭的倒放）；收尾自动复原页面。 */
-export function playInhaleMaterialize(root: HTMLElement, particleDensity = 50, speed = 100): void {
+export function playInhaleMaterialize(
+  root: HTMLElement,
+  particleDensity = 50,
+  speed = 100,
+): void {
   // 强制接管：若已有粒子吸入动画在播放（快速呼出时上一轮动画未收尾、inhaleActive 残留），
   // 先取消旧的再启动新的，杜绝「呼出被静默拒绝 → 窗口空画面永久卡死」。
   if (inhaleActive) cancelInhaleParticles();
@@ -145,7 +149,7 @@ export function playInhaleMaterialize(root: HTMLElement, particleDensity = 50, s
   };
   try {
     stopRun = runGlow(root, "materialize", particleDensity, speed, () => {
-      /* materialize 收尾在 runGlow 内自行复原，无需额外 onDone */
+      /* materialize 收尾在 runGlow 内自行复原 */
     });
   } catch (e) {
     console.error("粒子光效成形动画异常:", e);

@@ -122,7 +122,10 @@ pub fn summon_note(app: &AppHandle, id: &str) {
         let _ = win.set_focus();
         // 重新置顶：便签可能被历史面板等同样置顶的窗口挡住
         let _ = win.set_always_on_top(true);
-        let _ = win.emit("summoned", ());
+        // 【定向单播】Tauri2 的 emit 是全局广播（所有窗口都能收到）：广播 summoned
+        // 会让其他【已隐藏】便签窗口也执行"呼出收尾"（复位 wasHidden）→ 之后任何
+        // play-close-anim 广播都会让它们在旧位置凭空重播粒子消散。必须 emit_to 精确送达。
+        let _ = win.emit_to(win.label(), "summoned", ());
     }
     // 【呼出即模糊】show 是异步生效：等窗口真正显示后再用记忆参数重刷 DWM
     // 亚克力（见 schedule_refresh_note_acrylic 注释），保证窗口可见时模糊已就绪。
@@ -149,6 +152,15 @@ pub fn dismiss_note(app: &AppHandle, label: &str) {
 /// 历史窗口当前是否可见（同样绕过 is_visible 不可靠性，供 open_history 快捷键做 toggle）。
 static HISTORY_VISIBLE: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
 
+/// 便签窗口销毁后的状态清理（状态机 / 亚克力记忆 / 强制隐藏兜底）。
+fn drop_note_window_state(app: &AppHandle, label: &str) {
+    NOTE_STATES.lock().unwrap().remove(label);
+    NOTE_ACRYLIC.lock().unwrap().remove(label);
+    PENDING_FORCE_CLOSE.lock().unwrap().remove(label);
+    crate::panel::broadcast_panel_visibility(app, label, false);
+    let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
+}
+
 /// 待执行的「收起兜底强制隐藏」集合（label）。
 /// 快捷键收起会起一个延时兜底（见 schedule_force_close），用于前端动画未正常收尾时
 /// 强制隐藏。若在兜底到期前用户又呼出了便签，必须把它从本集合移除（取消兜底）——
@@ -167,14 +179,15 @@ pub fn cancel_force_close(labels: &[String]) {
     }
 }
 
-/// 收起时广播关闭动画：每个便签走与手动点击「×」完全相同的
+/// 收起时发送关闭动画：每个便签走与手动点击「×」完全相同的
 /// 前端路径（play-close-anim → requestAnimatedClose），先播消散动画再自行隐藏。
-/// 不做"只有最后激活的便签播"的区分——用户明确要求快捷键关闭与手动点击一致
-/// 播放动画；多便签同时消散也符合"全部收起"的直觉（此前 isFocused / payload
-/// 区分任一环节判断失误都会吞掉动画，是"快捷键关闭无动画"的反复根因）。
+/// 【定向单播】Tauri2 的 emit 是全局广播——广播 play-close-anim 会让所有便签窗口
+/// （含已隐藏常驻的）都收到；隐藏窗口一旦 wasHidden 被广播 summoned 复位，就会在
+/// 自己的旧位置凭空重播粒子消散（用户反馈"只关一个便签、多处触发粒子动画"的根因）。
+/// emit_to 只送达列表中的窗口，快捷键"关闭置顶便签"自然只播一处。
 pub fn emit_close_anim(note_wins: &[(String, tauri::WebviewWindow)]) {
     for (l, w) in note_wins {
-        let _ = w.emit("play-close-anim", true);
+        let _ = w.emit_to(l, "play-close-anim", true);
         crate::storage::diag_write(&format!("[sticky] emit close-anim -> {l}"));
     }
 }
@@ -623,7 +636,8 @@ pub fn delete_note(
     id: String,
 ) -> Result<(), String> {
     if let Some(win) = app.get_webview_window(format!("{NOTE_PREFIX}{id}").as_str()) {
-        let _ = win.emit("note-deleted", ());
+        // 定向单播：note-deleted 无 payload 区分，广播会让所有便签窗口都自毁
+        let _ = win.emit_to(win.label(), "note-deleted", ());
     }
     let path = note_path(&paths, &id);
     if path.exists() {
@@ -1060,6 +1074,10 @@ pub fn ensure_note_window(app: &AppHandle, id: &str) {
         )
         .title("便签")
         .decorations(false)
+        // 真透明窗口：mask 消散动画被裁区域直接透出桌面；透明主题的 DWM 原生
+        // 亚克力也依赖它。（曾试过"非透明主题用不透明窗口保 ClearType + 动画时
+        // 运行时切 blur-behind"，会在 Win11 触发经典窗口帧重画——白宽边+标题栏
+        // 按钮，故回退恒定透明；文字清晰度问题实际由删除 text-shadow 解决。）
         .transparent(true)
         .resizable(true)
         .always_on_top(true)
@@ -1128,7 +1146,7 @@ pub fn open_note_window(app: AppHandle, paths: State<'_, AppPaths>, id: String) 
         let _ = win.show();
         let _ = win.unminimize();
         let _ = win.set_always_on_top(true);
-        let _ = win.emit("summoned", ());
+        let _ = win.emit_to(win.label(), "summoned", ());
     }
     Ok(())
 }
@@ -1196,7 +1214,7 @@ pub fn open_main_note(app: &AppHandle) -> String {
     }
     ensure_note_window(app, &id);
     if let Some(win) = app.get_webview_window(&window_label(&id)) {
-        let _ = win.emit("summoned", ());
+        let _ = win.emit_to(win.label(), "summoned", ());
     }
     window_label(&id)
 }
@@ -1424,7 +1442,7 @@ fn hide_note_window(app: &AppHandle, label: &str) {
     // 复原样式——此时窗口若还没隐藏，已消散的便签会突然恢复完整显示 →
     // "关闭后闪一下"。hide() 先入队、emit 后入队，前端收到事件时窗口已隐藏，
     // 收尾（粒子层 cancel / 样式复位）无感知。
-    let _ = win.emit("sticky://force-hidden", ());
+    let _ = win.emit_to(win.label(), "sticky://force-hidden", ());
     crate::storage::diag_write(&format!("[sticky] hide_note_window: hidden (persistent) {label}"));
     let _ = app.emit(EVT_NOTE_STATE_CHANGED, ());
     crate::panel::broadcast_panel_visibility(app, label, false);
@@ -1584,7 +1602,7 @@ pub fn show_window(app: AppHandle, label: String) -> Result<(), String> {
             // 【跟手打断】与 summon_note 语义一致：通知前端打断进行中的关闭动画
             // （含粒子层）并复原/播成形——托盘"显示便签"路径也必须跟手，否则
             // 关闭动画播放中走托盘显示会继续播动画、呼出不及时。
-            let _ = win.emit("summoned", ());
+            let _ = win.emit_to(win.label(), "summoned", ());
             // 【呼出即模糊】同 summon_note：等窗口真正显示后重刷 DWM 亚克力
             schedule_refresh_note_acrylic(&app, &label);
         }
@@ -1636,7 +1654,7 @@ pub fn register_all_shortcuts<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
-/// 快捷键「呼出 / 收起便签」：仅作用于便签窗口，绝不打开历史面板
+/// 快捷键「呼出/关闭置顶便签」（show_app）：仅作用于置顶便签窗口，绝不打开历史面板
 /// （历史面板由独立的 open_history 快捷键负责）。
 
 /// 粒子层前端是否已就绪（收到 sticky://particles-layer-ready 置 true）。
@@ -1770,9 +1788,9 @@ pub fn set_note_priority(app: AppHandle, paths: State<'_, AppPaths>, id: String)
     Ok(())
 }
 
-/// 呼出/关闭"优先级便签"（show_app 快捷键的新语义，用户要求）：
+/// 呼出/关闭"置顶便签"（show_app 快捷键的语义，用户要求：只对置顶便签操作）：
 /// 1) 有置顶便签 → 操作它；2) 无置顶 → 操作第一条（最近更新）；3) 无便签 → 新建。
-/// 操作 = toggle：该便签可见 → 关闭（销毁）；否则 → 呼出（打开/聚焦）。
+/// 操作 = toggle：该便签可见 → 关闭（播放消散动画后隐藏）；否则 → 呼出（打开/聚焦）。
 fn toggle_priority_note(app: &AppHandle) {
     let Some(paths) = app.try_state::<AppPaths>() else {
         return;
@@ -1855,7 +1873,7 @@ fn toggle_priority_note(app: &AppHandle) {
 
 /// 分发便签全局快捷键：shortcut 命中便签设置的 show_app/new_note/open_history 之一
 /// 则执行并返回 true（调用方短路，不再走工具箱快捷键逻辑）。
-/// - show_app：呼出/收起便签（基于 note_on_screen 状态机做 toggle）
+/// - show_app：呼出/关闭置顶便签（基于 note_on_screen 状态机做 toggle）
 /// - new_note：新建便签
 /// - open_history：呼出/收起历史便签面板（基于 HISTORY_VISIBLE 做 toggle）
 pub fn handle_sticky_shortcut(app: &AppHandle, shortcut: &tauri_plugin_global_shortcut::Shortcut) -> bool {

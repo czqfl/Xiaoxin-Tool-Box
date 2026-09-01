@@ -941,7 +941,10 @@ export function mountNoteApp(noteId: string, preset = "") {
               // 无动画模式：直接复原显示（呼出/关闭零动画，动画竞态绕行）
               restoreGlowSummoned();
             }
-            else if (s.particle_mode === "inhale") anim.inhale!.playInhaleMaterialize(noteWindow, intensity, speed);
+            else if (s.particle_mode === "inhale") {
+              // 呼出成形动画（mask 自顶向下显现）：透明窗口被裁区域天然透出桌面
+              anim.inhale!.playInhaleMaterialize(noteWindow, intensity, speed);
+            }
             else restoreGlowSummoned();
           })
           .catch(() => {
@@ -1332,6 +1335,8 @@ export function mountNoteApp(noteId: string, preset = "") {
     if (theme === "dark" || theme === "transparent") {
       root.classList.add("theme-dark");
     }
+    // 恒定透明窗口（逐像素 alpha）：CSS 14px 大圆角直接生效，无物理裁剪对齐问题
+    root.style.removeProperty("--radius");
   }
 
   // ---- Markdown 主题（来自设置，作用于预览区）----

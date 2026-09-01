@@ -5,9 +5,9 @@
 // · 统一：主方向永远向上（浮力终端 ≈290 px/s；flow 向下分量一律忽略），
 //   小幅群体共波（相位取位置，同股烟一起摆），风是唯一的整体横漂来源。
 // · 差异：逐粒独立蜿蜒（频率/相位由 pseed 定，相邻粒子出生即轨迹分岔）、
-//   向上初速宽带（38~133 px/s，烟柱纵向自然拉开）、尺寸偏斜分布（多小少大）、
-//   收紧光晕（additive 大光晕叠加=糊，1.05×）。摆动均为【速度】直加不积分，
-//   正弦抵消 → 只摆不漂、零净横移（做成加速度会积出横向稳态漂移）。
+//   向上初速宽带（38~133 px/s，烟柱纵向自然拉开）、寿命随机（先后淡出）。
+//   尺寸/亮度【全粒一致】（用户要求：初始大小亮度一致，不做偏斜分布/脉动/闪烁）。
+//   摆动均为【速度】直加不积分，正弦抵消 → 只摆不漂、零净横移（做成加速度会积出横向稳态漂移）。
 // flow 场（∇T）横向分量 ×小增益只影响出生头几百毫秒的轻发散。
 
 export const TAU_DRAG = 1.1;    // 速度松驰时间常数（s）
@@ -22,6 +22,9 @@ const LAT_GAIN = 0.05;          // flow 水平分量 → 横向发散增益（�
 const UP_FLOW_GAIN = 0.05;      // flow 向上分量 → 额外上升增益
 const LIFE_BASE = 3000;         // 寿命基（ms）——给弹道分岔留足时间
 const LIFE_SPAN = 1800;         // 寿命随机幅度
+/** 粒子直径（CSS px）：全粒统一（原为 1.6~4.0 偏斜随机分布，用户要求一致）。
+ *  取原分布的期望值 ≈2.5，观感总量不变。 */
+const PARTICLE_SIZE = 2.5;
 
 /** 粒子池（SoA）。px/py 物理像素；vx/vy CSS px/s，积分时 ×dpr 转物理位移。 */
 export interface ParticlePool {
@@ -99,8 +102,8 @@ export function spawnParticle(
   ps.pvy[i] = -(UP_BASE + Math.random() * UP_SPAN) - upExtra; // 负 = 向上
   ps.plife[i] = life;
   ps.page[i] = 0;
-  // 尺寸偏斜分布：多数小亮点、少数大颗——层次感即"颗粒感"
-  ps.psize[i] = 1.6 + Math.pow(Math.random(), 1.6) * 2.4;
+  // 尺寸全粒统一（见 PARTICLE_SIZE 注释）
+  ps.psize[i] = PARTICLE_SIZE;
   ps.pseed[i] = Math.random() * Math.PI * 2;
   ps.pr[i] = r / 255;
   ps.pg[i] = g / 255;
@@ -141,14 +144,13 @@ export function stepAndPaint(
     ps.px[i] += (ps.pvx[i] + swayX(ps, cfg, i, aSec)) * cfg.dpr * dt;
     ps.py[i] += (ps.pvy[i] + swayY(ps, i, aSec)) * cfg.dpr * dt;
     const t = 1 - u;
-    const twinkle = 0.8 + 0.2 * Math.sin(a * 0.02 + ps.pseed[i] * 5);
-    const alpha = t * Math.pow(t, 0.2) * globalFade * twinkle;
+    // 亮度全粒一致：只随自身寿命进度 t 与全局淡出衰减，无逐粒闪烁
+    const alpha = t * Math.pow(t, 0.2) * globalFade;
     if (alpha < 0.02) continue;
-    const pulse = 1 + 0.22 * Math.sin(a * 0.007 + ps.pseed[i] * 2);
     const o = drawCount * 7;
     glData[o] = ps.px[i];
     glData[o + 1] = ps.py[i];
-    glData[o + 2] = ps.psize[i] * pulse * 1.05 * 2 * cfg.dpr;
+    glData[o + 2] = ps.psize[i] * 1.05 * 2 * cfg.dpr;
     glData[o + 3] = alpha;
     glData[o + 4] = ps.pr[i];
     glData[o + 5] = ps.pg[i];

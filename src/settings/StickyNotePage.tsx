@@ -80,7 +80,7 @@ const STICKY_ACTIONS: { key: string; label: string; global?: boolean }[] = [
   { key: "bg_color", label: "字体背景色" },
   { key: "size_up", label: "增大字号" },
   { key: "size_down", label: "减小字号" },
-  { key: "show_app", label: "呼出 / 收起便签", global: true },
+  { key: "show_app", label: "呼出 / 关闭置顶便签", global: true },
   { key: "open_history", label: "呼出 / 收起历史便签面板", global: true },
   { key: "new_note", label: "新建便签", global: true },
 ];
@@ -246,7 +246,7 @@ export function StickyNotePage() {
   };
 
   // ---- 便签快捷键：编辑只改本地，点「保存」才落盘并重注册系统级热键 ----
-  // 全局项（呼出/收起便签、历史面板、新建）保存后必须调 register_shortcuts，
+  // 全局项（呼出/关闭置顶便签、历史面板、新建）保存后必须调 register_shortcuts，
   // 否则组合改了但系统热键还是旧的。注册走便签自己的增量注册（不清工具箱热键）。
   const saveStickyOne = async (key: string) => {
     const combo = settings.shortcuts[key];
@@ -431,7 +431,7 @@ export function StickyNotePage() {
       </SettingGroup>
       <div className="shortcut-hint">
         便签快捷键支持纯功能键（如 F2 / F4）与 Ctrl/Alt/Shift 组合；
-        建议「呼出/收起便签」「呼出/收起历史面板」用功能键，编辑区快捷键用组合键避免误触。
+        建议「呼出/关闭置顶便签」「呼出/收起历史面板」用功能键，编辑区快捷键用组合键避免误触。
       </div>
 
       {/* ===== Markdown ===== */}
