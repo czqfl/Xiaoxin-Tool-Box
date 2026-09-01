@@ -20,11 +20,12 @@
  *  逐条推送。订阅落地后发 git-run-ready 索取全量快照（emit 首帧必丢，
  *  握手是唯一能保证"任何时刻挂载都看到全量结果"的通道）。 */
 import { useEffect, useState } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { emitTo } from "@tauri-apps/api/event";
 import type { FolderEntry, GitRunResult } from "../../types";
 import { IconBranch, IconClose } from "../../components/icons";
 import { onEvent } from "../../core/events";
+import { hideCurrentWindow, usePanelCommon } from "../../core/usePanel";
+import { useEscLayer } from "../../hooks/useEscLayered";
 import "../../styles/panel.css";
 import "./folder.css";
 
@@ -43,6 +44,8 @@ export const GITRUN_H = 440;
 
 export function GitRunWindow() {
   const [snap, setSnap] = useState<GitRunSnapshot | null>(null);
+  // 与其它面板一致：加载配置/主题、失焦自动隐藏、拖动守卫
+  usePanelCommon();
 
   // 【订阅与自举必须串行】先 await 注册 update 监听，注册成功后才发 ready
   // 索取快照。拆成两个 effect 会竞态：emitTo 是异步 IPC，ready 一发出
@@ -66,25 +69,9 @@ export function GitRunWindow() {
     };
   }, []);
 
-  // 关闭：完全自治——本窗口的点 × / Esc 只隐藏自己（隐藏而非销毁，
-  // 下次执行瞬时复用），不通知、不依赖面板任何行为。
-  const close = () => {
-    void getCurrentWindow()
-      .hide()
-      .catch((e) => console.error("[git-run] hide 失败:", e));
-  };
-
-  // Esc 关闭：窗口持有焦点时按键由本窗口处理
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        close();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  // 关闭与其它面板完全一致：Esc 与 × 都走 hideCurrentWindow
+  // （emit 显隐广播 + window.hide，失败打日志可见）
+  useEscLayer(true, hideCurrentWindow);
 
   return (
     <div className="panel git-run-window">
@@ -101,13 +88,8 @@ export function GitRunWindow() {
               </span>
             )}
           </span>
-          <button
-            className="icon-btn"
-            title="关闭"
-            onClick={close}
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <IconClose size={14} />
+          <button className="icon-btn" title="关闭（Esc）" onClick={hideCurrentWindow}>
+            <IconClose size={15} />
           </button>
         </div>
 
