@@ -421,39 +421,23 @@
   background-size: 6px 6px;
 }
 
-/* ---- Git 命令执行结果：独立窗口（label: git-run），不再挂在面板内 ----
-   面板内任何浮层（含 createPortal 挂到 body）都锁在同一 WebView 里：既拖不出
-   面板，执行期间也会挡住面板操作。改为独立 Tauri 窗口后两点同时满足。
-
-   【外壳不自绘，直接复用 .panel > .panel-shell】此前在这里另画一套底色与圆角，
-   底色写死 0.97、不吃 --panel-opacity，也没有亚克力，和文件夹面板质感对不上。
-   现在全部交给面板样式：底色吃 --panel-opacity（跟随设置里的"面板底色不透明
-   度"）、圆角吃 --radius-panel、顶部高光吃 --panel-highlight；DWM 原生圆角 +
-   亚克力模糊 + webview 透明底由 Rust 端 apply_panel_effects_for 在窗口显示前
-   施加（见 FolderPanel 的 applyGitRunEffects）。因此窗口必须建成
-   transparent: false —— 后端模糊以窗口为合成目标，自绘透明窗套不上亚克力。 */
-.git-run-window.panel {
-  /* 高度由内容决定：窗口高度在 GitRunWindow 里按外壳实测值收缩 */
-  height: auto;
-}
-.git-run-window .panel-shell {
-  height: auto;
-  animation: panel-in var(--dur-base) var(--ease-out);
-}
-.git-run-window .panel-header {
-  cursor: move;
-}
-.git-run-title {
-  flex: 1;
+/* ---- Git 命令执行结果浮层（面板内展示，逐条友好呈现） ---- */
+/* 独立浮窗：右下角浮动卡片，不铺满、无全屏遮罩——面板标题栏拖拽区不再被遮挡，
+   浮窗自身标题栏带 data-tauri-drag-region，可独立拖动整个窗口。 */
+.git-run-float {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  width: min(440px, calc(100vw - 32px));
+  max-height: 62vh;
+  z-index: var(--z-modal, 1000);
   display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
+  animation: panel-in var(--dur-base) var(--ease-out);
+  pointer-events: auto;
 }
-.git-run-title svg {
-  color: var(--accent);
+.git-run-float .git-run-panel {
+  width: 100%;
+  max-height: 62vh;
 }
 .git-run-progress {
   margin-left: 6px;
@@ -464,14 +448,43 @@
   color: var(--accent);
   background: var(--accent-soft, rgba(76, 141, 255, 0.16));
 }
-.git-run-window .panel-body {
+.git-run-panel {
+  width: 100%;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-strong);
+  background: rgba(var(--bg-panel-rgb), 0.97);
+  box-shadow: var(--shadow-menu);
+  overflow: hidden;
+}
+.git-run-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  cursor: move;
+}
+.git-run-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.git-run-title svg {
+  color: var(--accent);
+}
+.git-run-body {
+  overflow-y: auto;
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  /* 窗口高度随内容自适应，但必须设上限：命令输出很长时改为窗口内滚动，
-     否则窗口会一路长到超出屏幕（与 GitRunWindow 的 MAX_H 配套） */
-  max-height: 520px;
 }
 .git-run-loading {
   padding: 24px 0;

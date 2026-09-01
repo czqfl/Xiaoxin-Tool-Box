@@ -474,25 +474,6 @@ pub fn panel_set_always_on_top(window: WebviewWindow, on: bool) -> Result<(), St
     Ok(())
 }
 
-/// 给运行时动态创建的窗口（如 Git 命令执行状态窗 git-run）补一次与面板完全一致
-/// 的效果：DWM 原生圆角 + 亚克力模糊 + webview 透明底。启动期 apply_panel_acrylic
-/// 只覆盖固定面板标签，动态窗口不走那条路径，必须显式调用。acrylic 由前端透传
-/// （取自当前配置），与面板保持同步。
-#[tauri::command]
-pub fn panel_apply_window_effects(
-    app: AppHandle,
-    label: String,
-    acrylic: bool,
-) -> Result<(), String> {
-    let w = app
-        .get_webview_window(&label)
-        .ok_or_else(|| format!("窗口不存在：{label}"))?;
-    #[cfg(windows)]
-    crate::apply_panel_effects_for(&w, acrylic);
-    #[cfg(not(windows))]
-    let _ = (w, acrylic);
-    Ok(())
-}
 
 /// 若某个面板正持有焦点则隐藏它（全局顺序粘贴时让焦点回到之前的应用）
 pub fn hide_focused_panel<R: Runtime>(app: &AppHandle<R>) {

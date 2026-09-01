@@ -7,7 +7,6 @@ import { EVT_CONFIG_CHANGED, onEvent } from "./core/events";
 import { useConfigStore } from "./stores/configStore";
 import { ClipboardPanel } from "./modules/clipboard/ClipboardPanel";
 import { FolderPanel } from "./modules/folder/FolderPanel";
-import { GitRunWindow } from "./modules/folder/GitRunWindow";
 import { CredentialPanel } from "./modules/credential/CredentialPanel";
 import { PortPanel } from "./modules/port/PortPanel";
 import { QuickFilesPanel } from "./modules/quickfiles/QuickFilesPanel";
@@ -83,10 +82,6 @@ export default function App() {
   }
   if (label === "folder-panel") {
     return <FolderPanel />;
-  }
-  // Git 命令执行状态：独立窗口（可拖到任意位置，执行期间面板照常可操作）
-  if (label === "git-run") {
-    return <GitRunWindow />;
   }
   if (label === "credential-panel") {
     return <CredentialPanel />;

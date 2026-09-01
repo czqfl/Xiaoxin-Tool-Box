@@ -103,8 +103,6 @@ async function bootstrap() {
   const panelLabels = [
     "clipboard-panel",
     "folder-panel",
-    // Git 命令执行状态独立窗口：与面板同一套透明底 + 主题变量
-    "git-run",
     "credential-panel",
     "port-panel",
     "files-panel",

@@ -23,3 +23,10 @@
 **惨痛教训**：曾因用覆盖层 Edit 而非非沙箱 Bash，git 把 4 个源文件「删除」而非「修改」，
 生成错误提交（已用 `git reset --hard` 恢复到 fc91822 修复）。任何涉及真实改文件的任务，
 最终落地一律走非沙箱 Bash + 原生 python。
+
+## 架构取舍：展示型结果优先面板内 createPortal 浮层
+Git 命令结果独立窗（动态创建、透明+亚克力、跨 webview 握手）被用户两次实测否决
+（样式错乱/关不掉/无内容），已整体回退为面板内 createPortal 浮动卡片（FolderPanel
+`.git-run-float`）。结论：置顶悬浮面板 + 动态独立窗口组合不可靠，「展示型结果」一律
+优先面板内浮层（继承同一 webview 的渲染/主题/Esc/关闭模型，零窗口生命周期）。
+Tauri 动态窗口仅在硬需求时使用，且必须 show 后刷效果 + async 命令 + spawn_blocking。
