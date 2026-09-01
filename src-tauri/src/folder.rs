@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
 use std::thread;
@@ -358,7 +358,7 @@ pub fn folder_git_exec(path: String, command: String, shell: String) -> CmdResul
 }
 
 /// 单条命令执行结果（面板内友好展示用）
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct GitRunResult {
     /// 命令原文（如 "git status"）
     pub command: String,
@@ -370,7 +370,33 @@ pub struct GitRunResult {
     pub stderr: String,
     /// 退出码；命令启动失败时为 None
     pub code: Option<i32>,
+    /// 是否仍在执行中（流式快照内逐命令状态；命令结束为 false）
+    pub running: bool,
 }
+
+/// Git 流式执行的最新快照（Rust 权威状态：独立结果窗口轮询拉取，不经事件通道）
+#[derive(Clone, Serialize)]
+pub struct GitRunSnapshotState {
+    /// 单调递增序号（全局，跨多次执行递增）：窗口轮询据此判断是否有新内容
+    pub seq: u64,
+    /// 仓库路径
+    pub folder_path: String,
+    /// 仓库名（路径末级，结果窗口标题用）
+    pub folder_name: String,
+    /// 是否仍有命令在执行
+    pub running: bool,
+    /// 命令总数
+    pub total: usize,
+    /// 已结束命令数
+    pub done: usize,
+    /// 各命令累积结果（stdout/stderr 随行增长）
+    pub results: Vec<GitRunResult>,
+}
+
+/// Git 流式执行权威快照与全局单调序号：folder_git_run_stream 内累积发布，
+/// folder_git_run_last 供结果窗口轮询读取；进程启动即为空。
+static GIT_RUN_SEQ: AtomicU64 = AtomicU64::new(0);
+static GIT_RUN_STATE: Mutex<Option<GitRunSnapshotState>> = Mutex::new(None);
 
 /// 流式执行事件（folder_git_run_stream 的 Channel 载荷，逐行实时推送）
 #[derive(Debug, Clone, serde::Serialize)]
@@ -453,6 +479,7 @@ pub async fn folder_git_run(
                         stdout: String::new(),
                         stderr: format!("命令启动失败：{e}"),
                         code: None,
+                        running: false,
                     });
                     continue;
                 }
@@ -486,6 +513,7 @@ pub async fn folder_git_run(
                         stdout: String::new(),
                         stderr: "命令执行超时（120 秒），已强制终止".to_string(),
                         code: None,
+                        running: false,
                     });
                     continue;
                 }
@@ -496,6 +524,7 @@ pub async fn folder_git_run(
                 stdout: String::from_utf8_lossy(&out.stdout).trim().to_string(),
                 stderr: String::from_utf8_lossy(&out.stderr).trim().to_string(),
                 code: out.status.code(),
+                running: false,
             });
         }
         results
@@ -515,6 +544,8 @@ fn spawn_stream_reader<R: Read + Send + 'static>(
 ) {
     thread::spawn(move || {
         let mut buf: Vec<u8> = Vec::new();
+        // 输出行 seq 节流：30ms 内合并为一次 seq 递增，避免高频行唤醒轮询窗口
+        let mut last_pub = std::time::Instant::now();
         loop {
             buf.clear();
             match reader.read_until(b'\n', &mut buf) {
@@ -527,8 +558,29 @@ fn spawn_stream_reader<R: Read + Send + 'static>(
                         let _ = on_ev.send(GitStreamEvent::Line {
                             index,
                             stream: stream.to_string(),
-                            text,
+                            text: text.clone(),
                         });
+                        // 同步进 Rust 权威快照：结果窗口走轮询拉取（不经事件通道）
+                        if let Some(st) = GIT_RUN_STATE.lock().unwrap().as_mut() {
+                            if index < st.results.len() {
+                                let item = &mut st.results[index];
+                                if stream == "stdout" {
+                                    if !item.stdout.is_empty() {
+                                        item.stdout.push('\n');
+                                    }
+                                    item.stdout.push_str(&text);
+                                } else {
+                                    if !item.stderr.is_empty() {
+                                        item.stderr.push('\n');
+                                    }
+                                    item.stderr.push_str(&text);
+                                }
+                                if last_pub.elapsed() >= std::time::Duration::from_millis(30) {
+                                    st.seq = GIT_RUN_SEQ.fetch_add(1, Ordering::Relaxed) + 1;
+                                    last_pub = std::time::Instant::now();
+                                }
+                            }
+                        }
                     }
                 }
                 Err(_) => break,
@@ -555,7 +607,33 @@ pub async fn folder_git_run_stream(
         return Err("文件夹不存在或已被移动".into());
     }
     crate::storage::diag_write("[git-run] rust stream start");
+    // 初始化 Rust 权威快照：结果窗口改为轮询 folder_git_run_last 拉取，
+    // 不再依赖事件通道（listen/emitTo 对本窗口已证实不可靠）。
+    let folder_name = Path::new(&path)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.clone());
+    let total = commands.iter().filter(|c| !c.trim().is_empty()).count();
+    {
+        let mut g = GIT_RUN_STATE.lock().unwrap();
+        *g = Some(GitRunSnapshotState {
+            seq: GIT_RUN_SEQ.fetch_add(1, Ordering::Relaxed) + 1,
+            folder_path: path.clone(),
+            folder_name,
+            running: true,
+            total,
+            done: 0,
+            results: Vec::new(),
+        });
+    }
     tauri::async_runtime::spawn_blocking(move || {
+        // 统一改快照入口：修改内容 + 递增 seq（结果窗口据此刷新）
+        let mutate = |f: &dyn Fn(&mut GitRunSnapshotState)| {
+            if let Some(mut st) = GIT_RUN_STATE.lock().unwrap().as_mut() {
+                f(&mut st);
+                st.seq = GIT_RUN_SEQ.fetch_add(1, Ordering::Relaxed) + 1;
+            }
+        };
         let mut index = 0usize;
         for raw in commands {
             let line = raw.trim();
@@ -566,6 +644,19 @@ pub async fn folder_git_run_stream(
             let _ = on_ev.send(GitStreamEvent::Start {
                 index,
                 command: line.to_string(),
+            });
+            mutate(&|st: &mut GitRunSnapshotState| {
+                if index >= st.results.len() {
+                    st.results.push(GitRunResult {
+                        command: line.to_string(),
+                        ok: false,
+                        code: None,
+                        stdout: String::new(),
+                        stderr: String::new(),
+                        running: true,
+                    });
+                }
+                st.running = true;
             });
             // powershell -NoLogo -Command <line>：与用户手动执行的环境一致
             // （加载 $PROFILE，代理等网络配置生效）。
@@ -578,10 +669,21 @@ pub async fn folder_git_run_stream(
             {
                 Ok(c) => c,
                 Err(e) => {
+                    let msg = format!("命令启动失败：{e}");
                     let _ = on_ev.send(GitStreamEvent::Fail {
                         index,
                         command: line.to_string(),
-                        message: format!("命令启动失败：{e}"),
+                        message: msg.clone(),
+                    });
+                    mutate(&|st: &mut GitRunSnapshotState| {
+                        if let Some(item) = st.results.get_mut(index) {
+                            item.running = false;
+                            if !item.stderr.is_empty() {
+                                item.stderr.push('\n');
+                            }
+                            item.stderr.push_str(&msg);
+                        }
+                        st.done += 1;
                     });
                     index += 1;
                     continue;
@@ -614,6 +716,14 @@ pub async fn folder_git_run_stream(
                         ok: status.success(),
                         code: status.code(),
                     });
+                    mutate(&|st: &mut GitRunSnapshotState| {
+                        if let Some(item) = st.results.get_mut(index) {
+                            item.running = false;
+                            item.ok = status.success();
+                            item.code = status.code();
+                        }
+                        st.done += 1;
+                    });
                 }
                 Err(_) => {
                     if let Some(mut c) = child_arc.lock().unwrap().take() {
@@ -624,17 +734,40 @@ pub async fn folder_git_run_stream(
                         command: line.to_string(),
                         message: "命令执行超时（120 秒），已强制终止".into(),
                     });
+                    mutate(&|st: &mut GitRunSnapshotState| {
+                        if let Some(item) = st.results.get_mut(index) {
+                            item.running = false;
+                            if !item.stderr.is_empty() {
+                                item.stderr.push('\n');
+                            }
+                            item.stderr.push_str("命令执行超时（120 秒），已强制终止");
+                        }
+                        st.done += 1;
+                    });
                 }
             }
             index += 1;
         }
         let _ = on_event.send(GitStreamEvent::Finished);
+        // 终态发布：全部结束，窗口轮询拿到 running=false 即知执行完毕
+        mutate(&|st: &mut GitRunSnapshotState| {
+            st.running = false;
+            st.done = st.total;
+        });
+        crate::storage::diag_write("[git-run] rust stream finished");
     })
     .await
     .map_err(|e| format!("后台执行线程异常：{e}"))?;
     Ok(())
 }
 
+/// 【轮询】返回当前 Git 流式执行权威快照（无执行记录时为 None）。
+/// 独立结果窗口 200ms 轮询本命令拉取最新状态：事件通道（listen/emitTo）
+/// 对 git-run 窗口已证实不可靠（握手从未到达），invoke 通道稳定可靠。
+#[tauri::command]
+pub fn folder_git_run_last() -> Option<GitRunSnapshotState> {
+    GIT_RUN_STATE.lock().unwrap().clone()
+}
 /// 拉起终端并执行命令：复用 open_in_shell 的壳，进入目录后追加命令。
 /// 命令执行失败时错误信息同样显示在终端窗口内，反馈天然可见。
 ///

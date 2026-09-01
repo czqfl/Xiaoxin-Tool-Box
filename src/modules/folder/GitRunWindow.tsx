@@ -16,27 +16,37 @@
  *  下半区域露白（webview 透明未覆盖处）且内容溢出，样式与关闭都异常。
  *  固定高度后窗口尺寸永远等于声明尺寸，问题从根上不存在。
  *
- *  【数据来源】由 folder-panel 通过 emitTo("git-run", "git-run-update")
- *  逐条推送。订阅落地后发 git-run-ready 索取全量快照（emit 首帧必丢，
- *  握手是唯一能保证"任何时刻挂载都看到全量结果"的通道）。 */
+ *  【数据来源】Rust 权威快照轮询：folder_git_run_stream 在 Rust 侧把每条
+ *  命令的 Start/Line/Done/Fail 累积进全局快照（GIT_RUN_STATE，内容变更即
+ *  递增 seq），本窗口每 200ms invoke folder_git_run_last 拉取、seq 变化才
+ *  刷新。此前 listen/emitTo 事件通道对本窗口已证实不可靠（握手日志在整个
+ *  diag 全量里从未出现过），invoke 通道稳定可靠。 */
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { emitTo } from "@tauri-apps/api/event";
-import type { FolderEntry, GitRunResult } from "../../types";
+import type { GitRunResult } from "../../types";
 import { IconBranch, IconClose } from "../../components/icons";
-import { onEvent } from "../../core/events";
 import { hideCurrentWindow, usePanelCommon } from "../../core/usePanel";
 import { useEscLayer } from "../../hooks/useEscLayered";
 import "../../styles/panel.css";
 import "./folder.css";
 
-/** 一次 Git 执行的完整快照（跨窗口传输的载荷） */
-export interface GitRunSnapshot {
-  folder: FolderEntry;
-  results: GitRunResult[];
+/** Rust 侧 folder_git_run_last 返回的权威快照（与 folder.rs 的
+ *  GitRunSnapshotState 字段一一对应，勿改字段名） */
+export interface GitRunSnapshotState {
+  /** 单调递增序号（全局，跨多次执行递增）：变化即代表有新内容 */
+  seq: number;
+  /** 仓库路径 */
+  folder_path: string;
+  /** 仓库名（路径末级，窗口标题用） */
+  folder_name: string;
+  /** 是否仍有命令在执行 */
   running: boolean;
+  /** 命令总数 */
   total: number;
+  /** 已结束命令数 */
   done: number;
+  /** 各命令累积结果（stdout/stderr 随行增长） */
+  results: GitRunResult[];
 }
 
 /** 窗口逻辑尺寸（与 FolderPanel 的 GITRUN_W/GITRUN_H 保持一致，勿改） */
@@ -44,36 +54,34 @@ export const GITRUN_W = 460;
 export const GITRUN_H = 440;
 
 export function GitRunWindow() {
-  const [snap, setSnap] = useState<GitRunSnapshot | null>(null);
+  const [snap, setSnap] = useState<GitRunSnapshotState | null>(null);
   // 与其它面板一致：加载配置/主题、失焦自动隐藏、拖动守卫
   usePanelCommon();
 
-  // 【订阅与自举必须串行】先 await 注册 update 监听，注册成功后才发 ready
-  // 索取快照。拆成两个 effect 会竞态：emitTo 是异步 IPC，ready 一发出
-  // folder-panel 立刻回推，而本窗口的 listen 可能还没落地 → 首帧快照丢失。
+  // 【轮询拉取】Rust 权威快照：200ms invoke folder_git_run_last，seq 变化才
+  // setState（避免无谓渲染）。不再使用 listen/emitTo——事件通道对本窗口已
+  // 证实不可靠（diag 全量日志中 git-run-ready / git-run-update 从未出现过）。
   useEffect(() => {
-    let un: (() => void) | undefined;
     let disposed = false;
-    void invoke("diag_log", { msg: "[git-run] win mounted" }).catch(() => {});
-    void onEvent<GitRunSnapshot | null>("git-run-update", (s) => {
-      void invoke("diag_log", {
-        msg: "[git-run] win update snap=" + (s ? s.results.length + " running=" + s.running : "null"),
-      }).catch(() => {});
-      setSnap(s);
-    })
-      .then((f) => {
-        if (disposed) {
-          f();
-          return;
+    let lastSeq = -1;
+    const tick = async () => {
+      if (disposed) return;
+      try {
+        const s = await invoke<GitRunSnapshotState | null>("folder_git_run_last");
+        if (disposed) return;
+        if (s && s.seq !== lastSeq) {
+          lastSeq = s.seq;
+          setSnap(s);
         }
-        un = f;
-        void invoke("diag_log", { msg: "[git-run] win ready sent" }).catch(() => {});
-        void emitTo("folder-panel", "git-run-ready", true).catch(() => {});
-      })
-      .catch(() => {});
+      } catch {
+        // invoke 偶发失败（窗口关闭竞态等）：下一轮自动重试
+      }
+    };
+    void tick();
+    const timer = window.setInterval(tick, 200);
     return () => {
       disposed = true;
-      un?.();
+      window.clearInterval(timer);
     };
   }, []);
 
@@ -102,7 +110,7 @@ export function GitRunWindow() {
           <span className="git-run-title" data-tauri-drag-region>
             <IconBranch size={13} />
             {snap
-              ? `${snap.running ? "Git 执行中" : "Git 执行结果"} · ${snap.folder.name}`
+              ? `${snap.running ? "Git 执行中" : "Git 执行结果"} · ${snap.folder_name}`
               : "Git 执行状态"}
             {snap && snap.total > 1 && (
               <span className="git-run-progress">

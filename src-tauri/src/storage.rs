@@ -96,12 +96,25 @@ pub fn save_json<T: Serialize + ?Sized>(path: &Path, value: &T) -> std::io::Resu
     Ok(())
 }
 
+/// diag.log 超过 2MB 时轮转为 diag.log.old（覆盖旧档）——避免单文件无限膨胀
+/// 掩盖早期证据（曾出现 5.6MB 单文件，导致关键握手日志无从检索）。
+fn rotate_diag_if_large(dir: &std::path::Path) {
+    const MAX: u64 = 2 * 1024 * 1024;
+    let p = dir.join("diag.log");
+    if let Ok(meta) = std::fs::metadata(&p) {
+        if meta.len() > MAX {
+            let _ = std::fs::rename(&p, dir.join("diag.log.old"));
+        }
+    }
+}
+
 /// 诊断日志：追加写 data/diag.log（定位"弹窗交互失效"等疑难问题：
 /// 看前端是否挂载、事件是否到达）
 #[tauri::command]
 pub fn diag_log(msg: String, paths: State<'_, AppPaths>) {
     use std::io::Write;
     let line = format!("{} {}\n", chrono::Utc::now().to_rfc3339(), msg);
+    rotate_diag_if_large(&paths.data_dir);
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -116,6 +129,7 @@ pub fn diag_log(msg: String, paths: State<'_, AppPaths>) {
 pub fn diag_write(msg: &str) {
     use std::io::Write;
     let dir = AppPaths::resolve().data_dir;
+    rotate_diag_if_large(&dir);
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)

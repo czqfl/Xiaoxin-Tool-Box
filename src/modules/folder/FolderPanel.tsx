@@ -3,10 +3,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
-import { emitTo } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import type { EditorInfo, FolderEntry, FolderLayout, GitRunResult } from "../../types";
-import { GitRunSnapshot, GITRUN_W, GITRUN_H } from "./GitRunWindow";
+import type { EditorInfo, FolderEntry, FolderLayout } from "../../types";
+import { GITRUN_W, GITRUN_H } from "./GitRunWindow";
 import { hideCurrentWindow, usePanelCommon, withNativeDialog } from "../../core/usePanel";
 import { EVT_FOLDER_CHANGED, onEvent } from "../../core/events";
 import { useFolderStore, sortFolders } from "../../stores/folderStore";
@@ -174,24 +173,8 @@ function FolderPanelInner() {
   const [branches, setBranches] = useState<Record<string, string>>({});
   /** 已安装编辑器列表（null = 尚未检测完成） */
   const [editors, setEditors] = useState<EditorInfo[] | null>(null);
-  /** Git 命令执行结果快照（独立窗口渲染，null = 无执行） */
-  const [gitRun, setGitRun] = useState<GitRunSnapshot | null>(null);
   /** 待删除确认的文件夹（null = 无确认弹窗） */
   const [deleteTarget, setDeleteTarget] = useState<FolderEntry | null>(null);
-
-  /** 最新快照镜像：供窗口（重）挂载时的 ready 握手回推——
-   *  监听器只在挂载时注册一次，闭包里直接读 state 会拿到注册那一刻的陈旧值 */
-  const gitRunRef = useRef<GitRunSnapshot | null>(null);
-  useEffect(() => {
-    gitRunRef.current = gitRun;
-  }, [gitRun]);
-
-  /** 推送快照：面板 state 同步更新（Esc 层判定用）+ 定向发给独立窗口实时上屏 */
-  const pushGitRun = (snap: GitRunSnapshot) => {
-    gitRunRef.current = snap;
-    setGitRun(snap);
-    void emitTo(GITRUN_LABEL, "git-run-update", snap).catch(() => {});
-  };
 
 
   /** 智能停靠：算出 Git 结果窗应显示的物理坐标（用户需求）——
@@ -257,33 +240,13 @@ function FolderPanelInner() {
       await win.setPosition(geo.pos).catch(() => {});
     }
     // 显示改走 Rust 可靠置前（show + force_foreground_robust + set_focus），
-    // 与 tray/热键打开面板同款——修复"窗口可见但无焦点，点击不响应"
+    // 与 tray/热键打开面板同款——修复"窗口可见但无焦点，点击不响应"。
+    // 显示后再补刷一次亚克力（z-order 变化后 SWCA 可能失效；原 ready 握手
+    // 里的兜底重刷已随事件通道一起移除，这里成为唯一时机）。
     await invoke("panel_show_foreground", { label: GITRUN_LABEL }).catch(() => {});
+    invoke("panel_refresh_acrylic", { label: GITRUN_LABEL }).catch(() => {});
     return true;
   };
-
-  // 独立窗口的握手 / 关闭通道。窗口挂载（开发模式下由隐藏转可见会整页重载，
-  // 等同重新挂载）时发 git-run-ready 索取快照，此时把最新状态整体回推——
-  // 首帧 emit 必然丢失，握手是唯一能保证"任何时刻挂载都看到全量结果"的通道。
-  useEffect(() => {
-    let a: (() => void) | undefined;
-    let disposed = false;
-    onEvent<boolean>("git-run-ready", () => {
-      invoke("diag_log", { msg: "[git-run] panel got ready, push back snap=" + (gitRunRef.current ? gitRunRef.current.results.length : "null") }).catch(() => {});
-      // 窗口 webview 已挂载：顺手把窗口效果再刷一遍（开发模式隐藏转可见会整页
-      // 重载、效果随之丢失，这里是效果重刷的最稳兜底时机）
-      invoke("panel_refresh_acrylic", { label: GITRUN_LABEL }).catch(() => {});
-      void emitTo<GitRunSnapshot | null>(
-        GITRUN_LABEL,
-        "git-run-update",
-        gitRunRef.current,
-      ).catch(() => {});
-    }).then((f) => (disposed ? f() : (a = f)));
-    return () => {
-      disposed = true;
-      a?.();
-    };
-  }, []);
 
   // Esc：关闭面板。Git 结果窗口完全独立自治——它的开关由窗口自己管理，
   // 面板既不跟踪其状态，也不在自身关闭时连带操作它。
@@ -499,24 +462,19 @@ function FolderPanelInner() {
    *  一次性显示（add→commit→push 有顺序依赖必须串行 await；各命令在各自进程里
    *  于同一 .git 目录执行，状态互相可见）。
    *
-   *  实现：Rust 侧 folder_git_run_stream 用 Channel 把每条命令的 stdout/stderr
-   *  逐行实时推过来（line 事件）；前端先把所有命令建占位条目（首条 running），
-   *  输出行到达即原地累积、30ms 节流合并推给独立窗口——命令还没结束时，它的
-   *  输出就已经一行一行出现在弹窗里。既不再开终端（多条拼一行滚动太快只看得到
-   *  末尾），也不再是面板内浮层（锁在同一 WebView 里，拖不动也挡住面板）。 */
+   *  数据链路（Rust 权威快照 + 窗口轮询）：前端只负责拉起窗口、触发执行；
+   *  folder_git_run_stream 在 Rust 侧把每条命令的 Start/Line/Done/Fail 累积进
+   *  全局快照（GIT_RUN_STATE，内容变更即递增 seq），结果窗口每 200ms invoke
+   *  folder_git_run_last 拉取、seq 变化即刷新。不再经事件通道（listen/emitTo
+   *  对本窗口已证实不可靠，握手日志从未出现过），也不再由面板维护/推送任何
+   *  快照状态——面板 state、gitRunRef、pushGitRun 已全部移除。 */
   const execGitCommand = async (folder: FolderEntry, cmd: string) => {
     const commands = cmd
       .split("\n")
       .map((s) => s.trim())
       .filter(Boolean);
+    if (commands.length === 0) return;
     invoke("diag_log", { msg: "[git-run] exec start cmds=" + commands.length }).catch(() => {});
-    const snap = (results: GitRunResult[], running: boolean): GitRunSnapshot => ({
-      folder,
-      results,
-      running,
-      total: commands.length,
-      done: results.filter((r) => !r.running).length,
-    });
     // 窗口先就位再执行：首条命令的输出要落在已经显示出来的窗口里。
     // 锚点缺失（非右键入口触发）时传 +∞，等价于"右侧优先"。
     const ready = await openGitRunWindow(
@@ -526,82 +484,13 @@ function FolderPanelInner() {
       toast.show("Git 状态窗口创建失败，命令未执行", "error");
       return;
     }
-    // 占位条目：所有命令先建好（首条 running），输出行逐条累积其上
-    const results: GitRunResult[] = commands.map((command, i) => ({
-      command,
-      ok: false,
-      stdout: "",
-      stderr: "",
-      code: null,
-      running: i === 0,
-    }));
-    pushGitRun(snap(results, true));
-    invoke("diag_log", { msg: "[git-run] placeholder pushed results=" + results.length }).catch(() => {});
-    // 节流合并推送：line 事件可能高频（git 大输出），30ms 内只推一次快照
-    let timer: number | undefined;
-    const flush = () => {
-      timer = undefined;
-      pushGitRun(snap(results, true));
-    };
-    const schedule = () => {
-      if (timer === undefined) timer = window.setTimeout(flush, 30);
-    };
     try {
-      await api.gitRunStream(folder.path, commands, (ev) => {
-        switch (ev.type) {
-          case "start": {
-            const r = results[ev.index];
-            if (r) r.running = true;
-            break;
-          }
-          case "line": {
-            const r = results[ev.index];
-            if (!r) break;
-            if (ev.stream === "stdout") r.stdout += ev.text + "\n";
-            else r.stderr += ev.text + "\n";
-            break;
-          }
-          case "done": {
-            const r = results[ev.index];
-            if (r) {
-              r.ok = ev.ok;
-              r.code = ev.code;
-              r.running = false;
-            }
-            break;
-          }
-          case "fail": {
-            const r = results[ev.index];
-            if (r) {
-              r.ok = false;
-              r.code = null;
-              r.running = false;
-              r.stderr = r.stderr ? `${r.stderr}\n${ev.message}` : ev.message;
-            }
-            break;
-          }
-          case "finished":
-            break;
-        }
-        schedule();
-      });
+      await api.gitRunStream(folder.path, commands, () => {});
     } catch (e) {
-      // invoke 整体失败（如文件夹已不存在）：把所有未结束的条目标失败
-      for (const r of results) {
-        if (r.running) {
-          r.running = false;
-          r.stderr = String(e);
-        }
-      }
+      // invoke 整体失败（如文件夹已不存在）：给用户明确反馈
+      toast.show("Git 命令执行失败：" + String(e), "error");
     }
-    if (timer !== undefined) {
-      window.clearTimeout(timer);
-      timer = undefined;
-    }
-    invoke("diag_log", { msg: "[git-run] stream done results=" + results.length }).catch(() => {});
-    pushGitRun(snap(results, false));
   };
-
   const menuItems = (folder: FolderEntry): MenuItem[] => [
     {
       label: "打开",
