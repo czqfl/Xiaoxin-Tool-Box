@@ -176,9 +176,6 @@ function FolderPanelInner() {
   const [editors, setEditors] = useState<EditorInfo[] | null>(null);
   /** Git 命令执行结果快照（独立窗口渲染，null = 无执行） */
   const [gitRun, setGitRun] = useState<GitRunSnapshot | null>(null);
-  /** 独立窗口是否打开：只服务 Esc 层调度，与快照数据完全解耦。
-   *  窗口关闭（点 ×）只置 false，绝不清空 gitRun——那是面板自己的数据。 */
-  const [gitRunOpen, setGitRunOpen] = useState(false);
   /** 待删除确认的文件夹（null = 无确认弹窗） */
   const [deleteTarget, setDeleteTarget] = useState<FolderEntry | null>(null);
 
@@ -196,14 +193,6 @@ function FolderPanelInner() {
     void emitTo(GITRUN_LABEL, "git-run-update", snap).catch(() => {});
   };
 
-  /** 关闭独立窗口：隐藏窗口（隐藏而非销毁，下次执行瞬时复用）。
-   *  只隐藏 + 失活 Esc 层，绝不清空快照——快照是面板数据，窗口关闭不联动它。 */
-  const closeGitRun = () => {
-    setGitRunOpen(false);
-    void WebviewWindow.getByLabel(GITRUN_LABEL)
-      .then((w) => w?.hide())
-      .catch(() => {});
-  };
 
   /** 智能停靠：算出 Git 结果窗应显示的物理坐标（用户需求）——
    *  以被操作文件夹卡片的中心 X（逻辑像素）为锚点：
@@ -268,7 +257,6 @@ function FolderPanelInner() {
       await win.setPosition(geo.pos).catch(() => {});
     }
     await win.show().catch(() => {});
-    setGitRunOpen(true);
     await invoke("panel_refresh_acrylic", { label: GITRUN_LABEL }).catch(() => {});
     return true;
   };
@@ -278,7 +266,6 @@ function FolderPanelInner() {
   // 首帧 emit 必然丢失，握手是唯一能保证"任何时刻挂载都看到全量结果"的通道。
   useEffect(() => {
     let a: (() => void) | undefined;
-    let b: (() => void) | undefined;
     let disposed = false;
     onEvent<boolean>("git-run-ready", () => {
       // 窗口 webview 已挂载：顺手把窗口效果再刷一遍（开发模式隐藏转可见会整页
@@ -290,24 +277,15 @@ function FolderPanelInner() {
         gitRunRef.current,
       ).catch(() => {});
     }).then((f) => (disposed ? f() : (a = f)));
-    // 窗口点 ×：它已自行隐藏，这里只失活 Esc 层（窗口自治，面板不参与关闭）
-    onEvent<boolean>("git-run-close", () => setGitRunOpen(false)).then((f) =>
-      disposed ? f() : (b = f),
-    );
     return () => {
       disposed = true;
       a?.();
-      b?.();
     };
   }, []);
 
-  // Esc 层叠：Git 结果窗口打开时优先关它，否则关闭面板。
-  // 关闭面板时同步收起 Git 窗口——它虽是独立窗口，终究由本面板唤起。
-  useEscLayer(true, () => {
-    closeGitRun();
-    hideCurrentWindow();
-  });
-  useEscLayer(gitRunOpen, () => closeGitRun());
+  // Esc：关闭面板。Git 结果窗口完全独立自治——它的开关由窗口自己管理，
+  // 面板既不跟踪其状态，也不在自身关闭时连带操作它。
+  useEscLayer(true, () => hideCurrentWindow());
 
   // 列表变化时批量读取 Git 分支（读 .git/HEAD，毫秒级）
   useEffect(() => {

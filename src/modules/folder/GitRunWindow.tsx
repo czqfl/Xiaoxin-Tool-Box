@@ -66,10 +66,9 @@ export function GitRunWindow() {
     };
   }, []);
 
-  // 关闭：窗口自治——直接隐藏本窗口（隐藏而非销毁，下次执行瞬时复用），
-  // 关闭可靠性不依赖面板；同时通知面板仅失活 Esc 层（面板不清数据、不隐藏）。
+  // 关闭：完全自治——本窗口的点 × / Esc 只隐藏自己（隐藏而非销毁，
+  // 下次执行瞬时复用），不通知、不依赖面板任何行为。
   const close = () => {
-    void emitTo("folder-panel", "git-run-close", true).catch(() => {});
     void getCurrentWindow().hide().catch(() => {});
   };
 
