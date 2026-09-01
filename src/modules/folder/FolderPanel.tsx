@@ -1,5 +1,6 @@
 /** 文件夹快捷面板：固定/最常访问双分区、各自分页、搜索、右键菜单、拖拽添加与排序 */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { EditorInfo, FolderEntry, FolderLayout, GitRunResult } from "../../types";
 import { hideCurrentWindow, usePanelCommon, withNativeDialog } from "../../core/usePanel";
@@ -169,6 +170,8 @@ function FolderPanelInner() {
     folder: FolderEntry;
     results: GitRunResult[];
     running: boolean;
+    total: number;
+    done: number;
   } | null>(null);
   /** 待删除确认的文件夹（null = 无确认弹窗） */
   const [deleteTarget, setDeleteTarget] = useState<FolderEntry | null>(null);
@@ -384,14 +387,30 @@ function FolderPanelInner() {
   /** 面板内逐条执行 Git 命令并友好展示结果：
    *  不再开新终端（多条命令拼一行滚动太快只能看到末尾，用户反馈），
    *  改为在面板内逐条执行、每条独立展示成功/失败与输出。 */
+  /** 逐条串行执行 Git 命令并实时刷新结果：每条命令单独调用后端，完成一条立即上屏一条，
+   *  而非全部跑完才一起显示。add→commit→push 有顺序依赖必须串行 await；各命令在各自
+   *  进程里于同一 .git 目录执行，状态互相可见。 */
   const execGitCommand = async (folder: FolderEntry, cmd: string) => {
     const commands = cmd
       .split("\n")
       .map((s) => s.trim())
       .filter(Boolean);
-    setGitRun({ folder, results: [], running: true });
-    const results = await api.gitRun(folder.path, commands);
-    setGitRun({ folder, results, running: false });
+    setGitRun({ folder, results: [], running: true, total: commands.length, done: 0 });
+    const all: GitRunResult[] = [];
+    try {
+      for (const c of commands) {
+        const res = await api.gitRun(folder.path, [c]);
+        const r: GitRunResult =
+          res[0] ?? { command: c, ok: false, code: null, stdout: "", stderr: "执行失败：无返回结果" };
+        all.push(r);
+        setGitRun({ folder, results: [...all], running: true, total: commands.length, done: all.length });
+      }
+    } catch (e) {
+      all.push({ command: "—", ok: false, code: null, stdout: "", stderr: String(e) });
+      setGitRun({ folder, results: [...all], running: false, total: commands.length, done: all.length });
+      return;
+    }
+    setGitRun({ folder, results: all, running: false, total: commands.length, done: all.length });
   };
 
   const menuItems = (folder: FolderEntry): MenuItem[] => [
@@ -704,45 +723,50 @@ function FolderPanelInner() {
           </span>
         </div>
 
-        {gitRun && (
-          <div className="git-run-overlay" onClick={() => setGitRun(null)}>
-            <div className="git-run-panel" onClick={(e) => e.stopPropagation()}>
-              <div className="git-run-head">
-                <span className="git-run-title">
-                  <IconBranch size={13} /> Git 执行结果 · {gitRun.folder.name}
-                </span>
-                <button
-                  className="icon-btn"
-                  title="关闭"
-                  onClick={() => setGitRun(null)}
-                >
-                  <IconClose size={14} />
-                </button>
-              </div>
-              <div className="git-run-body">
-                {gitRun.running ? (
-                  <div className="git-run-loading">正在执行命令…</div>
-                ) : gitRun.results.length === 0 ? (
-                  <div className="git-run-loading">没有可执行的命令</div>
-                ) : (
-                  gitRun.results.map((r, i) => (
-                    <div className={`git-run-item ${r.ok ? "ok" : "fail"}`} key={i}>
-                      <div className="git-run-cmd">
-                        <span className="git-run-status">{r.ok ? "✔" : "✘"}</span>
-                        <code>{r.command}</code>
-                        {!r.ok && r.code != null && (
-                          <span className="git-run-code">退出码 {r.code}</span>
-                        )}
-                      </div>
-                      {r.stdout && <pre className="git-run-out">{r.stdout}</pre>}
-                      {r.stderr && <pre className="git-run-err">{r.stderr}</pre>}
+        {gitRun &&
+          createPortal(
+            <div className="git-run-float">
+              <div className="git-run-panel">
+                <div className="git-run-head" data-tauri-drag-region>
+                  <span className="git-run-title">
+                    <IconBranch size={13} />
+                    {gitRun.running ? "Git 执行中" : "Git 执行结果"} · {gitRun.folder.name}
+                    {gitRun.total > 1 && (
+                      <span className="git-run-progress">{gitRun.done}/{gitRun.total}</span>
+                    )}
+                  </span>
+                  <button className="icon-btn" title="关闭" onClick={() => setGitRun(null)}>
+                    <IconClose size={14} />
+                  </button>
+                </div>
+                <div className="git-run-body">
+                  {gitRun.results.length === 0 ? (
+                    <div className="git-run-loading">
+                      {gitRun.running ? "正在执行命令…" : "没有可执行的命令"}
                     </div>
-                  ))
-                )}
+                  ) : (
+                    gitRun.results.map((r, i) => (
+                      <div className={`git-run-item ${r.ok ? "ok" : "fail"}`} key={i}>
+                        <div className="git-run-cmd">
+                          <span className="git-run-status">{r.ok ? "✔" : "✘"}</span>
+                          <code>{r.command}</code>
+                          {!r.ok && r.code != null && (
+                            <span className="git-run-code">退出码 {r.code}</span>
+                          )}
+                        </div>
+                        {r.stdout && <pre className="git-run-out">{r.stdout}</pre>}
+                        {r.stderr && <pre className="git-run-err">{r.stderr}</pre>}
+                      </div>
+                    ))
+                  )}
+                  {gitRun.running && gitRun.results.length > 0 && (
+                    <div className="git-run-loading">正在执行下一条命令…</div>
+                  )}
+                </div>
               </div>
-            </div>
-          </div>
-        )}
+            </div>,
+            document.body,
+          )}
 
         {menu && (
           <ContextMenu

@@ -422,17 +422,31 @@
 }
 
 /* ---- Git 命令执行结果浮层（面板内展示，逐条友好呈现） ---- */
-.git-run-overlay {
+/* 独立浮窗：右下角浮动卡片，不铺满、无全屏遮罩——面板标题栏拖拽区不再被遮挡，
+   浮窗自身标题栏带 data-tauri-drag-region，可独立拖动整个窗口。 */
+.git-run-float {
   position: fixed;
-  inset: 0;
-  z-index: var(--z-modal-backdrop);
+  right: 16px;
+  bottom: 16px;
+  width: min(440px, calc(100vw - 32px));
+  max-height: 62vh;
+  z-index: var(--z-modal, 1000);
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-  background: light-dark(rgba(22, 24, 28, 0.32), rgba(0, 0, 0, 0.55));
-  border-radius: var(--radius-panel);
   animation: panel-in var(--dur-base) var(--ease-out);
+  pointer-events: auto;
+}
+.git-run-float .git-run-panel {
+  width: 100%;
+  max-height: 62vh;
+}
+.git-run-progress {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft, rgba(76, 141, 255, 0.16));
 }
 .git-run-panel {
   width: 100%;
@@ -452,6 +466,7 @@
   gap: 8px;
   padding: 10px 12px;
   border-bottom: 1px solid var(--border-subtle);
+  cursor: move;
 }
 .git-run-title {
   display: flex;
