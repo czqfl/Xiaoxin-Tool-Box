@@ -4,6 +4,7 @@ import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
 import { emitTo } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import type { EditorInfo, FolderEntry, FolderLayout, GitRunResult } from "../../types";
 import type { GitRunSnapshot } from "./GitRunWindow";
 import { hideCurrentWindow, usePanelCommon, withNativeDialog } from "../../core/usePanel";
@@ -247,10 +248,18 @@ function FolderPanelInner() {
     }
   };
 
+  /** 给独立窗口套上与文件夹面板完全一致的窗口效果：DWM 原生圆角裁剪 +
+   *  亚克力模糊 + webview 透明底（开关跟随配置里的"亚克力"，取值同源）。
+   *  动态创建的窗口不会经过启动时的效果管线，必须显式补一次。 */
+  const applyGitRunEffects = () =>
+    invoke("panel_apply_window_effects", { label: GITRUN_LABEL }).catch(() => {});
+
   /** 打开（或复用）Git 状态独立窗口。
    *  【何时重排位置】窗口已可见时不动——用户可能刚手动把它拖到顺手的地方；
-   *  只有首次创建 / 上次已关闭，才按当前面板位置重新智能定位一次。 */
-  const openGitRunWindow = async (anchorCx: number) => {
+   *  只有首次创建 / 上次已关闭，才按当前面板位置重新智能定位一次。
+   *  【返回值】窗口是否可用。不可用（建窗失败）时调用方必须给出可见反馈，
+   *  否则命令在后台跑完却一个字都看不到，表现为"点了没反应"。 */
+  const openGitRunWindow = async (anchorCx: number): Promise<boolean> => {
     let win = await WebviewWindow.getByLabel(GITRUN_LABEL).catch(() => null);
     if (!win) {
       const geo = await placeGitRunWindow(anchorCx);
@@ -260,11 +269,14 @@ function FolderPanelInner() {
           width: GITRUN_W,
           height: GITRUN_H,
           decorations: false,
-          transparent: true,
+          // 【必须与面板一致：transparent: false】面板的圆角与亚克力由 DWM /
+          // 后端合成提供，前提是"窗口不透明 + webview 背景透明"（见 Rust 端
+          // apply_panel_effects_for）。此前设 transparent: true 只能靠 CSS
+          // 自绘圆角和半透明底色，与文件夹面板的质感完全对不上。
+          transparent: false,
           alwaysOnTop: true,
           focus: true,
           resizable: true,
-          shadow: false,
           visible: false,
           skipTaskbar: true,
         });
@@ -281,11 +293,16 @@ function FolderPanelInner() {
         await win.setSize(geo.size).catch(() => {});
         await win.setPosition(geo.pos).catch(() => {});
       }
+      if (win) await applyGitRunEffects();
     } else if (!(await win.isVisible().catch(() => false))) {
       const geo = await placeGitRunWindow(anchorCx);
       if (geo) await win.setPosition(geo.pos).catch(() => {});
+      // 窗口被销毁重建（如开发期热重载）后效果会丢，每次显示前重刷一次
+      await applyGitRunEffects();
     }
-    if (win) await win.show().catch(() => {});
+    if (!win) return false;
+    await win.show().catch(() => {});
+    return true;
   };
 
   // 独立窗口的握手 / 关闭通道。窗口挂载（开发模式下由隐藏转可见会整页重载，
@@ -544,7 +561,13 @@ function FolderPanelInner() {
     });
     // 窗口先就位再执行：首条命令的输出要落在已经显示出来的窗口里。
     // 锚点缺失（非右键入口触发）时传 +∞，等价于"右侧优先"。
-    await openGitRunWindow(gitAnchorRef.current ?? Number.POSITIVE_INFINITY);
+    const ready = await openGitRunWindow(
+      gitAnchorRef.current ?? Number.POSITIVE_INFINITY,
+    );
+    if (!ready) {
+      toast.show("Git 状态窗口创建失败，命令未执行", "error");
+      return;
+    }
     pushGitRun(snap([], true));
     const all: GitRunResult[] = [];
     try {

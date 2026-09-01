@@ -4,13 +4,15 @@
  *  同一个 WebView 里——既不能拖到屏幕任意位置，也无法在命令执行期间同时操作
  *  文件夹面板。独立 Tauri 窗口天然满足两点：可拖到任意位置、与面板互不干扰。
  *
- *  【数据来源】由 folder-panel 通过 emitTo("git-run", "git-run-update") 逐条推送。
- *  本窗口挂载后主动 emitTo("folder-panel", "git-run-ready") 索取一次全量快照——
- *  窗口是"创建一次、隐藏复用"的常驻窗口（重建 WebView2 要几百毫秒），且开发模式下
- *  由隐藏转可见会触发整页重载（见 main.tsx），首帧 emit 必然丢失，握手是唯一可靠通道。
+ *  【外观】与文件夹面板同构：外壳就是 .panel > .panel-shell，窗口效果（DWM 原生
+ *  圆角 + 亚克力模糊 + webview 透明底）由 Rust 端 panel_apply_window_effects 施加，
+ *  底色不透明度同样吃 --panel-opacity，视觉与文件夹面板完全一致。
  *
- *  【高度】内容驱动自适应：ResizeObserver 测量外壳高度后 setSize，避免内容少时留白、
- *  内容多时被截断；超过上限后由 body 内部滚动。 */
+ *  【数据来源】由 folder-panel 通过 emitTo("git-run", "git-run-update") 逐条推送。
+ *
+ *  【高度】内容驱动自适应：ResizeObserver 测量外壳高度后 setSize；注意本窗口与
+ *  面板相反——面板铺满固定高度的窗口，本窗口是窗口跟着内容收缩（见 folder.css
+ *  里 .git-run-window .panel-shell { height: auto }）。 */
 import { useEffect, useRef, useState } from "react";
 import {
   LogicalSize,
@@ -39,26 +41,28 @@ const WIN_W = 460;
 /** 窗口逻辑高度上下限（内容自适应，超出后 body 内滚动） */
 const MIN_H = 132;
 const MAX_H = 620;
-/** 根容器内边距：透明无装饰窗口会裁掉边缘的 box-shadow，留白给阴影绘制空间 */
-const PAD = 10;
 
 export function GitRunWindow() {
   const [snap, setSnap] = useState<GitRunSnapshot | null>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
 
-  // 自举：向来源面板索取当前快照。首次创建窗口时组件还没挂载，执行期间推送的
-  // 数据全部丢失；开发模式下 show 触发的整页重载同理——挂载即索取可兜住所有情况。
-  useEffect(() => {
-    void emitTo("folder-panel", "git-run-ready", true).catch(() => {});
-  }, []);
-
+  // 【订阅与自举必须串行】先 await 注册 update 监听，注册成功后才发 ready
+  // 索取快照。拆成两个 effect 会竞态：emitTo 是异步 IPC，ready 一发出
+  // folder-panel 立刻回推，而本窗口的 listen 可能还没落地 → 首帧快照丢失，
+  // 表现为"窗口弹出来却是空的"，且因内容没渲染连关闭按钮都点不到（疑似卡死）。
   useEffect(() => {
     let un: (() => void) | undefined;
     let disposed = false;
-    onEvent<GitRunSnapshot | null>("git-run-update", (s) => setSnap(s)).then((f) => {
-      if (disposed) f();
-      else un = f;
-    });
+    void onEvent<GitRunSnapshot | null>("git-run-update", (s) => setSnap(s))
+      .then((f) => {
+        if (disposed) {
+          f();
+          return;
+        }
+        un = f;
+        void emitTo("folder-panel", "git-run-ready", true).catch(() => {});
+      })
+      .catch(() => {});
     return () => {
       disposed = true;
       un?.();
@@ -85,14 +89,14 @@ export function GitRunWindow() {
 
   // 高度自适应：内容变化 → 测量 → setSize；底部可能顶出工作区时把窗口上提
   useEffect(() => {
-    const el = panelRef.current;
+    const el = shellRef.current;
     if (!el) return;
     let raf = 0;
     let last = 0;
     const apply = () => {
       const h = Math.min(
         MAX_H,
-        Math.max(MIN_H, Math.ceil(el.getBoundingClientRect().height) + PAD * 2),
+        Math.max(MIN_H, Math.ceil(el.getBoundingClientRect().height)),
       );
       if (Math.abs(h - last) < 2) return;
       last = h;
@@ -127,9 +131,9 @@ export function GitRunWindow() {
   }, [snap]);
 
   return (
-    <div className="git-run-root">
-      <div className="git-run-panel" ref={panelRef}>
-        <div className="git-run-head" data-tauri-drag-region>
+    <div className="panel git-run-window">
+      <div className="panel-shell" ref={shellRef}>
+        <div className="panel-header" data-tauri-drag-region>
           <span className="git-run-title">
             <IconBranch size={13} />
             {snap
@@ -146,7 +150,7 @@ export function GitRunWindow() {
           </button>
         </div>
 
-        <div className="git-run-body">
+        <div className="panel-body">
           {!snap && <div className="git-run-loading">暂无执行记录</div>}
           {snap && snap.results.length === 0 && (
             <div className="git-run-loading">
