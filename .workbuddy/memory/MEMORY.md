@@ -24,9 +24,15 @@
 生成错误提交（已用 `git reset --hard` 恢复到 fc91822 修复）。任何涉及真实改文件的任务，
 最终落地一律走非沙箱 Bash + 原生 python。
 
-## 架构取舍：展示型结果优先面板内 createPortal 浮层
-Git 命令结果独立窗（动态创建、透明+亚克力、跨 webview 握手）被用户两次实测否决
-（样式错乱/关不掉/无内容），已整体回退为面板内 createPortal 浮动卡片（FolderPanel
-`.git-run-float`）。结论：置顶悬浮面板 + 动态独立窗口组合不可靠，「展示型结果」一律
-优先面板内浮层（继承同一 webview 的渲染/主题/Esc/关闭模型，零窗口生命周期）。
-Tauri 动态窗口仅在硬需求时使用，且必须 show 后刷效果 + async 命令 + spawn_blocking。
+## 架构取舍：独立窗口必须静态声明 + 启动效果管线（勿动态 new WebviewWindow）
+Git 结果弹窗用户先后要过两种形态：面板内卡片（createPortal）与独立窗口+智能停靠。
+以用户表达为准，两种都可行；但独立窗口若做，动态 new WebviewWindow 路线已三次证明
+不可靠（白屏/关不掉/无内容）。铁律（commit 4dabd53 验证）：
+1. 窗口静态声明进 tauri.conf.json（visible:false）+ 加入 apply_panel_acrylic 启动管线
+   ——效果首次显示前就位，杜绝 webview 透明时序问题导致的"下半白屏"；
+2. 固定逻辑高度，.panel 100vh 铺满、内容区 .panel-body 内滚动，勿用 ResizeObserver
+   自适应窗口高度（尺寸漂移 → 露白）；
+3. show 后 invoke panel_refresh_acrylic 补刷亚克力（z-order 变化 SWCA 可能失效）；
+4. async 命令 + spawn_blocking 防主线程冻结；跨窗口首帧数据用 ready 握手回推；
+5. 智能停靠：锚点=被操作卡片中心 X，左半靠左/右半靠右/放不下换侧/两侧不足覆盖
+   居中于锚点，纵向与面板顶部对齐且夹在工作区内不压任务栏。
