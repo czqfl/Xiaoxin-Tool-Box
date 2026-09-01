@@ -53,6 +53,21 @@
         "visible": false
       },
       {
+        "label": "git-run",
+        "title": "Git 执行结果",
+        "width": 460,
+        "height": 440,
+        "resizable": false,
+        "fullscreen": false,
+        "maximized": false,
+        "decorations": false,
+        "transparent": false,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false
+      },
+      {
         "label": "credential-panel",
         "title": "账号密码",
         "width": 640,

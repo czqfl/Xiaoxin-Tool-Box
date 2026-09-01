@@ -99,7 +99,6 @@ button {
 .panel-body,
 .zone-content,
 .settings-content,
-.git-run-body,
 .context-submenu {
   scroll-behavior: smooth;
 }

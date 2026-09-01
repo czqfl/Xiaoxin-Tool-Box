@@ -421,54 +421,20 @@
   background-size: 6px 6px;
 }
 
-/* ---- Git 命令执行结果浮层（面板内展示，逐条友好呈现） ---- */
-/* 独立浮窗：右下角浮动卡片，不铺满、无全屏遮罩——面板标题栏拖拽区不再被遮挡，
-   浮窗自身标题栏带 data-tauri-drag-region，可独立拖动整个窗口。 */
-.git-run-float {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  width: min(440px, calc(100vw - 32px));
-  max-height: 62vh;
-  z-index: var(--z-modal, 1000);
-  display: flex;
-  animation: panel-in var(--dur-base) var(--ease-out);
-  pointer-events: auto;
-}
-.git-run-float .git-run-panel {
-  width: 100%;
-  max-height: 62vh;
-}
-.git-run-progress {
-  margin-left: 6px;
-  padding: 1px 7px;
-  border-radius: 999px;
-  font-size: 10.5px;
-  font-weight: 600;
-  color: var(--accent);
-  background: var(--accent-soft, rgba(76, 141, 255, 0.16));
-}
-.git-run-panel {
-  width: 100%;
-  max-height: 100%;
-  display: flex;
-  flex-direction: column;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border-strong);
-  background: rgba(var(--bg-panel-rgb), 0.97);
-  box-shadow: var(--shadow-menu);
-  overflow: hidden;
-}
-.git-run-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border-subtle);
+/* ---- Git 命令执行结果：独立窗口（label: git-run）----
+   窗口在 tauri.conf.json 静态声明（visible:false），效果（DWM 原生圆角 + 亚克力
+   模糊 + webview 透明底）由启动管线 + 显示后补刷提供。外壳直接复用
+   .panel > .panel-shell（透明底吃 --panel-opacity、圆角吃 --radius-panel），
+   视觉与文件夹面板完全一致。
+
+   【高度固定】窗口逻辑高度固定（GitRunWindow.GITRUN_H），.panel 100vh 铺满，
+   结果区在 .panel-body 内滚动——窗口尺寸永远等于声明尺寸，杜绝旧版
+   ResizeObserver 自适应高度带来的"窗口高度 ≠ webview 高度、下半露白"。 */
+.git-run-window .panel-header {
   cursor: move;
 }
 .git-run-title {
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -479,12 +445,14 @@
 .git-run-title svg {
   color: var(--accent);
 }
-.git-run-body {
-  overflow-y: auto;
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.git-run-progress {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft, rgba(76, 141, 255, 0.16));
 }
 .git-run-loading {
   padding: 24px 0;

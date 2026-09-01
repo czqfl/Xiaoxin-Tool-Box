@@ -144,6 +144,7 @@ fn apply_panel_acrylic<R: tauri::Runtime>(app: &tauri::AppHandle<R>, acrylic: bo
     for label in [
         panel::CLIPBOARD_PANEL,
         panel::FOLDER_PANEL,
+        panel::GITRUN_PANEL,
         panel::CREDENTIAL_PANEL,
         panel::PORT_PANEL,
         panel::FILES_PANEL,
@@ -441,6 +442,7 @@ pub fn run() {
             panel::panel_toggle,
             panel::panel_active,
             panel::toolbar_set_visible,
+            panel::panel_refresh_acrylic,
             // ---- 便签（sticky）----
             // 设置存储独立于工具箱 AppConfig（存在便签自己的 sticky_settings.json），
             // 命令仅做读写通道；界面统一挂在工具箱设置里（StickyNotePage）。

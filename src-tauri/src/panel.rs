@@ -79,6 +79,8 @@ fn refresh_panel_acrylic<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<
 
 pub const CLIPBOARD_PANEL: &str = "clipboard-panel";
 pub const FOLDER_PANEL: &str = "folder-panel";
+/// Git 命令执行结果独立窗口（静态声明于 tauri.conf.json，走启动效果管线）
+pub const GITRUN_PANEL: &str = "git-run";
 pub const CREDENTIAL_PANEL: &str = "credential-panel";
 /// 快速文件面板（统一位置新建/打开/管理多种类型文件）
 pub const FILES_PANEL: &str = "files-panel";
@@ -474,6 +476,21 @@ pub fn panel_set_always_on_top(window: WebviewWindow, on: bool) -> Result<(), St
     Ok(())
 }
 
+
+/// 前端显示窗口后补刷亚克力（与面板 show→refresh_panel_acrylic 同序）。
+/// 面板窗口每次显示都重刷是因为 SWCA 亚克力层在 z-order 变化（show/置顶切换）
+/// 后可能失效；git-run 虽在启动管线刷过，显示瞬间仍要补一次兜底。
+#[tauri::command]
+pub fn panel_refresh_acrylic(app: AppHandle, label: String) -> Result<(), String> {
+    let w = app
+        .get_webview_window(&label)
+        .ok_or_else(|| format!("窗口不存在：{label}"))?;
+    #[cfg(windows)]
+    refresh_panel_acrylic(&app, &w);
+    #[cfg(not(windows))]
+    let _ = w;
+    Ok(())
+}
 
 /// 若某个面板正持有焦点则隐藏它（全局顺序粘贴时让焦点回到之前的应用）
 pub fn hide_focused_panel<R: Runtime>(app: &AppHandle<R>) {
