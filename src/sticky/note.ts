@@ -60,7 +60,7 @@ export function mountNoteApp(noteId: string, preset = "") {
         <div class="titlebar-left">
           <input class="title-input" id="note-title" placeholder="便签" maxlength="40" spellcheck="false" title="点击编辑标题" />
         </div>
-        <div class="titlebar-grip" id="drag-grip" title="拖动便签"><span class="grip-dots"></span></div>
+        <div class="titlebar-grip" id="drag-grip" title="拖动便签"></div>
         <div class="titlebar-right">
           <button class="icon-btn" id="btn-toolbar-toggle" title="显示/隐藏格式工具栏" aria-pressed="false">
             <span class="tb-toggle-ico" aria-hidden="true">Aa</span>
@@ -219,7 +219,7 @@ export function mountNoteApp(noteId: string, preset = "") {
   // keep 严格受列3空间约束：按钮总数放得下才显示，放不下就从左隐藏，
   // 从机制上保证按钮永不溢出到抓取区（"重叠"根治）。
   const titlebarRightButtons = [btnToolbarToggle, btnPin, btnMax, btnTray];
-  const TB_GRIP_W = 76; // 抓取区宽度（grid 列2 auto）
+  const TB_GRIP_W = 44; // 抓取区宽度（grid 列2 auto；点阵移除后收窄，须与 styles.css 的 .titlebar-grip 一致）
   const TB_PAD = 16; // titlebar 左右 padding（10+6）
   const TB_GRIP_GAP = 8; // 按钮组与抓取区强制间隔（margin-left）
   const TB_CLOSE_W = 31; // 关闭按钮（30 + gap1）

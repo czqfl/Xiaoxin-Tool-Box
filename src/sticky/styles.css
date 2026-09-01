@@ -17,7 +17,6 @@
   --text-sub: #a39c90;
   --text-hint: #c8c2b6;
   --accent: #6b9fd9;
-  --grip-dot: #9a9a9a;
   --pin-on: #5bae6f;
   --pin-off: #c8c2b6;
   --danger: #dd5247;
@@ -45,7 +44,6 @@
   --text-sub: #9b9b9b;
   --text-hint: #6b6b6b;
   --accent: #7fb0e6;
-  --grip-dot: #8a8a8a;
   --pin-on: #5fbf74;
   --pin-off: #6b6b6b;
   --danger: #ec6a5f;
@@ -121,48 +119,28 @@ body,
   padding: 0 6px 0 10px;
   border-bottom: 1px solid var(--border);
   user-select: none;
+  /* 整条标题栏都是拖动热区（JS 把 mousedown 挂在 .titlebar 上），抓手光标
+     铺满整条：抓取区收窄后依然一眼看出哪里能拖。按钮/输入框自带 cursor 覆盖 */
+  cursor: grab;
+}
+
+.titlebar:active {
+  cursor: grabbing;
 }
 
 /* 标题栏居中拖动抓手：网格中间轨道，justify-self 居中——
    不依赖左右内容宽度，宽度变化始终水平居中。
-   拖拽仍可整条标题栏进行，抓手只是明确的视觉指引。 */
+   拖拽本就作用于整条标题栏（mousedown 挂在 .titlebar 上），这里只是给中间
+   留一条"恒居中"的空白轨道，避免左右内容贴到一起。
+   【点阵已移除】原先纯作视觉指引的 .grip-dots 删掉后，无需再占 76px，
+   收窄到 44px 把空间让给左侧标题；宽度须与 note.ts 的 TB_GRIP_W 保持一致
+   （标题栏按它计算右侧按钮的可用宽度）。 */
 .titlebar-grip {
   grid-column: 2;
   justify-self: center;
-  width: 76px;
+  width: 44px;
   height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   cursor: grab;
-  /* 抓取区层级高于左侧标题区（输入框即使聚焦有背景也不盖住它） */
-  z-index: 4;
-}
-
-.titlebar-grip:active {
-  cursor: grabbing;
-}
-
-/* 抓取点阵：多行点阵，尺寸严格对齐格子（32÷8=4 列、24÷8=3 行），
-   每个点完整显示——此前 34×26 与格子 9px 不对齐，右侧/下侧被截半 */
-.titlebar-grip .grip-dots {
-  width: 32px;
-  height: 24px;
-  border-radius: 6px;
-  background-image: radial-gradient(circle, var(--grip-dot) 2.2px, transparent 2.6px);
-  background-size: 8px 8px;
-  background-position: 0 0;
-  opacity: 0.45;
-  transition: opacity 0.15s ease;
-  pointer-events: none;
-}
-
-.titlebar-grip:hover .grip-dots {
-  opacity: 0.85;
-}
-
-.titlebar-grip:active .grip-dots {
-  opacity: 1;
 }
 
 /* 左右按钮组置于抓取层之上，保证可点击 / 标题可编辑 */
@@ -538,17 +516,11 @@ body,
 .note-window.bg-transparent .icon-btn:active {
   background: color-mix(in srgb, var(--bg-bar, var(--bg)) 58%, transparent);
 }
-/* 标题栏抓手点 */
-.note-window.bg-transparent .titlebar-grip .grip-dots {
-  opacity: 0.7;
-}
-
 /* ===== 背景过暗：按钮自动切换为浅色（由 JS 按背景图平均亮度给面板加 .on-dark-bg）=====
    按钮的边框/底色多用 currentColor 混色，因此只需把主色切浅，边框与底色自动跟随；
    保证第一行（标题栏）与第二行（工具栏）按钮在深色背景上始终清晰可见。 */
 .note-window.on-dark-bg {
   --pin-off: rgba(255, 255, 255, 0.6);
-  --grip-dot: rgba(255, 255, 255, 0.85);
 }
 .note-window.on-dark-bg .icon-btn,
 .note-window.on-dark-bg .tool-color,
@@ -702,15 +674,15 @@ body,
    中间抓取区上；上限 max(220px, 45% 窗口宽) 兜底，超长省略号截断。 */
 .title-input {
   width: fit-content;
-  max-width: min(45%, 220px);
+  max-width: min(58%, 264px);
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   margin-left: 6px;
-  /* 与中间抓取区保持明确间隔 */
-  margin-right: 16px;
+  /* 与中间抓取区保持间隔（抓取区已收窄到 44px，无需再留 16px） */
+  margin-right: 10px;
   border: 1px solid transparent;
   /* 与其余按钮同款“果冻”底（半透明主题色） */
   background: color-mix(in srgb, var(--bg-bar, var(--bg)) 28%, transparent);

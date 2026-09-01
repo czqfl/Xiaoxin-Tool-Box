@@ -21,7 +21,6 @@ function syncToolboxTheme(): void {
         .getPropertyValue("--accent-rgb").trim();
       if (rgb) {
         document.documentElement.style.setProperty("--accent", `rgb(${rgb})`);
-        document.documentElement.style.setProperty("--grip-dot", `rgba(${rgb}, 0.8)`);
         document.documentElement.style.setProperty(
           "--select-bg",
           `color-mix(in srgb, rgb(${rgb}) 16%, var(--bg))`,
