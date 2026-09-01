@@ -191,6 +191,7 @@ function FolderPanelInner() {
 
   /** 推送快照：面板 state 同步更新（Esc 层判定用）+ 定向发给独立窗口实时上屏 */
   const pushGitRun = (snap: GitRunSnapshot) => {
+    gitRunRef.current = snap;
     setGitRun(snap);
     void emitTo(GITRUN_LABEL, "git-run-update", snap).catch(() => {});
   };
@@ -252,7 +253,10 @@ function FolderPanelInner() {
    *  亚克力模糊 + webview 透明底（开关跟随配置里的"亚克力"，取值同源）。
    *  动态创建的窗口不会经过启动时的效果管线，必须显式补一次。 */
   const applyGitRunEffects = () =>
-    invoke("panel_apply_window_effects", { label: GITRUN_LABEL }).catch(() => {});
+    invoke("panel_apply_window_effects", {
+      label: GITRUN_LABEL,
+      acrylic: config.general?.acrylic_enabled ?? true,
+    }).catch(() => {});
 
   /** 打开（或复用）Git 状态独立窗口。
    *  【何时重排位置】窗口已可见时不动——用户可能刚手动把它拖到顺手的地方；

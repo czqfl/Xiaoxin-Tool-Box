@@ -153,6 +153,7 @@ pub fn dismiss_note(app: &AppHandle, label: &str) {
 static HISTORY_VISIBLE: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
 
 /// 便签窗口销毁后的状态清理（状态机 / 亚克力记忆 / 强制隐藏兜底）。
+#[allow(dead_code)]
 fn drop_note_window_state(app: &AppHandle, label: &str) {
     NOTE_STATES.lock().unwrap().remove(label);
     NOTE_ACRYLIC.lock().unwrap().remove(label);
@@ -317,6 +318,7 @@ pub struct StickySettings {
 fn default_bg_glass_opacity() -> f64 {
     0.3
 }
+#[allow(dead_code)]
 fn default_true() -> bool {
     true
 }

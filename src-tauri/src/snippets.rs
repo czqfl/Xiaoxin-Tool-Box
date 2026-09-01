@@ -35,6 +35,7 @@ fn save_snippets(paths: &AppPaths, list: &[Snippet]) -> Result<(), String> {
 
 /// 读-改-写序列的互斥锁：两个面板窗口并发写 snippets.json 时
 /// 后写者会覆盖先写者的更新（storage save_json 的 tmp 竞态叠加）
+#[allow(dead_code)]
 static SNIPPETS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn now_ms() -> i64 {

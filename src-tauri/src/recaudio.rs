@@ -401,6 +401,7 @@ pub fn recorder_audio_rec(on: bool) -> bool {
     }
 }
 
+#[allow(dead_code)]
 fn add_into(dst: &mut [f32], src: &[f32]) {
     let n = dst.len().min(src.len());
     for i in 0..n {

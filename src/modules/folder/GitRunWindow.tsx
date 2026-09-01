@@ -133,8 +133,8 @@ export function GitRunWindow() {
   return (
     <div className="panel git-run-window">
       <div className="panel-shell" ref={shellRef}>
-        <div className="panel-header" data-tauri-drag-region>
-          <span className="git-run-title">
+        <div className="panel-header">
+          <span className="git-run-title" data-tauri-drag-region>
             <IconBranch size={13} />
             {snap
               ? `${snap.running ? "Git 执行中" : "Git 执行结果"} · ${snap.folder.name}`
@@ -145,7 +145,12 @@ export function GitRunWindow() {
               </span>
             )}
           </span>
-          <button className="icon-btn" title="关闭" onClick={close}>
+          <button
+            className="icon-btn"
+            title="关闭"
+            onClick={close}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
             <IconClose size={14} />
           </button>
         </div>

@@ -4,9 +4,12 @@ use crate::config::ConfigState;
 use crate::storage::{save_json, AppPaths};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
 
@@ -388,27 +391,68 @@ pub fn folder_git_run(path: String, commands: Vec<String>) -> Result<Vec<GitRunR
             continue;
         }
         // PowerShell -NoLogo -Command <line>：当前目录执行并捕获输出。
-        // 不传 -NoProfile：加载用户 $PROFILE（代理等网络配置随环境生效）
-        let out = Command::new("powershell")
+        // 不传 -NoProfile：加载用户 $PROFILE（代理等网络配置随环境生效）。
+        // 用 spawn + 独立线程等待 + 超时，避免 git push 等命令在等待凭据/
+        // 网络时无期限阻塞（表现为结果窗口"卡死"一直转圈）。
+        let child = match Command::new("powershell")
             .args(["-NoLogo", "-Command", line])
             .current_dir(&path)
-            .output();
-        match out {
-            Ok(o) => results.push(GitRunResult {
-                command: line.to_string(),
-                ok: o.status.success(),
-                stdout: String::from_utf8_lossy(&o.stdout).trim().to_string(),
-                stderr: String::from_utf8_lossy(&o.stderr).trim().to_string(),
-                code: o.status.code(),
-            }),
-            Err(e) => results.push(GitRunResult {
-                command: line.to_string(),
-                ok: false,
-                stdout: String::new(),
-                stderr: format!("命令启动失败：{e}"),
-                code: None,
-            }),
-        }
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                results.push(GitRunResult {
+                    command: line.to_string(),
+                    ok: false,
+                    stdout: String::new(),
+                    stderr: format!("命令启动失败：{e}"),
+                    code: None,
+                });
+                continue;
+            }
+        };
+        // 子进程句柄放进 Arc<Mutex>，等待线程负责收输出，超时则由主线程强制杀掉
+        let child_arc = Arc::new(Mutex::new(Some(child)));
+        let waiter = Arc::clone(&child_arc);
+        let (tx, rx) = mpsc::channel::<std::process::Output>();
+        thread::spawn(move || {
+            let out = waiter
+                .lock()
+                .unwrap()
+                .take()
+                .map(|c| c.wait_with_output());
+            if let Some(res) = out {
+                if let Ok(o) = res {
+                    let _ = tx.send(o);
+                }
+            }
+        });
+        let out = match rx.recv_timeout(Duration::from_secs(120)) {
+            Ok(o) => o,
+            Err(_) => {
+                // 超时：杀掉仍在运行的子进程（含其 git 进程树）
+                if let Some(mut c) = child_arc.lock().unwrap().take() {
+                    let _ = c.kill();
+                }
+                results.push(GitRunResult {
+                    command: line.to_string(),
+                    ok: false,
+                    stdout: String::new(),
+                    stderr: "命令执行超时（120 秒），已强制终止".to_string(),
+                    code: None,
+                });
+                continue;
+            }
+        };
+        results.push(GitRunResult {
+            command: line.to_string(),
+            ok: out.status.success(),
+            stdout: String::from_utf8_lossy(&out.stdout).trim().to_string(),
+            stderr: String::from_utf8_lossy(&out.stderr).trim().to_string(),
+            code: out.status.code(),
+        });
     }
     Ok(results)
 }
