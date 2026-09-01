@@ -443,6 +443,7 @@ pub fn run() {
             panel::panel_active,
             panel::toolbar_set_visible,
             panel::panel_refresh_acrylic,
+            panel::panel_show_foreground,
             // ---- 便签（sticky）----
             // 设置存储独立于工具箱 AppConfig（存在便签自己的 sticky_settings.json），
             // 命令仅做读写通道；界面统一挂在工具箱设置里（StickyNotePage）。

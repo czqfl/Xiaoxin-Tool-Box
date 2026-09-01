@@ -67,6 +67,21 @@ fn show_and_activate<R: Runtime>(window: &WebviewWindow<R>) {
     let _ = window.set_focus();
 }
 
+/// 显示面板并可靠置前聚焦（前端经 IPC 打开的窗口复用 tray/热键同款机制）。
+/// 背景：IPC 往返后已超出前台锁输入窗口，普通 show + set_focus 会被系统拒绝，
+/// 窗口可见却无焦点——WebView2 未激活时不响应鼠标点击（git-run 点 × 没反应的
+/// 根因）。robust 版不受前台锁限制，与托盘/热键打开面板完全一致。
+#[tauri::command]
+pub fn panel_show_foreground(app: tauri::AppHandle, label: String) -> Result<(), String> {
+    let Some(window) = app.get_webview_window(&label) else {
+        return Err(format!("window not found: {label}"));
+    };
+    show_and_activate(&window);
+    #[cfg(windows)]
+    refresh_panel_acrylic(&app, &window);
+    Ok(())
+}
+
 /// 面板窗口显示后补刷亚克力（SWCA 在可见窗口上才稳定）
 #[cfg(windows)]
 fn refresh_panel_acrylic<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) {

@@ -256,8 +256,9 @@ function FolderPanelInner() {
       await win.setSize(geo.size).catch(() => {});
       await win.setPosition(geo.pos).catch(() => {});
     }
-    await win.show().catch(() => {});
-    await invoke("panel_refresh_acrylic", { label: GITRUN_LABEL }).catch(() => {});
+    // 显示改走 Rust 可靠置前（show + force_foreground_robust + set_focus），
+    // 与 tray/热键打开面板同款——修复"窗口可见但无焦点，点击不响应"
+    await invoke("panel_show_foreground", { label: GITRUN_LABEL }).catch(() => {});
     return true;
   };
 
