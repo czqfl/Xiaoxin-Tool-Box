@@ -380,80 +380,92 @@ pub struct GitRunResult {
 /// cmd 子进程继承不到 → git push 直连 GitHub 失败（"连接不上"）；用
 /// PowerShell 与用户手动执行的环境一致，能连则这里也能连。
 #[tauri::command]
-pub fn folder_git_run(path: String, commands: Vec<String>) -> Result<Vec<GitRunResult>, String> {
+pub async fn folder_git_run(
+    path: String,
+    commands: Vec<String>,
+) -> Result<Vec<GitRunResult>, String> {
     if !Path::new(&path).is_dir() {
         return Err("文件夹不存在或已被移动".into());
     }
-    let mut results = Vec::new();
-    for line in commands {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
+    // 【主线程不能阻塞】Tauri 2 的同步命令在主线程执行（IPC handler 内联跑命令体）：
+    // 这里单条命令最长要等 120 秒，直接写在命令体里会把整个应用冻住——所有窗口的
+    // IPC 全部停摆，结果窗表现为"卡死、关不掉、不刷新"。必须 async + spawn_blocking
+    // 把等待挪到专用阻塞线程池，主线程只负责收结果、正常响应窗口操作。
+    let results = tauri::async_runtime::spawn_blocking(move || {
+        let mut results = Vec::new();
+        for line in commands {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            // PowerShell -NoLogo -Command <line>：当前目录执行并捕获输出。
+            // 不传 -NoProfile：加载用户 $PROFILE（代理等网络配置随环境生效）。
+            // 用 spawn + 独立线程等待 + 超时，避免 git push 等命令在等待凭据/
+            // 网络时无期限阻塞（表现为结果窗口"卡死"一直转圈）。
+            let child = match Command::new("powershell")
+                .args(["-NoLogo", "-Command", line])
+                .current_dir(&path)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    results.push(GitRunResult {
+                        command: line.to_string(),
+                        ok: false,
+                        stdout: String::new(),
+                        stderr: format!("命令启动失败：{e}"),
+                        code: None,
+                    });
+                    continue;
+                }
+            };
+            // 子进程句柄放进 Arc<Mutex>，等待线程负责收输出，超时则由等待方强制杀掉
+            let child_arc = Arc::new(Mutex::new(Some(child)));
+            let waiter = Arc::clone(&child_arc);
+            let (tx, rx) = mpsc::channel::<std::process::Output>();
+            thread::spawn(move || {
+                let out = waiter
+                    .lock()
+                    .unwrap()
+                    .take()
+                    .map(|c| c.wait_with_output());
+                if let Some(res) = out {
+                    if let Ok(o) = res {
+                        let _ = tx.send(o);
+                    }
+                }
+            });
+            let out = match rx.recv_timeout(Duration::from_secs(120)) {
+                Ok(o) => o,
+                Err(_) => {
+                    // 超时：杀掉仍在运行的子进程（含其 git 进程树）
+                    if let Some(mut c) = child_arc.lock().unwrap().take() {
+                        let _ = c.kill();
+                    }
+                    results.push(GitRunResult {
+                        command: line.to_string(),
+                        ok: false,
+                        stdout: String::new(),
+                        stderr: "命令执行超时（120 秒），已强制终止".to_string(),
+                        code: None,
+                    });
+                    continue;
+                }
+            };
+            results.push(GitRunResult {
+                command: line.to_string(),
+                ok: out.status.success(),
+                stdout: String::from_utf8_lossy(&out.stdout).trim().to_string(),
+                stderr: String::from_utf8_lossy(&out.stderr).trim().to_string(),
+                code: out.status.code(),
+            });
         }
-        // PowerShell -NoLogo -Command <line>：当前目录执行并捕获输出。
-        // 不传 -NoProfile：加载用户 $PROFILE（代理等网络配置随环境生效）。
-        // 用 spawn + 独立线程等待 + 超时，避免 git push 等命令在等待凭据/
-        // 网络时无期限阻塞（表现为结果窗口"卡死"一直转圈）。
-        let child = match Command::new("powershell")
-            .args(["-NoLogo", "-Command", line])
-            .current_dir(&path)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-        {
-            Ok(c) => c,
-            Err(e) => {
-                results.push(GitRunResult {
-                    command: line.to_string(),
-                    ok: false,
-                    stdout: String::new(),
-                    stderr: format!("命令启动失败：{e}"),
-                    code: None,
-                });
-                continue;
-            }
-        };
-        // 子进程句柄放进 Arc<Mutex>，等待线程负责收输出，超时则由主线程强制杀掉
-        let child_arc = Arc::new(Mutex::new(Some(child)));
-        let waiter = Arc::clone(&child_arc);
-        let (tx, rx) = mpsc::channel::<std::process::Output>();
-        thread::spawn(move || {
-            let out = waiter
-                .lock()
-                .unwrap()
-                .take()
-                .map(|c| c.wait_with_output());
-            if let Some(res) = out {
-                if let Ok(o) = res {
-                    let _ = tx.send(o);
-                }
-            }
-        });
-        let out = match rx.recv_timeout(Duration::from_secs(120)) {
-            Ok(o) => o,
-            Err(_) => {
-                // 超时：杀掉仍在运行的子进程（含其 git 进程树）
-                if let Some(mut c) = child_arc.lock().unwrap().take() {
-                    let _ = c.kill();
-                }
-                results.push(GitRunResult {
-                    command: line.to_string(),
-                    ok: false,
-                    stdout: String::new(),
-                    stderr: "命令执行超时（120 秒），已强制终止".to_string(),
-                    code: None,
-                });
-                continue;
-            }
-        };
-        results.push(GitRunResult {
-            command: line.to_string(),
-            ok: out.status.success(),
-            stdout: String::from_utf8_lossy(&out.stdout).trim().to_string(),
-            stderr: String::from_utf8_lossy(&out.stderr).trim().to_string(),
-            code: out.status.code(),
-        });
-    }
+        results
+    })
+    .await
+    .map_err(|e| format!("后台执行线程异常：{e}"))?;
     Ok(results)
 }
 

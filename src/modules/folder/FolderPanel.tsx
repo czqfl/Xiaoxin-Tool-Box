@@ -297,15 +297,17 @@ function FolderPanelInner() {
         await win.setSize(geo.size).catch(() => {});
         await win.setPosition(geo.pos).catch(() => {});
       }
-      if (win) await applyGitRunEffects();
     } else if (!(await win.isVisible().catch(() => false))) {
       const geo = await placeGitRunWindow(anchorCx);
       if (geo) await win.setPosition(geo.pos).catch(() => {});
-      // 窗口被销毁重建（如开发期热重载）后效果会丢，每次显示前重刷一次
-      await applyGitRunEffects();
     }
     if (!win) return false;
     await win.show().catch(() => {});
+    // 【与面板同序】先显示、后刷效果：DWM 亚克力层在窗口 z-order 变化（show /
+    // 置顶切换）后可能失效，面板正是 show 之后才 refresh_panel_acrylic 的。
+    // 首次创建时 webview 异步加载，show 后再刷也保证 make_webview_transparent
+    // 落在已就绪的 webview 上，透明底不会盖死亚克力层。
+    await applyGitRunEffects();
     return true;
   };
 
@@ -317,6 +319,9 @@ function FolderPanelInner() {
     let b: (() => void) | undefined;
     let disposed = false;
     onEvent<boolean>("git-run-ready", () => {
+      // 窗口 webview 已挂载：顺手把窗口效果再刷一遍（开发模式隐藏转可见会整页
+      // 重载、效果随之丢失，这里是效果重刷的最稳兜底时机）
+      applyGitRunEffects();
       void emitTo<GitRunSnapshot | null>(
         GITRUN_LABEL,
         "git-run-update",
