@@ -176,6 +176,9 @@ function FolderPanelInner() {
   const [editors, setEditors] = useState<EditorInfo[] | null>(null);
   /** Git 命令执行结果快照（独立窗口渲染，null = 无执行） */
   const [gitRun, setGitRun] = useState<GitRunSnapshot | null>(null);
+  /** 独立窗口是否打开：只服务 Esc 层调度，与快照数据完全解耦。
+   *  窗口关闭（点 ×）只置 false，绝不清空 gitRun——那是面板自己的数据。 */
+  const [gitRunOpen, setGitRunOpen] = useState(false);
   /** 待删除确认的文件夹（null = 无确认弹窗） */
   const [deleteTarget, setDeleteTarget] = useState<FolderEntry | null>(null);
 
@@ -193,9 +196,10 @@ function FolderPanelInner() {
     void emitTo(GITRUN_LABEL, "git-run-update", snap).catch(() => {});
   };
 
-  /** 关闭独立窗口：清空快照 + 隐藏窗口（隐藏而非销毁，下次执行瞬时复用） */
+  /** 关闭独立窗口：隐藏窗口（隐藏而非销毁，下次执行瞬时复用）。
+   *  只隐藏 + 失活 Esc 层，绝不清空快照——快照是面板数据，窗口关闭不联动它。 */
   const closeGitRun = () => {
-    setGitRun(null);
+    setGitRunOpen(false);
     void WebviewWindow.getByLabel(GITRUN_LABEL)
       .then((w) => w?.hide())
       .catch(() => {});
@@ -264,6 +268,7 @@ function FolderPanelInner() {
       await win.setPosition(geo.pos).catch(() => {});
     }
     await win.show().catch(() => {});
+    setGitRunOpen(true);
     await invoke("panel_refresh_acrylic", { label: GITRUN_LABEL }).catch(() => {});
     return true;
   };
@@ -285,7 +290,8 @@ function FolderPanelInner() {
         gitRunRef.current,
       ).catch(() => {});
     }).then((f) => (disposed ? f() : (a = f)));
-    onEvent<boolean>("git-run-close", () => closeGitRun()).then((f) =>
+    // 窗口点 ×：它已自行隐藏，这里只失活 Esc 层（窗口自治，面板不参与关闭）
+    onEvent<boolean>("git-run-close", () => setGitRunOpen(false)).then((f) =>
       disposed ? f() : (b = f),
     );
     return () => {
@@ -301,7 +307,7 @@ function FolderPanelInner() {
     closeGitRun();
     hideCurrentWindow();
   });
-  useEscLayer(gitRun !== null, () => closeGitRun());
+  useEscLayer(gitRunOpen, () => closeGitRun());
 
   // 列表变化时批量读取 Git 分支（读 .git/HEAD，毫秒级）
   useEffect(() => {
