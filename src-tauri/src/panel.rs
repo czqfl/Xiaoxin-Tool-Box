@@ -79,6 +79,26 @@ pub fn panel_show_foreground(app: tauri::AppHandle, label: String) -> Result<(),
     show_and_activate(&window);
     #[cfg(windows)]
     refresh_panel_acrylic(&app, &window);
+    crate::storage::diag_write(&format!(
+        "[panel_show_foreground] {label} visible={} focused={}",
+        window.is_visible().unwrap_or(false),
+        window.is_focused().unwrap_or(false),
+    ));
+    Ok(())
+}
+
+/// 隐藏面板（git-run × 关闭的 Rust 侧兜底，与前端 hide 同效，多一层保障）。
+/// 前端 onClick 已触发 hideCurrentWindow，这里再 hide 一次是幂等兜底，
+/// 并写 diag 日志——若用户点 × 后窗口仍在，日志能区分"点击没到达"与
+/// "hide 不生效"。
+#[tauri::command]
+pub fn panel_hide(app: tauri::AppHandle, label: String) -> Result<(), String> {
+    let Some(window) = app.get_webview_window(&label) else {
+        return Err(format!("window not found: {label}"));
+    };
+    let _ = window.hide();
+    broadcast_panel_visibility(&app, &label, false);
+    crate::storage::diag_write(&format!("[panel_hide] {label} hidden"));
     Ok(())
 }
 

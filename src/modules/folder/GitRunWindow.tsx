@@ -20,6 +20,7 @@
  *  逐条推送。订阅落地后发 git-run-ready 索取全量快照（emit 首帧必丢，
  *  握手是唯一能保证"任何时刻挂载都看到全量结果"的通道）。 */
 import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { emitTo } from "@tauri-apps/api/event";
 import type { FolderEntry, GitRunResult } from "../../types";
 import { IconBranch, IconClose } from "../../components/icons";
@@ -69,9 +70,14 @@ export function GitRunWindow() {
     };
   }, []);
 
-  // 关闭与其它面板完全一致：Esc 与 × 都走 hideCurrentWindow
-  // （emit 显隐广播 + window.hide，失败打日志可见）
-  useEscLayer(true, hideCurrentWindow);
+  // 关闭三重保险：前端 hide（emit 广播 + window.hide）+ Rust panel_hide 兜底
+  // + diag 日志（点击是否到达、hide 是否生效，全部落盘可查）
+  const closePanel = () => {
+    hideCurrentWindow();
+    void invoke("diag_log", { msg: "[git-run] × close clicked" }).catch(() => {});
+    void invoke("panel_hide", { label: "git-run" }).catch(() => {});
+  };
+  useEscLayer(true, closePanel);
 
   return (
     <div className="panel git-run-window">
@@ -88,7 +94,18 @@ export function GitRunWindow() {
               </span>
             )}
           </span>
-          <button className="icon-btn" title="关闭（Esc）" onClick={hideCurrentWindow}>
+          <button
+            className="icon-btn"
+            title="关闭（Esc）"
+            onClick={closePanel}
+            onPointerDown={(e) => {
+              // 视觉反馈：点击到达按钮会闪一下红（区分"没点到"与"点了没关"）
+              e.currentTarget.style.background = "#e5484d";
+              window.setTimeout(() => {
+                e.currentTarget.style.background = "";
+              }, 180);
+            }}
+          >
             <IconClose size={15} />
           </button>
         </div>
