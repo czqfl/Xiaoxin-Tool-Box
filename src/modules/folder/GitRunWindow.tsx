@@ -69,7 +69,9 @@ export function GitRunWindow() {
   // 关闭：完全自治——本窗口的点 × / Esc 只隐藏自己（隐藏而非销毁，
   // 下次执行瞬时复用），不通知、不依赖面板任何行为。
   const close = () => {
-    void getCurrentWindow().hide().catch(() => {});
+    void getCurrentWindow()
+      .hide()
+      .catch((e) => console.error("[git-run] hide 失败:", e));
   };
 
   // Esc 关闭：窗口持有焦点时按键由本窗口处理
