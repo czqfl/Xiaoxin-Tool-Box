@@ -29,12 +29,47 @@ pub fn pin_busy(on: bool) {
     INTERACTING.store(on, Ordering::SeqCst);
 }
 
-/// 等待用户空闲，最多 max_ms。每 250ms 探测一次，空闲即返回。
+/// 距最后一次键鼠输入已过去多少毫秒（系统级，覆盖本进程之外的一切输入）。
+/// 非 Windows 平台一律视为「已空闲」。
+fn last_input_idle_ms() -> u32 {
+    #[cfg(windows)]
+    {
+        use windows::Win32::System::SystemInformation::GetTickCount;
+        use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
+        unsafe {
+            let mut lii = LASTINPUTINFO {
+                cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32,
+                dwTime: 0,
+            };
+            if GetLastInputInfo(&mut lii).as_bool() {
+                return GetTickCount().wrapping_sub(lii.dwTime);
+            }
+        }
+        u32::MAX
+    }
+    #[cfg(not(windows))]
+    { u32::MAX }
+}
+
+/// 补建前要求的系统输入静止时长：最后输入距今 >= 此值才认为用户真的停手。
+/// 太短挡不住拖动，太长则待命池长期空缺（下次贴图走慢路径）。
+const INPUT_IDLE_MS: u32 = 350;
+
+/// 等待用户空闲，最多 max_ms。
+/// 【双重条件】① 前端上报的交互中标记（拖拽/缩放）为假；
+/// ② 系统最后一次键鼠输入距今 >= INPUT_IDLE_MS。
+/// 只靠 ① 不够：补建线程探测时用户常常还没按下鼠标（于是判定空闲、开始建窗），
+/// 而 WebView2 建窗 + 加载整个前端应用要占用主线程数百毫秒且【无法中断】，
+/// 用户恰恰在这段窗口里起手拖动 → 单帧被拖到 200~800ms（diag 埋点实测）。
+/// 加上 ② 后，补建只会发生在用户真正松手静止之后，阻塞再也砸不到交互上。
 fn wait_idle(max_ms: u64) {
     let mut waited = 0u64;
-    while INTERACTING.load(Ordering::SeqCst) && waited < max_ms {
-        std::thread::sleep(std::time::Duration::from_millis(250));
-        waited += 250;
+    while waited < max_ms {
+        let interacting = INTERACTING.load(Ordering::SeqCst);
+        let input_idle = last_input_idle_ms() >= INPUT_IDLE_MS;
+        if !interacting && input_idle { return; }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        waited += 100;
     }
 }
 /// 前端监听：staging 窗被分配了某个贴图任务（payload: { id })
@@ -334,9 +369,10 @@ pub(crate) fn attach_to_staging<R: Runtime>(app: &AppHandle<R>, pin: PinData) {
                 crate::storage::diag_write(&format!("[pin] staging {label} unresponsive, closed"));
             }
         }
-        // 补建待命窗是重活（WebView2 建窗）：用户正拖拽/缩放时做会"卡一下"，
-        // 先等空闲（最多 8s）再建，把这次卡顿挪到无感知时刻
-        wait_idle(8000);
+        // 补建待命窗是重活（WebView2 建窗 + 加载整个前端应用，数百毫秒且
+        // 不可中断）：用户正拖拽/缩放时做会"卡一下"。等空闲（实测拖动可长达
+        // 十几秒，故上限放宽到 30s）再建，把这次阻塞挪到停手后的无感知时刻
+        wait_idle(30_000);
         ensure_staging(&app2);
     });
 }
@@ -397,12 +433,12 @@ pub async fn pin_ready(app: AppHandle, window: WebviewWindow) -> Result<(), Stri
         // （defer_to_main_loop 内建窗，数百毫秒级阻塞），此刻建 = 用户起手
         // 拖动直接撞上——正是「贴图刚贴上、立刻拖就卡一下」的根因。
         // 改为：先过 ~900ms 起手保护期（覆盖「看到贴图 → 按下鼠标」的反应时间），
-        // 再等用户空闲（pinBusy 解除，最多 8s）才真正建窗，把卡顿挪到无感知时刻
+        // 再等用户空闲（交互中标记解除 + 系统输入静止 ≥350ms，最多 30s）才建窗
         if is_staging {
             let app3 = app.clone();
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_millis(900));
-                wait_idle(8000);
+                wait_idle(30_000);
                 ensure_staging(&app3);
             });
         }
