@@ -392,9 +392,19 @@ pub async fn pin_ready(app: AppHandle, window: WebviewWindow) -> Result<(), Stri
             }
             crate::screenshot::hide_all(&app2);
         });
-        // 本次 staging 已消耗：立刻补一个待命
+        // 本次 staging 已消耗：补建待命窗——【绝不能立刻建】贴图刚上屏正是
+        // 用户最可能马上拖拽/缩放的时刻，而建 WebView2 窗是主线程重活
+        // （defer_to_main_loop 内建窗，数百毫秒级阻塞），此刻建 = 用户起手
+        // 拖动直接撞上——正是「贴图刚贴上、立刻拖就卡一下」的根因。
+        // 改为：先过 ~900ms 起手保护期（覆盖「看到贴图 → 按下鼠标」的反应时间），
+        // 再等用户空闲（pinBusy 解除，最多 8s）才真正建窗，把卡顿挪到无感知时刻
         if is_staging {
-            ensure_staging(&app);
+            let app3 = app.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(900));
+                wait_idle(8000);
+                ensure_staging(&app3);
+            });
         }
     }
     Ok(())

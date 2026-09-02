@@ -530,6 +530,12 @@ export function PinWindow() {
 
   // drag
   const dragClearRef = useRef(0);
+  // 窗口当前物理位置缓存：由 onMoved 事件【零 IPC 成本】维护（事件 payload 自带
+  // 坐标）。拖动起手直接拿它当基准——旧实现每次 mousedown 都要等 outerPosition()
+  // 的 IPC 往返才 ready，这期间所有 pointermove 被丢弃（窗口不动）→ 起手发涩
+  const posRef = useRef<{ x: number; y: number } | null>(null);
+  // 拖动帧耗时采样（可验证手段）：记录每次 apply 的时刻，松手时统计帧间隔
+  const dragStatRef = useRef<number[]>([]);
   // 自驱动拖拽中标记：onMoved 监听据此跳过（否则每次 setPosition 都会回调
   // onMoved → debouncePersist + 定时器重置，等于每帧白干一遍调度，拖拽发涩）
   const draggingRef = useRef(false);
@@ -569,7 +575,11 @@ export function PinWindow() {
     let tx = 0, ty = 0;              // 目标物理位置（outerPosition 到位后初始化）
     let lx = e.screenX, ly = e.screenY; // 上次光标逻辑屏幕坐标（基准未就绪时持续刷新起点）
     let ready = false;
+    // 【起手零等待】缓存里有位置就立即起步，按下第一帧窗口就跟着走；
+    // 旧实现必须等 outerPosition() 的 IPC 返回才 ready，此前移动全被丢弃
+    if (posRef.current) { tx = posRef.current.x; ty = posRef.current.y; ready = true; }
     let raf = 0;
+    dragStatRef.current = [];
     const cleanup = () => {
       el.removeEventListener("pointermove", onMove);
       el.removeEventListener("pointerup", onUp);
@@ -577,11 +587,27 @@ export function PinWindow() {
       try { el.releasePointerCapture(pointerId); } catch {}
       if (raf) { cancelAnimationFrame(raf); raf = 0; }
       // 松手兜底一次最终落点（rAF 可能在最后一帧前被取消）
-      if (ready) void win.setPosition(new PhysicalPosition(Math.round(tx), Math.round(ty))).catch(() => {});
+      if (ready) {
+        void win.setPosition(new PhysicalPosition(Math.round(tx), Math.round(ty))).catch(() => {});
+        posRef.current = { x: Math.round(tx), y: Math.round(ty) };
+      }
+      // 帧耗时统计（可验证手段）：相邻 apply 的间隔即每帧成本，>32ms 视为掉帧。
+      // 松手后打一条诊断，用来量化拖拽流畅度与后续优化效果
+      const ts = dragStatRef.current;
+      if (ts.length > 2) {
+        const gaps: number[] = [];
+        for (let i = 1; i < ts.length; i++) gaps.push(ts[i] - ts[i - 1]);
+        gaps.sort((a, b) => a - b);
+        const avg = gaps.reduce((s, v) => s + v, 0) / gaps.length;
+        const p95 = gaps[Math.min(gaps.length - 1, Math.floor(gaps.length * 0.95))];
+        void diagLog(`[pin] drag ${gaps.length}f avg=${avg.toFixed(1)}ms p95=${p95.toFixed(1)}ms max=${gaps[gaps.length - 1].toFixed(1)}ms`);
+      }
+      dragStatRef.current = [];
       clearDragState();
     };
     const apply = () => {
       raf = 0;
+      dragStatRef.current.push(performance.now());
       if (ready) void win.setPosition(new PhysicalPosition(Math.round(tx), Math.round(ty))).catch(() => {});
     };
     const onMove = (ev: PointerEvent) => {
@@ -602,14 +628,23 @@ export function PinWindow() {
     el.addEventListener("pointermove", onMove);
     el.addEventListener("pointerup", onUp);
     el.addEventListener("pointercancel", onUp);
-    void win.outerPosition().then((p0) => { tx = p0.x; ty = p0.y; ready = true; }).catch(() => cleanup());
+    // 仅缓存缺失（首次拖动）才需要这次 IPC 取基准；已有缓存时它只作权威值缓存，
+    // 且绝不覆盖用户已经产生的位移
+    void win.outerPosition().then((p0) => {
+      posRef.current = { x: p0.x, y: p0.y };
+      if (!ready) { tx = p0.x; ty = p0.y; ready = true; }
+    }).catch(() => cleanup());
   };
 
   // 拖动中的位置持久化与拖拽态复位：onMoved 持续触发视为拖拽中，停稳
   // ~180ms 视为松手；位置持久化沿用 400ms 防抖
   useEffect(() => {
     let un: (() => void) | undefined;
-    void getCurrentWindow().onMoved(() => {
+    void getCurrentWindow().onMoved((e) => {
+      // 位置缓存【零 IPC 成本】维护：移动事件 payload 自带物理坐标，
+      // 顺手更新即可让下次拖动起手零等待
+      const mv = e.payload as unknown as { x: number; y: number } | undefined;
+      if (mv && typeof mv.x === "number") posRef.current = { x: mv.x, y: mv.y };
       // 自驱动拖拽中：位置由 onMove/rAF 维护，落点在 mouseup 统一持久化。
       // 这里若每帧都跑，就成了 setPosition→onMoved→调度持久化 的每帧噪声，拖拽发涩
       if (draggingRef.current) return;

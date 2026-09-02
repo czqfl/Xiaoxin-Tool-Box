@@ -57,6 +57,13 @@ html[data-window="pin"], html[data-window="pin"] body { background: transparent 
 /* 拖拽开始即定格主题色边框：模态拖放循环会冻结 JS 主线程，150ms 过渡
    会僵在半途（视觉上就是"卡了一下"），直接关掉过场最利落 */
 .pin-window.pin-dragging .pin-border { transition: none; }
+/* 【拖拽中卸掉暗色投影】透明窗口每次移动都要 DWM 重合成整个窗口（含阴影
+   扩散区），大贴图单是两层投影就是每帧数百万像素的采样——拖拽掉帧的主因。
+   松手即自动恢复（去掉 pin-dragging 类），拖动那零点几秒肉眼几乎无感。
+   特异性高于 .pin-shadow（0,4,0 vs 0,3,0），无需 !important */
+.pin-window.pin-dragging.pin-shadow .pin-border {
+  --pin-drop: 0 0 rgba(0,0,0,0);
+}
 /* 选中（窗口聚焦）态：主题色边框 + 深色衬圈 + 柔和辉光——与悬停态区分
    （悬停只是亮色描边，选中多一圈衬底与更明显的光晕），一眼可辨且优雅 */
 .pin-window.pin-focused .pin-border {
