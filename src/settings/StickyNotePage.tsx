@@ -169,11 +169,11 @@ export function StickyNotePage() {
   const mdFileRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
-    const guard = new Promise<StickySettings | null>((resolve) =>
-      setTimeout(() => resolve(null), 1200)
-    );
+    // 直接等 invoke 完成（invoke 层自带超时兜底）：旧版 Promise.race 1200ms
+    // 超时后落 DEFAULT 并 setLoaded(true)，迟到的真实配置被丢弃——此后任意
+    // patch 都会把「默认值+本次改动」整体写回，llm_api_key 等字段被清空
     try {
-      const s = (await Promise.race([invoke<StickySettings>("load_settings"), guard])) ?? DEFAULT;
+      const s = (await invoke<StickySettings>("load_settings")) ?? DEFAULT;
       if (s) {
         // 透明主题已移除（工具箱自带亚克力）：存量 transparent 归入浅色并回写
         if (s.theme === "transparent") {

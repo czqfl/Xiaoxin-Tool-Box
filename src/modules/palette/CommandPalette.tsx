@@ -271,7 +271,9 @@ export function CommandPalette() {
         setKind(next);
       } else if (e.key === "Enter") {
         e.preventDefault();
-        void run(visible[active], e.ctrlKey || e.metaKey);
+        // active 钳制到结果范围内：结果收缩的间隙 active 可能越界，
+        // 不钳制会取到 undefined（按 Enter 无响应一次）
+        void run(visible.length ? visible[Math.min(active, visible.length - 1)] : undefined, e.ctrlKey || e.metaKey);
       }
     };
     document.addEventListener("keydown", onKey);

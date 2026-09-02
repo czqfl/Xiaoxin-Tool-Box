@@ -629,10 +629,19 @@ function QuickFilesPanelInner() {
     }
   };
 
+  // load 的 ref 镜像：面板显隐事件监听只注册一次，经此调到最新闭包
+  const loadRef = useRef(load);
+  loadRef.current = load;
+
+  // 配置加载完成才拉列表：挂载瞬间 configStore.load() 的 IPC 往往还没返回，
+  // 此时 config.files 是默认值——用默认位置/扩展名拉出的列表是错的，且面板
+  // 隐显不卸载组件，错列表会一直停留
+  const configLoaded = useConfigStore((s) => s.loaded);
   useEffect(() => {
+    if (!configLoaded) return;
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [configLoaded]);
 
   // 置顶跟随配置
   useEffect(() => {
@@ -650,6 +659,9 @@ function QuickFilesPanelInner() {
         setNewName("");
         setDeleteTarget(null);
         setNewOpen(false);
+        // 面板不卸载、重显不重挂：保存位置/文件列表可能在隐藏期间被设置页
+        // 或外部改动，显示时重拉一次，避免永远停在旧列表
+        void loadRef.current();
       }
     }).then((un) => {
       if (disposed) un();

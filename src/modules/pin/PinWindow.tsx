@@ -521,6 +521,9 @@ export function PinWindow() {
           : pinCopyOriginal(idRef.current).then(() => undefined);
         job.catch(() => showBadge("复制失败", 1500, "failed"));
       } else if (e.key === "r" && e.ctrlKey) {
+        // 必须 preventDefault：WebView2 启用浏览器加速键，Ctrl+R 会同时整页
+        // 重载贴图窗——旋转状态丢失、图片重新加载闪烁
+        e.preventDefault();
         setRotation((r) => (r + 90) % 360);
       }
     };

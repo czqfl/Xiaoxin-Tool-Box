@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { hideCurrentWindow, usePanelCommon } from "../../core/usePanel";
+import { EVT_PANEL_VISIBILITY, onEvent } from "../../core/events";
 import { useConfigStore } from "../../stores/configStore";
 import { setPanelAlwaysOnTop } from "../../core/tauri";
 import type { Snippet } from "../../types";
@@ -93,10 +94,28 @@ export function SnippetPanel() {
     }
   };
 
+  // refresh 的 ref 镜像：显隐事件监听只注册一次，经此调到最新闭包
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+
   useEffect(() => {
     void refresh();
     // 聚焦时自动聚焦搜索框（面板 show 后）
     setTimeout(() => searchRef.current?.focus(), 60);
+    // 面板不卸载、重显不重挂：片段可能在隐藏期间被增删，显示时刷新一次，
+    // 否则列表永远停在上一场的内容
+    let cleanup: (() => void) | undefined;
+    let disposed = false;
+    onEvent<{ label: string; visible: boolean }>(EVT_PANEL_VISIBILITY, (ev) => {
+      if (ev.visible && ev.label === getCurrentWindow().label) void refreshRef.current();
+    }).then((un) => {
+      if (disposed) un();
+      else cleanup = un;
+    });
+    return () => {
+      disposed = true;
+      cleanup?.();
+    };
   }, []);
 
   /** 分组列表（按名称排序；始终含"默认"以外的全部实际分组） */

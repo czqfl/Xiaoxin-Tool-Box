@@ -78,7 +78,10 @@ export function GitRunWindow() {
       }
     };
     void tick();
-    const timer = window.setInterval(tick, 200);
+    // 窗口隐藏期间跳过轮询：该窗口常驻挂载，200ms 一次的 IPC 在后台纯空转
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void tick();
+    }, 200);
     return () => {
       disposed = true;
       window.clearInterval(timer);

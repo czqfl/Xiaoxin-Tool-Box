@@ -1638,39 +1638,56 @@ export function mountNoteApp(noteId: string, preset = "") {
   function unifiedDiff(oldText: string, newText: string): { type: "ctx" | "del" | "add"; text: string }[] {
     const a = oldText.split("\n");
     const b = newText.split("\n");
-    const n = a.length;
-    const m = b.length;
-    // LCS 动态规划表
-    const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
-    for (let i = n - 1; i >= 0; i--) {
-      for (let j = m - 1; j >= 0; j--) {
-        dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-      }
-    }
+    // 先剥掉公共前后缀，把 LCS 限制在中间真正有差异的区域——
+    // 常见的"改了中间一段"场景复杂度从 O(全文²) 骤降到 O(差异²)
+    let pre = 0;
+    while (pre < a.length && pre < b.length && a[pre] === b[pre]) pre++;
+    let endA = a.length, endB = b.length;
+    while (endA > pre && endB > pre && a[endA - 1] === b[endB - 1]) { endA--; endB--; }
+    const am = a.slice(pre, endA);
+    const bm = b.slice(pre, endB);
+    const n = am.length;
+    const m = bm.length;
     const out: { type: "ctx" | "del" | "add"; text: string }[] = [];
-    let i = 0;
-    let j = 0;
-    while (i < n && j < m) {
-      if (a[i] === b[j]) {
-        out.push({ type: "ctx", text: a[i] });
+    for (let k = 0; k < pre; k++) out.push({ type: "ctx", text: a[k] });
+    if (n * m > 4_000_000) {
+      // 差异区仍然过大（如整篇重排的上万行文本）：LCS 动态规划要分配上亿个
+      // 单元格，同步阻塞主线程数秒直至崩溃——降级为整块"全删全加"
+      for (const t of am) out.push({ type: "del", text: t });
+      for (const t of bm) out.push({ type: "add", text: t });
+    } else {
+      // LCS 动态规划表
+      const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+      for (let i = n - 1; i >= 0; i--) {
+        for (let j = m - 1; j >= 0; j--) {
+          dp[i][j] = am[i] === bm[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+        }
+      }
+      let i = 0;
+      let j = 0;
+      while (i < n && j < m) {
+        if (am[i] === bm[j]) {
+          out.push({ type: "ctx", text: am[i] });
+          i++;
+          j++;
+        } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+          out.push({ type: "del", text: am[i] });
+          i++;
+        } else {
+          out.push({ type: "add", text: bm[j] });
+          j++;
+        }
+      }
+      while (i < n) {
+        out.push({ type: "del", text: am[i] });
         i++;
-        j++;
-      } else if (dp[i + 1][j] >= dp[i][j + 1]) {
-        out.push({ type: "del", text: a[i] });
-        i++;
-      } else {
-        out.push({ type: "add", text: b[j] });
+      }
+      while (j < m) {
+        out.push({ type: "add", text: bm[j] });
         j++;
       }
     }
-    while (i < n) {
-      out.push({ type: "del", text: a[i] });
-      i++;
-    }
-    while (j < m) {
-      out.push({ type: "add", text: b[j] });
-      j++;
-    }
+    for (let k = endA; k < a.length; k++) out.push({ type: "ctx", text: a[k] });
     return out;
   }
 

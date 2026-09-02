@@ -227,6 +227,9 @@ function ClipboardPanelInner() {
       const t = e.target as HTMLElement | null;
       const inSearch = t === inputRef.current;
       const inEditable = !!t?.closest?.("input, textarea");
+      // 确认弹窗打开时不接管键盘：否则「清空全部」确认框上按 Enter 会被
+      // 这里的 preventDefault 吞掉（按钮收不到确认），还顺手执行了一次粘贴
+      if (confirmClear) return;
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         if (inEditable && !inSearch) return;
         e.preventDefault();
@@ -251,7 +254,7 @@ function ClipboardPanelInner() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [flat, queue, sequential, selectedIdx, doPaste]);
+  }, [flat, queue, sequential, selectedIdx, doPaste, confirmClear]);
 
   const handleClear = () => setConfirmClear(true);
 

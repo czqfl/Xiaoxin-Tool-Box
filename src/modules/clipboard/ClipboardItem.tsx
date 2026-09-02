@@ -45,6 +45,7 @@ function ImageThumb({ entryId }: { entryId: string }) {
     if (src) return;
     let cancelled = false;
     let attempts = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     const tryLoad = () => {
       if (cancelled) return;
       fetchImage(entryId).then((s) => {
@@ -53,7 +54,7 @@ function ImageThumb({ entryId }: { entryId: string }) {
           setSrc(s);
         } else if (attempts < 6) {
           attempts += 1;
-          setTimeout(tryLoad, 400);
+          retryTimer = setTimeout(tryLoad, 400);
         } else {
           setThumbFailed(true);
         }
@@ -62,6 +63,7 @@ function ImageThumb({ entryId }: { entryId: string }) {
     tryLoad();
     return () => {
       cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
     };
   }, [entryId, src, fetchImage, thumbRetry]);
 

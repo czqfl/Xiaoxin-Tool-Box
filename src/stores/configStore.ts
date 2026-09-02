@@ -162,7 +162,7 @@ function mergeDefaults(next: AppConfig): AppConfig {
   return merged;
 }
 
-export const useConfigStore = create<ConfigStore>((set) => ({
+export const useConfigStore = create<ConfigStore>((set, get) => ({
   config: defaultConfig,
   loaded: false,
 
@@ -183,6 +183,11 @@ export const useConfigStore = create<ConfigStore>((set) => ({
 
   update: async (next, broadcast = true) => {
     set({ config: next });
+    // 【载入完成前拒绝落盘】窗口刚挂载的几百 ms 内 config 还是 defaultConfig，
+    // 此时调用方用渲染闭包拼出的 next 整体基于默认值——直接写盘会用默认配置
+    // 覆盖磁盘上的真实配置（丢翻译 Key/快捷键/自定义目录）。只更新内存供 UI
+    // 响应，等 load() 完成后用户再改动才持久化
+    if (!get().loaded) return;
     // 主题/外观立即生效（applyTheme 内部已去重），持久化与广播都不阻塞渲染：
     // 磁盘写入放后台，广播先发——其他窗口同步越早，整体切换观感越跟手
     void saveConfig(next);

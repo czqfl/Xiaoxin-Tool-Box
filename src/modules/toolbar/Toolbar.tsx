@@ -370,12 +370,18 @@ export function Toolbar() {
   useEffect(() => {
     void refreshActive();
     let cleanup: (() => void) | undefined;
+    let disposed = false;
     onEvent<{ label: string; visible: boolean }>(EVT_PANEL_VISIBILITY, () => {
       void refreshActive();
     }).then((un) => {
-      cleanup = un;
+      // 卸载早于 promise resolve 时直接反注册，否则监听器泄漏
+      if (disposed) un();
+      else cleanup = un;
     });
-    return () => cleanup?.();
+    return () => {
+      disposed = true;
+      cleanup?.();
+    };
   }, []);
 
   // ---- 磁吸交互：DOM 直写（refs + rAF），避免每帧 React 重渲染 ----

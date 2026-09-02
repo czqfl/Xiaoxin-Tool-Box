@@ -253,21 +253,27 @@ export function TranslatePopup() {
   /** 正向翻译：以原文为源，翻译到目标语言（Enter / 顶部按钮触发）。
    *  源语言选「自动检测」时目标语言走智能方向（中文→英 / 英文→中）；
    *  手动指定了目标语言则用用户选择。结果落到译文区 → "翻译中"显示在下方 */
+  // 翻译代次：连续两次 Enter（或划词结果与手动翻译并发）时，先发后至的
+  // 旧译文会覆盖新结果——过期代次直接丢弃
+  const transSeqRef = useRef(0);
   const doTranslate = async () => {
     const t = text.trim();
     if (!t) return;
+    const mySeq = ++transSeqRef.current;
     setBusy("dst");
     try {
       const target = fromLang === "auto" ? smartTarget(t) : toLang;
       const r = await translateText(t, fromLang, target);
+      if (mySeq !== transSeqRef.current) return;
       setDst(r.translation);
       setResult(r);
       // 源语言为自动检测：目标语言下拉跟随识别结果（用户反馈）
       if (fromLang === "auto") setToLang(target);
     } catch (err) {
+      if (mySeq !== transSeqRef.current) return;
       flashStatus("翻译失败，请检查网络或服务商配置", "err");
     } finally {
-      setBusy(null);
+      if (mySeq === transSeqRef.current) setBusy(null);
     }
   };
 
@@ -277,17 +283,20 @@ export function TranslatePopup() {
   const doReverse = async () => {
     const t = dst.trim();
     if (!t) return;
+    const mySeq = ++transSeqRef.current;
     setBusy("src");
     try {
       const target = fromLang !== "auto" ? fromLang : (result?.from || "zh");
       const r = await translateText(t, toLang, target);
+      if (mySeq !== transSeqRef.current) return;
       // 反向结果放回原文区，译文区保留用户编辑的内容
       setText(r.translation);
       setResult({ ...r, text: t, from: toLang, to: target });
     } catch (err) {
+      if (mySeq !== transSeqRef.current) return;
       flashStatus("反向翻译失败，请检查网络或服务商配置", "err");
     } finally {
-      setBusy(null);
+      if (mySeq === transSeqRef.current) setBusy(null);
     }
   };
 

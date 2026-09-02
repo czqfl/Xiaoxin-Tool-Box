@@ -179,6 +179,12 @@ export function RecorderSelect() {
     return () => clearTimeout(t);
   }, [error]);
 
+  // start 的 ref 镜像 + 监听一次性注册：旧 effect 无 deps，框选拖动时每帧
+  // setBoth 重渲染 → 每帧 remove/add 4 个 window 监听（keydown/contextmenu/
+  // blur/focus），纯开销且 blur 计时行为依赖重挂时序
+  const startRef = useRef(start);
+  startRef.current = start;
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (startingRef.current) return;
@@ -186,15 +192,15 @@ export function RecorderSelect() {
         e.preventDefault();
         // 录制中（遮罩模式）：Esc = 停止并保存。控制条已移除，
         // 这是除"再按一次录制快捷键"之外的兜底停止入口（焦点还在本窗时可用）
-        if (masking) {
+        if (maskingRef.current) {
           void recorderStop().catch(() => {});
           return;
         }
         void recSelectCancel().catch(() => {});
       } else if (e.key === "Enter") {
         e.preventDefault();
-        if (masking) return; // 录制中忽略 Enter，避免重复触发 recorder_start
-        void start();
+        if (maskingRef.current) return; // 录制中忽略 Enter，避免重复触发 recorder_start
+        void startRef.current();
       }
     };
     const onContext = (e: MouseEvent) => {
@@ -229,7 +235,7 @@ export function RecorderSelect() {
       window.removeEventListener("focus", onFocus);
       if (blurTimer) clearTimeout(blurTimer);
     };
-  });
+  }, []);
 
   // ---- 选区模式 ----
   const valid = rect != null && rect.w >= 24 && rect.h >= 24;

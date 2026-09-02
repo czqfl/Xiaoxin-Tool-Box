@@ -25,7 +25,6 @@ export function FilesPage() {
   const config = useConfigStore((s) => s.config);
   const update = useConfigStore((s) => s.update);
 
-  if (!config.files) return null;
   const files = config.files;
 
   // 本机已安装应用（开始菜单 + App Paths），供「默认打开方式」下拉选择
@@ -134,6 +133,10 @@ export function FilesPage() {
     opts.push({ value: "__browse__", label: "浏览其他程序…", group: "更多" });
     return opts;
   };
+
+  // 早退放在所有 hooks 之后：条件 return 若出现在 useState/useEffect 之前，
+  // config.files 缺失时 hooks 数量前后不一致，直接触发 React 崩溃
+  if (!files) return null;
 
   return (
     <div className="settings-page">

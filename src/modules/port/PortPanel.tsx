@@ -89,6 +89,9 @@ function PortPanelInner() {
     });
   };
 
+  // 查询代次：portSearch 最长可挂 20s，连续查询时先发后至的旧响应
+  // 会覆盖新结果——过期代次的结果直接丢弃
+  const querySeqRef = useRef(0);
   const runQuery = async (kw: string) => {
     const q = kw.trim();
     if (!q) {
@@ -102,10 +105,12 @@ function PortPanelInner() {
         return;
       }
     }
+    const mySeq = ++querySeqRef.current;
     setLoading(true);
     setError("");
     try {
       const list = await portSearch(q);
+      if (mySeq !== querySeqRef.current) return;
       setItems(list);
       if (list.length === 0) {
         // 数字走端口语义，否则按应用名语义给出不同提示
@@ -114,10 +119,11 @@ function PortPanelInner() {
         setError("仅 TIME_WAIT 连接（几分钟后自动释放，通常无需处理）");
       }
     } catch (err) {
+      if (mySeq !== querySeqRef.current) return;
       setError(String(err));
       setItems([]);
     } finally {
-      setLoading(false);
+      if (mySeq === querySeqRef.current) setLoading(false);
     }
   };
 

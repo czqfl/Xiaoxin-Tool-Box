@@ -252,14 +252,18 @@ function FolderPanelInner() {
   // 面板既不跟踪其状态，也不在自身关闭时连带操作它。
   useEscLayer(true, () => hideCurrentWindow());
 
-  // 列表变化时批量读取 Git 分支（读 .git/HEAD，毫秒级）
+  // 列表变化时批量读取 Git 分支（读 .git/HEAD，毫秒级）。
+  // cancelled 标志：列表快速变化连发请求时，先发后至的旧响应按【旧 folders
+  // 数组的下标】建映射——整体 setBranches 会把分支挂到错误的文件夹上
   useEffect(() => {
+    let cancelled = false;
     const paths = folders.map((f) => f.path);
     if (paths.length === 0) {
       setBranches({});
       return;
     }
     api.folderGitBranches(paths).then((list) => {
+      if (cancelled) return;
       const map: Record<string, string> = {};
       folders.forEach((f, i) => {
         const b = list[i];
@@ -267,6 +271,7 @@ function FolderPanelInner() {
       });
       setBranches(map);
     });
+    return () => { cancelled = true; };
   }, [folders]);
 
   useEffect(() => {

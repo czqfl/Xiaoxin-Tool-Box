@@ -391,7 +391,10 @@ function drawShape(
       pctx.imageSmoothingEnabled = true; // 降采样平滑 = 区域平均色
       pctx.drawImage(sampleSrc, 0, 0, pw, ph);
       layer = { bs, w: W, h: H, stamp: mosaicFrameStamp, pix };
-      mosaicLayerCache.set(src, layer);
+      // 缓存键必须与查询键一致（sampleSrc）：定稿后的马赛克采样源是时序快照
+      // 画布，若存到 src（底图）名下，下次重绘 get(sampleSrc) 永远 miss →
+      // 每次重绘都整帧降采样重建马赛克层（4K 下每帧几十 MB 带宽，白烧）
+      mosaicLayerCache.set(sampleSrc, layer);
     }
     // 2) 笔迹蒙版 + 合成【只在笔迹包围盒内进行】：整屏大小的 clear/合成
     //    每帧 ×2 层在弱 GPU 上会拖垮整页（"一用马赛克就卡死"），包围盒
@@ -406,7 +409,7 @@ function drawShape(
     }
     bx = Math.max(0, Math.floor(bx - pad)); by = Math.max(0, Math.floor(by - pad));
     bw2 = Math.min(W, Math.ceil(bx2 + pad)) - bx; bh2 = Math.min(H, Math.ceil(by2 + pad)) - by;
-    if (bw2 <= 0 || bh2 <= 0) return;
+    if (bw2 <= 0 || bh2 <= 0) { ctx.restore(); return; }
     let mask = mosaicScratch.mask;
     if (!mask) { mask = document.createElement("canvas"); mosaicScratch.mask = mask; }
     if (mask.width !== bw2) mask.width = bw2;
@@ -744,6 +747,7 @@ export function ScreenshotOverlay() {
     // 只刷新几何/帧数据，不再重复复位。复位若发生在已亮窗的会话上，
     // 智能高亮会被清掉再重画，表现为"呼出瞬间选框来回闪几下"
     dragRef.current = null; resizeRef.current = null; downPtRef.current = null;
+    regionMoveRef.current = null;
     // 原生拖拽层复位：上一会话若在拖拽中被强制收场，这里兜底停更+还原；
     // 并挂上重置标记隐藏旧工具栏等浮层 DOM（原生即时亮窗后、本页收到
     // shot-refresh 前的窗口期，防止残留 UI 在新画面上闪现）
@@ -784,9 +788,9 @@ export function ScreenshotOverlay() {
         // 无需等整屏 RGBA 传完——遮罩窗一出现高亮框就在
         const g = await shotGeometry();
         if (mySession !== sessionRef.current) break;
+        if (!g) break;
         setGeom(g);
         candsRef.current = g.cands ?? null;
-        if (!g) break;
         if (g.snap) {
           // snap 是 Rust 端【显示器局部物理像素】；选区/高亮层统一用 CSS 像素，
           // 须 ÷cssScale 归一——否则 150% 下初始高亮框比实际窗口大 1.5 倍
@@ -1135,14 +1139,14 @@ export function ScreenshotOverlay() {
         else if (e.key === "ArrowUp") r.y -= d; else r.y += d;
         setRegion(r); regRef.current = r;
       } else if (e.code === "KeyZ" && e.ctrlKey && !e.shiftKey) {
-        e.preventDefault(); if (annos.length > 0) { setEditIdx(-1); setUndos((u)=>[...u,[...annos]]); setAnnos((a)=>a.slice(0,-1)); }
+        e.preventDefault(); if (annos.length > 0) { setEditIdx(-1); setUndos((u)=>[...u.slice(-99),[...annos]]); setAnnos((a)=>a.slice(0,-1)); }
       } else if (e.code === "KeyZ" && e.ctrlKey && e.shiftKey) {
         e.preventDefault(); if (undos.length > 0) { setEditIdx(-1); setAnnos(undos[undos.length-1]); setUndos((u)=>u.slice(0,-1)); }
       }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [phase, annos, undos]);
+  }, [phase, annos, undos, cfg]);
 
   // ---- OCR 文字模式键盘：ALT 触发/切换、Esc 退出、Ctrl+C 复制划选 ----
   // 与贴图 Alt 文字模式保持一致：未识别时 ALT 启动识别并自动进模式，已识别时
@@ -2061,7 +2065,8 @@ export function ScreenshotOverlay() {
     box.style.left = `${left}px`;
     // 整体高约 镜头140 + 信息区~80：下缘预留不足时翻到光标上方
     box.style.top = `${my < vh - MAG - 130 ? my + 20 : my - MAG - 150}px`;
-    c.width = MAG; c.height = MAG;
+    // 仅尺寸变化时重设位图（赋值即重置画布）：同值反复赋值每帧白白重置一次
+    if (c.width !== MAG) { c.width = MAG; c.height = MAG; }
     const ctx = c.getContext("2d")!;
     ctx.imageSmoothingEnabled = false;
     const src = MAG / MAG_Z; // 镜头覆盖的【CSS 像素】边长
@@ -2207,6 +2212,15 @@ export function ScreenshotOverlay() {
         beginNativeDrag(1, hx, hy, start);
         queueSelPaint();
       }
+    } else if (regionMoveRef.current) {
+      // 拖动移动选区：整体平移并钳制在屏幕内；纯 webview 路径重绘
+      //（不唤起原生层——原生拖拽模式的锚点语义是"从锚点画新矩形"，与移动不符）
+      const { start, orig } = regionMoveRef.current;
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const nx = Math.max(0, Math.min(orig.x + (pt.x - start.x), vw - orig.w));
+      const ny = Math.max(0, Math.min(orig.y + (pt.y - start.y), vh - orig.h));
+      regRef.current = { x: nx, y: ny, w: orig.w, h: orig.h };
+      queueSelPaint();
     }
     // 手柄悬停光标反馈（手柄由画布绘制，无 CSS :hover 可用）：
     // 基础光标按工具语义（TOOL_CURSOR），命中手柄/形状本体再精细覆盖
@@ -2278,6 +2292,7 @@ export function ScreenshotOverlay() {
       let ox = te.x, oy = te.y;
       const r = textInputRef.current?.getBoundingClientRect();
       if (r) { ox = r.left; oy = r.top; }
+      setUndos([]);
       setAnnos((arr)=>[...arr, { kind:"text", x1:ox, y1:oy, x2:ox, y2:oy,
         color, width: sw, text: te.value }]);
     }
@@ -2301,6 +2316,7 @@ export function ScreenshotOverlay() {
   /** 二次编辑·移动：按住图形本体拖动，整体平移（笔画点集与对角两点同步偏移） */
   const startShapeMove = (idx: number, start: Pt) => {
     const orig = annos[idx];
+    setUndos([]); // 移动也是一次"新动作"，清空重做栈
     const onM = (ev: MouseEvent) => {
       const rc = bgRef.current?.getBoundingClientRect(); if (!rc) return;
       const dx = Math.round(ev.clientX - rc.left) - start.x;
@@ -2317,6 +2333,7 @@ export function ScreenshotOverlay() {
   /** 二次编辑·缩放：拖动单个手柄。线条类直接搬端点；矩形/椭圆钉住对角为锚点 */
   const startShapeResize = (idx: number, hi: number) => {
     const orig = annos[idx];
+    setUndos([]); // 缩放同移动：新动作清空重做栈
     const b = annoBounds(orig);
     // 手柄序（矩形/椭圆）：0 左上 1 右上 2 右下 3 左下 → 锚点取对角
     const ax = (hi === 0 || hi === 3) ? b.x + b.w : b.x;
@@ -2335,6 +2352,11 @@ export function ScreenshotOverlay() {
     const onU = () => { window.removeEventListener("mousemove", onM); window.removeEventListener("mouseup", onU); };
     window.addEventListener("mousemove", onM); window.addEventListener("mouseup", onU);
   };
+
+  // 拖动移动选区状态：select 工具在选区内按下即整体平移（光标 move 的承诺），
+  // 纯点击（几乎未动）选区保持不消失——旧行为是单击即取消选区、拖拽变成
+  // 重画新选区，与光标语义相悖
+  const regionMoveRef = useRef<{ start: Pt; orig: Rect } | null>(null);
 
   const onDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
@@ -2370,6 +2392,9 @@ export function ScreenshotOverlay() {
         points: (tool==="brush"||tool==="mosaic") ? [pt] : undefined,
         num: tool==="number" ? numCnt : undefined };
       if (tool==="number") setNumCnt((n)=>n+1);
+      // 新动作清空重做栈：撤销后画了新图形，再"重做"若恢复旧标注会把
+      // 新画的图形整个吞掉（无提示的数据丢失）
+      setUndos([]);
       // 【时序马赛克】落下瞬间拍「当时画面」快照（底图 + 已存在的全部标注）：
       // 之后这条马赛克永远像素化这一帧状态；后续新标注不受影响
       if (tool==="mosaic") {
@@ -2403,6 +2428,15 @@ export function ScreenshotOverlay() {
     if (phase === "selected") {
       const hnd = hitHandle(pt);
       if (hnd) { resizeRef.current = { hx:hnd[0], hy:hnd[1], start:{...regRef.current}, startPt:pt }; return; }
+      // select 工具在选区内按下 = 拖动移动整个选区；选区外拖拽才是新建选区
+      if (tool === "select") {
+        const r = regRef.current;
+        if (r.w > 0 && r.h > 0 && pt.x >= r.x && pt.x <= r.x + r.w && pt.y >= r.y && pt.y <= r.y + r.h) {
+          regionMoveRef.current = { start: pt, orig: { ...r } };
+          setDragging(true);
+          return;
+        }
+      }
     }
     downPtRef.current = pt;
     // 按下左键瞬间：若有智能高亮，把它【无缝】转成"拖拽中的选区"——
@@ -2433,7 +2467,17 @@ export function ScreenshotOverlay() {
       setRegion(regRef.current);
       handoverNativeDrag(() => paintSelCanvas());
       const sc = cssScale();
-      shotSaveRegion([regRef.current.x*sc+(geom?.x??0),regRef.current.y*sc+(geom?.y??0),regRef.current.w*sc,regRef.current.h*sc]); return;
+      void shotSaveRegion([regRef.current.x*sc+(geom?.x??0),regRef.current.y*sc+(geom?.y??0),regRef.current.w*sc,regRef.current.h*sc]).catch(()=>{}); return;
+    }
+    if (regionMoveRef.current) {
+      // 拖动移动选区收场：提交最终位置并重画（选区保持选定态不消失）
+      regionMoveRef.current = null;
+      setDragging(false);
+      setRegion(regRef.current);
+      paintSelCanvas();
+      const sc = cssScale();
+      void shotSaveRegion([regRef.current.x*sc+(geom?.x??0),regRef.current.y*sc+(geom?.y??0),regRef.current.w*sc,regRef.current.h*sc]).catch(()=>{});
+      return;
     }
     if (!dragRef.current) return;
     setDragging(false);
@@ -2451,7 +2495,7 @@ export function ScreenshotOverlay() {
       // 必须立即按最终矩形重画，否则边框和亮区消失
       handoverNativeDrag(() => paintSelCanvas("selected"));
       const sc = cssScale();
-      shotSaveRegion([r.x*sc+(geom?.x??0),r.y*sc+(geom?.y??0),r.w*sc,r.h*sc]);
+      void shotSaveRegion([r.x*sc+(geom?.x??0),r.y*sc+(geom?.y??0),r.w*sc,r.h*sc]).catch(()=>{});
       return;
     }
     const r = {x:Math.min(s.x,pt.x),y:Math.min(s.y,pt.y),w:Math.abs(pt.x-s.x),h:Math.abs(pt.y-s.y)};
@@ -2460,7 +2504,7 @@ export function ScreenshotOverlay() {
       phaseRef.current = "selected";
       handoverNativeDrag(() => paintSelCanvas("selected"));
       const sc = cssScale();
-      shotSaveRegion([r.x*sc+(geom?.x??0),r.y*sc+(geom?.y??0),r.w*sc,r.h*sc]);
+      void shotSaveRegion([r.x*sc+(geom?.x??0),r.y*sc+(geom?.y??0),r.w*sc,r.h*sc]).catch(()=>{});
     }
     else { setPhase("idle"); phaseRef.current = "idle"; handoverNativeDrag(() => paintSelCanvas("idle")); }
   };
@@ -3020,7 +3064,7 @@ export function ScreenshotOverlay() {
               </button>
               <div className="shot-toolbar-sep" />
               <button data-tip="撤销 (Ctrl+Z)" disabled={annos.length===0}
-                onClick={()=>{if(annos.length>0){setEditIdx(-1);setUndos(u=>[...u,[...annos]]);setAnnos(a=>a.slice(0,-1));}}}><IcoUndo/></button>
+                onClick={()=>{if(annos.length>0){setEditIdx(-1);setUndos(u=>[...u.slice(-99),[...annos]]);setAnnos(a=>a.slice(0,-1));}}}><IcoUndo/></button>
               <button data-tip="重做 (Ctrl+Shift+Z)" disabled={undos.length===0}
                 onClick={()=>{if(undos.length>0){setEditIdx(-1);setAnnos(undos[undos.length-1]);setUndos(u=>u.slice(0,-1));}}}><IcoRedo/></button>
               <div className="shot-toolbar-sep" />
