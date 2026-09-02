@@ -78,15 +78,18 @@ const IcoShape = () => (
   </svg>
 );
 // 箭头（经典）：等宽杆身 + 端部 V 形双翼箭头（描边，翼内镂空）。
-// 与「锥形箭头」一眼可辨：杆身从头到尾一样粗，头部是两条描边翼
+// 与「锥形箭头」一眼可辨：杆身从头到尾一样粗，头部是两条描边翼。
+// 【加长】杆身 2.8→20.8（原 3.2→19.4）、头部拉到 8.8 长、翼展收窄
+// （原 2.4+0.78w → 1.8+0.44w），整体修长不短粗
 const IcoArrow = ({ w = 2 }: { w?: number }) => {
-  const hl = Math.min(6.4, 2.4 + w * 0.78);   // 箭头翼半展（随粗细缩放）
+  const hl = Math.min(4.3, 1.8 + w * 0.44);   // 箭头翼半展（随粗细缩放）
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
       strokeWidth={w} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <g transform="rotate(-45 12 12)">
-        <line x1="3.2" y1="12" x2="19.4" y2="12" />
-        <polyline points={`12.2,${(12 - hl).toFixed(2)} 20.4,12 12.2,${(12 + hl).toFixed(2)}`} />
+        {/* 杆身圆头端点与 V 顶点同在 20.8 —— 两者外缘齐平，尖端不出毛刺 */}
+        <line x1="2.8" y1="12" x2="20.8" y2="12" />
+        <polyline points={`12,${(12 - hl).toFixed(2)} 20.8,12 12,${(12 + hl).toFixed(2)}`} />
       </g>
     </svg>
   );
@@ -96,7 +99,7 @@ const IcoArrow = ({ w = 2 }: { w?: number }) => {
 const IcoLine = ({ w = 2 }: { w?: number }) => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
     strokeWidth={w} strokeLinecap="round" aria-hidden="true">
-    <line x1="4.6" y1="19.4" x2="19.4" y2="4.6" />
+    <line x1="3.8" y1="20.2" x2="20.2" y2="3.8" />
   </svg>
 );
 // 线组图标：折线+箭头叠合（Snipaste 第二格趋势线）。统一 22×22 与其他
@@ -113,14 +116,16 @@ const IcoLineGroup = () => (
  *  图标本身就是粗细预览 */
 const icoW = (sw: number) => Math.max(1.7, Math.min(5.4, 1.5 + sw * 0.2));
 
-// 锥形箭头：实心锥形（尾细 → 头粗、头部两翼外张），fill 渲染。
-// 与「箭头」一眼可辨：整条实心、从尾到头连续变粗，没有独立等宽杆身
+// 锥形箭头：实心 + 带【凹口】的倒刺箭头（与画布上的画法一致）。
+// 【细长】造型：全长 19.5（2.3→21.8），头部独占 9，倒刺底边 12.8、
+// 凹口顶点 15.6 —— 头长:头宽 ≈ 2.2，去掉旧版的短粗感；但倒刺半宽
+// 有 2.0 下限，细画笔下也不会细到看不出是锥形箭头
 const IcoTapered = ({ w = 2 }: { w?: number }) => {
-  const tw = Math.max(0.55, w * 0.3);                 // 尾半宽（细）
-  const bw = Math.max(1.1, Math.min(3.4, w * 0.62));  // 杆根半宽（渐粗）
-  const hw = Math.max(2.4, Math.min(6.2, w * 1.05));  // 箭头两翼半宽
+  const tw = Math.max(0.5, w * 0.24);                  // 尾半宽
+  const kw = Math.max(0.8, Math.min(2.6, w * 0.44));   // 杆身到凹口顶点时的半宽
+  const hw = Math.max(2.0, Math.min(4.0, w * 0.95));   // 倒刺半宽（头部最宽）
   const f = (v: number) => (12 + v).toFixed(2);
-  const pts = `2.6,${f(-tw)} 13.1,${f(-bw)} 13.1,${f(-hw)} 21,12 13.1,${f(hw)} 13.1,${f(bw)} 2.6,${f(tw)}`;
+  const pts = `2.3,${f(-tw)} 15.6,${f(-kw)} 12.8,${f(-hw)} 21.8,12 12.8,${f(hw)} 15.6,${f(kw)} 2.3,${f(tw)}`;
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <polygon points={pts} transform="rotate(-45 12 12)"
@@ -272,24 +277,34 @@ function drawShape(
     ctx.lineTo(X2 - hl * Math.cos(angle + 0.4), Y2 - hl * Math.sin(angle + 0.4));
     ctx.stroke();
   } else if (s.kind === "tapered") {
-    // 锥形箭头（企微截图同款）：尾（X1,Y1）细、头（X2,Y2）粗的实心翼形。
-    // 翼宽随线宽缩放，头部为全宽，尾部收到一点——纯实心无杆，指向性最强
+    // 锥形箭头：带实际尾宽的锥形杆 + 底部带【凹口】的倒刺箭头。
+    // 头部 = 三角形基础上，从底边朝尖端再挖掉一个小三角（凹口），
+    // 剩下两片向后外张的倒刺 —— 比纯三角头部指向感更强。
+    // 【尾端】旧版是 moveTo(X1,Y1) 单点（收到 0 宽，过细），现改为有
+    // 实际宽度的平尾，再沿杆身渐粗到凹口顶点处的 wShaft
     const dx = X2 - X1, dy = Y2 - Y1;
     const len = Math.sqrt(dx * dx + dy * dy);
     if (len < 2 * scale) { ctx.restore(); return; }
     const angle = Math.atan2(dy, dx);
-    // 头部【半宽】= 0.72× 线宽（再收窄一档：上一版 1.0× 时头翼明显过宽，
-    // 实际张开是 2×wHead ≈ 1.44× 线宽）；尾部同步微调，保留锥形渐变
-    const wHead = Math.max(1.6, s.width * 0.72) * scale;
-    const wTail = Math.max(0.4, s.width * 0.22) * scale;
+    // 头部长度随线宽缩放（≥8 CSS px），最多占线段总长的 45%
+    const hl = Math.min(Math.max(8, s.width * 2.8) * scale, len * 0.45);
+    const nd = hl * 0.42;                                   // 凹口深度（占头长 42%）
+    const wTail = Math.max(0.9, s.width * 0.38) * scale;    // 尾端半宽（加粗）
+    const wShaft = Math.max(1.2, s.width * 0.55) * scale;   // 杆身到凹口顶点时的半宽
+    const wBarb = Math.max(1.8, s.width * 0.72) * scale;    // 倒刺（头部最宽处）半宽
+    const ux = dx / len, uy = dy / len;                     // 沿轴单位向量
     const nx = Math.cos(angle + Math.PI / 2), ny = Math.sin(angle + Math.PI / 2);
+    const bx = X2 - ux * hl, by = Y2 - uy * hl;                   // 头部底边（倒刺尖）
+    const kx = X2 - ux * (hl - nd), ky = Y2 - uy * (hl - nd);     // 凹口顶点
+    const P = (px: number, py: number, off: number) => ctx.lineTo(px + nx * off, py + ny * off);
     ctx.beginPath();
-    ctx.moveTo(X1, Y1);
-    ctx.lineTo(X2 - nx * wTail, Y2 - ny * wTail);
-    ctx.lineTo(X2 - nx * wHead, Y2 - ny * wHead);
-    ctx.lineTo(X2 + (dx / len) * wHead * 1.15, Y2 + (dy / len) * wHead * 1.15); // 尖端略延
-    ctx.lineTo(X2 + nx * wHead, Y2 + ny * wHead);
-    ctx.lineTo(X2 + nx * wTail, Y2 + ny * wTail);
+    ctx.moveTo(X1 - nx * wTail, Y1 - ny * wTail);   // 尾端上缘（平尾，非尖点）
+    P(kx, ky, -wShaft);                             // 杆身上缘 → 凹口顶点
+    P(bx, by, -wBarb);                              // 上倒刺尖
+    ctx.lineTo(X2, Y2);                             // 尖端
+    P(bx, by, wBarb);                               // 下倒刺尖
+    P(kx, ky, wShaft);                              // 凹口顶点 → 杆身下缘
+    P(X1, Y1, wTail);                               // 尾端下缘
     ctx.closePath();
     ctx.fillStyle = ctx.strokeStyle as string;
     ctx.fill();
