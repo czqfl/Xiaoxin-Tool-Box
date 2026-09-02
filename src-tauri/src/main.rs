@@ -4,59 +4,11 @@
 // 使工具箱与可能以管理员运行的程序（如 WorkBuddy）同级，解除 UIPI 对跨权限
 // 截图/取词/置前等操作的拦截。已提权 / 用户取消 UAC → 本进程正常继续。
 //
-// dev 豁免：由 tauri dev / cargo run 拉起的开发进程（父进程链含 cargo.exe 或
-// tauri.exe）跳过自动提权——否则 runas 提权重启后原进程 exit(0)，tauri dev
-// 会误判应用退出而中断热更新工作流。开发时如需提权能力（如 WorkBuddy 内
-// 快捷键验证），请用管理员终端跑 dev；直接双击 / 自启的 exe 照常自动提权。
-#[cfg(windows)]
-fn is_dev_spawn() -> bool {
-    use std::collections::HashMap;
-    use windows::Win32::Foundation::CloseHandle;
-    use windows::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
-        TH32CS_SNAPPROCESS,
-    };
-    use windows::Win32::System::Threading::GetCurrentProcessId;
-
-    unsafe {
-        let snap = match CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) {
-            Ok(h) => h,
-            Err(_) => return false,
-        };
-        // 第一遍收集：pid -> (parent_pid, exe 名小写)
-        let mut map: HashMap<u32, (u32, String)> = HashMap::new();
-        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
-        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
-        let mut has = Process32FirstW(snap, &mut entry).is_ok();
-        while has {
-            let n = entry
-                .szExeFile
-                .iter()
-                .position(|&c| c == 0)
-                .unwrap_or(entry.szExeFile.len());
-            let name = String::from_utf16_lossy(&entry.szExeFile[..n]).to_lowercase();
-            map.insert(entry.th32ProcessID, (entry.th32ParentProcessID, name));
-            has = Process32NextW(snap, &mut entry).is_ok();
-        }
-        let _ = CloseHandle(snap);
-
-        // 沿父链上溯（最多 6 层），命中 cargo/tauri 即视为 dev 拉起
-        let mut cur = GetCurrentProcessId();
-        for _ in 0..6 {
-            match map.get(&cur) {
-                Some((ppid, name)) => {
-                    if name == "cargo.exe" || name == "tauri.exe" {
-                        return true;
-                    }
-                    cur = *ppid;
-                }
-                None => break,
-            }
-        }
-        false
-    }
-}
-
+// 提权策略：无论 dev（tauri dev/cargo run 拉起）还是正式运行（双击/自启），
+// 只要非管理员一律自动提权——WorkBuddy 以管理员运行，工具箱必须同级才能
+// 在 WorkBuddy 内执行截图/取词/快捷键。代价：普通终端跑 tauri dev 会弹 UAC，
+// 选「是」后原 dev 进程退出（tauri dev 会停止），提权实例独立运行；
+// 要 dev 热更新 + 提权并存，请用管理员终端启动 tauri dev（已提权则直行）。
 #[cfg(windows)]
 fn elevate_if_needed() {
     use std::os::windows::ffi::OsStrExt;
@@ -99,11 +51,7 @@ fn elevate_if_needed() {
     if elevated {
         return;
     }
-    // dev 豁免：tauri dev / cargo run 拉起的开发进程不提权，保 dev 热更新不断链
-    if is_dev_spawn() {
-        return;
-    }
-    // 普通权限（非 dev 拉起）：runas 提权重启自身，本进程退出（释放单实例，避免与提权实例并存）
+    // 普通权限：runas 提权重启自身，本进程退出（释放单实例，避免与提权实例并存）
     let Ok(exe) = std::env::current_exe() else { return };
     let dir = exe
         .parent()
