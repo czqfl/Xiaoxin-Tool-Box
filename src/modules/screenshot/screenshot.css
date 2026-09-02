@@ -273,17 +273,17 @@ html[data-theme="dark"] {
   padding: 2px !important;
   display: inline-flex !important; align-items: center !important; justify-content: center !important;
 }
-/* 粗细圆点的四角取景框：与 OCR 图标同款边框语言（SVG 复用其四角路径）。
-   框随圆贴合生长（公式在组件内）：圆大到快碰臂尖时框同心外扩、与圆边保持
-   ~0.8px 恒定细缝，圆+框像一体生长；过渡参数与圆点严格一致（80ms ease），
-   滚轮调节时二者同步滑动。left/top 50% + translate 居中而非 inset:0+
-   margin:auto——max sw 时框（33.5px）大于 30px 按钮需对称外溢，
-   margin:auto 在溢出布局下会退化为非居中 */
+/* 粗细圆点的四角取景框：与 OCR 图标同款边框语言（四角臂路径由组件内 SWI
+   几何生成）。sw≥11 后四条臂逐点【弯曲】成 90° 弧段、沿圆周游走贴合圆点，
+   sw=24 时四弧拼成整圆落边——描边与圆点同色（currentColor），融为一体。
+   svg 固定 30×30，形变全在 path 的 d 上；d 过渡与圆点 width/height 过渡
+   严格同参（80ms ease），滚轮调节时臂弯与圆点同步滑动。left/top 50% +
+   translate 居中（svg 比按钮 content box 大 4px，不能走常规流式布局） */
 .shot-sw-wheel-frame {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
   pointer-events: none;
-  transition: width 80ms ease, height 80ms ease;
 }
+.shot-sw-wheel-frame path { transition: d 80ms ease; }
 .shot-sw-wheel span {
   display: block; border-radius: 50%; background: var(--tb-fg);
   box-shadow: 0 0 0 1.5px var(--tb-bg);

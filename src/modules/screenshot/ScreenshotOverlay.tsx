@@ -1,5 +1,5 @@
 /** Fullscreen screenshot overlay: frozen screen + selection + magnifier + toolbar */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
@@ -184,6 +184,59 @@ const btnTip = (b: { items: [Tool, () => JSX.Element, string, string][]; hotkey:
 const ANNO_DEFAULT_COLORS = ["#e5484d","#ff8d1a","#ffd60a","#36b37e","#4c8dff","#b06fd6","#ffffff","#000000"];
 /** 自定义色上限：色板总长 = 内置 8 色 + 最多 6 个自定义（防色条无限变长） */
 const ANNO_MAX_CUSTOM = 6;
+
+// ---- 粗细图标「四角框弯曲贴合圆」几何（统一 30×30 视箱 1:1 像素，中心 (15,15)） ----
+// 基态四角框 = 旧 24 视箱框 × 22/24 等比缩放居中（小粗细时外观与旧版完全一致）；
+// 终态 = 每角一段 90° 圆弧（四段拼成整圆），弧落在圆点边缘——描边与圆点同为
+// currentColor，落边即融为一体、只剩余一个圆。
+// 两态都用 M+3C 同构路径表达（直线臂 = 退化三次曲线），逐点插值即为「弯曲」：
+// 臂尖沿圆周游走、直臂渐弯成弧，配合 CSS d 过渡实现滚轮连续调节的顺滑动画。
+const SWI = (() => {
+  // 顺时针旋转 90°（y-down 屏幕坐标）：(x,y) -> (30-y, x)，绕中心 (15,15)
+  const rot = (p: [number, number]): [number, number] => [30 - p[1], p[0]];
+  // NW 角框 10 点：M + 竖臂(退化C) + 圆角(C) + 横臂(退化C)
+  const BR: [number, number][] = [
+    [6.75, 11.333333], [6.75, 10.569444], [6.75, 9.805556], [6.75, 9.041667],
+    [6.75, 7.776014], [7.776014, 6.75], [9.041667, 6.75],
+    [9.805556, 6.75], [10.569444, 6.75], [11.333333, 6.75],
+  ];
+  const K30 = 0.175537; // (4/3)·tan(7.5°)：30° 圆弧的三次贝塞尔逼近系数
+  // NW 终态弧：西点 → 北点（跨 90°，三段 30°），10 点与角框逐点对应
+  const arc = (R: number): [number, number][] => {
+    const k = K30 * R;
+    const P = (f: number): [number, number] => [15 - R * Math.cos(f), 15 - R * Math.sin(f)];
+    const T = (f: number): [number, number] => [Math.sin(f), -Math.cos(f)];
+    const p0 = P(0), p1 = P(Math.PI / 6), p2 = P(Math.PI / 3), p3 = P(Math.PI / 2);
+    const t0 = T(0), t1 = T(Math.PI / 6), t2 = T(Math.PI / 3), t3 = T(Math.PI / 2);
+    const off = (p: [number, number], t: [number, number], d: number): [number, number] =>
+      [p[0] + t[0] * k * d, p[1] + t[1] * k * d];
+    return [
+      p0, off(p0, t0, 1), off(p1, t1, -1), p1,
+      off(p1, t1, 1), off(p2, t2, -1), p2,
+      off(p2, t2, 1), off(p3, t3, -1), p3,
+    ];
+  };
+  const rotN = (pts: [number, number][], q: number): [number, number][] => {
+    let out = pts;
+    for (let i = 0; i < q; i++) out = out.map(rot);
+    return out;
+  };
+  const fmt = (n: number): string => String(Math.round(n * 100) / 100);
+  /** 第 q 个角（0..3 顺时针）的 path；m=贴合进度 0..1，R=贴合弧半径 */
+  const path = (q: number, m: number, R: number): string => {
+    const b = rotN(BR, q), a = rotN(arc(R), q);
+    const pts = b.map((pt, i) =>
+      [pt[0] + (a[i][0] - pt[0]) * m, pt[1] + (a[i][1] - pt[1]) * m] as [number, number]);
+    let d = `M ${fmt(pts[0][0])} ${fmt(pts[0][1])}`;
+    for (let i = 0; i < 3; i++) {
+      d += ` C ${fmt(pts[1 + 3 * i][0])} ${fmt(pts[1 + 3 * i][1])},` +
+        ` ${fmt(pts[2 + 3 * i][0])} ${fmt(pts[2 + 3 * i][1])},` +
+        ` ${fmt(pts[3 + 3 * i][0])} ${fmt(pts[3 + 3 * i][1])}`;
+    }
+    return d;
+  };
+  return { path };
+})();
 
 // ---- 马赛克整图层缓存（模块级：drawShape 是模块函数，无组件状态） ----
 // key = 底图画布（WeakMap 自动随画布回收）；帧内容变化时 bump mosaicFrameStamp
@@ -2739,12 +2792,14 @@ export function ScreenshotOverlay() {
         // 所有工具统一：二次选项一律挂在【一级图标正下方】，不再单独
         // 在主条下方拼接配置面板（旧版单工具与形状/线组行为不一致）
         const menuOpen = submenuOpen !== null;
-        // 粗细图标：圆径沿用 4+1.2sw（封顶 26）；四角框【随圆贴合生长】——
-        // viewBox 24 中臂尖位于半幅的 0.821（9.85/12），frame=(D+1.5)/0.821
-        // 使臂尖与圆边保持 ~0.8px 恒定细缝：圆从快碰到框（sw≈12）起框开始
-        // 同步外扩，视觉上框抱圆、融为一体；基态仍 22px 不变
+        // 粗细图标：圆点照旧（4+1.2sw 封顶 26）。sw≥11 进入「弯曲贴合」段：
+        // 四角框从角框形状逐点弯成 90° 弧段（每角一段），弧半径追踪圆边并渐收
+        // 细缝（gap=1.5·(1-p)）；sw=24 时四弧拼成整圆、落边与圆点同色融为一体。
+        // 形状 d 交给 CSS 过渡（80ms，与圆点 width/height 同参），滚轮连续
+        // 调节时臂弯顺滑游走，无跳变
         const swDot = Math.min(4 + sw * 1.2, 26);
-        const swFrame = Math.max(22, Math.min((swDot + 1.5) * 1.22, 34));
+        const swMorph = Math.min(1, Math.max(0, (sw - 11) / 13));
+        const swArcR = swDot / 2 + 1.5 * (1 - swMorph);
         // 主条 barH≈40px，二次选项面板 panelH≈52px。条的位置【只按条本身】能否
         // 放下决定——开合二级选项时条不跳动；面板方向独立判定：条下方有空间就
         // 向下展开，没有就翻到条上方（向上扩展）
@@ -2867,11 +2922,10 @@ export function ScreenshotOverlay() {
                   swBadgeTimer.current = window.setTimeout(() => setSwBadge(null), 800);
                 }}>
                 <span style={{ width: swDot, height: swDot }} />
-                  <svg className="shot-sw-wheel-frame" width={swFrame} height={swFrame} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M3 8V5.5A2.5 2.5 0 0 1 5.5 3H8" />
-                    <path d="M16 3h2.5A2.5 2.5 0 0 1 21 5.5V8" />
-                    <path d="M21 16v2.5A2.5 2.5 0 0 1 18.5 21H16" />
-                    <path d="M8 21H5.5A2.5 2.5 0 0 1 3 18.5V16" />
+                  <svg className="shot-sw-wheel-frame" width="30" height="30" viewBox="0 0 30 30" fill="none" stroke="currentColor" strokeWidth={1.8333} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    {[0, 1, 2, 3].map((q) => (
+                      <path key={q} style={{ d: `path("${SWI.path(q, swMorph, swArcR)}")` } as CSSProperties} />
+                    ))}
                   </svg>
               </button>
               <div className="shot-toolbar-sep" />
