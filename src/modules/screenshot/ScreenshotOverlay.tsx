@@ -23,55 +23,65 @@ import "./screenshot.css";
 type Tool = "select"|"rect"|"ellipse"|"arrow"|"line"|"brush"|"mosaic"|"text"|"number";
 type Phase = "idle"|"selected";
 // ---- 工具光标：canvas 现绘 PNG（Chromium/WebView2 不支持 SVG cursor，只认
-// PNG/CUR/ICO，故运行时画进 canvas 再 toDataURL）。24×24 逻辑像素、hotspot
-// 中心 (12,12)；黑粗底 + 白细芯双层描边，浅色/深色截图内容上都清晰可辨。
+// PNG/CUR/ICO，故运行时画进 canvas 再 toDataURL）。32×32 对齐系统光标尺寸、
+// hotspot 中心 (16,16)；黑粗底 + 白细芯双层描边，浅色/深色截图内容上都清晰。
 // 绘制类 = 十字瞄准线 + 中心徽标（各工具图形语义），文字 = I 形，选择 = 系统箭头
 function cursorCanvas(draw: (g: CanvasRenderingContext2D) => void): string {
   const c = document.createElement("canvas");
-  c.width = 24; c.height = 24;
+  c.width = 32; c.height = 32;
   const g = c.getContext("2d");
   if (!g) return "auto";
   draw(g);
-  return `url("${c.toDataURL("image/png")}") 12 12, auto`;
+  return `url("${c.toDataURL("image/png")}") 16 16, auto`;
 }
-/** 双重描边：黑粗底（2.4px）+ 白细芯（1.05px） */
-function strokeTwice(draw: (lw: number, style: string) => void): void {
-  draw(2.4, "rgba(0,0,0,0.85)");
-  draw(1.05, "#fff");
+/** 双重描边：黑粗底 + 白细芯（主线 3.6/1.7，徽标 3.0/1.4 略细更精致） */
+function strokeTwice(draw: (lw: number, style: string) => void, dark = 3.6, light = 1.7): void {
+  draw(dark, "rgba(0,0,0,0.9)");
+  draw(light, "#fff");
 }
-/** 十字瞄准线（黑底白芯双层） */
+/** 十字瞄准线（黑底白芯双层，32 视箱中心交叉、留 4px 边距） */
 function drawCross(g: CanvasRenderingContext2D): void {
   strokeTwice((lw, s) => {
     g.strokeStyle = s; g.lineWidth = lw; g.lineCap = "round";
-    g.beginPath(); g.moveTo(12, 3.2); g.lineTo(12, 20.8); g.moveTo(3.2, 12); g.lineTo(20.8, 12); g.stroke();
+    g.beginPath(); g.moveTo(16, 4); g.lineTo(16, 28); g.moveTo(4, 16); g.lineTo(28, 16); g.stroke();
   });
+}
+/** 圆角矩形路径（strokeRect 无圆角，徽标用 arcTo 手工画更精致） */
+function roundedRectPath(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.arcTo(x + w, y, x + w, y + h, r);
+  g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r);
+  g.arcTo(x, y, x + w, y, r);
+  g.closePath();
 }
 /** 十字 + 描边徽标（rect/ellipse/arrow/line/mosaic/number 共用骨架） */
 function crossCursor(badge: (g: CanvasRenderingContext2D, lw: number, style: string) => void): string {
-  return cursorCanvas((g) => { drawCross(g); strokeTwice((lw, s) => badge(g, lw, s)); });
+  return cursorCanvas((g) => { drawCross(g); strokeTwice((lw, s) => badge(g, lw, s), 3.0, 1.4); });
 }
 /** 工具 → 光标映射：select 系统箭头；绘制类十字 + 徽标；text 为 I 形 */
 const TOOL_CURSOR: Record<Tool, string> = {
   select: "default",
-  rect: crossCursor((g, lw, s) => { g.strokeStyle = s; g.lineWidth = lw; g.strokeRect(8.8, 8.8, 6.4, 6.4); }),
-  ellipse: crossCursor((g, lw, s) => { g.strokeStyle = s; g.lineWidth = lw; g.beginPath(); g.ellipse(12, 12, 6.2, 4.3, 0, 0, Math.PI * 2); g.stroke(); }),
-  arrow: crossCursor((g, lw, s) => { g.strokeStyle = s; g.lineWidth = lw; g.lineJoin = "round"; g.lineCap = "round"; g.beginPath(); g.moveTo(7.8, 16.2); g.lineTo(16.2, 7.8); g.lineTo(10.9, 7.8); g.moveTo(16.2, 7.8); g.lineTo(16.2, 13.1); g.stroke(); }),
-  line: crossCursor((g, lw, s) => { g.strokeStyle = s; g.lineWidth = lw; g.lineCap = "round"; g.beginPath(); g.moveTo(7, 17); g.lineTo(17, 7); g.stroke(); }),
+  rect: crossCursor((g, lw, s) => { g.strokeStyle = s; g.lineWidth = lw; roundedRectPath(g, 11, 11, 10, 10, 2.4); g.stroke(); }),
+  ellipse: crossCursor((g, lw, s) => { g.strokeStyle = s; g.lineWidth = lw; g.beginPath(); g.ellipse(16, 16, 8.6, 6, 0, 0, Math.PI * 2); g.stroke(); }),
+  arrow: crossCursor((g, lw, s) => { g.strokeStyle = s; g.lineWidth = lw; g.lineJoin = "round"; g.lineCap = "round"; g.beginPath(); g.moveTo(10.2, 21.8); g.lineTo(21.8, 10.2); g.lineTo(14.6, 10.2); g.moveTo(21.8, 10.2); g.lineTo(21.8, 17.4); g.stroke(); }),
+  line: crossCursor((g, lw, s) => { g.strokeStyle = s; g.lineWidth = lw; g.lineCap = "round"; g.beginPath(); g.moveTo(9.2, 22.8); g.lineTo(22.8, 9.2); g.stroke(); }),
   brush: cursorCanvas((g) => {
     drawCross(g);
-    g.fillStyle = "rgba(0,0,0,0.85)"; g.beginPath(); g.arc(12, 12, 4.2, 0, Math.PI * 2); g.fill();
-    g.fillStyle = "#fff"; g.beginPath(); g.arc(12, 12, 2.2, 0, Math.PI * 2); g.fill();
+    g.fillStyle = "rgba(0,0,0,0.9)"; g.beginPath(); g.arc(16, 16, 6, 0, Math.PI * 2); g.fill();
+    g.fillStyle = "#fff"; g.beginPath(); g.arc(16, 16, 3.2, 0, Math.PI * 2); g.fill();
   }),
-  mosaic: crossCursor((g, lw, s) => { g.strokeStyle = s; g.lineWidth = lw; g.strokeRect(8.8, 8.8, 6.4, 6.4); g.beginPath(); g.moveTo(12, 8.8); g.lineTo(12, 15.2); g.moveTo(8.8, 12); g.lineTo(15.2, 12); g.stroke(); }),
+  mosaic: crossCursor((g, lw, s) => { g.strokeStyle = s; g.lineWidth = lw; roundedRectPath(g, 11, 11, 10, 10, 2.4); g.stroke(); g.beginPath(); g.moveTo(16, 11); g.lineTo(16, 21); g.moveTo(11, 16); g.lineTo(21, 16); g.stroke(); }),
   text: cursorCanvas((g) => {
     strokeTwice((lw, s) => {
       g.strokeStyle = s; g.lineWidth = lw; g.lineCap = "round";
-      g.beginPath(); g.moveTo(12, 3.4); g.lineTo(12, 20.6);
-      g.moveTo(8.2, 3.4); g.lineTo(15.8, 3.4);
-      g.moveTo(8.2, 20.6); g.lineTo(15.8, 20.6); g.stroke();
+      g.beginPath(); g.moveTo(16, 4.5); g.lineTo(16, 27.5);
+      g.moveTo(10.8, 4.5); g.lineTo(21.2, 4.5);
+      g.moveTo(10.8, 27.5); g.lineTo(21.2, 27.5); g.stroke();
     });
   }),
-  number: crossCursor((g, lw, s) => { g.strokeStyle = s; g.lineWidth = lw; g.beginPath(); g.arc(12, 12, 4.3, 0, Math.PI * 2); g.stroke(); }),
+  number: crossCursor((g, lw, s) => { g.strokeStyle = s; g.lineWidth = lw; g.beginPath(); g.arc(16, 16, 5.8, 0, Math.PI * 2); g.stroke(); }),
 };
 interface Pt { x: number; y: number; }
 interface Rect { x: number; y: number; w: number; h: number; }
