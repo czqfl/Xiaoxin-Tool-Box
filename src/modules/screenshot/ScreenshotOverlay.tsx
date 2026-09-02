@@ -22,12 +22,56 @@ import "./screenshot.css";
 
 type Tool = "select"|"rect"|"ellipse"|"arrow"|"line"|"brush"|"mosaic"|"text"|"number";
 type Phase = "idle"|"selected";
-/** 标注工具对应的鼠标光标：绘制/框选 = 十字，文字 = 文本 I 形，
- *  选择/移动 = 默认箭头（选区内/手柄由 handlers 层实时覆盖为 move/pointer） */
+// ---- 工具光标：canvas 现绘 PNG（Chromium/WebView2 不支持 SVG cursor，只认
+// PNG/CUR/ICO，故运行时画进 canvas 再 toDataURL）。24×24 逻辑像素、hotspot
+// 中心 (12,12)；黑粗底 + 白细芯双层描边，浅色/深色截图内容上都清晰可辨。
+// 绘制类 = 十字瞄准线 + 中心徽标（各工具图形语义），文字 = I 形，选择 = 系统箭头
+function cursorCanvas(draw: (g: CanvasRenderingContext2D) => void): string {
+  const c = document.createElement("canvas");
+  c.width = 24; c.height = 24;
+  const g = c.getContext("2d");
+  if (!g) return "auto";
+  draw(g);
+  return `url("${c.toDataURL("image/png")}") 12 12, auto`;
+}
+/** 双重描边：黑粗底（2.4px）+ 白细芯（1.05px） */
+function strokeTwice(draw: (lw: number, style: string) => void): void {
+  draw(2.4, "rgba(0,0,0,0.85)");
+  draw(1.05, "#fff");
+}
+/** 十字瞄准线（黑底白芯双层） */
+function drawCross(g: CanvasRenderingContext2D): void {
+  strokeTwice((lw, s) => {
+    g.strokeStyle = s; g.lineWidth = lw; g.lineCap = "round";
+    g.beginPath(); g.moveTo(12, 3.2); g.lineTo(12, 20.8); g.moveTo(3.2, 12); g.lineTo(20.8, 12); g.stroke();
+  });
+}
+/** 十字 + 描边徽标（rect/ellipse/arrow/line/mosaic/number 共用骨架） */
+function crossCursor(badge: (g: CanvasRenderingContext2D, lw: number, style: string) => void): string {
+  return cursorCanvas((g) => { drawCross(g); strokeTwice((lw, s) => badge(g, lw, s)); });
+}
+/** 工具 → 光标映射：select 系统箭头；绘制类十字 + 徽标；text 为 I 形 */
 const TOOL_CURSOR: Record<Tool, string> = {
-  select: "default", rect: "crosshair", ellipse: "crosshair",
-  arrow: "crosshair", line: "crosshair", brush: "crosshair",
-  mosaic: "crosshair", text: "text", number: "crosshair",
+  select: "default",
+  rect: crossCursor((g, lw, s) => { g.strokeStyle = s; g.lineWidth = lw; g.strokeRect(8.8, 8.8, 6.4, 6.4); }),
+  ellipse: crossCursor((g, lw, s) => { g.strokeStyle = s; g.lineWidth = lw; g.beginPath(); g.ellipse(12, 12, 6.2, 4.3, 0, 0, Math.PI * 2); g.stroke(); }),
+  arrow: crossCursor((g, lw, s) => { g.strokeStyle = s; g.lineWidth = lw; g.lineJoin = "round"; g.lineCap = "round"; g.beginPath(); g.moveTo(7.8, 16.2); g.lineTo(16.2, 7.8); g.lineTo(10.9, 7.8); g.moveTo(16.2, 7.8); g.lineTo(16.2, 13.1); g.stroke(); }),
+  line: crossCursor((g, lw, s) => { g.strokeStyle = s; g.lineWidth = lw; g.lineCap = "round"; g.beginPath(); g.moveTo(7, 17); g.lineTo(17, 7); g.stroke(); }),
+  brush: cursorCanvas((g) => {
+    drawCross(g);
+    g.fillStyle = "rgba(0,0,0,0.85)"; g.beginPath(); g.arc(12, 12, 4.2, 0, Math.PI * 2); g.fill();
+    g.fillStyle = "#fff"; g.beginPath(); g.arc(12, 12, 2.2, 0, Math.PI * 2); g.fill();
+  }),
+  mosaic: crossCursor((g, lw, s) => { g.strokeStyle = s; g.lineWidth = lw; g.strokeRect(8.8, 8.8, 6.4, 6.4); g.beginPath(); g.moveTo(12, 8.8); g.lineTo(12, 15.2); g.moveTo(8.8, 12); g.lineTo(15.2, 12); g.stroke(); }),
+  text: cursorCanvas((g) => {
+    strokeTwice((lw, s) => {
+      g.strokeStyle = s; g.lineWidth = lw; g.lineCap = "round";
+      g.beginPath(); g.moveTo(12, 3.4); g.lineTo(12, 20.6);
+      g.moveTo(8.2, 3.4); g.lineTo(15.8, 3.4);
+      g.moveTo(8.2, 20.6); g.lineTo(15.8, 20.6); g.stroke();
+    });
+  }),
+  number: crossCursor((g, lw, s) => { g.strokeStyle = s; g.lineWidth = lw; g.beginPath(); g.arc(12, 12, 4.3, 0, Math.PI * 2); g.stroke(); }),
 };
 interface Pt { x: number; y: number; }
 interface Rect { x: number; y: number; w: number; h: number; }
@@ -2764,10 +2808,10 @@ export function ScreenshotOverlay() {
         // 所有工具统一：二次选项一律挂在【一级图标正下方】，不再单独
         // 在主条下方拼接配置面板（旧版单工具与形状/线组行为不一致）
         const menuOpen = submenuOpen !== null;
-        // 粗细图标：圆点直径随粗细线性增长、封顶在四角框内。22px 渲染框的
-        // 中心安全区直径 = 2×(22×8/24) ≈ 14.67px（角臂内侧到中心 8/24 视箱格），
-        // 封顶取 14 留余量——圆恒在框内、不触角臂（删除动画后的简单对应）
-        const swDot = Math.min(4 + sw * 0.6, 14);
+        // 粗细图标：圆点直径与画笔粗细【全程线性】对应——sw=1 → 4px，
+        // sw=24 → 恰 14px（22px 框中心安全区 2×(22×8/24)≈14.67px，封顶取
+        // 14 留余量）。无封顶段：滚轮调到最大时圆也刚好到最大、不超框
+        const swDot = 4 + (sw - 1) * (10 / 23);
         // 主条 barH≈40px，二次选项面板 panelH≈52px。条的位置【只按条本身】能否
         // 放下决定——开合二级选项时条不跳动；面板方向独立判定：条下方有空间就
         // 向下展开，没有就翻到条上方（向上扩展）
