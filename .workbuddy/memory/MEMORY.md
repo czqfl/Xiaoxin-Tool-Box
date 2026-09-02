@@ -74,3 +74,11 @@ new WebviewWindow 三次证明不可靠（白屏/关不掉/无内容）。铁律
 - 呼出自动聚焦原文框（2ff9664）：focusSourceInput 聚焦并把光标置文本末尾；
   scheduleSourceFocus 双时序 60/240ms（240ms 抵消 activate_popup 后台 120ms 补焦的
   焦点重置）；无选中路径 Rust 补发轻量 translate://shown（不带内容、不清空既有内容）。
+## UIPI 自提权铁律（2026-09-02，e69da69/0bd7c3b 定型）
+- WorkBuddy 以管理员运行（High IL 12288），工具箱必须同级：main.rs 入口检测非管理员
+  一律 runas 自动提权（--elevated 防递归、XIAOXIN_NO_ELEVATE=1 逃生口）；普通权限
+  工具箱在 WorkBuddy 内截图/取词/快捷键被 UIPI 拦截——F1 失效即此根因。
+- 禁止再引入「dev 豁免」跳过提权（4f924a0 教训已回滚）：dev 不提权 → WorkBuddy 内
+  仍失效，主人明确 dev 也自动提权（WorkBuddy 可用 > dev 终端不断链）。
+- 使用矩阵：普通终端 tauri dev 弹 UAC 选「是」→ 原 dev 退出、提权实例独立运行；
+  要 dev 热更新 + 提权并存 = 管理员终端跑 tauri dev（已提权直行）；双击/自启 exe 照常提权。
