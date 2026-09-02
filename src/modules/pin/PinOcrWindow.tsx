@@ -101,7 +101,12 @@ export default function PinOcrWindow() {
   // 再直接销毁本窗自身——绝不能依赖来源贴图来关自己(来源已销毁→孤儿窗，手动关失效)
   const selfClose = () => {
     emit("close");
+    // 立即销毁；若与来源贴图 hide 等异步操作竞争导致首次 destroy 被吞，
+    // 延迟再强制销毁一次兜底（主人实测过"点 ✕ 不生效"的异常交互态）
     void getCurrentWindow().destroy().catch(() => {});
+    window.setTimeout(() => {
+      void getCurrentWindow().destroy().catch(() => {});
+    }, 300);
   };
 
   // 数据/几何变化 → 量尺寸、按"选侧规则"贴边定位、显示。
@@ -191,14 +196,16 @@ export default function PinOcrWindow() {
   }, [data?.pin]);
 
   // 安全网：若来源贴图窗已被销毁(任意关闭途径)，本弹窗应在极短时间内自我销毁，
-  // 避免残留孤儿窗——且孤儿窗的手动关会失效(其关闭事件发往已销毁的来源贴图)
+  // 避免残留孤儿窗——且孤儿窗的手动关会失效(其关闭事件发往已销毁的来源贴图)。
+  // 【注意】staging 待命贴图窗销毁后会立即补建同 label 的新窗，getByLabel 非空会
+  // 骗过本安全网——那类场景由 Rust 侧 drop_ocr_window 在贴图窗 Destroyed 时兜底
   useEffect(() => {
     if (!data?.pin) return;
     const t = window.setInterval(() => {
       void WebviewWindow.getByLabel(data.pin).then((src) => {
         if (!src) void getCurrentWindow().destroy().catch(() => {});
       }).catch(() => {});
-    }, 300);
+    }, 200);
     return () => window.clearInterval(t);
   }, [data?.pin]);
 

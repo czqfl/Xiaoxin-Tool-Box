@@ -526,6 +526,10 @@ pub fn pin_update(app: AppHandle, id: String, x: i32, y: i32, width: u32, height
 #[tauri::command]
 pub fn pin_close(app: AppHandle, id: String) -> Result<(), String> {
     crate::storage::diag_write(&format!("[pin] close {id}"));
+    // 贴图被关闭 = 其 OCR 弹窗一并销毁（pin-ocr 是独立窗，不随来源贴图自动关）。
+    // 见 drop_ocr_window 注释：前端 getByLabel 存在性安全网会被 staging 补建的新窗骗过，
+    // 这里必须在 Rust 侧同步销毁，杜绝跨贴图残留孤儿弹窗。
+    drop_ocr_window(&app);
     if let Some(w) = window_of_pin(&app, &id) { let _ = w.close(); }
     let store = app.try_state::<PinStore>().ok_or("no state")?;
     store.0.lock().unwrap().retain(|p| p.id != id);
@@ -536,6 +540,21 @@ pub fn pin_close(app: AppHandle, id: String) -> Result<(), String> {
     // （"同一段文本只有第一次能贴出来"的根因）
     *LAST_CLIP_SIG.lock().unwrap() = None;
     Ok(())
+}
+
+/// 销毁共享的贴图 OCR 弹窗（label "pin-ocr"，独立 WebView 窗）。
+/// 幂等：弹窗不存在时无操作；销毁中二次调用忽略错误。
+///
+/// 【为什么必须在 Rust 侧销毁】
+/// - pin-ocr 是前端动态创建的独立窗，贴图窗 close/Alt+F4 不会级联关闭它；
+/// - staging 待命窗被销毁后 ensure_staging 会【立即补建同 label 的新窗】，
+///   前端安全网（getByLabel(label) 为空才自毁）会被"新窗非空"骗过，
+///   残留弹窗带着旧贴图的脏 data 跨贴图复用 → 贴图场景 OCR 弹窗各种异常。
+/// 贴图窗真销毁的统一出口（lib.rs WindowEvent::Destroyed）也会调用本函数兜底。
+pub(crate) fn drop_ocr_window<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(w) = app.get_webview_window("pin-ocr") {
+        let _ = w.destroy();
+    }
 }
 
 pub(crate) fn hide_all_impl<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {

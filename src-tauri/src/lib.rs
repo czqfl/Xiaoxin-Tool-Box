@@ -648,6 +648,7 @@ pub fn run() {
                     // id 找不到窗口与存储条目）——从存储一并清除。正常
                     // pin_close 路径已先清存储，这里是幂等兜底；若该贴图另有
                     // 兜底窗（watchdog 回退建窗）则保留。
+                    pin::drop_ocr_window(app_handle);
                     let mapped = app_handle
                         .try_state::<pin::PinWinMap>()
                         .and_then(|m| m.0.lock().unwrap().remove(label.as_str()));
@@ -663,8 +664,17 @@ pub fn run() {
                         }
                     }
                     pin::ensure_staging(app_handle);
-                } else if let Some(id) = label.strip_prefix("pin-") {
-                    pin::forget_pin(app_handle, id);
+                } else if label.starts_with(pin::PIN_PREFIX)
+                    && label != "pin-ocr"
+                    && label != "pin-menu"
+                {
+                    // 常规贴图窗（pin-<uuid>）被销毁：同步销毁共享 OCR 弹窗
+                    // （独立窗不随来源贴图自动关；staging 补建新窗会骗过前端
+                    // 存在性安全网，必须在 Rust 侧统一兜底）。
+                    pin::drop_ocr_window(app_handle);
+                    if let Some(id) = label.strip_prefix(pin::PIN_PREFIX) {
+                        pin::forget_pin(app_handle, id);
+                    }
                 }
             }
             // 应用退出前：把所有面板/工具栏的最后位置与尺寸写入配置，
