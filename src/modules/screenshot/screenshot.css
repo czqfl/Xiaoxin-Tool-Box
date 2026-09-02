@@ -288,13 +288,31 @@ html[data-theme="dark"] {
 /* 截图工具栏明暗两态（见上方 --tb-* 令牌）：浅色白底深字 / 深色黑底浅字，
    system 模式靠 prefers-color-scheme 兜底；图标颜色随之翻转保证可读 */
 
-/* 文字标注编辑器 */
-.shot-text-editor { position: fixed; z-index: 300; display: inline-flex; align-items: center; gap: 5px; background: transparent; border: 1.5px solid rgba(255,255,255,0.95); outline: 1px solid rgba(0,0,0,0.35); border-radius: 2px; padding: 3px 6px; transform: translateY(-50%); }
+/* 文字标注编辑器：与主工具栏同族设计语言（实底 + 1px 细描边 + 12px 圆角 +
+   同款投影；截图背景已被冻结，毛玻璃采样不到原生层，高级感靠实底对比度）。
+   【底材随文字亮度、与主题无关】亮字(白/黄)永远深材、暗字永远浅材——
+   色板同时含 #ffffff 与 #000000，若跟随 --tb-bg 主题翻转，暗色主题下黑字
+   必然落在深底上不可读；故两套材质写死、由 .light-text 类切换。
+   【所见即所得契约】input 字体 bold 16px/16px 行盒绝不可改：commitText 量
+   input 的 getBoundingClientRect、canvas 用 baseline="top" 同字体重画；
+   文字色/光标色由内联 style 实时跟随色板。 */
+.shot-text-editor { position: fixed; z-index: 300; display: inline-flex; align-items: center; gap: 6px;
+  background: #f5f5f7; border: 1px solid rgba(0, 0, 0, 0.12); border-radius: 12px;
+  padding: 6px 6px 6px 11px; transform: translateY(-50%); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18); }
+.shot-text-editor.light-text { background: rgb(32, 32, 33); border-color: rgba(255, 255, 255, 0.10);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5); }
 /* line-height 与 font-size 相等：DOM 行盒顶部 == em 盒顶部，与 canvas
-   textBaseline="top" 精确对应；颜色/光标色由内联 style 实时跟随色板 */
-.shot-text-editor input { border: none; outline: none; background: transparent; font: bold 16px/16px sans-serif; min-width: 150px; text-shadow: 0 1px 2px rgba(0,0,0,0.85), 0 0 3px rgba(0,0,0,0.6); }
-.shot-text-editor input::placeholder { color: rgba(255,255,255,0.55); text-shadow: 0 1px 2px rgba(0,0,0,0.8); }
-.shot-text-x { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: none; border-radius: 50%; background: rgba(255,255,255,0.14); color: rgba(255,255,255,0.9); cursor: pointer; flex-shrink: 0; }
+   textBaseline="top" 精确对应（commitText 量 input 的 rect 画进 canvas）——
+   字体/行盒绝不可改 */
+.shot-text-editor input { border: none; outline: none; background: transparent; padding: 0;
+  font: bold 16px/16px sans-serif; min-width: 150px; text-shadow: 0 1px 2px rgba(0,0,0,0.45); }
+.shot-text-editor.light-text input { text-shadow: 0 1px 2px rgba(0,0,0,0.85), 0 0 3px rgba(0,0,0,0.6); }
+.shot-text-editor input::placeholder { color: #2b2f36; opacity: 0.45; text-shadow: none; }
+.shot-text-editor.light-text input::placeholder { color: rgba(255,255,255,0.55); }
+.shot-text-x { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px;
+  padding: 0; border: none; border-radius: 50%; background: rgba(0,0,0,0.07); color: #2b2f36;
+  cursor: pointer; flex-shrink: 0; transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
+.shot-text-editor.light-text .shot-text-x { background: rgba(255,255,255,0.14); color: rgba(255,255,255,0.9); }
 .shot-text-x:hover { background: rgba(255,69,58,0.75); color: #fff; }
 .shot-sw-badge { position: fixed; z-index: 400; display: flex; align-items: center; gap: 7px; background: rgba(20,20,20,0.92); color: #fff; font-size: 13px; line-height: 1; padding: 8px 13px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.14); box-shadow: 0 4px 14px rgba(0,0,0,0.35); pointer-events: none; }
 .shot-sw-badge svg { flex-shrink: 0; color: rgba(255,255,255,0.88); }
