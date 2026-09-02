@@ -184,15 +184,6 @@ const btnTip = (b: { items: [Tool, () => JSX.Element, string, string][]; hotkey:
 const ANNO_DEFAULT_COLORS = ["#e5484d","#ff8d1a","#ffd60a","#36b37e","#4c8dff","#b06fd6","#ffffff","#000000"];
 /** 自定义色上限：色板总长 = 内置 8 色 + 最多 6 个自定义（防色条无限变长） */
 const ANNO_MAX_CUSTOM = 6;
-/** 文字色亮度判断（sRGB 加权相对亮度 > 0.62 视为亮色）：文字编辑器底材随
- *  之反转（亮字配深底、暗字配浅底）——色板同时含 #ffffff 与 #000000，
- *  固定底材必有一种主题下不可读。阈值 0.62 落在黄(#ffd60a→亮)与橙(#ff8d1a→暗)之间 */
-function isLightColor(hex: string): boolean {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
-  if (!m) return false;
-  const n = parseInt(m[1], 16);
-  return (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255 > 0.62;
-}
 
 // ---- 马赛克整图层缓存（模块级：drawShape 是模块函数，无组件状态） ----
 // key = 底图画布（WeakMap 自动随画布回收）；帧内容变化时 bump mosaicFrameStamp
@@ -2654,12 +2645,12 @@ export function ScreenshotOverlay() {
       {textEdit && (() => {
         // textEdit 已是【CSS 像素】（toCanvas 产出），left/top 直接用
         const vw = window.innerWidth, vh = window.innerHeight;
-        // 估宽高只用于边界钳制（编辑器底材胶囊化后实际约 196×32）
-        const estW = 196, estH = 32;
+        // 估宽高只用于边界钳制（编辑器为透明方角框，实际约 195×30）
+        const estW = 195, estH = 30;
         const ex = Math.min(Math.max(textEdit.x, 4), Math.max(4, vw - estW - 4));
         const ey = Math.min(Math.max(textEdit.y, estH / 2 + 4), Math.max(4, vh - estH - 4));
         return (
-          <div className={`shot-text-editor${isLightColor(color) ? " light-text" : ""}`} style={{ left: ex, top: ey }}
+          <div className="shot-text-editor" style={{ left: ex, top: ey }}
             onMouseDown={(ev)=>ev.stopPropagation()} onMouseUp={(ev)=>ev.stopPropagation()}>
             <input ref={textInputRef} value={textEdit.value}
               style={{ color, caretColor: color }}
