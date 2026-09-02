@@ -291,14 +291,25 @@ function drawShape(
     const dx = X2 - X1, dy = Y2 - Y1;
     const len = Math.sqrt(dx * dx + dy * dy);
     if (len < 2 * scale) { ctx.restore(); return; }
+    const w = Math.max(0.5, s.width * scale);
+    // 主线圆头端到 X2；头部为【填充三角】——长度随线宽等比放大（细线保底、
+    // 粗线不缩水），任何粗细下尖端都锐利。旧版头是两条线段：粗线时 butt 端
+    // 与主线方头在 X2 叠成钝块、且头长固定 16px 不随宽度放大 → 尖端消失
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
     ctx.beginPath(); ctx.moveTo(X1, Y1); ctx.lineTo(X2, Y2); ctx.stroke();
     const angle = Math.atan2(dy, dx);
-    const hl = Math.min(16 * scale, len * 0.3);
+    const spread = 0.46; // 半张角 ≈ 26.4°，Snipaste 式锐角
+    const hl = Math.min(Math.max(12 * scale, w * 3.2), len * 0.42);
     ctx.beginPath();
     ctx.moveTo(X2, Y2);
-    ctx.lineTo(X2 - hl * Math.cos(angle - 0.4), Y2 - hl * Math.sin(angle - 0.4));
-    ctx.moveTo(X2, Y2);
-    ctx.lineTo(X2 - hl * Math.cos(angle + 0.4), Y2 - hl * Math.sin(angle + 0.4));
+    ctx.lineTo(X2 - hl * Math.cos(angle - spread), Y2 - hl * Math.sin(angle - spread));
+    ctx.lineTo(X2 - hl * Math.cos(angle + spread), Y2 - hl * Math.sin(angle + spread));
+    ctx.closePath();
+    ctx.fillStyle = s.color;
+    ctx.fill();
+    // 同色细描边消除填充边缘与底色间的抗锯齿细缝
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = 1;
     ctx.stroke();
   } else if (s.kind === "line") {
     ctx.beginPath(); ctx.moveTo(X1, Y1); ctx.lineTo(X2, Y2); ctx.stroke();
@@ -450,6 +461,13 @@ const shapeHit = (a: Anno, pt: Pt, tol: number): boolean => {
   }
   if (a.kind === "arrow" || a.kind === "line") {
     return distSeg(pt, { x: a.x1, y: a.y1 }, { x: a.x2, y: a.y2 }) <= t;
+  }
+  // brush（自由笔画）：命中改用【包围盒】判定——虚线框内即命中。手绘线
+  // 窄而曲折，按笔迹距离判定时点在框内空白处会漏判 → 误当成新笔画落笔
+  // （"有虚线框却拖不动"的根因）；框内命中=移动，想画新笔点框外空白
+  if (a.kind === "brush") {
+    const b = annoBounds(a);
+    return pt.x >= b.x - tol && pt.x <= b.x + b.w + tol && pt.y >= b.y - tol && pt.y <= b.y + b.h + tol;
   }
   const pts = a.points;
   if (!pts || !pts.length) return false;
@@ -922,10 +940,11 @@ export function ScreenshotOverlay() {
     annos.forEach((s) => {
       drawShape(ctx, s, bgRef.current, mosaicCacheRef.current, scale);   // 屏显层
     });
-    // 二次编辑装饰：虚线包围盒 + 白色方形手柄（仅同种绘制工具激活时显示；
-    // OCR 划选期间隐藏，避免与文字选择视觉打架）
+    // 二次编辑装饰：虚线包围盒 + 白色方形手柄（非 select 工具下显示——
+    // 编辑对象与当前工具不必同种：切工具后上一笔仍可调整；OCR 划选期间
+    // 隐藏，避免与文字选择视觉打架）
     const es = editIdx >= 0 ? annos[editIdx] : undefined;
-    if (phase === "selected" && ocrPhase === "idle" && es && es.kind === tool && shapeEditable(es)) {
+    if (phase === "selected" && ocrPhase === "idle" && es && tool !== "select" && shapeEditable(es)) {
       const b = annoBounds(es);
       ctx.save();
       ctx.strokeStyle = "rgba(255,255,255,0.85)";
@@ -2291,10 +2310,10 @@ export function ScreenshotOverlay() {
       return;
     }
     if (phase === "selected" && tool !== "select") {
-      // 二次编辑拦截：同种工具下先查正在编辑的图形——命中手柄=缩放、
-      // 命中本体=移动；否则本次落笔就是新绘制，上一个图形失去编辑权
+      // 二次编辑拦截：命中「正在编辑的图形」手柄=缩放、本体=移动——不与
+      // 当前工具绑定（切工具后上一笔仍能调整）；未命中才落笔新绘制
       const cur = editIdx >= 0 ? annos[editIdx] : undefined;
-      if (cur && cur.kind === tool && shapeEditable(cur)) {
+      if (cur && shapeEditable(cur)) {
         const hi = hitShapeHandle(cur, pt, HANDLE_HIT);
         if (hi >= 0) { startShapeResize(editIdx, hi); return; }
         if (shapeHit(cur, pt, HANDLE_HIT)) { startShapeMove(editIdx, pt); return; }
