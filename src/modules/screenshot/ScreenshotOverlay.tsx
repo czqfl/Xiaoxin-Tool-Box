@@ -292,18 +292,25 @@ function drawShape(
     const len = Math.sqrt(dx * dx + dy * dy);
     if (len < 2 * scale) { ctx.restore(); return; }
     const w = Math.max(0.5, s.width * scale);
-    // 主线圆头端到 X2；头部为【填充三角】——长度随线宽等比放大（细线保底、
-    // 粗线不缩水），任何粗细下尖端都锐利。旧版头是两条线段：粗线时 butt 端
-    // 与主线方头在 X2 叠成钝块、且头长固定 16px 不随宽度放大 → 尖端消失
+    // 头部 = 实心【平底等腰三角】：尖在 X2、基座在 X2 后 hl、半宽 bw。
+    // 上一版主线仍直画到 X2：lineCap round 的圆帽以 X2 为圆心、半径 w/2 向
+    // 前凸出，而三角顶点也在 X2、盖不住尖端前方 → 粗线时圆帽整个顶在尖上、
+    // 两侧还从三角边露出 → 看起来像"线穿透了箭头，箭头变成圆头线头"。
+    // 现在主线【不到尖】：止于 X2 向内 hl*0.6 处，round 圆帽完全缩进头内；
+    // 且基座半宽 bw>=1.1w 恒宽于杆(半宽 w/2)，圆帽两侧也不外露——尖端只
+    // 属于填充三角，任何粗细下都是锐利尖角。
+    const ux = dx / len, uy = dy / len;
+    const hl = Math.min(Math.max(12 * scale, w * 3), len * 0.45);
+    const bw = Math.max(w * 1.1, 4 * scale);
+    const inset = hl * 0.6;
     ctx.lineCap = "round"; ctx.lineJoin = "round";
-    ctx.beginPath(); ctx.moveTo(X1, Y1); ctx.lineTo(X2, Y2); ctx.stroke();
-    const angle = Math.atan2(dy, dx);
-    const spread = 0.46; // 半张角 ≈ 26.4°，Snipaste 式锐角
-    const hl = Math.min(Math.max(12 * scale, w * 3.2), len * 0.42);
+    ctx.beginPath(); ctx.moveTo(X1, Y1);
+    ctx.lineTo(X2 - ux * inset, Y2 - uy * inset);
+    ctx.stroke();
     ctx.beginPath();
     ctx.moveTo(X2, Y2);
-    ctx.lineTo(X2 - hl * Math.cos(angle - spread), Y2 - hl * Math.sin(angle - spread));
-    ctx.lineTo(X2 - hl * Math.cos(angle + spread), Y2 - hl * Math.sin(angle + spread));
+    ctx.lineTo(X2 - ux * hl - uy * bw, Y2 - uy * hl + ux * bw);
+    ctx.lineTo(X2 - ux * hl + uy * bw, Y2 - uy * hl - ux * bw);
     ctx.closePath();
     ctx.fillStyle = s.color;
     ctx.fill();
