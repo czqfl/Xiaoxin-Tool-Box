@@ -52,6 +52,8 @@ features = [
     "Win32_UI_Accessibility",
     "Win32_UI_HiDpi",
     "Win32_System_Threading",
+    # 自提权：父进程链检测（tauri dev / cargo run 拉起的开发进程跳过提权，保 dev 工作流）
+    "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_SystemInformation",
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
