@@ -124,6 +124,29 @@ static PINS_CLOSE_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
 /// 全局命令面板热键（Win/Alt 组合）
 static PALETTE_HOTKEY_VK: AtomicU16 = AtomicU16::new(0);
 static PALETTE_HOTKEY_ALT_VK: AtomicU16 = AtomicU16::new(0);
+
+// ---- 裸功能键热键槽位（无任何修饰键，仅 F1~F12）----
+// 【为什么裸键也必须走钩子】RegisterHotKey 依赖系统生成 WM_HOTKEY，而 Electron /
+// Chromium 系应用（VS Code、WorkBuddy、各类 Electron 客户端）在消息循环内自行消费
+// F 键、不交给 DefWindowProc，WM_HOTKEY 根本不生成——表现为"快捷键在这些应用里
+// 完全没反应，在其他应用里却正常"。低级钩子在事件到达任何应用【之前】接管，
+// 从根上免疫这类吞键。
+// 【为什么只允许功能键】裸字母/数字键一旦被钩子吞掉，用户在任何应用里都打不出
+// 这个字符，是灾难级副作用；F1~F12 不承担文本输入，安全。
+static CLIPBOARD_HOTKEY_BARE_VK: AtomicU16 = AtomicU16::new(0);
+static FOLDER_HOTKEY_BARE_VK: AtomicU16 = AtomicU16::new(0);
+static CREDENTIAL_HOTKEY_BARE_VK: AtomicU16 = AtomicU16::new(0);
+static TRANSLATE_HOTKEY_BARE_VK: AtomicU16 = AtomicU16::new(0);
+static PORT_HOTKEY_BARE_VK: AtomicU16 = AtomicU16::new(0);
+static FILES_HOTKEY_BARE_VK: AtomicU16 = AtomicU16::new(0);
+static SNIPPETS_HOTKEY_BARE_VK: AtomicU16 = AtomicU16::new(0);
+static SCREENSHOT_HOTKEY_BARE_VK: AtomicU16 = AtomicU16::new(0);
+static PINS_HOTKEY_BARE_VK: AtomicU16 = AtomicU16::new(0);
+static PINS_CLOSE_HOTKEY_BARE_VK: AtomicU16 = AtomicU16::new(0);
+static PICKER_HOTKEY_BARE_VK: AtomicU16 = AtomicU16::new(0);
+static RECORDER_HOTKEY_BARE_VK: AtomicU16 = AtomicU16::new(0);
+static PALETTE_HOTKEY_BARE_VK: AtomicU16 = AtomicU16::new(0);
+
 /// 翻译弹窗是否打开：打开时按 Esc 系统级关闭（弹窗 webview 可能无焦点收不到键）
 static TRANSLATE_POPUP_OPEN: AtomicBool = AtomicBool::new(false);
 static SENDER: OnceLock<Sender<Action>> = OnceLock::new();
@@ -174,42 +197,75 @@ pub fn set_capture_mode(on: bool) {
     }
 }
 
-/// 设置钩子接管的组合热键主键；vk 为 0 时取消接管。
-/// `is_alt`：true 表示 Alt 组合（钩子主动吞键），false 表示 Win 组合。
-pub fn set_panel_hotkey(target: &str, is_alt: bool, vk: u16) {
-    let slot = match (target, is_alt) {
-        ("clipboard", false) => &CLIPBOARD_HOTKEY_VK,
-        ("folder", false) => &FOLDER_HOTKEY_VK,
-        ("credentials", false) => &CREDENTIAL_HOTKEY_VK,
-        ("translation", false) => &TRANSLATE_HOTKEY_VK,
-        ("port", false) => &PORT_HOTKEY_VK,
-        ("files", false) => &FILES_HOTKEY_VK,
-        ("snippets", false) => &SNIPPETS_HOTKEY_VK,
-        ("screenshot", false) => &SCREENSHOT_HOTKEY_VK,
-        ("pins", false) => &PINS_HOTKEY_VK,
-        ("pins_close", false) => &PINS_CLOSE_HOTKEY_VK,
-        ("picker", false) => &PICKER_HOTKEY_VK,
-        ("recorder", false) => &RECORDER_HOTKEY_VK,
-        ("palette", false) => &PALETTE_HOTKEY_VK,
-        ("clipboard", true) => &CLIPBOARD_HOTKEY_ALT_VK,
-        ("folder", true) => &FOLDER_HOTKEY_ALT_VK,
-        ("credentials", true) => &CREDENTIAL_HOTKEY_ALT_VK,
-        ("translation", true) => &TRANSLATE_HOTKEY_ALT_VK,
-        ("port", true) => &PORT_HOTKEY_ALT_VK,
-        ("files", true) => &FILES_HOTKEY_ALT_VK,
-        ("snippets", true) => &SNIPPETS_HOTKEY_ALT_VK,
-        ("screenshot", true) => &SCREENSHOT_HOTKEY_ALT_VK,
-        ("pins", true) => &PINS_HOTKEY_ALT_VK,
-        ("pins_close", true) => &PINS_CLOSE_HOTKEY_ALT_VK,
-        ("picker", true) => &PICKER_HOTKEY_ALT_VK,
-        ("recorder", true) => &RECORDER_HOTKEY_ALT_VK,
-        ("palette", true) => &PALETTE_HOTKEY_ALT_VK,
+/// 钩子接管热键的修饰键形态。
+/// 用枚举而非 bool：裸功能键（Bare）与 Alt 组合是两条语义完全不同的路径
+/// （Alt 组合要排除 Ctrl/Shift 残留；裸键要求【所有】修饰键都没按住），
+/// 继续用 bool 会不断派生新参数，可读性迅速崩坏。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum HookMode {
+    /// Win 组合：RegisterHotKey 完全抢不到，只能钩子
+    Win,
+    /// 纯 Alt 组合：钩子主动吞键（防主键泄漏进编辑器）+ RegisterHotKey 兜底
+    Alt,
+    /// 裸功能键（F1~F12，无任何修饰键）：Electron/Chromium 会吃掉 WM_HOTKEY，只能钩子
+    Bare,
+}
+
+/// 设置钩子接管的热键主键；vk 为 0 时取消接管。
+pub fn set_panel_hotkey(target: &str, mode: HookMode, vk: u16) {
+    let slot = match (target, mode) {
+        ("clipboard", HookMode::Win) => &CLIPBOARD_HOTKEY_VK,
+        ("folder", HookMode::Win) => &FOLDER_HOTKEY_VK,
+        ("credentials", HookMode::Win) => &CREDENTIAL_HOTKEY_VK,
+        ("translation", HookMode::Win) => &TRANSLATE_HOTKEY_VK,
+        ("port", HookMode::Win) => &PORT_HOTKEY_VK,
+        ("files", HookMode::Win) => &FILES_HOTKEY_VK,
+        ("snippets", HookMode::Win) => &SNIPPETS_HOTKEY_VK,
+        ("screenshot", HookMode::Win) => &SCREENSHOT_HOTKEY_VK,
+        ("pins", HookMode::Win) => &PINS_HOTKEY_VK,
+        ("pins_close", HookMode::Win) => &PINS_CLOSE_HOTKEY_VK,
+        ("picker", HookMode::Win) => &PICKER_HOTKEY_VK,
+        ("recorder", HookMode::Win) => &RECORDER_HOTKEY_VK,
+        ("palette", HookMode::Win) => &PALETTE_HOTKEY_VK,
+        ("clipboard", HookMode::Alt) => &CLIPBOARD_HOTKEY_ALT_VK,
+        ("folder", HookMode::Alt) => &FOLDER_HOTKEY_ALT_VK,
+        ("credentials", HookMode::Alt) => &CREDENTIAL_HOTKEY_ALT_VK,
+        ("translation", HookMode::Alt) => &TRANSLATE_HOTKEY_ALT_VK,
+        ("port", HookMode::Alt) => &PORT_HOTKEY_ALT_VK,
+        ("files", HookMode::Alt) => &FILES_HOTKEY_ALT_VK,
+        ("snippets", HookMode::Alt) => &SNIPPETS_HOTKEY_ALT_VK,
+        ("screenshot", HookMode::Alt) => &SCREENSHOT_HOTKEY_ALT_VK,
+        ("pins", HookMode::Alt) => &PINS_HOTKEY_ALT_VK,
+        ("pins_close", HookMode::Alt) => &PINS_CLOSE_HOTKEY_ALT_VK,
+        ("picker", HookMode::Alt) => &PICKER_HOTKEY_ALT_VK,
+        ("recorder", HookMode::Alt) => &RECORDER_HOTKEY_ALT_VK,
+        ("palette", HookMode::Alt) => &PALETTE_HOTKEY_ALT_VK,
+        ("clipboard", HookMode::Bare) => &CLIPBOARD_HOTKEY_BARE_VK,
+        ("folder", HookMode::Bare) => &FOLDER_HOTKEY_BARE_VK,
+        ("credentials", HookMode::Bare) => &CREDENTIAL_HOTKEY_BARE_VK,
+        ("translation", HookMode::Bare) => &TRANSLATE_HOTKEY_BARE_VK,
+        ("port", HookMode::Bare) => &PORT_HOTKEY_BARE_VK,
+        ("files", HookMode::Bare) => &FILES_HOTKEY_BARE_VK,
+        ("snippets", HookMode::Bare) => &SNIPPETS_HOTKEY_BARE_VK,
+        ("screenshot", HookMode::Bare) => &SCREENSHOT_HOTKEY_BARE_VK,
+        ("pins", HookMode::Bare) => &PINS_HOTKEY_BARE_VK,
+        ("pins_close", HookMode::Bare) => &PINS_CLOSE_HOTKEY_BARE_VK,
+        ("picker", HookMode::Bare) => &PICKER_HOTKEY_BARE_VK,
+        ("recorder", HookMode::Bare) => &RECORDER_HOTKEY_BARE_VK,
+        ("palette", HookMode::Bare) => &PALETTE_HOTKEY_BARE_VK,
         _ => return,
     };
     slot.store(vk, Ordering::SeqCst);
     crate::storage::diag_write(&format!(
-        "[keyhook] hotkey set: {target} alt={is_alt} vk=0x{vk:X}"
+        "[keyhook] hotkey set: {target} mode={mode:?} vk=0x{vk:X}"
     ));
+}
+
+/// 是否功能键（F1~F12）。仅功能键允许以「裸键（无修饰键）」形态交给钩子接管：
+/// 裸字母/数字键若被钩子吞掉，用户在任何应用里都打不出该字符，是灾难级副作用。
+pub fn is_function_key(code: tauri_plugin_global_shortcut::Code) -> bool {
+    // F1=0x70 … F12=0x7B（code_to_vk 未映射的键返回 None，自然被排除）
+    matches!(code_to_vk(code), Some(0x70..=0x7B))
 }
 
 /// 组合键主键（keyboard Code）转虚拟键码；不支持的键返回 None
@@ -421,6 +477,43 @@ fn vk_to_combo_name(vk: u32) -> Option<String> {
     }
 }
 
+/// 修饰键状态自愈：以 GetAsyncKeyState 物理状态校准内部
+/// ALT_HELD / WIN_HELD / CTRL_HELD / SHIFT_HELD。
+/// 只清除"标记 true 但物理已松开"的残留，绝不反向误置。
+fn reconcile_modifiers() {
+    fn held(vk: VIRTUAL_KEY) -> bool {
+        unsafe { (GetAsyncKeyState(vk.0 as i32) as u16) & 0x8000 != 0 }
+    }
+    if WIN_HELD.load(Ordering::SeqCst) && !held(VK_LWIN) && !held(VK_RWIN) {
+        WIN_HELD.store(false, Ordering::SeqCst);
+        crate::storage::diag_write("[keyhook] self-heal: win_held stale -> false");
+    }
+    if ALT_HELD.load(Ordering::SeqCst)
+        && !held(VK_MENU)
+        && !held(VK_LMENU)
+        && !held(VK_RMENU)
+    {
+        ALT_HELD.store(false, Ordering::SeqCst);
+        crate::storage::diag_write("[keyhook] self-heal: alt_held stale -> false");
+    }
+    if CTRL_HELD.load(Ordering::SeqCst)
+        && !held(VK_CONTROL)
+        && !held(VK_LCONTROL)
+        && !held(VK_RCONTROL)
+    {
+        CTRL_HELD.store(false, Ordering::SeqCst);
+        crate::storage::diag_write("[keyhook] self-heal: ctrl_held stale -> false");
+    }
+    if SHIFT_HELD.load(Ordering::SeqCst)
+        && !held(VK_SHIFT)
+        && !held(VK_LSHIFT)
+        && !held(VK_RSHIFT)
+    {
+        SHIFT_HELD.store(false, Ordering::SeqCst);
+        crate::storage::diag_write("[keyhook] self-heal: shift_held stale -> false");
+    }
+}
+
 unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code != HC_ACTION as i32 {
         return CallNextHookEx(None, code, wparam, lparam);
@@ -436,6 +529,14 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
     let msg = wparam.0;
     let is_down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
     let is_up = msg == WM_KEYUP || msg == WM_SYSKEYUP;
+
+    // 修饰键状态自愈：系统会吞掉部分修饰键的 keyup（Alt+Tab 后松 Alt、Win 菜单
+    // /贴靠布局后松 Win 等），若 ALT_HELD/WIN_HELD 等残留 true：裸功能键(如 F1
+    // 截图)会被"有修饰键按住"挡掉——这就是「F1 在 WorkBuddy 里失效、Alt+V 却
+    // 正常」的真根因(都走同一低级钩子，区别只在裸键分支要求所有修饰键未按住)；
+    // 残留还会让纯字母按键被误判成组合(输入 v 却呼出剪贴板)。每个事件以物理
+    // 状态校准一次，开销可忽略。
+    reconcile_modifiers();
 
     // Win 键自身：只跟踪状态；消费过组合后抬起时吞掉，避免弹出开始菜单
     if vk == VK_LWIN.0 as u32 || vk == VK_RWIN.0 as u32 {
@@ -586,6 +687,68 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                 post(action);
                 return LRESULT(1);
             }
+        }
+        // 裸功能键热键（F1~F12，无任何修饰键）：要求【所有】修饰键都未按住。
+        // 走钩子的原因见 CLIPBOARD_HOTKEY_BARE_VK 处注释——RegisterHotKey 在
+        // Electron / Chromium 系应用里会被吃掉（消息循环内自消费 F 键、不交
+        // DefWindowProc，WM_HOTKEY 不生成），只有钩子能在事件到达应用前接管。
+        // 与上面的 Win/Alt 分支互斥：那两个分支命中后已 return，走到这里必然是
+        // Win/Alt 都未按住；再排除 Ctrl/Shift 后即「纯裸键」。
+        if !CAPTURE_MODE.load(Ordering::SeqCst)
+            && !win_held
+            && !alt_held
+            && !CTRL_HELD.load(Ordering::SeqCst)
+            && !SHIFT_HELD.load(Ordering::SeqCst)
+        {
+            let action = if vk == CLIPBOARD_HOTKEY_BARE_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::ToggleClipboard)
+            } else if vk == FOLDER_HOTKEY_BARE_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::ToggleFolder)
+            } else if vk == CREDENTIAL_HOTKEY_BARE_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::ToggleCredential)
+            } else if vk == TRANSLATE_HOTKEY_BARE_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::ToggleTranslate)
+            } else if vk == PORT_HOTKEY_BARE_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::TogglePort)
+            } else if vk == FILES_HOTKEY_BARE_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::ToggleFiles)
+            } else if vk == SNIPPETS_HOTKEY_BARE_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::ToggleSnippets)
+            } else if vk == SCREENSHOT_HOTKEY_BARE_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::ShotBegin)
+            } else if vk == PINS_HOTKEY_BARE_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::TogglePins)
+            } else if vk == PINS_CLOSE_HOTKEY_BARE_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::PinsCloseAll)
+            } else if vk == PICKER_HOTKEY_BARE_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::PickerBegin)
+            } else if vk == RECORDER_HOTKEY_BARE_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::RecorderBegin)
+            } else if vk == PALETTE_HOTKEY_BARE_VK.load(Ordering::SeqCst) as u32 {
+                Some(Action::TogglePalette)
+            } else {
+                None
+            };
+            if let Some(action) = action {
+                crate::storage::diag_write(&format!(
+                    "[keyhook] bare hotkey matched vk=0x{vk:X}"
+                ));
+                SWALLOWED_VK.store(vk as u16, Ordering::SeqCst);
+                post(action);
+                return LRESULT(1);
+            }
+        }
+        // 诊断：F1~F12 到达钩子但未被任何分支匹配——区分"钩子根本没收到键"
+        // （此日志不出现）与"修饰键残留/槽位缺失挡掉了匹配"（此日志出现并
+        // 打印当时四个修饰键标记）。修复 WorkBuddy 里 F1 失效时靠它一锤定音。
+        if is_down && (0x70..=0x7B).contains(&vk) {
+            crate::storage::diag_write(&format!(
+                "[keyhook] fn-key unhandled vk=0x{vk:X} held w:{} a:{} c:{} s:{}",
+                WIN_HELD.load(Ordering::SeqCst) as u8,
+                ALT_HELD.load(Ordering::SeqCst) as u8,
+                CTRL_HELD.load(Ordering::SeqCst) as u8,
+                SHIFT_HELD.load(Ordering::SeqCst) as u8,
+            ));
         }
         // 顺序粘贴 Ctrl+V：仅剪贴板面板打开时拦截（吞掉物理按键，稍后发送
         // 一次干净的模拟粘贴）。面板关闭时放行，普通粘贴不受影响。

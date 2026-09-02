@@ -274,7 +274,7 @@ html[data-theme="dark"] {
   display: inline-flex !important; align-items: center !important; justify-content: center !important;
 }
 /* 粗细圆点的四角取景框：与 OCR 图标同款边框语言（SVG 复用其四角路径），
-   框不动、点的大小即笔画粗细 */
+   框不动、圆点大小即笔画粗细；圆点直径在组件内封顶于框内安全区 */
 .shot-sw-wheel-frame {
   position: absolute; inset: 0; margin: auto; pointer-events: none;
 }
@@ -288,14 +288,25 @@ html[data-theme="dark"] {
 /* 截图工具栏明暗两态（见上方 --tb-* 令牌）：浅色白底深字 / 深色黑底浅字，
    system 模式靠 prefers-color-scheme 兜底；图标颜色随之翻转保证可读 */
 
-/* 文字标注编辑器 */
-.shot-text-editor { position: fixed; z-index: 300; display: inline-flex; align-items: center; gap: 5px; background: transparent; border: 1.5px solid rgba(255,255,255,0.95); outline: 1px solid rgba(0,0,0,0.35); border-radius: 2px; padding: 3px 6px; transform: translateY(-50%); }
-/* line-height 与 font-size 相等：DOM 行盒顶部 == em 盒顶部，与 canvas
-   textBaseline="top" 精确对应；颜色/光标色由内联 style 实时跟随色板 */
-.shot-text-editor input { border: none; outline: none; background: transparent; font: bold 16px/16px sans-serif; min-width: 150px; text-shadow: 0 1px 2px rgba(0,0,0,0.85), 0 0 3px rgba(0,0,0,0.6); }
-.shot-text-editor input::placeholder { color: rgba(255,255,255,0.55); text-shadow: 0 1px 2px rgba(0,0,0,0.8); }
-.shot-text-x { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: none; border-radius: 50%; background: rgba(255,255,255,0.14); color: rgba(255,255,255,0.9); cursor: pointer; flex-shrink: 0; }
-.shot-text-x:hover { background: rgba(255,69,58,0.75); color: #fff; }
+/* 文字标注编辑器：透明底 + 方角双线边框（主人指定：无圆角、透明、简洁优雅）——
+   1px 白线为主 + box-shadow 外圈 1px 深线构成双线，亮/暗截图内容上都有清晰
+   轮廓；再叠极轻投影给浮层一点深度。文字【零 shadow】（重影根因）：编辑态
+   与 canvas 成品完全同貌，才是真「所见即所得」。
+   【所见即所得契约】input 字体 bold 16px/16px 行盒绝不可改：commitText 量
+   input 的 getBoundingClientRect、canvas 用 baseline="top" 同字体重画；
+   文字色/光标色由内联 style 实时跟随色板。 */
+.shot-text-editor { position: fixed; z-index: 300; display: inline-flex; align-items: center; gap: 7px;
+  background: transparent; border: 1px solid rgba(255,255,255,0.92); border-radius: 0;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.32), 0 3px 14px rgba(0,0,0,0.22);
+  padding: 5px 8px 5px 10px; transform: translateY(-50%); }
+.shot-text-editor input { border: none; outline: none; background: transparent; padding: 0;
+  font: bold 16px/16px sans-serif; min-width: 150px; }
+.shot-text-editor input::placeholder { color: rgba(150,150,150,0.85); }
+.shot-text-x { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px;
+  padding: 0; border: none; border-radius: 50%; background: rgba(255,255,255,0.16); color: rgba(255,255,255,0.92);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.22);
+  cursor: pointer; flex-shrink: 0; transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
+.shot-text-x:hover { background: rgba(255,69,58,0.8); color: #fff; }
 .shot-sw-badge { position: fixed; z-index: 400; display: flex; align-items: center; gap: 7px; background: rgba(20,20,20,0.92); color: #fff; font-size: 13px; line-height: 1; padding: 8px 13px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.14); box-shadow: 0 4px 14px rgba(0,0,0,0.35); pointer-events: none; }
 .shot-sw-badge svg { flex-shrink: 0; color: rgba(255,255,255,0.88); }
 

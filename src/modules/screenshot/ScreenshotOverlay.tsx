@@ -21,6 +21,78 @@ import "./screenshot.css";
 
 type Tool = "select"|"rect"|"ellipse"|"arrow"|"sarrow"|"line"|"brush"|"mosaic"|"text"|"number";
 type Phase = "idle"|"selected";
+// ---- 工具光标：canvas 现绘 PNG（Chromium/WebView2 不支持 SVG cursor，只认
+// PNG/CUR/ICO，故运行时画进 canvas 再 toDataURL）。32×32 对齐系统光标尺寸、
+// hotspot 中心 (16,16)；黑粗底 + 白细芯双层描边，浅色/深色截图内容上都清晰。
+// 绘制类 = 十字瞄准线 + 中心徽标（各工具图形语义），文字 = I 形，选择 = 系统箭头
+function cursorCanvas(draw: (g: CanvasRenderingContext2D) => void): string {
+  const c = document.createElement("canvas");
+  c.width = 32; c.height = 32;
+  const g = c.getContext("2d");
+  if (!g) return "auto";
+  draw(g);
+  return `url("${c.toDataURL("image/png")}") 16 16, auto`;
+}
+/** 双重描边：黑粗底 + 白细芯（主线 3.6/1.7，徽标 3.0/1.4 略细更精致） */
+function strokeTwice(draw: (lw: number, style: string) => void, dark = 3.6, light = 1.7): void {
+  draw(dark, "rgba(0,0,0,0.9)");
+  draw(light, "#fff");
+}
+/** 十字瞄准线（黑底白芯双层，32 视箱中心交叉、留 4px 边距） */
+function drawCross(g: CanvasRenderingContext2D): void {
+  strokeTwice((lw, s) => {
+    g.strokeStyle = s; g.lineWidth = lw; g.lineCap = "round";
+    g.beginPath(); g.moveTo(16, 4); g.lineTo(16, 28); g.moveTo(4, 16); g.lineTo(28, 16); g.stroke();
+  });
+}
+/** 圆角矩形路径（strokeRect 无圆角，徽标用 arcTo 手工画更精致） */
+function roundedRectPath(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.arcTo(x + w, y, x + w, y + h, r);
+  g.arcTo(x + w, y + h, x, y + h, r);
+  g.arcTo(x, y + h, x, y, r);
+  g.arcTo(x, y, x + w, y, r);
+  g.closePath();
+}
+/** 十字 + 描边徽标（rect/ellipse/arrow/line/mosaic/number 共用骨架） */
+function crossCursor(badge: (g: CanvasRenderingContext2D, lw: number, style: string) => void): string {
+  return cursorCanvas((g) => { drawCross(g); strokeTwice((lw, s) => badge(g, lw, s), 3.0, 1.4); });
+}
+/** 工具 → 光标映射：select 系统箭头；绘制类十字 + 徽标；text 为 I 形 */
+const TOOL_CURSOR: Record<Tool, string> = {
+  select: "default",
+  rect: crossCursor((g, lw, s) => { g.strokeStyle = s; g.lineWidth = lw; roundedRectPath(g, 11, 11, 10, 10, 2.4); g.stroke(); }),
+  ellipse: crossCursor((g, lw, s) => { g.strokeStyle = s; g.lineWidth = lw; g.beginPath(); g.ellipse(16, 16, 8.6, 6, 0, 0, Math.PI * 2); g.stroke(); }),
+  arrow: crossCursor((g, lw, s) => { g.strokeStyle = s; g.lineWidth = lw; g.lineJoin = "round"; g.lineCap = "round"; g.beginPath(); g.moveTo(10.2, 21.8); g.lineTo(21.8, 10.2); g.lineTo(14.6, 10.2); g.moveTo(21.8, 10.2); g.lineTo(21.8, 17.4); g.stroke(); }),
+  sarrow: cursorCanvas((g) => {
+    // 实心箭头徽标：与画布 sarrow 同款造型（细尖尾锥形杆 + 窄三角头）缩小版
+    drawCross(g);
+    g.fillStyle = "rgba(0,0,0,0.9)";
+    g.beginPath();
+    g.moveTo(21.8, 10.2);
+    g.lineTo(19.9, 16.8); g.lineTo(18.2, 15.1); g.lineTo(12.1, 20.3);
+    g.lineTo(11.7, 19.9); g.lineTo(16.9, 13.8); g.lineTo(15.2, 12.1);
+    g.closePath(); g.fill();
+    g.strokeStyle = "#fff"; g.lineWidth = 1.2; g.stroke();
+  }),
+  line: crossCursor((g, lw, s) => { g.strokeStyle = s; g.lineWidth = lw; g.lineCap = "round"; g.beginPath(); g.moveTo(9.2, 22.8); g.lineTo(22.8, 9.2); g.stroke(); }),
+  brush: cursorCanvas((g) => {
+    drawCross(g);
+    g.fillStyle = "rgba(0,0,0,0.9)"; g.beginPath(); g.arc(16, 16, 6, 0, Math.PI * 2); g.fill();
+    g.fillStyle = "#fff"; g.beginPath(); g.arc(16, 16, 3.2, 0, Math.PI * 2); g.fill();
+  }),
+  mosaic: crossCursor((g, lw, s) => { g.strokeStyle = s; g.lineWidth = lw; roundedRectPath(g, 11, 11, 10, 10, 2.4); g.stroke(); g.beginPath(); g.moveTo(16, 11); g.lineTo(16, 21); g.moveTo(11, 16); g.lineTo(21, 16); g.stroke(); }),
+  text: cursorCanvas((g) => {
+    strokeTwice((lw, s) => {
+      g.strokeStyle = s; g.lineWidth = lw; g.lineCap = "round";
+      g.beginPath(); g.moveTo(16, 4.5); g.lineTo(16, 27.5);
+      g.moveTo(10.8, 4.5); g.lineTo(21.2, 4.5);
+      g.moveTo(10.8, 27.5); g.lineTo(21.2, 27.5); g.stroke();
+    });
+  }),
+  number: crossCursor((g, lw, s) => { g.strokeStyle = s; g.lineWidth = lw; g.beginPath(); g.arc(16, 16, 5.8, 0, Math.PI * 2); g.stroke(); }),
+};
 interface Pt { x: number; y: number; }
 interface Rect { x: number; y: number; w: number; h: number; }
 interface Anno {
@@ -438,6 +510,13 @@ const shapeHit = (a: Anno, pt: Pt, tol: number): boolean => {
   if (a.kind === "arrow" || a.kind === "sarrow" || a.kind === "line") {
     return distSeg(pt, { x: a.x1, y: a.y1 }, { x: a.x2, y: a.y2 }) <= t;
   }
+  // brush（自由笔画）：命中改用【包围盒】判定——虚线框内即命中。手绘线
+  // 窄而曲折，按笔迹距离判定时点在框内空白处会漏判 → 误当成新笔画落笔
+  // （"有虚线框却拖不动"的根因）；框内命中=移动，想画新笔点框外空白
+  if (a.kind === "brush") {
+    const b = annoBounds(a);
+    return pt.x >= b.x - tol && pt.x <= b.x + b.w + tol && pt.y >= b.y - tol && pt.y <= b.y + b.h + tol;
+  }
   const pts = a.points;
   if (!pts || !pts.length) return false;
   if (pts.length === 1) return Math.hypot(pt.x - pts[0].x, pt.y - pts[0].y) <= t;
@@ -535,7 +614,13 @@ export function ScreenshotOverlay() {
   }, [textEdit?.x, textEdit?.y]); // eslint-disable-line react-hooks/exhaustive-deps
   // 当前工具镜像：键盘 Ctrl+数字切换工具时读 ref，避免 keydown 闭包捕获旧值
   const toolRef = useRef<Tool>("select");
-  useEffect(() => { toolRef.current = tool; }, [tool]);
+  useEffect(() => {
+    toolRef.current = tool;
+    // 切换工具即时同步鼠标光标（不等 pointermove）：selected 阶段 handlers 层
+    // 存在则直接改；框选阶段由 root 的 crosshair 兜底
+    const el = handlersRef.current;
+    if (el && phaseRef.current === "selected") el.style.cursor = TOOL_CURSOR[tool];
+  }, [tool]);
 
   // ---- 取色 ----
   // 颜色显示格式（Shift 切 RGB/HEX）；ref 镜像供 rAF 绘制路径直读
@@ -665,6 +750,10 @@ export function ScreenshotOverlay() {
     if (nativeDragRef.current) { nativeDragRef.current = false; void shotDragEnd().catch(() => {}); }
     rootRef.current?.setAttribute("data-resetting", "1");
     setAnnos([]); setUndos([]); setEditIdx(-1); setTextEdit(null); setNumCnt(1); setShowMag(false);
+    // 二级选项展开状态复位：遮罩窗复用（组件不卸载），上一会话收场时若某组
+    // 的子选项面板还开着，不reset则下次呼出工具栏会带着旧面板自动弹出，
+    // 且工具已复位成 select、面板里没有任何选中项（观感即"凭空冒出个空面板"）
+    setSubmenuOpen(null);
     // OCR 状态复位：新会话不保留上一场的识别结果
     resetOcr();
     // 历史浏览状态复位：新会话永远从实时画面开始
@@ -899,10 +988,11 @@ export function ScreenshotOverlay() {
     annos.forEach((s) => {
       drawShape(ctx, s, bgRef.current, mosaicCacheRef.current, scale);   // 屏显层
     });
-    // 二次编辑装饰：虚线包围盒 + 白色方形手柄（仅同种绘制工具激活时显示；
-    // OCR 划选期间隐藏，避免与文字选择视觉打架）
+    // 二次编辑装饰：虚线包围盒 + 白色方形手柄（非 select 工具下显示——
+    // 编辑对象与当前工具不必同种：切工具后上一笔仍可调整；OCR 划选期间
+    // 隐藏，避免与文字选择视觉打架）
     const es = editIdx >= 0 ? annos[editIdx] : undefined;
-    if (phase === "selected" && ocrPhase === "idle" && es && es.kind === tool && shapeEditable(es)) {
+    if (phase === "selected" && ocrPhase === "idle" && es && tool !== "select" && shapeEditable(es)) {
       const b = annoBounds(es);
       ctx.save();
       ctx.strokeStyle = "rgba(255,255,255,0.85)";
@@ -2118,13 +2208,18 @@ export function ScreenshotOverlay() {
         queueSelPaint();
       }
     }
-    // 手柄悬停光标反馈（手柄由画布绘制，无 CSS :hover 可用）
+    // 手柄悬停光标反馈（手柄由画布绘制，无 CSS :hover 可用）：
+    // 基础光标按工具语义（TOOL_CURSOR），命中手柄/形状本体再精细覆盖
     if (phaseRef.current === "selected" && !dragRef.current && !resizeRef.current) {
       const el = handlersRef.current;
       if (el) {
-        let cur = "crosshair";
-        if (tool === "select" && hitHandle(pt)) cur = "pointer";
-        else {
+        let cur = TOOL_CURSOR[tool];
+        if (tool === "select") {
+          const r = regRef.current;
+          const inR = r && pt.x >= r.x && pt.x <= r.x + r.w && pt.y >= r.y && pt.y <= r.y + r.h;
+          if (hitHandle(pt)) cur = "pointer";
+          else if (inR) cur = "move";
+        } else {
           const es = editIdx >= 0 ? annos[editIdx] : undefined;
           if (es && es.kind === tool && shapeEditable(es)) {
             if (hitShapeHandle(es, pt, HANDLE_HIT) >= 0) cur = "pointer";
@@ -2263,10 +2358,10 @@ export function ScreenshotOverlay() {
       return;
     }
     if (phase === "selected" && tool !== "select") {
-      // 二次编辑拦截：同种工具下先查正在编辑的图形——命中手柄=缩放、
-      // 命中本体=移动；否则本次落笔就是新绘制，上一个图形失去编辑权
+      // 二次编辑拦截：命中「正在编辑的图形」手柄=缩放、本体=移动——不与
+      // 当前工具绑定（切工具后上一笔仍能调整）；未命中才落笔新绘制
       const cur = editIdx >= 0 ? annos[editIdx] : undefined;
-      if (cur && cur.kind === tool && shapeEditable(cur)) {
+      if (cur && shapeEditable(cur)) {
         const hi = hitShapeHandle(cur, pt, HANDLE_HIT);
         if (hi >= 0) { startShapeResize(editIdx, hi); return; }
         if (shapeHit(cur, pt, HANDLE_HIT)) { startShapeMove(editIdx, pt); return; }
@@ -2627,9 +2722,16 @@ export function ScreenshotOverlay() {
   // render
   if (!geom) return null;
   const displayW = "100vw", displayH = "100vh";
+  // 遮罩光标按工具语义：框选阶段一律十字；选中后 select=箭头（选区内/手柄
+  // 由 handlers 层覆盖为 move/pointer）、文字=文本 I 形、绘制工具=十字
+  const rootCursor =
+    phase !== "selected" ? "crosshair"
+    : tool === "text" ? "text"
+    : tool === "select" ? "default"
+    : "crosshair";
 
   return (
-    <div ref={rootRef} className="shot-overlay" style={{width:displayW,height:displayH,position:"fixed",top:0,left:0,overflow:"hidden",cursor:"crosshair"}}
+    <div ref={rootRef} className="shot-overlay" style={{width:displayW,height:displayH,position:"fixed",top:0,left:0,overflow:"hidden",cursor:rootCursor}}
       onWheel={(ev) => {
         // 悬停阶段（idle 未拖拽、有可见高亮）：智能候选链滚轮切换层级——
         // 上滚更精细（链内层），下滚更粗（外层，直至整窗），PixPin 式。
@@ -2689,7 +2791,8 @@ export function ScreenshotOverlay() {
       {textEdit && (() => {
         // textEdit 已是【CSS 像素】（toCanvas 产出），left/top 直接用
         const vw = window.innerWidth, vh = window.innerHeight;
-        const estW = 190, estH = 30;
+        // 估宽高只用于边界钳制（编辑器为透明方角框，实际约 195×30）
+        const estW = 195, estH = 30;
         const ex = Math.min(Math.max(textEdit.x, 4), Math.max(4, vw - estW - 4));
         const ey = Math.min(Math.max(textEdit.y, estH / 2 + 4), Math.max(4, vh - estH - 4));
         return (
@@ -2782,6 +2885,10 @@ export function ScreenshotOverlay() {
         // 所有工具统一：二次选项一律挂在【一级图标正下方】，不再单独
         // 在主条下方拼接配置面板（旧版单工具与形状/线组行为不一致）
         const menuOpen = submenuOpen !== null;
+        // 粗细图标：圆点直径与画笔粗细【全程线性】对应——sw=1 → 4px，
+        // sw=24 → 恰 14px（22px 框中心安全区 2×(22×8/24)≈14.67px，封顶取
+        // 14 留余量）。无封顶段：滚轮调到最大时圆也刚好到最大、不超框
+        const swDot = 4 + (sw - 1) * (10 / 23);
         // 主条 barH≈40px，二次选项面板 panelH≈52px。条的位置【只按条本身】能否
         // 放下决定——开合二级选项时条不跳动；面板方向独立判定：条下方有空间就
         // 向下展开，没有就翻到条上方（向上扩展）
@@ -2903,10 +3010,7 @@ export function ScreenshotOverlay() {
                   window.clearTimeout(swBadgeTimer.current);
                   swBadgeTimer.current = window.setTimeout(() => setSwBadge(null), 800);
                 }}>
-                {/* 圆径与粗细【满线性映射】：sw=1 → 4px（最小），sw=24（上限）
-                    → 恰好 14px（22px 渲染框中心安全区 ≈14.67px，留余量封顶）。
-                    圆到最大的同一刻笔也到最粗，中段无"圆不动笔还在粗"的死区 */}
-                <span style={{ width: 4 + (sw - 1) * (10 / 23), height: 4 + (sw - 1) * (10 / 23) }} />
+                <span style={{ width: swDot, height: swDot }} />
                   <svg className="shot-sw-wheel-frame" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M3 8V5.5A2.5 2.5 0 0 1 5.5 3H8" />
                     <path d="M16 3h2.5A2.5 2.5 0 0 1 21 5.5V8" />

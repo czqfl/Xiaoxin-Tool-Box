@@ -90,7 +90,10 @@ export function OcrPanel(p: OcrPanelProps) {
                     {pr.pending ? (
                       <div className="ocr-pcell"><i className="ocr-pwait" /></div>
                     ) : (
-                      <div className={`ocr-pcell ocr-pout${pr.ok ? "" : " ocr-pfail"}`}>{pr.out}</div>
+                      <div className={`ocr-pcell ocr-pout${pr.ok ? "" : " ocr-pfail"}`}>
+                        {!pr.ok && <span className="ocr-pfail-tag">未译</span>}
+                        {pr.out}
+                      </div>
                     )}
                   </div>
                 ))}

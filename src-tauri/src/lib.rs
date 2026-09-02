@@ -21,6 +21,7 @@ pub mod fsindex;
 mod recentfiles;
 mod credentials;
 #[cfg(windows)]
+mod apps;
 mod keyhook;
 mod panel;
 mod port;
@@ -317,6 +318,18 @@ pub fn run() {
                 let p = handle.state::<storage::AppPaths>().inner().clone();
                 std::thread::spawn(move || fsindex::load_from_disk(&p));
             }
+            // 本机应用列表预热：单开一条线程（读盘 + 必要时整表扫描 + 图标提取），
+            // 主进程启动不等它。命令面板/设置页首次取用时缓存已就绪即零等待返回。
+            {
+                let p = handle.state::<storage::AppPaths>().inner().clone();
+                std::thread::Builder::new()
+                    .name("app-scan".into())
+                    .spawn(move || apps::warm_from_disk(&p))
+                    .map(|_| ())
+                    .unwrap_or_else(|e| {
+                        crate::storage::diag_write(&format!("[apps] 预热线程启动失败：{e}"))
+                    });
+            }
             // 顺序粘贴（FIFO/LIFO）是会话内临时模式：启动即复位为普通粘贴，
             // 覆盖"上次退出时面板未关、配置残留 FIFO"的场景——下次打开面板
             // 默认普通模式，Ctrl+V 不会被接管（register_initial 已按残留配置
@@ -496,8 +509,8 @@ pub fn run() {
             quickfiles::quickfiles_open,
             quickfiles::quickfiles_reveal,
             quickfiles::quickfiles_delete,
-            quickfiles::list_installed_apps,
-            quickfiles::app_launch,
+            apps::list_installed_apps,
+            apps::app_launch,
             // 最近打开文件（quickfiles_open 内打点，面板/命令面板/全盘搜索共用）
             recentfiles::recent_files_list,
             recentfiles::recent_files_remove,
@@ -635,6 +648,7 @@ pub fn run() {
                     // id 找不到窗口与存储条目）——从存储一并清除。正常
                     // pin_close 路径已先清存储，这里是幂等兜底；若该贴图另有
                     // 兜底窗（watchdog 回退建窗）则保留。
+                    pin::drop_ocr_window(app_handle);
                     let mapped = app_handle
                         .try_state::<pin::PinWinMap>()
                         .and_then(|m| m.0.lock().unwrap().remove(label.as_str()));
@@ -650,8 +664,17 @@ pub fn run() {
                         }
                     }
                     pin::ensure_staging(app_handle);
-                } else if let Some(id) = label.strip_prefix("pin-") {
-                    pin::forget_pin(app_handle, id);
+                } else if label.starts_with(pin::PIN_PREFIX)
+                    && label != "pin-ocr"
+                    && label != "pin-menu"
+                {
+                    // 常规贴图窗（pin-<uuid>）被销毁：同步销毁共享 OCR 弹窗
+                    // （独立窗不随来源贴图自动关；staging 补建新窗会骗过前端
+                    // 存在性安全网，必须在 Rust 侧统一兜底）。
+                    pin::drop_ocr_window(app_handle);
+                    if let Some(id) = label.strip_prefix(pin::PIN_PREFIX) {
+                        pin::forget_pin(app_handle, id);
+                    }
                 }
             }
             // 应用退出前：把所有面板/工具栏的最后位置与尺寸写入配置，

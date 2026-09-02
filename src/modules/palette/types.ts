@@ -57,6 +57,26 @@ export interface PaletteItem {
   perform: () => void | Promise<void>;
 }
 
+/** 左栏分区顺序（按组优先级排列，保证与结果列表的先后一致） */
+export const KIND_ORDER = (Object.keys(KIND_RANK) as PaletteKind[]).sort(
+  (a, b) => KIND_RANK[a] - KIND_RANK[b]
+);
+
+/** kind → 专属色（取自主题工具色 token，各主题自动换色）。
+ *  一个来源一个色相：图标座、分区头、左栏计数点统一用它，扫一眼就知道这行来自哪一类。
+ *  网页搜索是兜底通道，用中性灰压低存在感。 */
+export const KIND_COLOR: Record<PaletteKind, string> = {
+  tool: "var(--tool-port)",
+  command: "var(--tool-settings)",
+  snippet: "var(--tool-snippets)",
+  clip: "var(--tool-clipboard)",
+  folder: "var(--tool-folder)",
+  qfile: "var(--tool-files)",
+  app: "var(--tool-sticky)",
+  credential: "var(--tool-credentials)",
+  web: "var(--text-secondary)",
+};
+
 /** kind → 中文区段名（渲染组头） */
 export const KIND_LABEL: Record<PaletteKind, string> = {
   tool: "工具",

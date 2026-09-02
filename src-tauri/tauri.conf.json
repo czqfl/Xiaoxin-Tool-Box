@@ -134,8 +134,8 @@
       {
         "label": "palette",
         "title": "命令面板",
-        "width": 680,
-        "height": 480,
+        "width": 780,
+        "height": 600,
         "resizable": false,
         "fullscreen": false,
         "maximized": false,

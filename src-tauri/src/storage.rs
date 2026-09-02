@@ -24,6 +24,8 @@ pub struct AppPaths {
     pub recent_files_file: PathBuf,
     /// 全盘文件名索引的磁盘缓存（紧凑二进制，启动时秒加载）
     pub fs_index_file: PathBuf,
+    /// 本机应用列表缓存（含图标 data URL，约 1MB；启动时后台线程预热）
+    pub app_cache_file: PathBuf,
 }
 
 impl AppPaths {
@@ -59,6 +61,7 @@ impl AppPaths {
             palette_stats_file: data_dir.join("palette_stats.json"),
             recent_files_file: data_dir.join("recent_files.json"),
             fs_index_file: data_dir.join("file_index.bin"),
+            app_cache_file: data_dir.join("app_cache.json"),
             images_dir,
             data_dir,
         }

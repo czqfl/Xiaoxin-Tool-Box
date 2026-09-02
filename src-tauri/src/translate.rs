@@ -355,6 +355,8 @@ pub fn trigger_selection_translate<R: Runtime>(app: &AppHandle<R>) {
                     *store.0.lock().unwrap() = None;
                 }
                 activate_popup(&app);
+                // 无选中呼出也通知前端聚焦输入框（不带内容、不清空既有内容）
+                let _ = app.emit("translate://shown", ());
             }
         }
     });

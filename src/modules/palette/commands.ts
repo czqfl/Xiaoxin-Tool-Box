@@ -33,7 +33,7 @@ import {
   type SourceData,
 } from "./sources";
 import { buildToolItems, buildWebItems, type TranslationState } from "./tools";
-import { KIND_LABEL, type PaletteItem } from "./types";
+import { KIND_LABEL, type PaletteItem, type PaletteKind } from "./types";
 import type { AppConfig, ClipEntry, EntryKind, InstalledApp, ThemeMode } from "../../types";
 import {
   IconClipboard,
@@ -65,9 +65,13 @@ type IconCmp = PaletteItem["icon"];
 /** 收起面板（粘贴/跳转类动作执行前调用，把焦点还给用户原窗口） */
 const hide = () => hideCurrentWindow();
 
-/** 每个区段最多渲染条数 / 整屏最多渲染条数 */
-const PER_GROUP = 8;
-const TOTAL = 60;
+/** 每个区段最多渲染条数 / 整屏最多渲染条数（面板放大后可视行数变多，同步放宽） */
+const PER_GROUP = 10;
+const TOTAL = 80;
+/** 左栏选定分区后，该分区独占的展示名额（配合分区筛选一起放宽） */
+const FOCUS_GROUP = 40;
+/** 空态里常驻展示的本机应用条数（按名称序） */
+const EMPTY_APPS = 30;
 
 /** 只为"打分"临时拼一个可搜索替身条目（不产生动作、不进结果列表） */
 function probe(
@@ -415,13 +419,23 @@ function appItem(app: InstalledApp): PaletteItem {
 export interface QueryContext {
   config: AppConfig;
   translation: TranslationState | null;
+  /** 左栏选中的分区：命中该分区时放宽限流（其余分区不再占用名额） */
+  focus?: PaletteKind | null;
+}
+
+/** 检索结果：展示条目 + 各来源命中总数。
+ *  计数单独给——左栏要显示"本机应用 42 条"这种全量分布，
+ *  不能跟着展示列表的区段限流一起缩水。 */
+export interface QueryResult {
+  items: PaletteItem[];
+  counts: Partial<Record<PaletteKind, number>>;
 }
 
 /** 一次检索的完整结果：内联工具置顶 → 其余按分数/用量排序 → 尾部兜底网页搜索 */
-export async function queryItems(rawQuery: string, ctx: QueryContext): Promise<PaletteItem[]> {
+export async function queryItems(rawQuery: string, ctx: QueryContext): Promise<QueryResult> {
   const q = rawQuery.trim().toLowerCase();
-  if (!q) return [];
-  const { config, translation } = ctx;
+  if (!q) return { items: [], counts: {} };
+  const { config, translation, focus } = ctx;
   const tools = buildToolItems(rawQuery, { config, translation });
   const src = await sourcesForSearch();
 
@@ -445,11 +459,29 @@ export async function queryItems(rawQuery: string, ctx: QueryContext): Promise<P
   const toolItems = strongHit
     ? tools.items.filter((i) => !i.id.startsWith("tool-transl"))
     : tools.items;
-  return [...cap(toolItems), ...cap(scored.map((s) => s.item)), ...tail];
+  const merged = [...toolItems, ...scored.map((s) => s.item), ...tail];
+  return {
+    items: cap(pick(merged, focus), focus),
+    counts: countBy(merged),
+  };
 }
 
-/** 每个区段限 PER_GROUP 条、整屏限 TOTAL 条（保持已排好的顺序） */
-function cap(items: PaletteItem[]): PaletteItem[] {
+/** 按分区筛选（未选分区则原样返回） */
+function pick(items: PaletteItem[], focus?: PaletteKind | null): PaletteItem[] {
+  return focus ? items.filter((i) => i.kind === focus) : items;
+}
+
+/** 各来源命中数（左栏计数用，统计的是限流前的全量） */
+function countBy(items: PaletteItem[]): Partial<Record<PaletteKind, number>> {
+  const counts: Partial<Record<PaletteKind, number>> = {};
+  for (const i of items) counts[i.kind] = (counts[i.kind] ?? 0) + 1;
+  return counts;
+}
+
+/** 限流：选定分区时该分区独占名额（放宽到 FOCUS_GROUP）；
+ *  否则每个区段限 PER_GROUP 条、整屏限 TOTAL 条（保持已排好的顺序） */
+function cap(items: PaletteItem[], focus?: PaletteKind | null): PaletteItem[] {
+  if (focus) return items.slice(0, FOCUS_GROUP);
   const perGroup = new Map<string, number>();
   const out: PaletteItem[] = [];
   for (const i of items) {
@@ -463,13 +495,21 @@ function cap(items: PaletteItem[]): PaletteItem[] {
 }
 
 /** 空态：最近使用 + 常用（均来自用量统计）；首次运行无统计时退回全部静态命令 */
-export async function emptyStateItems(config: AppConfig): Promise<PaletteItem[]> {
+export async function emptyStateItems(
+  config: AppConfig,
+  focus?: PaletteKind | null
+): Promise<QueryResult> {
   if (!statsReady()) await refreshStats();
   const stats = allStats();
   const statics = buildStaticCommands(config);
-  if (!stats.size) return statics;
-
   const [src, apps] = await Promise.all([sourcesForSearch(), Promise.resolve(peekApps())]);
+  /** 应用常驻条目：面板最常用的场景之一就是"快速启动"，没被用过的应用也该可浏览 */
+  const appEntries = (apps ?? []).slice(0, EMPTY_APPS).map(appItem);
+  if (!stats.size) {
+    const base = [...statics, ...appEntries];
+    return { items: cap(pick(base, focus), focus), counts: countBy(base) };
+  }
+
   const pool = new Map<string, PaletteItem>();
   const put = (i: PaletteItem) => pool.set(statKey(i), i);
   for (const i of statics) put(i);
@@ -508,11 +548,19 @@ export async function emptyStateItems(config: AppConfig): Promise<PaletteItem[]>
     .map((s) => s.key);
   take(byRecency, "最近使用");
   take(byFrequency, "常用");
+  // 本机应用常驻空态（按名称序）：没有使用记录的应用不该完全不可见
+  for (const i of appEntries) {
+    if (out.length >= TOTAL) break;
+    const key = statKey(i);
+    if (taken.has(key)) continue;
+    taken.add(key);
+    out.push(i);
+  }
   // 记录很少时面板不该几乎空掉：继续追加没出现过的静态命令，保留可浏览性
   for (const i of statics) {
     if (out.length >= TOTAL) break;
     if (taken.has(statKey(i))) continue;
     out.push(i);
   }
-  return out;
+  return { items: cap(pick(out, focus), focus), counts: countBy(out) };
 }

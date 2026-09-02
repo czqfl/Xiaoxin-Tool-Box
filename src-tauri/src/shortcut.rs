@@ -137,9 +137,17 @@ fn set_binding(inner: &mut ShortcutBindingsInner, target: &str, v: Option<Shortc
 ///      （ALT_HELD 未置位等）失败，由系统热键保证一定能触发。
 ///   两者互不冲突：钩子吞键后按键不会到达系统，RegisterHotKey 不触发；
 ///   钩子放行时按键到达系统，RegisterHotKey 正常触发。
+/// 是否需要低级键盘钩子接管：
+///   - Win 组合：RegisterHotKey 无法注册（被 shell 保留）
+///   - 纯 Alt 组合：钩子吞键防主键泄漏 + RegisterHotKey 兜底
+///   - 裸功能键（F1~F12 无修饰键）：RegisterHotKey 在 Electron/Chromium 系
+///     应用里被吃掉（消息循环自消费 F 键、不交 DefWindowProc，WM_HOTKEY 不生成），
+///     只有钩子能在事件到达应用前接管
 #[cfg(windows)]
 fn is_hook_combo(s: &Shortcut) -> bool {
-    s.mods == Modifiers::SUPER || s.mods == Modifiers::ALT
+    s.mods == Modifiers::SUPER
+        || s.mods == Modifiers::ALT
+        || (s.mods.is_empty() && crate::keyhook::is_function_key(s.key))
 }
 
 #[cfg(not(windows))]
@@ -151,11 +159,12 @@ fn is_hook_combo(_s: &Shortcut) -> bool {
 #[cfg(windows)]
 fn hook_vk(s: &Shortcut) -> Result<u16, String> {
     crate::keyhook::code_to_vk(s.key)
-        .ok_or_else(|| "Win 组合仅支持字母、数字与 F 键".to_string())
+        .ok_or_else(|| "钩子接管的热键仅支持字母、数字与 F 键".to_string())
 }
 
 /// 注册单个面板热键：Win 组合交给低级钩子接管；纯 Alt 组合【钩子 + RegisterHotKey
-/// 双保险】；其余（Ctrl、Ctrl+Alt 等）走全局热键插件
+/// 双保险】；裸功能键【钩子 + RegisterHotKey 双保险】（钩子免疫 Electron/Chromium
+/// 吞键，RegisterHotKey 兜底钩子异常）；其余（Ctrl、Ctrl+Alt 等）走全局热键插件
 fn register_combo<R: Runtime>(
     app: &AppHandle<R>,
     target: &str,
@@ -164,9 +173,16 @@ fn register_combo<R: Runtime>(
     if is_hook_combo(&s) {
         #[cfg(windows)]
         {
-            crate::keyhook::set_panel_hotkey(target, s.mods == Modifiers::ALT, hook_vk(&s)?);
-            // Alt 组合兜底注册 RegisterHotKey：保证钩子异常时也能触发
-            if s.mods == Modifiers::ALT {
+            let mode = if s.mods == Modifiers::SUPER {
+                crate::keyhook::HookMode::Win
+            } else if s.mods == Modifiers::ALT {
+                crate::keyhook::HookMode::Alt
+            } else {
+                crate::keyhook::HookMode::Bare
+            };
+            crate::keyhook::set_panel_hotkey(target, mode, hook_vk(&s)?);
+            // Alt 组合 / 裸功能键兜底注册 RegisterHotKey：保证钩子异常时也能触发
+            if mode == crate::keyhook::HookMode::Alt || mode == crate::keyhook::HookMode::Bare {
                 app.global_shortcut().register(s).map_err(|_| {
                     "该快捷键已被系统或其他应用占用，请更换其他组合".to_string()
                 })?;
@@ -210,9 +226,11 @@ pub fn shortcut_test(
     }
     #[cfg(windows)]
     if is_hook_combo(&parsed) {
-        if parsed.mods == Modifiers::ALT {
-            // Alt 组合双保险中的 RegisterHotKey 需要真注册：试注册检测占用
-            // （钩子虽总能拦截，但若系统里该组合已被占用，兜底注册会失败）
+        let needs_register = parsed.mods == Modifiers::ALT
+            || (parsed.mods.is_empty() && crate::keyhook::is_function_key(parsed.key));
+        if needs_register {
+            // Alt 组合 / 裸功能键双保险中的 RegisterHotKey 需要真注册：试注册检测
+            // 占用（钩子虽总能拦截，但若系统里该组合已被占用，兜底注册会失败）
             let gs = app.global_shortcut();
             gs.register(parsed).map_err(|_| {
                 "该快捷键已被系统或其他应用占用，请更换其他组合".to_string()
@@ -357,8 +375,9 @@ pub fn unregister_all_runtime<R: Runtime>(app: &AppHandle<R>) {
     let _ = app.global_shortcut().unregister_all();
     #[cfg(windows)]
     for target in TARGETS {
-        crate::keyhook::set_panel_hotkey(target, false, 0);
-        crate::keyhook::set_panel_hotkey(target, true, 0);
+        crate::keyhook::set_panel_hotkey(target, crate::keyhook::HookMode::Win, 0);
+        crate::keyhook::set_panel_hotkey(target, crate::keyhook::HookMode::Alt, 0);
+        crate::keyhook::set_panel_hotkey(target, crate::keyhook::HookMode::Bare, 0);
     }
     if let Some(b) = app.try_state::<ShortcutBindings>() {
         *b.0.lock().unwrap() = ShortcutBindingsInner::default();

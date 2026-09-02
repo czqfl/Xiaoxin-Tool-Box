@@ -46,6 +46,8 @@ ignore = "0.4.33"
 version = "0.61"
 features = [
     "Win32_Foundation",
+    # 自提权：TokenElevation 检测（main.rs elevate_if_needed）
+    "Win32_Security",
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Accessibility",
     "Win32_UI_HiDpi",
