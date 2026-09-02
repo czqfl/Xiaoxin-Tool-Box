@@ -121,11 +121,12 @@ const icoW = (sw: number) => Math.max(1.7, Math.min(5.4, 1.5 + sw * 0.2));
 // 凹口顶点 15.6 —— 头长:头宽 ≈ 2.2，去掉旧版的短粗感；但倒刺半宽
 // 有 2.0 下限，细画笔下也不会细到看不出是锥形箭头
 const IcoTapered = ({ w = 2 }: { w?: number }) => {
-  const tw = Math.max(0.5, w * 0.24);                  // 尾半宽
-  const kw = Math.max(0.8, Math.min(2.6, w * 0.44));   // 杆身到凹口顶点时的半宽
-  const hw = Math.max(2.0, Math.min(4.0, w * 0.95));   // 倒刺半宽（头部最宽）
+  const tw = Math.max(0.45, w * 0.14);                 // 尾半宽（只比针粗一点）
+  const kw = Math.max(0.7, Math.min(2.0, w * 0.36));   // 杆身到凹口顶点的半宽（比头窄 → 形成明显杆/头之分）
+  const hw = Math.max(2.0, Math.min(4.2, w * 1.0));    // 倒刺半宽（比杆身明显宽，外张可见）
   const f = (v: number) => (12 + v).toFixed(2);
-  const pts = `2.3,${f(-tw)} 15.6,${f(-kw)} 12.8,${f(-hw)} 21.8,12 12.8,${f(hw)} 15.6,${f(kw)} 2.3,${f(tw)}`;
+  // 凹口底边 12.8、凹口顶点 16.0（深度 3.2）—— 比上一版的 2.8 更深，V 口一眼可辨
+  const pts = `2.3,${f(-tw)} 16,${f(-kw)} 12.8,${f(-hw)} 21.8,12 12.8,${f(hw)} 16,${f(kw)} 2.3,${f(tw)}`;
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <polygon points={pts} transform="rotate(-45 12 12)"
@@ -288,10 +289,10 @@ function drawShape(
     const angle = Math.atan2(dy, dx);
     // 头部长度随线宽缩放（≥8 CSS px），最多占线段总长的 45%
     const hl = Math.min(Math.max(8, s.width * 2.8) * scale, len * 0.45);
-    const nd = hl * 0.42;                                   // 凹口深度（占头长 42%）
-    const wTail = Math.max(0.9, s.width * 0.38) * scale;    // 尾端半宽（加粗）
-    const wShaft = Math.max(1.2, s.width * 0.55) * scale;   // 杆身到凹口顶点时的半宽
-    const wBarb = Math.max(1.8, s.width * 0.72) * scale;    // 倒刺（头部最宽处）半宽
+    const nd = hl * 0.55;                                   // 凹口深度（占头长 55%，加深让 V 口一眼可辨）
+    const wTail = Math.max(0.6, s.width * 0.16) * scale;    // 尾端半宽（只比「针」粗一点，上一版 0.38 太粗像木桩）
+    const wShaft = Math.max(1.2, s.width * 0.50) * scale;   // 杆身到凹口顶点的半宽（比头窄，形成杆/头之分）
+    const wBarb = Math.max(2.0, Math.min(8, s.width * 0.95) * scale);  // 倒刺半宽（比杆身明显宽，外张可见）
     const ux = dx / len, uy = dy / len;                     // 沿轴单位向量
     const nx = Math.cos(angle + Math.PI / 2), ny = Math.sin(angle + Math.PI / 2);
     const bx = X2 - ux * hl, by = Y2 - uy * hl;                   // 头部底边（倒刺尖）
