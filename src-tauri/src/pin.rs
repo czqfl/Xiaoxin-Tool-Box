@@ -446,10 +446,13 @@ pub fn pin_update(app: AppHandle, id: String, x: i32, y: i32, width: u32, height
     opacity: f64, rotation: i32, flip_h: bool, flip_v: bool, shadow: bool, click_through: bool,
 ) -> Result<(), String> {
     let store = app.try_state::<PinStore>().ok_or("no state")?;
+    // 旧值快照：下面据此只在【真正变化】时才动窗口（见下方注释）
+    let prev_click_through: Option<bool>;
     // 作用域内改完即放锁：persist 内部会再次加锁，持锁调用会死锁
     {
         let mut entries = store.0.lock().unwrap();
         let pin = entries.iter_mut().find(|p| p.id == id).ok_or("not found")?;
+        prev_click_through = Some(pin.click_through);
         pin.x = x; pin.y = y;
         pin.width = width; pin.height = height;
         pin.opacity = opacity; pin.rotation = rotation;
@@ -458,11 +461,26 @@ pub fn pin_update(app: AppHandle, id: String, x: i32, y: i32, width: u32, height
         pin.click_through = click_through;
     }
     if let Some(w) = window_of_pin(&app, &id) {
-        let _ = w.set_ignore_cursor_events(click_through);
+        // 【只在真正变化时才动窗口】前端每次拖动松手/鼠标抬起都会用当前几何
+        // 回写持久化，绝大多数时候位置尺寸一字未变——旧代码无条件
+        // set_position + set_size，每次都触发 WM_SIZE → 整页重新布局 + 重新
+        // 光栅化（大贴图可达数百毫秒），正是「松手后卡一下」的根因。
+        // 比对当前几何，无变化则一次窗口操作都不做。
+        if prev_click_through != Some(click_through) {
+            let _ = w.set_ignore_cursor_events(click_through);
+        }
         // x/y/width/height 是【图片区域】几何（前端已减掉透明边距），
         // 落窗时统一加回边距——与 create_window/attach_to_staging 保持同一约定
-        let _ = w.set_position(win_pos(x, y));
-        let _ = w.set_size(win_size(width, height));
+        let want_pos = win_pos(x, y);
+        let pos_changed = w.outer_position()
+            .map(|p| p.x != want_pos.x || p.y != want_pos.y)
+            .unwrap_or(true);
+        if pos_changed { let _ = w.set_position(want_pos); }
+        let want_size = win_size(width, height);
+        let size_changed = w.inner_size()
+            .map(|s| s.width != want_size.width || s.height != want_size.height)
+            .unwrap_or(true);
+        if size_changed { let _ = w.set_size(want_size); }
         let _ = w.set_always_on_top(true);
     }
     persist(&store, &app);
