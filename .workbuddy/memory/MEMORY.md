@@ -1,5 +1,10 @@
 # 项目长期记忆（Xiaoxin-Tool-Box）
 
+## 提交约定（2026-09-02 更新）
+- **每次完成任务：git commit 并 push 到 GitHub**（origin=git@github.com:czqfl/Xiaoxin-Tool-Box.git，
+  main 分支）。旧约定「commit only, no push」已作废——主人自定义指令明确要求推送。
+- push 走非沙箱 Bash。若 push 失败先 `git fetch` 查分叉，勿盲目 force push。
+
 ## 关键环境事实：Edit/Write/Read/沙箱Bash 落在「覆盖层」，不是真实 D: 盘
 **【2026-09-02 修正】** 该结论**不再成立**：本会话实测 Write/Edit/Read 直落真实 D:
 （探针文件对非沙箱 Bash 与 git 均可见，git diff 干净）。**但不同会话行为可能不同**，
