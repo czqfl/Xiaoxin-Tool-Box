@@ -79,6 +79,9 @@ export default function PinOcrWindow() {
   // 不同于截图弹窗在同 WebView 内只切 CSS）
   const lastWRef = useRef(0);
   const lastHRef = useRef(0);
+  // 上次主动置顶（overlap 补顶）的时间戳：贴图拖拽/缩放期间 geometry 事件
+  // 高频到达，setAlwaysOnTop 每次都要走一次 SetWindowPos，节流避免拖拽掉帧
+  const lastRaiseRef = useRef(0);
 
   // 接收来源贴图窗推送（首次可由 URL 自举，后续由事件驱动）
   useEffect(() => {
@@ -160,6 +163,20 @@ export default function PinOcrWindow() {
     void win.setSize(new LogicalSize(mw, mh)).then(() => {
       void win.setPosition(new LogicalPosition(x, y)).then(() => {
         void win.show().catch(() => {});
+        // 弹窗与贴图相交（overlap：贴图过大时只能退到贴图内/贴图边缘，别无空间）：
+        // 贴图窗是置顶窗，滚轮缩放/拖拽贴图会把它激活到置顶链顶端，把本窗整个盖住
+        // ——代码层面 size/pos/show 都执行了，z 序却在贴图之下，看起来就是"不显示了"。
+        // 此时主动把本窗硬置顶到置顶链顶端（SetWindowPos HWND_TOPMOST，不抢焦点），
+        // 弹窗与贴图重合没关系——主人要求"贴图再大，弹窗也必须显示，最多贴屏幕边"。
+        // 不 overlap（弹窗在贴图外侧的正常形态）不动 z 序，避免干扰贴图拖拽。
+        const overlap = !(
+          x + mw <= data.pinLeft || x >= data.pinLeft + data.pinW
+          || y + mh <= data.pinTop || y >= data.pinTop + data.pinH
+        );
+        if (overlap && performance.now() - lastRaiseRef.current > 250) {
+          lastRaiseRef.current = performance.now();
+          void win.setAlwaysOnTop(true).catch(() => {});
+        }
       }).catch(() => {});
     }).catch(() => {});
   }, [data]);
