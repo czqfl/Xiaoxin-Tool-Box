@@ -64,3 +64,14 @@ Git 结果弹窗用户先后要过两种形态：面板内卡片（createPortal�
   过期(24h)先交货、后台重扫。
 - 命令面板 UI 同日重写：左分区导航（Tab 切换）+ 双行结果 + 每来源一色（KIND_COLOR），
   窗口 780×600；检索返回 QueryResult{items,counts}；空态常驻前 30 个本机应用。
+
+## 贴图 OCR 独立窗(pin-ocr)生命周期（2026-09-02 三轮修复沉淀，1d737e4）
+- pin/pin-ocr 系前端动态 new WebviewWindow 的成功实例——「勿动态建窗」铁律只针对
+  带亚克力时序依赖的复杂窗，简单置顶窗动态建没问题。
+- 独立子窗级联关闭必须下沉 Rust 统一出口：pin_close 命令 + lib.rs Destroyed 事件
+  （staging 与 pin-<id> 分支）都调 pin::drop_ocr_window；前端 getByLabel 存在性
+  安全网会被 staging「销毁即补建同 label 新窗」骗过，只当第二道闸。
+- 独立小窗防超屏上限用 window.screen.availWidth 在 JS 算好注入，禁用 vw/vh
+  （=窗自身视口，会把 560 面板 clamp 成 284「缩没」）。
+- 两个 alwaysOnTop 窗重叠：后激活者在上，弹窗需 setAlwaysOnTop(true) 硬顶
+  （250ms 节流防拖拽高频触发）。
