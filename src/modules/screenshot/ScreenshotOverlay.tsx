@@ -116,20 +116,32 @@ const IcoLineGroup = () => (
  *  图标本身就是粗细预览 */
 const icoW = (sw: number) => Math.max(1.7, Math.min(5.4, 1.5 + sw * 0.2));
 
-// 锥形箭头：实心 + 带【凹口】的倒刺箭头（与画布上的画法一致）。
+// 锥形箭头：实心 + 带【凹口】的倒刺箭头 + 尾端【内凹】燕尾（与画布画法一致）。
 // 【细长】造型：全长 19.5（2.3→21.8），头部独占 9，倒刺底边 12.8、
-// 凹口顶点 15.6 —— 头长:头宽 ≈ 2.2，去掉旧版的短粗感；但倒刺半宽
+// 凹口顶点 16.0 —— 头长:头宽 ≈ 2.2，去掉旧版的短粗感；但倒刺半宽
 // 有 2.0 下限，细画笔下也不会细到看不出是锥形箭头
 const IcoTapered = ({ w = 2 }: { w?: number }) => {
   const tw = Math.max(0.45, w * 0.14);                 // 尾半宽（只比针粗一点）
   const kw = Math.max(0.7, Math.min(2.0, w * 0.36));   // 杆身到凹口顶点的半宽（比头窄 → 形成明显杆/头之分）
   const hw = Math.max(2.0, Math.min(4.2, w * 1.0));    // 倒刺半宽（比杆身明显宽，外张可见）
+  const td = Math.max(1.1, Math.min(3.2, tw * 2.4));   // 尾端内凹深度（燕尾缺口，与尾宽成比例）
   const f = (v: number) => (12 + v).toFixed(2);
-  // 凹口底边 12.8、凹口顶点 16.0（深度 3.2）—— 比上一版的 2.8 更深，V 口一眼可辨
-  const pts = `2.3,${f(-tw)} 16,${f(-kw)} 12.8,${f(-hw)} 21.8,12 12.8,${f(hw)} 16,${f(kw)} 2.3,${f(tw)}`;
+  // 头部：倒刺底边 12.8 → 凹口顶点 16.0（凹深 3.2）→ 尖端 21.8
+  // 尾端：不平口，用二次曲线 Q 把尾缘朝尖端顶进去 td（控制点前移 2×td）
+  const d = [
+    `M2.3,${f(-tw)}`,
+    `L16,${f(-kw)}`,
+    `L12.8,${f(-hw)}`,
+    `L21.8,12`,
+    `L12.8,${f(hw)}`,
+    `L16,${f(kw)}`,
+    `L2.3,${f(tw)}`,
+    `Q${(2.3 + td * 2).toFixed(2)},12 2.3,${f(-tw)}`,
+    "Z",
+  ].join(" ");
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <polygon points={pts} transform="rotate(-45 12 12)"
+      <path d={d} transform="rotate(-45 12 12)"
         stroke="currentColor" strokeWidth="0.7" strokeLinejoin="round" />
     </svg>
   );
@@ -281,8 +293,9 @@ function drawShape(
     // 锥形箭头：带实际尾宽的锥形杆 + 底部带【凹口】的倒刺箭头。
     // 头部 = 三角形基础上，从底边朝尖端再挖掉一个小三角（凹口），
     // 剩下两片向后外张的倒刺 —— 比纯三角头部指向感更强。
-    // 【尾端】旧版是 moveTo(X1,Y1) 单点（收到 0 宽，过细），现改为有
-    // 实际宽度的平尾，再沿杆身渐粗到凹口顶点处的 wShaft
+    // 【尾端】旧版是 moveTo(X1,Y1) 单点（收到 0 宽，过细），现改为有实际
+    // 宽度的尾端；且尾缘不是平口——用二次曲线朝尖端方向凹进去（燕尾缺口），
+    // 这是常规箭头的画法，平尾看着像被一刀切断的木棍
     const dx = X2 - X1, dy = Y2 - Y1;
     const len = Math.sqrt(dx * dx + dy * dy);
     if (len < 2 * scale) { ctx.restore(); return; }
@@ -297,15 +310,21 @@ function drawShape(
     const nx = Math.cos(angle + Math.PI / 2), ny = Math.sin(angle + Math.PI / 2);
     const bx = X2 - ux * hl, by = Y2 - uy * hl;                   // 头部底边（倒刺尖）
     const kx = X2 - ux * (hl - nd), ky = Y2 - uy * (hl - nd);     // 凹口顶点
+    // 尾端内凹深度：与尾宽成比例（约 2.2×半宽 ≈ 1.1×全宽），细画笔下也有
+    // 1.2 CSS px 保底，最多不超过线段总长的 15%
+    const td = Math.min(Math.max(1.2 * scale, wTail * 2.2), len * 0.15);
     const P = (px: number, py: number, off: number) => ctx.lineTo(px + nx * off, py + ny * off);
     ctx.beginPath();
-    ctx.moveTo(X1 - nx * wTail, Y1 - ny * wTail);   // 尾端上缘（平尾，非尖点）
+    ctx.moveTo(X1 - nx * wTail, Y1 - ny * wTail);   // 尾端上缘
     P(kx, ky, -wShaft);                             // 杆身上缘 → 凹口顶点
     P(bx, by, -wBarb);                              // 上倒刺尖
     ctx.lineTo(X2, Y2);                             // 尖端
     P(bx, by, wBarb);                               // 下倒刺尖
     P(kx, ky, wShaft);                              // 凹口顶点 → 杆身下缘
     P(X1, Y1, wTail);                               // 尾端下缘
+    // 尾缘内凹：二次贝塞尔在 t=0.5 处只到控制点一半，故控制点沿轴前移 2×td，
+    // 曲线实际凹深恰为 td —— 形成向内的燕尾缺口
+    ctx.quadraticCurveTo(X1 + ux * td * 2, Y1 + uy * td * 2, X1 - nx * wTail, Y1 - ny * wTail);
     ctx.closePath();
     ctx.fillStyle = ctx.strokeStyle as string;
     ctx.fill();
