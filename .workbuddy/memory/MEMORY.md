@@ -75,3 +75,11 @@ Git 结果弹窗用户先后要过两种形态：面板内卡片（createPortal�
   （=窗自身视口，会把 560 面板 clamp 成 284「缩没」）。
 - 两个 alwaysOnTop 窗重叠：后激活者在上，弹窗需 setAlwaysOnTop(true) 硬顶
   （250ms 节流防拖拽高频触发）。
+## 低级键盘钩子修饰键状态需物理自愈（2026-09-02，4c1021b）
+- 钩子自维护 ALT_HELD/WIN_HELD/CTRL_HELD/SHIFT_HELD；系统会在 Alt+Tab（吞 Alt keyup）、
+  Win 菜单/贴附（吞 Win keyup）后不发 keyup → 标记残留 true → 裸功能键（F1~F12，要求
+  全部修饰键未按住）被永久挡掉，但 Alt 组合键（只要 Alt down 即匹配）正常——症状
+  "只在特定应用里裸键失效"（进该应用前常 Alt+Tab）。修复：hook_proc 每事件先调
+  reconcile_modifiers()，以 GetAsyncKeyState 物理状态对账，只清残留绝不反向置位。
+- 定位技巧：同钩子下"Alt+V 正常但 F1 无效"= 钩子已收到键，差异仅在裸键分支前置条件；
+  查 diag.log 有无 `bare hotkey matched` vs `alt hotkey matched` 一锤定音。
