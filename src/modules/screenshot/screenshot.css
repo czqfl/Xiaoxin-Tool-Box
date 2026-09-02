@@ -273,10 +273,16 @@ html[data-theme="dark"] {
   padding: 2px !important;
   display: inline-flex !important; align-items: center !important; justify-content: center !important;
 }
-/* 粗细圆点的四角取景框：与 OCR 图标同款边框语言（SVG 复用其四角路径），
-   框不动、点的大小即笔画粗细 */
+/* 粗细圆点的四角取景框：与 OCR 图标同款边框语言（SVG 复用其四角路径）。
+   框随圆贴合生长（公式在组件内）：圆大到快碰臂尖时框同心外扩、与圆边保持
+   ~0.8px 恒定细缝，圆+框像一体生长；过渡参数与圆点严格一致（80ms ease），
+   滚轮调节时二者同步滑动。left/top 50% + translate 居中而非 inset:0+
+   margin:auto——max sw 时框（33.5px）大于 30px 按钮需对称外溢，
+   margin:auto 在溢出布局下会退化为非居中 */
 .shot-sw-wheel-frame {
-  position: absolute; inset: 0; margin: auto; pointer-events: none;
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  pointer-events: none;
+  transition: width 80ms ease, height 80ms ease;
 }
 .shot-sw-wheel span {
   display: block; border-radius: 50%; background: var(--tb-fg);

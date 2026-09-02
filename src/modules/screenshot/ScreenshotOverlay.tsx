@@ -2739,6 +2739,12 @@ export function ScreenshotOverlay() {
         // 所有工具统一：二次选项一律挂在【一级图标正下方】，不再单独
         // 在主条下方拼接配置面板（旧版单工具与形状/线组行为不一致）
         const menuOpen = submenuOpen !== null;
+        // 粗细图标：圆径沿用 4+1.2sw（封顶 26）；四角框【随圆贴合生长】——
+        // viewBox 24 中臂尖位于半幅的 0.821（9.85/12），frame=(D+1.5)/0.821
+        // 使臂尖与圆边保持 ~0.8px 恒定细缝：圆从快碰到框（sw≈12）起框开始
+        // 同步外扩，视觉上框抱圆、融为一体；基态仍 22px 不变
+        const swDot = Math.min(4 + sw * 1.2, 26);
+        const swFrame = Math.max(22, Math.min((swDot + 1.5) * 1.22, 34));
         // 主条 barH≈40px，二次选项面板 panelH≈52px。条的位置【只按条本身】能否
         // 放下决定——开合二级选项时条不跳动；面板方向独立判定：条下方有空间就
         // 向下展开，没有就翻到条上方（向上扩展）
@@ -2860,8 +2866,8 @@ export function ScreenshotOverlay() {
                   window.clearTimeout(swBadgeTimer.current);
                   swBadgeTimer.current = window.setTimeout(() => setSwBadge(null), 800);
                 }}>
-                <span style={{ width: Math.min(4 + sw * 1.2, 26), height: Math.min(4 + sw * 1.2, 26) }} />
-                  <svg className="shot-sw-wheel-frame" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <span style={{ width: swDot, height: swDot }} />
+                  <svg className="shot-sw-wheel-frame" width={swFrame} height={swFrame} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M3 8V5.5A2.5 2.5 0 0 1 5.5 3H8" />
                     <path d="M16 3h2.5A2.5 2.5 0 0 1 21 5.5V8" />
                     <path d="M21 16v2.5A2.5 2.5 0 0 1 18.5 21H16" />
