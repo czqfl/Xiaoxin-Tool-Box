@@ -477,6 +477,43 @@ fn vk_to_combo_name(vk: u32) -> Option<String> {
     }
 }
 
+/// 修饰键状态自愈：以 GetAsyncKeyState 物理状态校准内部
+/// ALT_HELD / WIN_HELD / CTRL_HELD / SHIFT_HELD。
+/// 只清除"标记 true 但物理已松开"的残留，绝不反向误置。
+fn reconcile_modifiers() {
+    fn held(vk: VIRTUAL_KEY) -> bool {
+        unsafe { (GetAsyncKeyState(vk.0 as i32) as u16) & 0x8000 != 0 }
+    }
+    if WIN_HELD.load(Ordering::SeqCst) && !held(VK_LWIN) && !held(VK_RWIN) {
+        WIN_HELD.store(false, Ordering::SeqCst);
+        crate::storage::diag_write("[keyhook] self-heal: win_held stale -> false");
+    }
+    if ALT_HELD.load(Ordering::SeqCst)
+        && !held(VK_MENU)
+        && !held(VK_LMENU)
+        && !held(VK_RMENU)
+    {
+        ALT_HELD.store(false, Ordering::SeqCst);
+        crate::storage::diag_write("[keyhook] self-heal: alt_held stale -> false");
+    }
+    if CTRL_HELD.load(Ordering::SeqCst)
+        && !held(VK_CONTROL)
+        && !held(VK_LCONTROL)
+        && !held(VK_RCONTROL)
+    {
+        CTRL_HELD.store(false, Ordering::SeqCst);
+        crate::storage::diag_write("[keyhook] self-heal: ctrl_held stale -> false");
+    }
+    if SHIFT_HELD.load(Ordering::SeqCst)
+        && !held(VK_SHIFT)
+        && !held(VK_LSHIFT)
+        && !held(VK_RSHIFT)
+    {
+        SHIFT_HELD.store(false, Ordering::SeqCst);
+        crate::storage::diag_write("[keyhook] self-heal: shift_held stale -> false");
+    }
+}
+
 unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code != HC_ACTION as i32 {
         return CallNextHookEx(None, code, wparam, lparam);
@@ -492,6 +529,14 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
     let msg = wparam.0;
     let is_down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
     let is_up = msg == WM_KEYUP || msg == WM_SYSKEYUP;
+
+    // 修饰键状态自愈：系统会吞掉部分修饰键的 keyup（Alt+Tab 后松 Alt、Win 菜单
+    // /贴靠布局后松 Win 等），若 ALT_HELD/WIN_HELD 等残留 true：裸功能键(如 F1
+    // 截图)会被"有修饰键按住"挡掉——这就是「F1 在 WorkBuddy 里失效、Alt+V 却
+    // 正常」的真根因(都走同一低级钩子，区别只在裸键分支要求所有修饰键未按住)；
+    // 残留还会让纯字母按键被误判成组合(输入 v 却呼出剪贴板)。每个事件以物理
+    // 状态校准一次，开销可忽略。
+    reconcile_modifiers();
 
     // Win 键自身：只跟踪状态；消费过组合后抬起时吞掉，避免弹出开始菜单
     if vk == VK_LWIN.0 as u32 || vk == VK_RWIN.0 as u32 {
@@ -692,6 +737,18 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                 post(action);
                 return LRESULT(1);
             }
+        }
+        // 诊断：F1~F12 到达钩子但未被任何分支匹配——区分"钩子根本没收到键"
+        // （此日志不出现）与"修饰键残留/槽位缺失挡掉了匹配"（此日志出现并
+        // 打印当时四个修饰键标记）。修复 WorkBuddy 里 F1 失效时靠它一锤定音。
+        if is_down && (0x70..=0x7B).contains(&vk) {
+            crate::storage::diag_write(&format!(
+                "[keyhook] fn-key unhandled vk=0x{vk:X} held w:{} a:{} c:{} s:{}",
+                WIN_HELD.load(Ordering::SeqCst) as u8,
+                ALT_HELD.load(Ordering::SeqCst) as u8,
+                CTRL_HELD.load(Ordering::SeqCst) as u8,
+                SHIFT_HELD.load(Ordering::SeqCst) as u8,
+            ));
         }
         // 顺序粘贴 Ctrl+V：仅剪贴板面板打开时拦截（吞掉物理按键，稍后发送
         // 一次干净的模拟粘贴）。面板关闭时放行，普通粘贴不受影响。
