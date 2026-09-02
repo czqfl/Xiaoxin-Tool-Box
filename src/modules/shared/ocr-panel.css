@@ -122,8 +122,19 @@
 @media (prefers-reduced-motion: reduce) {
   .ocr-trans, .ocr-pout, .ocr-pwait, .ocr-panel { animation: none; }
 }
-/* 该行没译成（回退显示原文）：压暗以区别于正常译文 */
+/* 该行没译成（回退显示原文）：压暗 + 「未译」小标签，让"原本应是译文、实际是原文"一眼可辨。
+   区分两种"原文 == 译文"：
+     ① 服务商原样返回（如纯数字 / 标准号无可译内容）→ pr.ok=true，正常白色，无标签
+     ② API 调用失败（网络 / 配额 / 行数超出上限）→ pr.ok=false，压暗 + 红色「未译」标签 */
 .ocr-pfail { color: rgba(255, 255, 255, 0.42); }
+.ocr-pfail-tag {
+  display: inline-block; font-size: 10px; font-weight: 500;
+  padding: 1px 6px; margin-right: 6px; border-radius: 4px;
+  background: rgba(229, 72, 77, 0.16);
+  color: rgba(229, 72, 77, 0.92);
+  vertical-align: 2px; letter-spacing: 0.3px;
+  user-select: none;
+}
 .ocr-note {
   flex: none; padding: 5px 14px; font-size: 11px; color: rgba(255, 255, 255, 0.5);
   border-top: 1px solid rgba(255, 255, 255, 0.07); user-select: none;
