@@ -7,6 +7,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
 import { emitTo } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import { useConfigStore } from "../../stores/configStore";
 import "./pin.css";
 
@@ -77,6 +78,10 @@ export default function PinMenu() {
         void win.show().then(() => {
           void win.setFocus().catch(() => {});
           shownRef.current = true;
+          // 显示后补刷亚克力：本窗由前端动态创建、不在启动效果管线内，SWCA 模糊层
+          // 在 z-order 变化（show）后还可能失效——与各面板 show→panel_refresh_acrylic
+          // 同序，每次显示都补刷一次（命令内部读 acrylic_enabled 开关，关闭则只留圆角）
+          invoke("panel_refresh_acrylic", { label: "pin-menu" }).catch(() => {});
         }).catch(() => {});
       }).catch(() => {});
     }).catch(() => {});
