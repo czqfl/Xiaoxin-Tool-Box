@@ -15,11 +15,12 @@ import { EVT_TRANSLATE_LINE } from "../../core/events";
 import { useConfigStore } from "../../stores/configStore";
 import { scrollBegin } from "../scrollshot/api";
 import { Pencil, Undo2, Redo2, X, Download, Copy } from "lucide-react";
+import { ARROW_ICON_PATH } from "./arrow-path.const";
 import { OcrPanel } from "../shared/OcrPanel";
 import { groupOcrParagraphs } from "../shared/ocr-group";
 import "./screenshot.css";
 
-type Tool = "select"|"rect"|"ellipse"|"arrow"|"tapered"|"line"|"brush"|"mosaic"|"text"|"number";
+type Tool = "select"|"rect"|"ellipse"|"arrow"|"line"|"brush"|"mosaic"|"text"|"number";
 type Phase = "idle"|"selected";
 interface Pt { x: number; y: number; }
 interface Rect { x: number; y: number; w: number; h: number; }
@@ -77,85 +78,28 @@ const IcoShape = () => (
     <ellipse cx="17" cy="16.5" rx="5.5" ry="4.5"/>
   </svg>
 );
-// 箭头（经典）：等宽杆身 + 端部 V 形双翼箭头（描边，翼内镂空）。
-// 与「锥形箭头」一眼可辨：杆身从头到尾一样粗，头部是两条描边翼。
-// 【加长】杆身 2.8→20.8（原 3.2→19.4）、头部拉到 8.8 长、翼展收窄
-// （原 2.4+0.78w → 1.8+0.44w），整体修长不短粗
-// 经典箭头：等宽直线 + 外张的 V 形箭头（chevron 填充多边形，与画布画法一致）。
-// 旧版是「描两条边 + round 线帽」，翼尖被磨成圆头、且离杆身太近 —— 缩放后
-// 肩上的两个尖儿几乎看不见。改为填充多边形后，尖端与两翼尖都是真正的尖点。
-const IcoArrow = ({ w = 2 }: { w?: number }) => {
-  const tip = 21.8;
-  const hl = Math.min(6.6, 3.0 + w * 0.8);        // 头长（随粗细增长）
-  const sw = hl * 0.55;                           // 翼展半宽
-  const d0 = hl * 0.35;                           // V 口内顶点到尖端的距离
-  const base = tip - hl, vin = tip - d0;
-  // 杆身收在「chevron 外缘 = 杆宽」处，与画布同一套算法
-  const xEnd = Math.min(hl * 0.9, Math.max(hl * 0.15, (hl * (w / 2)) / sw));
-  const f = (v: number) => (12 + v).toFixed(2);
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-      strokeWidth={w} strokeLinecap="butt" strokeLinejoin="miter" aria-hidden="true">
-      <g transform="rotate(-45 12 12)">
-        <line x1="2.6" y1="12" x2={(tip - xEnd).toFixed(2)} y2="12" />
-        <path d={`M${tip},12 L${base.toFixed(2)},${f(-sw)} L${vin.toFixed(2)},12 L${base.toFixed(2)},${f(sw)} Z`}
-          fill="currentColor" stroke="none" />
-      </g>
-    </svg>
-  );
-};
-// 直线：一条左下→右上的斜线，笔画粗细即当前画笔粗细（本身就是粗细示意），
-// 与上面两个箭头图标的差别就是「没有箭头」
-const IcoLine = ({ w = 2 }: { w?: number }) => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-    strokeWidth={w} strokeLinecap="round" aria-hidden="true">
-    <line x1="3.8" y1="20.2" x2="20.2" y2="3.8" />
+// 箭头：翼形流线箭头（尾部窄、头部宽），来自用户提供的企微风格箭头 PNG；
+// trace 出来的水平 path 加 rotate(-45 12 12) 转到斜向上方向（粗端朝右上）
+const IcoArrow = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+    <path d={ARROW_ICON_PATH} transform="rotate(-45 12 12)" />
+  </svg>
+);
+// 直线：一条左下→右上的斜线（Lucide 无"纯直线"图标，TrendingUp 是折线+箭头，
+// 曾被误用作直线图标）。自绘与 Lucide 描线风格一致
+const IcoLine = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <line x1="4.5" y1="19.5" x2="19.5" y2="4.5" />
   </svg>
 );
 // 线组图标：折线+箭头叠合（Snipaste 第二格趋势线）。统一 22×22 与其他
 // 图标对齐，去掉超尺寸浮起感
 const IcoLineGroup = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    {/* 斜直线 + 端部两翼小箭头：一眼可辨"箭头/直线"组（旧折线示意看不出箭头） */}
-    <line x1="4.5" y1="19.5" x2="19.5" y2="4.5" />
-    <polyline points="13 4.5 19.5 4.5 19.5 11" />
+    <polyline points="3 17 9 11 13 14 20 6"/>
+    <polyline points="15 6 20 6 20 11"/>
   </svg>
 );
-/** 线组三个二级图标的【粗细示意】映射：把当前画笔粗细 sw(1~24) 压到图标
- *  可辨的 1.7~5.4 个 viewBox 单位——滚轮调粗细，二级菜单里三个图标同步变粗，
- *  图标本身就是粗细预览 */
-const icoW = (sw: number) => Math.max(1.7, Math.min(5.4, 1.5 + sw * 0.2));
-
-// 锥形箭头：实心 + 带【凹口】的倒刺箭头 + 尾端【内凹】燕尾（与画布画法一致）。
-// 【细长】造型：全长 19.5（2.3→21.8），头部独占 9，倒刺底边 12.8、
-// 凹口顶点 16.0 —— 头长:头宽 ≈ 2.2，去掉旧版的短粗感；但倒刺半宽
-// 有 2.0 下限，细画笔下也不会细到看不出是锥形箭头
-const IcoTapered = ({ w = 2 }: { w?: number }) => {
-  const tw = Math.max(0.45, w * 0.14);                 // 尾半宽（只比针粗一点）
-  const kw = Math.max(0.7, Math.min(2.0, w * 0.36));   // 杆身到凹口顶点的半宽（比头窄 → 形成明显杆/头之分）
-  const hw = Math.max(2.4, Math.min(5.0, w * 1.3));    // 倒刺半宽（1.3×，旧 1.0× —— 明显外张）
-  const td = Math.max(1.1, Math.min(3.2, tw * 2.4));   // 尾端内凹深度（燕尾缺口，与尾宽成比例）
-  const f = (v: number) => (12 + v).toFixed(2);
-  // 头部加长：倒刺底边 11.2（旧 12.8）→ 凹口顶点 15.8 → 尖端 21.8，头长 10.6
-  // 尾端：不平口，用二次曲线 Q 把尾缘朝尖端顶进去 td（控制点前移 2×td）
-  const d = [
-    `M2.3,${f(-tw)}`,
-    `L15.8,${f(-kw)}`,
-    `L11.2,${f(-hw)}`,
-    `L21.8,12`,
-    `L11.2,${f(hw)}`,
-    `L15.8,${f(kw)}`,
-    `L2.3,${f(tw)}`,
-    `Q${(2.3 + td * 2).toFixed(2)},12 2.3,${f(-tw)}`,
-    "Z",
-  ].join(" ");
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d={d} transform="rotate(-45 12 12)"
-        stroke="currentColor" strokeWidth="0.7" strokeLinejoin="round" />
-    </svg>
-  );
-};
 const IcoBrush = () => <Pencil {...IC} />;
 // 马赛克：一个圆角方框 + 左上/右下两个放大的填充格（像素化的对角示意）
 const IcoMosaic = () => (
@@ -221,13 +165,11 @@ const IcoSelect = () => (
 /** 工具条按钮（Snipaste 式）：同类形状合并为一键，重复点击在组内循环切换
  *  （矩形→椭圆→矩形…），悬停提示「名称、名称 (Ctrl+N)」，Ctrl+数字直达。
  *  每组图标带主题色：常态即彩色描边，激活时同色底+白色描边 */
-/** 工具图标组件：线组三个图标接收当前画笔粗细 w 做「粗细示意」，其余忽略该 prop */
-type ToolIcon = (p: { w?: number }) => JSX.Element;
-const TOOL_BUTTONS: { items: [Tool, ToolIcon, string, string][]; groupIcon?: ToolIcon; hotkey: string }[] = [
+const TOOL_BUTTONS: { items: [Tool, () => JSX.Element, string, string][]; groupIcon?: () => JSX.Element; hotkey: string }[] = [
   // 形状组：未激活显示组合图标（IcoShape），激活后显示当前子工具图标
   { items: [["rect", IcoRect, "矩形", "#64d2ff"], ["ellipse", IcoEllipse, "椭圆", "#64d2ff"]], groupIcon: IcoShape, hotkey: "Ctrl+1" },
-  // 线组：锥形箭头默认（企微同款、指向性强）；经典箭头/直线并列
-  { items: [["tapered", IcoTapered, "锥形箭头", "#32d74b"], ["arrow", IcoArrow, "箭头", "#32d74b"], ["line", IcoLine, "直线", "#32d74b"]], groupIcon: IcoLineGroup, hotkey: "Ctrl+2" },
+  // 线组：箭头排前面（默认选中箭头，更常用）
+  { items: [["arrow", IcoArrow, "箭头", "#32d74b"], ["line", IcoLine, "直线", "#32d74b"]], groupIcon: IcoLineGroup, hotkey: "Ctrl+2" },
   { items: [["brush", IcoBrush, "画笔", "#ff9f0a"]], hotkey: "Ctrl+3" },
   { items: [["mosaic", IcoMosaic, "马赛克", "#bf5af2"]], hotkey: "Ctrl+4" },
   { items: [["text", IcoTextT, "文字", "#ffd60a"]], hotkey: "Ctrl+5" },
@@ -235,7 +177,7 @@ const TOOL_BUTTONS: { items: [Tool, ToolIcon, string, string][]; groupIcon?: Too
 ];
 
 /** 按钮的悬停提示文案：「矩形、椭圆 (Ctrl+1)」；单工具为「画笔 (Ctrl+3)」 */
-const btnTip = (b: { items: [Tool, ToolIcon, string, string][]; hotkey: string }) =>
+const btnTip = (b: { items: [Tool, () => JSX.Element, string, string][]; hotkey: string }) =>
   `${b.items.map(([, , n]) => n).join("、")} (${b.hotkey})`;
 
 /** 标注色板内置色（8 色）。自定义色在其后追加；自定义色上限 ANNO_MAX_CUSTOM */
@@ -289,72 +231,13 @@ function drawShape(
     const len = Math.sqrt(dx * dx + dy * dy);
     if (len < 2 * scale) { ctx.restore(); return; }
     const angle = Math.atan2(dy, dx);
-    const ux = dx / len, uy = dy / len;                     // 沿轴单位向量
-    const nx = Math.cos(angle + Math.PI / 2), ny = Math.sin(angle + Math.PI / 2);
-    // 头长随线宽放大（4.5× 线宽起、下限 11 CSS px），最多占线段总长 40%
-    // ——旧版上限 16px 且翼只张开 ±0.4rad，线一粗两翼就跟杆身糊成一团
-    const hl = Math.min(Math.max(11, s.width * 4.5) * scale, 30 * scale, len * 0.4);
-    const sw = hl * 0.55;                                   // 两翼张开的半宽（明显外伸）
-    const d0 = hl * 0.35;                                   // V 口内顶点到尖端的距离
-    // 杆身收在「chevron 外缘宽度 = 杆宽」处：既不留缝，也不会从尖端戳出去把尖糊平
-    const xEnd = Math.min(hl * 0.9, Math.max(hl * 0.15, (hl * (ctx.lineWidth / 2)) / sw));
-    ctx.lineCap = "butt";
-    ctx.beginPath();
-    ctx.moveTo(X1, Y1);
-    ctx.lineTo(X2 - ux * xEnd, Y2 - uy * xEnd);
-    ctx.stroke();
-    // V 形箭头（填充多边形）：T 尖端 → E+ 上翼尖 → V_in 凹口 → E- 下翼尖，四点皆尖
-    const Vx = X2 - ux * d0, Vy = Y2 - uy * d0;
-    const Ex = X2 - ux * hl, Ey = Y2 - uy * hl;
+    const hl = Math.min(16 * scale, len * 0.3);
     ctx.beginPath();
     ctx.moveTo(X2, Y2);
-    ctx.lineTo(Ex + nx * sw, Ey + ny * sw);
-    ctx.lineTo(Vx, Vy);
-    ctx.lineTo(Ex - nx * sw, Ey - ny * sw);
-    ctx.closePath();
-    ctx.fillStyle = s.color;
-    ctx.fill();
-  } else if (s.kind === "tapered") {
-    // 锥形箭头：带实际尾宽的锥形杆 + 底部带【凹口】的倒刺箭头。
-    // 头部 = 三角形基础上，从底边朝尖端再挖掉一个小三角（凹口），
-    // 剩下两片向后外张的倒刺 —— 比纯三角头部指向感更强。
-    // 【尾端】旧版是 moveTo(X1,Y1) 单点（收到 0 宽，过细），现改为有实际
-    // 宽度的尾端；且尾缘不是平口——用二次曲线朝尖端方向凹进去（燕尾缺口），
-    // 这是常规箭头的画法，平尾看着像被一刀切断的木棍
-    const dx = X2 - X1, dy = Y2 - Y1;
-    const len = Math.sqrt(dx * dx + dy * dy);
-    if (len < 2 * scale) { ctx.restore(); return; }
-    const angle = Math.atan2(dy, dx);
-    // 头部长度随线宽缩放（≥11 CSS px），最多占线段总长的 50%
-    // ——旧版 2.8× 线宽、下限 8px，头太小，用户反馈"像木桩/削过的铅笔"
-    const hl = Math.min(Math.max(11, s.width * 4.5) * scale, len * 0.5);
-    const nd = hl * 0.55;                                   // 凹口深度（占头长 55%，加深让 V 口一眼可辨）
-    const wTail = Math.max(0.6, s.width * 0.16) * scale;    // 尾端半宽（只比「针」粗一点，上一版 0.38 太粗像木桩）
-    const wShaft = Math.max(1.2, s.width * 0.50) * scale;   // 杆身到凹口顶点的半宽（比头窄，形成杆/头之分）
-    // 倒刺半宽：1.6× 线宽（旧 0.95×）且上限从 8 提到 20 —— 头要明显向外侧 + 向后张开
-    const wBarb = Math.max(2.6, Math.min(20, s.width * 1.6) * scale);
-    const ux = dx / len, uy = dy / len;                     // 沿轴单位向量
-    const nx = Math.cos(angle + Math.PI / 2), ny = Math.sin(angle + Math.PI / 2);
-    const bx = X2 - ux * hl, by = Y2 - uy * hl;                   // 头部底边（倒刺尖）
-    const kx = X2 - ux * (hl - nd), ky = Y2 - uy * (hl - nd);     // 凹口顶点
-    // 尾端内凹深度：与尾宽成比例（约 2.2×半宽 ≈ 1.1×全宽），细画笔下也有
-    // 1.2 CSS px 保底，最多不超过线段总长的 15%
-    const td = Math.min(Math.max(1.2 * scale, wTail * 2.2), len * 0.15);
-    const P = (px: number, py: number, off: number) => ctx.lineTo(px + nx * off, py + ny * off);
-    ctx.beginPath();
-    ctx.moveTo(X1 - nx * wTail, Y1 - ny * wTail);   // 尾端上缘
-    P(kx, ky, -wShaft);                             // 杆身上缘 → 凹口顶点
-    P(bx, by, -wBarb);                              // 上倒刺尖
-    ctx.lineTo(X2, Y2);                             // 尖端
-    P(bx, by, wBarb);                               // 下倒刺尖
-    P(kx, ky, wShaft);                              // 凹口顶点 → 杆身下缘
-    P(X1, Y1, wTail);                               // 尾端下缘
-    // 尾缘内凹：二次贝塞尔在 t=0.5 处只到控制点一半，故控制点沿轴前移 2×td，
-    // 曲线实际凹深恰为 td —— 形成向内的燕尾缺口
-    ctx.quadraticCurveTo(X1 + ux * td * 2, Y1 + uy * td * 2, X1 - nx * wTail, Y1 - ny * wTail);
-    ctx.closePath();
-    ctx.fillStyle = ctx.strokeStyle as string;
-    ctx.fill();
+    ctx.lineTo(X2 - hl * Math.cos(angle - 0.4), Y2 - hl * Math.sin(angle - 0.4));
+    ctx.moveTo(X2, Y2);
+    ctx.lineTo(X2 - hl * Math.cos(angle + 0.4), Y2 - hl * Math.sin(angle + 0.4));
+    ctx.stroke();
   } else if (s.kind === "line") {
     ctx.beginPath(); ctx.moveTo(X1, Y1); ctx.lineTo(X2, Y2); ctx.stroke();
   } else if (s.kind === "brush" && s.points && s.points.length > 1) {
@@ -467,7 +350,7 @@ const annoBounds = (a: Anno): Rect => {
 /** 可二次编辑的图形。马赛克落下即冻结采样快照，移位会换成别处像素、
  *  露出原处内容，语义不对，排除；文字/序号不在编辑范围 */
 const shapeEditable = (a: Anno) =>
-  a.kind === "rect" || a.kind === "ellipse" || a.kind === "arrow" || a.kind === "tapered" || a.kind === "line" || a.kind === "brush";
+  a.kind === "rect" || a.kind === "ellipse" || a.kind === "arrow" || a.kind === "line" || a.kind === "brush";
 const distSeg = (p: Pt, a: Pt, b: Pt): number => {
   const dx = b.x - a.x, dy = b.y - a.y;
   const l2 = dx * dx + dy * dy;
@@ -477,7 +360,7 @@ const distSeg = (p: Pt, a: Pt, b: Pt): number => {
 };
 /** 编辑手柄：rect/ellipse = 包围盒四角；arrow/line = 两端点；brush 只可移动无手柄 */
 const shapeHandles = (a: Anno): Pt[] => {
-  if (a.kind === "arrow" || a.kind === "tapered" || a.kind === "line") return [{ x: a.x1, y: a.y1 }, { x: a.x2, y: a.y2 }];
+  if (a.kind === "arrow" || a.kind === "line") return [{ x: a.x1, y: a.y1 }, { x: a.x2, y: a.y2 }];
   if (a.kind === "rect" || a.kind === "ellipse") {
     const b = annoBounds(a);
     return [
@@ -503,7 +386,7 @@ const shapeHit = (a: Anno, pt: Pt, tol: number): boolean => {
     const nx = (pt.x - (b.x + b.w / 2)) / rx, ny = (pt.y - (b.y + b.h / 2)) / ry;
     return nx * nx + ny * ny <= 1;
   }
-  if (a.kind === "arrow" || a.kind === "tapered" || a.kind === "line") {
+  if (a.kind === "arrow" || a.kind === "line") {
     return distSeg(pt, { x: a.x1, y: a.y1 }, { x: a.x2, y: a.y2 }) <= t;
   }
   const pts = a.points;
@@ -660,7 +543,7 @@ export function ScreenshotOverlay() {
   /** 激活某个工具条按钮：若当前已在组内则循环切到下一个兄弟工具
    *  （矩形→椭圆→矩形…，Snipaste 同款交互），否则取组内第一个。
    *  【不】在此收起子菜单：点击组按钮 = 选默认工具 + 展开枚举，两者共存 */
-  const applyToolButton = (b: { items: [Tool, ToolIcon, string, string][] }) => {
+  const applyToolButton = (b: { items: [Tool, () => JSX.Element, string, string][] }) => {
     const idx = b.items.findIndex(([t]) => t === toolRef.current);
     setTool(b.items[(idx + 1) % b.items.length][0]);
   };
@@ -2299,7 +2182,7 @@ export function ScreenshotOverlay() {
       const mx = Math.round(ev.clientX - rc.left), my = Math.round(ev.clientY - rc.top);
       setAnnos((arr) => arr.map((s, i) => {
         if (i !== idx) return s;
-        if (s.kind === "arrow" || s.kind === "tapered" || s.kind === "line") {
+        if (s.kind === "arrow" || s.kind === "line") {
           return hi === 0 ? { ...s, x1: mx, y1: my } : { ...s, x2: mx, y2: my };
         }
         return { ...s, x1: ax, y1: ay, x2: mx, y2: my };
@@ -2939,7 +2822,7 @@ export function ScreenshotOverlay() {
                         }
                       }}>
                       {/* Snipaste 式单色白图标：激活反白，不按功能染色 */}
-                      <span style={{ display: "inline-flex" }}><MainIcon w={icoW(sw)} /></span>
+                      <span style={{ display: "inline-flex" }}><MainIcon /></span>
                     </button>
                     {/* 二次选项枚举：平铺在一级图标正下方，子图形 + 颜色
                         同行展示。所有工具统一此逻辑；单工具无子图形、只显示
@@ -2949,7 +2832,7 @@ export function ScreenshotOverlay() {
                         {isGroup && b.items.map(([t, Ic, name]) => (
                           <button key={t} className={tool === t ? "active" : ""} data-tip={name}
                             onClick={() => setTool(t)}>
-                            <span style={{ display: "inline-flex" }}><Ic w={icoW(sw)} /></span>
+                            <span style={{ display: "inline-flex" }}><Ic /></span>
                           </button>
                         ))}
                         {isGroup && <span className="shot-submenu-divider" />}
