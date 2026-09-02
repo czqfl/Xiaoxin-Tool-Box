@@ -41,6 +41,22 @@ export function TranslatePopup() {
   const [loading, setLoading] = useState(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const dstRef = useRef<HTMLTextAreaElement>(null);
+  /** 聚焦原文输入框（呼出自动聚焦）：确保窗口聚焦后聚焦元素，光标置于文本末尾 */
+  const focusSourceInput = () => {
+    const el = inputRef.current;
+    if (!el) return;
+    if (!document.hasFocus()) {
+      getCurrentWindow().setFocus().catch(() => undefined);
+    }
+    el.focus({ preventScroll: true });
+    const len = el.value.length;
+    el.setSelectionRange(len, len);
+  };
+  /** 呼出后分两次聚焦：60ms 抢首帧；240ms 抵消后端 activate_popup 120ms 后台补焦的焦点重置 */
+  const scheduleSourceFocus = () => {
+    window.setTimeout(focusSourceInput, 60);
+    window.setTimeout(focusSourceInput, 240);
+  };
   // 渐进式 Esc：焦点在原文/译文输入框时，第一次 Esc 仅退出编辑（内容保留），
   // 再按一次才关闭弹窗——避免编辑到一半误按 Esc 直接丢失内容
   useEscLayer(true, () => {
@@ -149,6 +165,13 @@ export function TranslatePopup() {
         loadingRef.current = false;
         setLoading(false);
       }
+      // 呼出自动聚焦原文框：选中文本已就位，光标置末尾便于续输/修改
+      scheduleSourceFocus();
+    }).then((un) => (disposed ? un() : cleanup.push(un)));
+    // 无选中呼出（后端仅激活、不带文本）：同样聚焦输入框，方便直接打字翻译
+    onEvent<null>("translate://shown", () => {
+      lastStartAt.current = Date.now();
+      scheduleSourceFocus();
     }).then((un) => (disposed ? un() : cleanup.push(un)));
     // 失焦自动隐藏：用窗口级 onFocusChanged 判断"焦点真正离开本窗口（点到别的程序）"
     // 才隐藏，不要用 DOM window blur——点击 data-tauri-drag-region 头部触发原生拖动时，
