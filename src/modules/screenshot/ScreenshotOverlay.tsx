@@ -15,12 +15,11 @@ import { EVT_TRANSLATE_LINE } from "../../core/events";
 import { useConfigStore } from "../../stores/configStore";
 import { scrollBegin } from "../scrollshot/api";
 import { Pencil, Undo2, Redo2, X, Download, Copy } from "lucide-react";
-import { ARROW_ICON_PATH } from "./arrow-path.const";
 import { OcrPanel } from "../shared/OcrPanel";
 import { groupOcrParagraphs } from "../shared/ocr-group";
 import "./screenshot.css";
 
-type Tool = "select"|"rect"|"ellipse"|"arrow"|"line"|"brush"|"mosaic"|"text"|"number";
+type Tool = "select"|"rect"|"ellipse"|"arrow"|"sarrow"|"line"|"brush"|"mosaic"|"text"|"number";
 type Phase = "idle"|"selected";
 interface Pt { x: number; y: number; }
 interface Rect { x: number; y: number; w: number; h: number; }
@@ -54,18 +53,18 @@ const fmtDisplay = (c: [number, number, number], fmt: ColorFmt) =>
 const fmtCopy = (c: [number, number, number], fmt: ColorFmt) =>
   fmt === "hex" ? fmtHex(c) : `rgb(${c[0]},${c[1]},${c[2]})`;
 
-/* ---- 工具图标：Lucide React 矢量图标（Snipaste 同风格描线），统一 22px / strokeWidth 2。
+/* ---- 工具图标：Lucide React 矢量图标（Snipaste 同风格描线），统一 22px / strokeWidth 1.5。
    两个组合图标（形状组、线组）由 Lucide 单图标叠合而成 ---- */
-const IC = { size: 22, strokeWidth: 2, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
+const IC = { size: 22, strokeWidth: 1.5, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
 // 矩形：圆角矩形，比上一版整体放大（更占满画布、识别度更高）；与形状组 IcoShape 视觉一致
 const IcoRect = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <rect x="3" y="4.5" width="18" height="15" rx="3.5" />
   </svg>
 );
 // 椭圆：正圆形态（与 Lucide Circle 一致）；曾被误改为扁椭圆，已恢复
 const IcoEllipse = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="10" />
   </svg>
 );
@@ -73,29 +72,34 @@ const IcoEllipse = () => (
 // 矩形加 rx 与其他自绘图标保持一致的圆润观感；viewBox 24×24，几何稍外推。
 // 比例按用户要求（二轮放大）：矩形 16×13、椭圆 rx5.5/ry4.5，总尺寸 22×22 不变
 const IcoShape = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <rect x="1.5" y="3" width="16" height="13" rx="4.5"/>
     <ellipse cx="17" cy="16.5" rx="5.5" ry="4.5"/>
   </svg>
 );
-// 箭头：翼形流线箭头（尾部窄、头部宽），来自用户提供的企微风格箭头 PNG；
-// trace 出来的水平 path 加 rotate(-45 12 12) 转到斜向上方向（粗端朝右上）
+// 箭头：等宽杆+凹底大头（与画布上 arrow 的形状一致），指向右上，占满画布
 const IcoArrow = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-    <path d={ARROW_ICON_PATH} transform="rotate(-45 12 12)" />
+    <path d="M21 3 L17.5 12.6 L17.5 8.7 L5.1 21.1 L2.9 18.9 L15.3 6.5 L11.4 6.5 Z" transform="translate(0.9 -0.9)" />
+  </svg>
+);
+// 实心箭头：细尖尾锥形杆+窄三角头（与画布上 sarrow 的形状一致），指向右上
+const IcoSArrow = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M21 3 L17.8 14 L15.1 11.2 L3.6 20.6 L3.4 20.4 L12.8 8.9 L10 6.2 Z" />
   </svg>
 );
 // 直线：一条左下→右上的斜线（Lucide 无"纯直线"图标，TrendingUp 是折线+箭头，
 // 曾被误用作直线图标）。自绘与 Lucide 描线风格一致
 const IcoLine = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
     <line x1="4.5" y1="19.5" x2="19.5" y2="4.5" />
   </svg>
 );
 // 线组图标：折线+箭头叠合（Snipaste 第二格趋势线）。统一 22×22 与其他
 // 图标对齐，去掉超尺寸浮起感
 const IcoLineGroup = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="3 17 9 11 13 14 20 6"/>
     <polyline points="15 6 20 6 20 11"/>
   </svg>
@@ -103,7 +107,7 @@ const IcoLineGroup = () => (
 const IcoBrush = () => <Pencil {...IC} />;
 // 马赛克：一个圆角方框 + 左上/右下两个放大的填充格（像素化的对角示意）
 const IcoMosaic = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round">
     <rect x="3.5" y="3.5" width="17" height="17" rx="4"/>
     <rect x="5.5" y="5.5" width="6" height="6" rx="1" fill="currentColor" stroke="none"/>
     <rect x="12.5" y="12.5" width="6" height="6" rx="1" fill="currentColor" stroke="none"/>
@@ -111,21 +115,21 @@ const IcoMosaic = () => (
 );
 // 文字：一横 + 一竖的极简 T（Lucide Type 顶部带衬线端点的"刺"观感）
 const IcoTextT = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <line x1="5" y1="6" x2="19" y2="6" />
     <line x1="12" y1="6" x2="12" y2="19" />
   </svg>
 );
 // 序号：Lucide 无对应，保留精简自绘（描线风格统一）
 const IcoNumber = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="9"/>
     <path d="M12.5 8.2V16"/><path d="M12.5 8.2L10.3 9.8"/>
   </svg>
 );
 // OCR 文字识别：四角取景框 + 三行左对齐渐短文本（模拟文字段落；Lucide 无对应）
 const IcoOcr = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="M3 8V5.5A2.5 2.5 0 0 1 5.5 3H8" />
     <path d="M16 3h2.5A2.5 2.5 0 0 1 21 5.5V8" />
     <path d="M21 16v2.5A2.5 2.5 0 0 1 18.5 21H16" />
@@ -145,19 +149,22 @@ const IcoPin = () => (
 );
 const IcoSaveAs = () => <Download {...IC} />;
 const IcoCopy = () => <Copy {...IC} />;
-// 长截图：页面（底部开口）+ 内容行 + 箭头从开口向下穿出——内容继续向下滚动拼接
+// 长截图：页面（顶边+两侧实线、底边点线 = 内容未截完继续向下）+ 下方
+// 向下箭头（继续滚动拼接）。与复制（叠页）造型明确区分
 const IcoLongShot = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M10.5 15H8.5A2.5 2.5 0 0 1 6 12.5V5.5A2.5 2.5 0 0 1 8.5 3h7a2.5 2.5 0 0 1 2.5 2.5v7a2.5 2.5 0 0 1-2.5 2.5h-2" />
-    <path d="M9 7.5h6M9 10.5h6" />
-    <path d="M12 14.5v6.5" />
-    <path d="m9.8 18.8 2.2 2.2 2.2-2.2" />
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    {/* 页面主体：底边开口，用点线收口表达「未完待续」 */}
+    <path d="M4.5 15.5V6A2.5 2.5 0 0 1 7 3.5H17A2.5 2.5 0 0 1 19.5 6V15.5" />
+    <path d="M4.5 15.5H19.5" strokeDasharray="0.1 3.5" />
+    {/* 向下箭头 */}
+    <path d="M12 18.2v3.3" />
+    <path d="m9.8 19.6 2.2 2.2 2.2-2.2" />
   </svg>
 );
 // 选择 / 移动：经典光标箭头（与 Lucide MousePointer 一致的描线风格），
 // 激活时高亮表示当前处于"选区/移动"模式，点击图形图标才进入绘制
 const IcoSelect = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="M4 3l7.07 16.97 2.51-7.39 7.39-2.51L4 3z" />
   </svg>
 );
@@ -168,8 +175,8 @@ const IcoSelect = () => (
 const TOOL_BUTTONS: { items: [Tool, () => JSX.Element, string, string][]; groupIcon?: () => JSX.Element; hotkey: string }[] = [
   // 形状组：未激活显示组合图标（IcoShape），激活后显示当前子工具图标
   { items: [["rect", IcoRect, "矩形", "#64d2ff"], ["ellipse", IcoEllipse, "椭圆", "#64d2ff"]], groupIcon: IcoShape, hotkey: "Ctrl+1" },
-  // 线组：箭头排前面（默认选中箭头，更常用）
-  { items: [["arrow", IcoArrow, "箭头", "#32d74b"], ["line", IcoLine, "直线", "#32d74b"]], groupIcon: IcoLineGroup, hotkey: "Ctrl+2" },
+  // 线组：实心箭头排最前（组内第一个 = 默认选中）
+  { items: [["sarrow", IcoSArrow, "实心箭头", "#32d74b"], ["arrow", IcoArrow, "箭头", "#32d74b"], ["line", IcoLine, "直线", "#32d74b"]], groupIcon: IcoLineGroup, hotkey: "Ctrl+2" },
   { items: [["brush", IcoBrush, "画笔", "#ff9f0a"]], hotkey: "Ctrl+3" },
   { items: [["mosaic", IcoMosaic, "马赛克", "#bf5af2"]], hotkey: "Ctrl+4" },
   { items: [["text", IcoTextT, "文字", "#ffd60a"]], hotkey: "Ctrl+5" },
@@ -226,18 +233,60 @@ function drawShape(
     const cx = (X1 + X2) / 2, cy = (Y1 + Y2) / 2;
     const rx = Math.abs(X2 - X1) / 2, ry = Math.abs(Y2 - Y1) / 2;
     ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); ctx.stroke();
-  } else if (s.kind === "arrow") {
+  } else if (s.kind === "sarrow") {
+    // 实心箭头（经典标注箭头）：细长锥形杆几乎收成尖 + 宽大三角头，
+    // 一个闭合多边形一次 fill，针尖落在终点
     const dx = X2 - X1, dy = Y2 - Y1;
     const len = Math.sqrt(dx * dx + dy * dy);
     if (len < 2 * scale) { ctx.restore(); return; }
     const angle = Math.atan2(dy, dx);
-    const hl = Math.min(16 * scale, len * 0.3);
+    const ux = Math.cos(angle), uy = Math.sin(angle);
+    const px = -uy, py = ux;
+    const lw = Math.max(0.5, s.width * scale);
+    const hl = Math.min(Math.max(20 * scale, lw * 2.2), len * 0.55);
+    const hw = hl * 0.55;  // 三角头半宽（收窄版）
+    const sw1 = hl * 0.16; // 杆在头部底边处的半宽（头部明显变粗、锥度可感）
+    const tw = hl * 0.02;  // 尾部半宽（几乎收成尖）
+    const bx = X2 - hl * ux, by = Y2 - hl * uy;
+    ctx.lineJoin = "round";
     ctx.beginPath();
     ctx.moveTo(X2, Y2);
-    ctx.lineTo(X2 - hl * Math.cos(angle - 0.4), Y2 - hl * Math.sin(angle - 0.4));
-    ctx.moveTo(X2, Y2);
-    ctx.lineTo(X2 - hl * Math.cos(angle + 0.4), Y2 - hl * Math.sin(angle + 0.4));
-    ctx.stroke();
+    ctx.lineTo(bx + hw * px, by + hw * py);
+    ctx.lineTo(bx + sw1 * px, by + sw1 * py);
+    ctx.lineTo(X1 + tw * px, Y1 + tw * py);
+    ctx.lineTo(X1 - tw * px, Y1 - tw * py);
+    ctx.lineTo(bx - sw1 * px, by - sw1 * py);
+    ctx.lineTo(bx - hw * px, by - hw * py);
+    ctx.closePath();
+    ctx.fill();
+  } else if (s.kind === "arrow") {
+    // 等宽杆实心箭头：箭杆全程粗细一致，三角头底边向针尖方向凹进
+    // （燕尾式），整体一个闭合多边形一次 fill，针尖落在终点
+    const dx = X2 - X1, dy = Y2 - Y1;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len < 2 * scale) { ctx.restore(); return; }
+    const angle = Math.atan2(dy, dx);
+    const ux = Math.cos(angle), uy = Math.sin(angle); // 指向针尖的单位向量
+    const px = -uy, py = ux;                          // 左法线
+    const lw = Math.max(0.5, s.width * scale);
+    // 头部长度随线宽放大，但不超杆长一半（短箭头不至于头比杆大）
+    const hl = Math.min(Math.max(18 * scale, lw * 2), len * 0.5);
+    const hw = hl * 0.5;                      // 三角头半宽（收窄，避免翅膀感）
+    const sw = Math.max(hl * 0.13, lw * 0.6); // 箭杆半宽（全程一致）
+    const d = hl * 0.35;                      // 头部底边凹进深度
+    const bx = X2 - hl * ux, by = Y2 - hl * uy; // 头部底边中点（凹进基准）
+    const sx = bx + d * ux, sy = by + d * uy;   // 凹进后的杆接头中点
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(X2, Y2);                       // 针尖
+    ctx.lineTo(bx + hw * px, by + hw * py);   // 头底右角（倒钩）
+    ctx.lineTo(sx + sw * px, sy + sw * py);   // 凹进底边 → 杆右缘
+    ctx.lineTo(X1 + sw * px, Y1 + sw * py);   // 尾右（与杆等宽）
+    ctx.lineTo(X1 - sw * px, Y1 - sw * py);   // 尾左
+    ctx.lineTo(sx - sw * px, sy - sw * py);   // 杆左缘 → 凹进底边
+    ctx.lineTo(bx - hw * px, by - hw * py);   // 头底左角
+    ctx.closePath();
+    ctx.fill();
   } else if (s.kind === "line") {
     ctx.beginPath(); ctx.moveTo(X1, Y1); ctx.lineTo(X2, Y2); ctx.stroke();
   } else if (s.kind === "brush" && s.points && s.points.length > 1) {
@@ -350,7 +399,7 @@ const annoBounds = (a: Anno): Rect => {
 /** 可二次编辑的图形。马赛克落下即冻结采样快照，移位会换成别处像素、
  *  露出原处内容，语义不对，排除；文字/序号不在编辑范围 */
 const shapeEditable = (a: Anno) =>
-  a.kind === "rect" || a.kind === "ellipse" || a.kind === "arrow" || a.kind === "line" || a.kind === "brush";
+  a.kind === "rect" || a.kind === "ellipse" || a.kind === "arrow" || a.kind === "sarrow" || a.kind === "line" || a.kind === "brush";
 const distSeg = (p: Pt, a: Pt, b: Pt): number => {
   const dx = b.x - a.x, dy = b.y - a.y;
   const l2 = dx * dx + dy * dy;
@@ -360,7 +409,7 @@ const distSeg = (p: Pt, a: Pt, b: Pt): number => {
 };
 /** 编辑手柄：rect/ellipse = 包围盒四角；arrow/line = 两端点；brush 只可移动无手柄 */
 const shapeHandles = (a: Anno): Pt[] => {
-  if (a.kind === "arrow" || a.kind === "line") return [{ x: a.x1, y: a.y1 }, { x: a.x2, y: a.y2 }];
+  if (a.kind === "arrow" || a.kind === "sarrow" || a.kind === "line") return [{ x: a.x1, y: a.y1 }, { x: a.x2, y: a.y2 }];
   if (a.kind === "rect" || a.kind === "ellipse") {
     const b = annoBounds(a);
     return [
@@ -386,7 +435,7 @@ const shapeHit = (a: Anno, pt: Pt, tol: number): boolean => {
     const nx = (pt.x - (b.x + b.w / 2)) / rx, ny = (pt.y - (b.y + b.h / 2)) / ry;
     return nx * nx + ny * ny <= 1;
   }
-  if (a.kind === "arrow" || a.kind === "line") {
+  if (a.kind === "arrow" || a.kind === "sarrow" || a.kind === "line") {
     return distSeg(pt, { x: a.x1, y: a.y1 }, { x: a.x2, y: a.y2 }) <= t;
   }
   const pts = a.points;
@@ -2182,7 +2231,7 @@ export function ScreenshotOverlay() {
       const mx = Math.round(ev.clientX - rc.left), my = Math.round(ev.clientY - rc.top);
       setAnnos((arr) => arr.map((s, i) => {
         if (i !== idx) return s;
-        if (s.kind === "arrow" || s.kind === "line") {
+        if (s.kind === "arrow" || s.kind === "sarrow" || s.kind === "line") {
           return hi === 0 ? { ...s, x1: mx, y1: my } : { ...s, x2: mx, y2: my };
         }
         return { ...s, x1: ax, y1: ay, x2: mx, y2: my };
@@ -2854,8 +2903,11 @@ export function ScreenshotOverlay() {
                   window.clearTimeout(swBadgeTimer.current);
                   swBadgeTimer.current = window.setTimeout(() => setSwBadge(null), 800);
                 }}>
-                <span style={{ width: Math.min(4 + sw * 1.2, 26), height: Math.min(4 + sw * 1.2, 26) }} />
-                  <svg className="shot-sw-wheel-frame" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                {/* 圆径与粗细【满线性映射】：sw=1 → 4px（最小），sw=24（上限）
+                    → 恰好 14px（22px 渲染框中心安全区 ≈14.67px，留余量封顶）。
+                    圆到最大的同一刻笔也到最粗，中段无"圆不动笔还在粗"的死区 */}
+                <span style={{ width: 4 + (sw - 1) * (10 / 23), height: 4 + (sw - 1) * (10 / 23) }} />
+                  <svg className="shot-sw-wheel-frame" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M3 8V5.5A2.5 2.5 0 0 1 5.5 3H8" />
                     <path d="M16 3h2.5A2.5 2.5 0 0 1 21 5.5V8" />
                     <path d="M21 16v2.5A2.5 2.5 0 0 1 18.5 21H16" />
