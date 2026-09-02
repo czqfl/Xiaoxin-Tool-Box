@@ -24,8 +24,11 @@ import "./pin.css";
 
 /** OCR 弹窗默认宽度（贴图外侧独立窗，贴图较小时也放得下） */
 const PANEL_W = 300;
-/** OCR 弹窗翻译态宽度：与截图弹窗对齐（截图 320→560），
- *  让「原文 / 译文」两列译文列不再被挤窄（≈275px/列），英文长词不必强制换行 */
+/** OCR 弹窗翻译态宽度上限：与截图弹窗对齐（截图 320→560），
+ *  让「原文 / 译文」两列译文列不再被挤窄（≈275px/列），英文长词不必强制换行。
+ *  【不能拿 100vw 当上限】：本窗是独立 WebView，vw = 窗口自身视口宽（初始 300），
+ *  若 maxWidth 写成 min(560px, calc(100vw - 16px))，会把 560 clamp 回 284——
+ *  翻译扩宽被自己锁死、窗口反而略缩（"面板缩没了"）。上限必须用屏幕可用宽。 */
 const PANEL_W_TRANS = 560;
 /** 独立窗与贴图外缘的间距 */
 const GAP = 8;
@@ -106,10 +109,12 @@ export default function PinOcrWindow() {
   useLayoutEffect(() => {
     const el = panelRef.current?.firstElementChild as HTMLElement | null;
     if (!el || !data || data.pinW <= 0) return;
-    const mw = el.offsetWidth || PANEL_W;
-    const mh = el.offsetHeight || 200;
     const availW = window.screen.availWidth;
     const availH = window.screen.availHeight;
+    // 量面板实际宽高；先夹到屏幕容量内（防御高缩放/小屏下 DOM 目标宽 > 屏宽，
+    // 避免 setSize 把窗口开到比屏幕还大——那会让坐标 clamp 失效、窗口溢出屏外）
+    const mw = Math.min(el.offsetWidth || PANEL_W, availW - 4);
+    const mh = Math.min(el.offsetHeight || 200, availH - 4);
     const need = mw + GAP;                                  // 弹窗所需(宽+间隙)
     const rightRoom = availW - (data.pinLeft + data.pinW);  // 贴图右侧剩余
     const leftRoom = data.pinLeft;                          // 贴图左侧剩余
@@ -183,8 +188,14 @@ export default function PinOcrWindow() {
   if (!data) return null;
   // 翻译态开关：与 ScreenshotOverlay 的 transMode 保持一致——切宽度让两列对照不被挤窄。
   // PinOcrWindow 是独立 WebView 窗口，CSS 宽度变化不会自动同步到 OS 窗口尺寸，
-  // 必须由 useLayoutEffect 重新量尺寸 + setSize 才能真正变宽（见 early-return 注释）
+  // 必须由 useLayoutEffect 重新量尺寸 + setSize 才能真正变宽（见 early-return 注释）。
   const transMode = !!(data.trans || data.translating);
+  // 面板目标宽：翻译态 300→560。**上限用屏幕可用宽而不是 100vw**——独立窗的
+  // vw = 窗口自身视口宽（初始 300），写 calc(100vw - 16px) 会把 560 clamp 回 284，
+  // 扩宽被自锁、窗口反而缩没（上一版 bug）。极端小屏按 availW-16 收窄，保底 PANEL_W。
+  const panelW = transMode
+    ? Math.max(PANEL_W, Math.min(PANEL_W_TRANS, Math.round(window.screen.availWidth) - 16))
+    : PANEL_W;
   return (
     <div ref={panelRef} style={{ padding: 0, margin: 0 }}>
       <OcrPanel
@@ -199,9 +210,8 @@ export default function PinOcrWindow() {
         onReturn={() => emit("return")}
         style={{
           position: "static",
-          width: transMode ? PANEL_W_TRANS : PANEL_W,
-          // 翻译态上限与截图弹窗对齐（560）；小屏按 vw-16 兜底，避免超屏
-          maxWidth: transMode ? "min(560px, calc(100vw - 16px))" : PANEL_W,
+          width: panelW,
+          maxWidth: panelW,
           maxHeight: Math.min(560, Math.round(window.screen.availHeight * 0.8)),
           margin: 0,
         }}
