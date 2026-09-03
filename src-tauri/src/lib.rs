@@ -452,6 +452,7 @@ pub fn run() {
             panel::toolbar_set_visible,
             panel::panel_refresh_acrylic,
             panel::panel_show_foreground,
+            panel::panel_focus_foreground,
             panel::panel_hide,
             // ---- 便签（sticky）----
             // 设置存储独立于工具箱 AppConfig（存在便签自己的 sticky_settings.json），

@@ -5,6 +5,7 @@ import { getAllWindows, getCurrentWindow } from "@tauri-apps/api/window";
 import type { TranslateResult } from "../../types";
 import { onEvent } from "../../core/events";
 import { copyText, closeTranslatePopup, diagLog, lastTranslateResult, translateText } from "../../core/tauri";
+import { bindHoverFocus } from "../../core/usePanel";
 import { useConfigStore } from "../../stores/configStore";
 import { IconCheck, IconClose, IconCopy, IconPin } from "../../components/icons";
 import { GlassSelect } from "../../components/GlassSelect";
@@ -208,28 +209,20 @@ export function TranslatePopup() {
       }, 80);
     });
     cleanup.push(() => focusUn.then((u) => u()));
-    // 鼠标移入即补一次聚焦：后端置前偶被前台锁拒绝时，用户一交互就能拿到焦点。
+    // 鼠标移入即补一次聚焦（robust 抢前台，不受前台锁限制，见 bindHoverFocus 注释）。
     // 复制在面板显示【之前】就已完成，所以这里不再需要"loading 期间不抢焦点"，
     // 抢焦点绝不会再影响复制。
-    const requestFocus = () => {
-      if (!document.hasFocus()) {
-        getCurrentWindow().setFocus().catch(() => undefined);
-      }
-    };
-    // 鼠标按下：若落在头部（拖动区），先置位拖动守卫（原生拖动会瞬时失焦，期间不许隐藏）。
+    cleanup.push(bindHoverFocus());
+    // 鼠标按下头部（拖动区）：置位拖动守卫（原生拖动会瞬时失焦，期间不许隐藏）。
     // 注意守卫必须在任何 return 之前置位——否则"翻译中"点头部时守卫没生效，
     // 一旦翻译超过 lastStartAt 守卫窗口，点头部就会把面板关掉。
     const onMouseDown = (e: Event) => {
       const t = e.target as HTMLElement | null;
       if (t?.closest?.(".translate-head")) {
         dragGuardRef.current = true;
-        return;
       }
-      requestFocus();
     };
-    document.addEventListener("mouseover", requestFocus);
     document.addEventListener("mousedown", onMouseDown);
-    cleanup.push(() => document.removeEventListener("mouseover", requestFocus));
     cleanup.push(() => document.removeEventListener("mousedown", onMouseDown));
     // 松开后短暂延时解除拖动守卫（覆盖原生拖动期间/之后的瞬时失焦）
     const onDocMouseUp = () => {

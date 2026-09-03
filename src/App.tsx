@@ -6,6 +6,7 @@ import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { AppConfig } from "./types";
 import { EVT_CONFIG_CHANGED, onEvent } from "./core/events";
 import { useConfigStore } from "./stores/configStore";
+import { bindHoverFocus } from "./core/usePanel";
 import { ClipboardPanel } from "./modules/clipboard/ClipboardPanel";
 import { FolderPanel } from "./modules/folder/FolderPanel";
 import { GitRunWindow } from "./modules/folder/GitRunWindow";
@@ -82,6 +83,14 @@ export default function App() {
   // webview 吃掉所有输入且无法 Esc（Rust 侧 app_frontend_ready 注释）
   useEffect(() => {
     if (label === "toolbar") void invoke("app_frontend_ready").catch(() => {});
+  }, [label]);
+
+  // 设置窗未走 usePanelCommon（它常驻不隐藏），补挂「鼠标悬停即聚焦」——
+  // WebView2 失焦不响应滚轮，鼠标移入即 robust 抢前台，滚轮无需先点一下。
+  // 工具窗（截图遮罩/贴图/录制/粒子等）不挂：抢焦点会打断它们自身的交互语义。
+  useEffect(() => {
+    if (label === "settings") return bindHoverFocus();
+    return undefined;
   }, [label]);
 
   if (label === "clipboard-panel") {

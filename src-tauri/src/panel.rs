@@ -16,19 +16,15 @@ fn hwnd_of<R: Runtime>(window: &WebviewWindow<R>) -> Option<HWND> {
     None
 }
 
-/// 显示面板并可靠激活（快捷键/托盘/工具栏共用，后台线程也生效）。
-/// 与翻译弹窗 show_popup_activated 同一套验证过的可靠模式：
-///   show → Win32 SW_SHOWNORMAL 兜底强制显示 → force_foreground_robust
-///   （AttachThreadInput 抢前台，不受前台锁输入窗口超时限制）→ set_focus
-///   → 120ms 后后台补一次置前（前台锁偶发拒绝时兜底）。
-/// 注：工具栏点击经 IPC 往返已超出前台锁输入窗口，普通 force_foreground
-/// 的 SetForegroundWindow 会被系统拒绝（窗口显示但无焦点）——这正是
-/// "快捷键能开、工具栏点不开"的根因；robust 版不受此限制。
+/// 可靠激活窗口（置前 + 聚焦）。与翻译弹窗 show_popup_activated 同一套验证过的
+/// 可靠模式：force_foreground_robust（AttachThreadInput 抢前台，不受前台锁输入
+/// 窗口超时限制）→ set_focus → 120ms 后后台补一次置前（前台锁偶发拒绝时兜底）。
+/// 注：普通 SetForegroundWindow 在"经 IPC / 后台线程"呼出场景会被系统拒绝
+/// （窗口显示但无焦点）——这正是"快捷键能开、工具栏点不开 / 鼠标悬停不聚焦、
+/// 滚轮要点一下才可用"的根因；robust 版不受此限制。
 #[cfg(windows)]
-fn show_and_activate<R: Runtime>(window: &WebviewWindow<R>) {
-    let _ = window.unminimize();
-    let _ = window.show();
-    // 极端状态（最小化+隐藏）下 show 可能仍未真正显示 → Win32 强制激活显示
+fn activate_foreground<R: Runtime>(window: &WebviewWindow<R>) {
+    // 极端状态（最小化+隐藏）下 show 后可能仍未真正显示 → Win32 强制激活显示
     if !window.is_visible().unwrap_or(false) {
         if let Some(hwnd) = hwnd_of(window) {
             use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNORMAL};
@@ -60,11 +56,26 @@ fn show_and_activate<R: Runtime>(window: &WebviewWindow<R>) {
     });
 }
 
+/// 显示面板并可靠激活（快捷键/托盘/工具栏共用，后台线程也生效）：
+///   unminimize → show → activate_foreground（见其注释）
+#[cfg(windows)]
+fn show_and_activate<R: Runtime>(window: &WebviewWindow<R>) {
+    let _ = window.unminimize();
+    let _ = window.show();
+    activate_foreground(window);
+}
+
+#[cfg(not(windows))]
+fn activate_foreground<R: Runtime>(window: &WebviewWindow<R>) {
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+}
+
 #[cfg(not(windows))]
 fn show_and_activate<R: Runtime>(window: &WebviewWindow<R>) {
     let _ = window.unminimize();
     let _ = window.show();
-    let _ = window.set_focus();
+    activate_foreground(window);
 }
 
 /// 显示面板并可靠置前聚焦（前端经 IPC 打开的窗口复用 tray/热键同款机制）。
@@ -84,6 +95,23 @@ pub fn panel_show_foreground(app: tauri::AppHandle, label: String) -> Result<(),
         window.is_visible().unwrap_or(false),
         window.is_focused().unwrap_or(false),
     ));
+    Ok(())
+}
+
+/// 鼠标悬停面板即聚焦（前端 mouseover/mousedown 触发）：WebView2 在窗口未激活
+/// （失焦）时不响应滚轮——"面板打开了、鼠标放上去滚不动、要点一下空白才可用"。
+/// 裸 set_focus 在 Windows 前台锁下偶发被系统拒绝（"有时候"不聚焦），这里走
+/// activate_foreground（robust 抢前台，不受前台锁限制）。窗口已聚焦直接返回，
+/// 避免无谓 IPC。
+#[tauri::command]
+pub fn panel_focus_foreground(app: tauri::AppHandle, label: String) -> Result<(), String> {
+    let Some(window) = app.get_webview_window(&label) else {
+        return Err(format!("window not found: {label}"));
+    };
+    if window.is_focused().unwrap_or(false) {
+        return Ok(());
+    }
+    activate_foreground(&window);
     Ok(())
 }
 

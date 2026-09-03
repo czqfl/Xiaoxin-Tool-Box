@@ -1,10 +1,42 @@
 /** 悬浮面板公共行为：加载配置与主题、响应配置广播、失焦自动隐藏 */
 import { useEffect, useRef } from "react";
 import { getAllWindows, getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
 import { useConfigStore } from "../stores/configStore";
 import { EVT_CONFIG_CHANGED, EVT_PANEL_VISIBILITY, onEvent } from "./events";
 import { emit } from "@tauri-apps/api/event";
 import type { AppConfig } from "../types";
+
+/**
+ * 鼠标悬停/点击窗口即请求聚焦。WebView2 在窗口未激活（失焦）时不响应滚轮，
+ * 导致"面板呼出后滚不动、必须点一下空白才可用"。裸 setFocus 在 Windows 前台锁
+ * 下偶发被系统拒绝（"有时候"鼠标放上去不聚焦），这里改走 Rust 命令
+ * panel_focus_foreground —— 内部是 force_foreground_robust（AttachThreadInput
+ * 抢前台，不受前台锁限制），鼠标移入即聚焦，滚轮立即可用。
+ * 节流：300ms 内只发一次 IPC；DOM 已有焦点（hasFocus）直接跳过。
+ * 返回清理函数。挂载方：usePanelCommon 的面板 + 设置窗/翻译弹窗等未走
+ * usePanelCommon 的悬浮窗口（App.tsx）。
+ */
+export function bindHoverFocus() {
+  const label = getCurrentWindow().label;
+  let throttle = false;
+  const attempt = () => {
+    if (throttle || document.hasFocus()) return;
+    throttle = true;
+    window.setTimeout(() => {
+      throttle = false;
+    }, 300);
+    void invoke("panel_focus_foreground", { label }).catch(() => undefined);
+  };
+  const onOver = () => attempt();
+  const onDown = () => attempt();
+  document.addEventListener("mouseover", onOver);
+  document.addEventListener("mousedown", onDown);
+  return () => {
+    document.removeEventListener("mouseover", onOver);
+    document.removeEventListener("mousedown", onDown);
+  };
+}
 
 /** 隐藏当前窗口并广播显隐事件（工具栏据此熄灭/点亮图标高亮）。
  *  面板的所有前端关闭路径（失焦自动隐藏 / Esc / 关闭按钮）都走这里，
@@ -94,18 +126,9 @@ export function usePanelCommon(stayVisible = false) {
     });
     cleanup.push(() => focusUn.then((un) => un()));
 
-    // 鼠标悬停/点击面板即请求聚焦：WebView2 在窗口非活动（失焦）时不响应滚轮，
-    // 导致"呼出后面板滚不动、要点一下才行"。鼠标一进面板就补一次 setFocus，
-    // 滚轮立即可用（有真实鼠标输入时 Windows 允许置前，通常能成功）。
-    const onMouseActivate = () => {
-      if (!document.hasFocus()) {
-        getCurrentWindow().setFocus().catch(() => undefined);
-      }
-    };
-    document.addEventListener("mouseover", onMouseActivate);
-    document.addEventListener("mousedown", onMouseActivate);
-    cleanup.push(() => document.removeEventListener("mouseover", onMouseActivate));
-    cleanup.push(() => document.removeEventListener("mousedown", onMouseActivate));
+    // 鼠标悬停/点击面板即请求聚焦（见 bindHoverFocus 注释：robust 抢前台，
+    // 不受前台锁限制，滚轮立即可用）
+    cleanup.push(bindHoverFocus());
 
     return () => {
       disposed = true;
