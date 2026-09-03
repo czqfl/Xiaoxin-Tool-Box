@@ -12,12 +12,19 @@
 //!    与行裁剪垂直 padding，那些补偿手段反而会干扰它。
 
 use serde::Serialize;
-use std::path::PathBuf;
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
+use std::time::Instant;
+
+use sha2::{Digest, Sha256};
+
+use tauri::Emitter;
 
 use rapidocr_core::{
     config::{InferenceOptions, PipelineConfig},
-    model::{model_set_by_name, ModelCache, ModelDownloadMode},
+    model::{model_set_by_name, ModelAssetSpec, ModelCache, ModelDownloadMode, ModelSetSpec},
     RapidOcr,
 };
 
@@ -172,15 +179,18 @@ fn build_engine(set_name: &str) -> Result<Engine, String> {
             return make(&cache);
         }
     }
-    // 兜底：往可写数据目录下载（用户选了未内置的档位，或开发期源码目录缺文件）
+    // 兜底：往可写数据目录下载（用户选了未内置的档位，或开发期源码目录缺文件）。
+    // 走自写管线（.part + SHA256 + 损坏文件清理）；预热/识别路径静默，无进度 UI。
     let dir = crate::storage::AppPaths::resolve().data_dir.join("models");
+    ensure_in_dir(&dir, spec, &mut |_| {}).map_err(|e| format!(
+        "OCR 模型 {set_name} 未就位且下载失败（需要联网，或手动把模型放到 {}）：{e}",
+        dir.display()
+    ))?;
     let cache = ModelCache::new(&dir);
+    // 文件此时必然已就位，Never 二次把关（语义等价原 Missing 下载成功分支）
     cache
-        .ensure_model_set_for_pipeline(spec, pipeline(), ModelDownloadMode::Missing)
-        .map_err(|e| format!(
-            "OCR 模型 {set_name} 未就位且下载失败（需要联网，或手动把模型放到 {}）：{e}",
-            dir.display()
-        ))?;
+        .ensure_model_set_for_pipeline(spec, pipeline(), ModelDownloadMode::Never)
+        .map_err(|e| format!("OCR 模型 {set_name} 就位检查失败：{e}"))?;
     make(&cache)
 }
 
@@ -324,17 +334,225 @@ pub fn recognize_png(png: &[u8]) -> Result<Vec<OcrLineResp>, String> {
     Ok(lines)
 }
 
-/// 下载指定档位模型到可写数据目录（设置页「下载」按钮）。
+// ===================== 自写模型下载管线（进度 + 续传 + 不留垃圾） =====================
+// rapidocr-core 自带的 download_asset 不能直接用：整包 .bytes() 吞进内存没有进度；
+// 且先把文件写进正式路径，SHA256 一不对就报错走人——那份损坏文件留在原地，而 ensure
+// 的 exists 短路会让下次下载永远卡死在这份“垃圾”上、绝不重下。
+// 这里统一改成：正式名就位且 SHA256 通过 → 跳过；否则下载到 `<文件名>.part`（支持
+// Range 断点续传）→ SHA256 校验通过才 rename 成正式名。损坏的正式文件与校验不过的
+// .part 立即删除；网络中断保留 .part 供下次“接着下”。
+
+/// OCR 模型下载进度（经 `ocr://dl-progress` 事件推给设置页进度条）
+#[derive(Debug, Clone, Serialize)]
+pub struct OcrDlProgress {
+    /// 档位 id（如 ppocrv6-small）
+    pub id: String,
+    /// 当前正在传输的文件（det/rec 模型或字典文件名）
+    pub file: String,
+    /// download（传输中）| verify（SHA256 校验）| done（该文件落位完成）
+    pub phase: String,
+    /// 本档位累计已完成字节（含此前已就位/完成的文件）
+    pub done: u64,
+    /// 本档位需下载总字节（HEAD 预检汇总）；0 = 未知（进度条转不确定动画）
+    pub total: u64,
+    /// 当前文件已下字节
+    pub file_done: u64,
+    /// 当前文件总字节（0 = 未知）
+    pub file_total: u64,
+}
+
+/// 前端进度事件名（设置页 listen 它）
+pub const OCR_DL_EVENT: &str = "ocr://dl-progress";
+
+/// 就位判定：文件存在且 SHA256 与库登记一致才算好文件。正式路径上若躺着损坏文件
+/// （历史下载残留的“垃圾”），当场删除——否则 exists 短路会让它永远占着坑位。
+fn asset_ready(dir: &Path, asset: ModelAssetSpec) -> Result<bool, String> {
+    let path = dir.join(asset.filename);
+    if !path.is_file() {
+        return Ok(false);
+    }
+    let Some(exp) = asset.sha256 else {
+        return Ok(true);
+    };
+    let bytes = fs::read(&path).map_err(|e| format!("读取 {} 失败：{e}", path.display()))?;
+    let actual = format!("{:x}", Sha256::digest(&bytes));
+    if actual.eq_ignore_ascii_case(exp) {
+        return Ok(true);
+    }
+    fs::remove_file(&path).map_err(|e| format!("删除损坏模型 {} 失败：{e}", path.display()))?;
+    crate::storage::diag_write(&format!(
+        "[ocr] sha256 mismatch, removed stale model {}",
+        path.display()
+    ));
+    Ok(false)
+}
+
+fn http_client() -> Result<reqwest::blocking::Client, String> {
+    reqwest::blocking::Client::builder()
+        .user_agent("Mozilla/5.0 xiaoxin-toolbox")
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(900))
+        .build()
+        .map_err(|e| format!("HTTP 客户端初始化失败：{e}"))
+}
+
+/// 流式下载单个资产到 `.part` 并落位正式名，返回该文件最终字节数。
+///
+/// 断点续传：`.part` 已存在则带 `Range` 续传——服务器回 206 追加写；回 200 说明它
+/// 忽略 Range（不支持断点），从头覆盖；回 416 说明 part 已不短于全量，删掉全量重下。
+/// 传输中断（网络/超时/写盘失败）保留 `.part` 供下次接着下；校验不过删 part 报错，
+/// 下次干净重下。`report(file_done, file_total, phase)` 每 128KB 上报一次（调用方节流）。
+fn fetch_asset(
+    client: &reqwest::blocking::Client,
+    asset: ModelAssetSpec,
+    final_path: &Path,
+    report: &mut dyn FnMut(u64, u64, &str),
+) -> Result<u64, String> {
+    let part = final_path.with_extension("part");
+    let mut part_len = part.metadata().map(|m| m.len()).unwrap_or(0);
+    let mut rounds = 0u32;
+    let (mut file, mut resp, file_total) = loop {
+        let resume = part_len > 0 && rounds == 0;
+        let mut req = client.get(asset.url);
+        if resume {
+            req = req.header(reqwest::header::RANGE, format!("bytes={part_len}-"));
+        }
+        let resp_ev = req.send().map_err(|e| {
+            format!("下载失败：{e}（已保留半成品，可再次下载续传）")
+        })?;
+        let status = resp_ev.status();
+        if status == reqwest::StatusCode::PARTIAL_CONTENT && resume {
+            let f = OpenOptions::new().append(true).open(&part)
+                .map_err(|e| format!("打开续传文件 {} 失败：{e}", part.display()))?;
+            let flen = part_len + resp_ev.content_length().unwrap_or(0);
+            break (f, resp_ev, flen);
+        }
+        if status == reqwest::StatusCode::OK {
+            if resume {
+                part_len = 0; // 服务器不支持 Range，从头覆盖
+            }
+            let f = File::create(&part)
+                .map_err(|e| format!("创建 {} 失败：{e}", part.display()))?;
+            let flen = resp_ev.content_length().unwrap_or(0);
+            break (f, resp_ev, flen);
+        }
+        if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE && resume {
+            fs::remove_file(&part).ok();
+            part_len = 0;
+            rounds = 1;
+            continue; // part 已 ≥ 全量，删掉后全量重下
+        }
+        return Err(format!(
+            "HTTP {}（{}）",
+            status.as_u16(),
+            status.canonical_reason().unwrap_or("请求被拒绝")
+        ));
+    };
+    // 流式落盘（128KB/块），边写边上报进度
+    let mut file_done = part_len;
+    let mut buf = vec![0u8; 128 * 1024];
+    loop {
+        let n = resp.read(&mut buf).map_err(|e| {
+            format!("下载中断：{e}（已保留半成品，可再次下载续传）")
+        })?;
+        if n == 0 {
+            break;
+        }
+        file.write_all(&buf[..n])
+            .map_err(|e| format!("写入 {} 失败：{e}", part.display()))?;
+        file_done += n as u64;
+        report(file_done, file_total, "download");
+    }
+    drop(file);
+    report(file_done, file_total, "verify");
+    if let Some(exp) = asset.sha256 {
+        let bytes = fs::read(&part).map_err(|e| format!("读取 {} 失败：{e}", part.display()))?;
+        let actual = format!("{:x}", Sha256::digest(&bytes));
+        if !actual.eq_ignore_ascii_case(exp) {
+            fs::remove_file(&part).ok();
+            return Err(format!(
+                "SHA256 校验失败（内容不完整或源文件已变更），已删除半成品，请重试"
+            ));
+        }
+    }
+    if final_path.exists() {
+        fs::remove_file(final_path).ok();
+    }
+    fs::rename(&part, final_path)
+        .map_err(|e| format!("落位 {} 失败：{e}", final_path.display()))?;
+    report(file_total, file_total, "done");
+    Ok(file_total)
+}
+
+/// 确保 `dir` 内本档位（去 cls 的 det/rec/dict 三件）齐备且 SHA256 通过；缺失即下载。
+/// `report` 每份进度变化回调一次；`done` 已按本档位全量累计（含此前就位文件），
+/// 配合 HEAD 预算出的 `total`，前端一条总进度条即可走到 100%。
+fn ensure_in_dir(
+    dir: &Path,
+    spec: &ModelSetSpec,
+    report: &mut dyn FnMut(&OcrDlProgress),
+) -> Result<(), String> {
+    let mut todo: Vec<ModelAssetSpec> = Vec::new();
+    for a in spec.assets_for_pipeline(pipeline()) {
+        if !asset_ready(dir, a)? {
+            todo.push(a);
+        }
+    }
+    if todo.is_empty() {
+        return Ok(());
+    }
+    fs::create_dir_all(dir).map_err(|e| format!("创建模型目录 {} 失败：{e}", dir.display()))?;
+    let client = http_client()?;
+    // 先 HEAD 预检缺失文件的真实字节数并加总；任何 HEAD 失败都不致命——total=0
+    // 时前端退化为不确定进度动画。
+    let mut total: u64 = 0;
+    let mut unknown = false;
+    for a in &todo {
+        match client.head(a.url).send() {
+            Ok(r) => match r.content_length() {
+                Some(n) if n > 0 => total += n,
+                _ => unknown = true,
+            },
+            Err(_) => unknown = true,
+        }
+    }
+    if unknown {
+        total = 0;
+    }
+    let mut done: u64 = 0;
+    let dir_owned = dir.to_path_buf();
+    for a in &todo {
+        let id = spec.name.to_string();
+        let file = a.filename.to_string();
+        let final_path = dir_owned.join(a.filename);
+        let base = done;
+        let size = fetch_asset(&client, *a, &final_path, &mut |fd, ft, phase| {
+            report(&OcrDlProgress {
+                id: id.clone(),
+                file: file.clone(),
+                phase: phase.to_string(),
+                done: base + fd,
+                total,
+                file_done: fd,
+                file_total: ft,
+            });
+        })
+        .map_err(|e| format!("{}：{e}", a.name))?;
+        done = base + size;
+    }
+    Ok(())
+}
+
+/// 下载指定档位模型到可写数据目录（设置页「下载」按钮 / 引擎兜底）。
 /// 同步阻塞（6~170MB，走 ModelScope 国内源），调用方放 spawn_blocking。
-pub fn download_model(id: &str) -> Result<(), String> {
+/// `report` 收到每份进度（下载/校验/完成）；不需要进度就传空闭包。
+pub fn download_model(id: &str, report: &mut dyn FnMut(&OcrDlProgress)) -> Result<(), String> {
     let spec = model_set_by_name(id).ok_or_else(|| format!("未知的 OCR 模型档位：{id}"))?;
     if ready_set(id) {
         return Ok(());
     }
     let dir = crate::storage::AppPaths::resolve().data_dir.join("models");
-    ModelCache::new(&dir)
-        .ensure_model_set_for_pipeline(spec, pipeline(), ModelDownloadMode::Missing)
-        .map_err(|e| format!("模型下载失败：{e}"))
+    ensure_in_dir(&dir, spec, report).map_err(|e| format!("模型下载失败：{e}"))
 }
 
 #[tauri::command]
@@ -342,12 +560,23 @@ pub fn ocr_model_status() -> Vec<OcrModelInfo> {
     model_status()
 }
 
-/// 下载档位模型（6~170MB，ModelScope 国内源）。整段放阻塞线程池，
+/// 下载档位模型（6~170MB，ModelScope 国内源）。整段放阻塞线程池，进度经
+/// `ocr://dl-progress` 事件实时推给设置页（~120ms 节流，文件完成强制刷一次），
 /// 完成后直接回一份最新状态列表，设置页不必再发一次查询。
 #[tauri::command]
-pub async fn ocr_model_download(model: String) -> Result<Vec<OcrModelInfo>, String> {
+pub async fn ocr_model_download(
+    app: tauri::AppHandle,
+    model: String,
+) -> Result<Vec<OcrModelInfo>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        download_model(&model)?;
+        let mut last = Instant::now();
+        let mut on_progress = |p: &OcrDlProgress| {
+            if last.elapsed().as_millis() >= 120 || p.phase == "done" {
+                last = Instant::now();
+                let _ = app.emit(OCR_DL_EVENT, p);
+            }
+        };
+        download_model(&model, &mut on_progress)?;
         Ok(model_status())
     })
     .await

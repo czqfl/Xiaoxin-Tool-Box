@@ -866,3 +866,34 @@
 .feature-badge.on {
   color: var(--accent);
 }
+
+/* OCR 模型下载进度（设置页档位行下方 block 行） */
+.ocr-dl {
+  width: 100%;
+}
+.ocr-dl-track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.14);
+  overflow: hidden;
+}
+.ocr-dl-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-hover));
+  transition: width 0.12s linear;
+}
+.ocr-dl-fill.indet {
+  width: 34%;
+  animation: ocr-dl-slide 1.1s ease-in-out infinite;
+}
+@keyframes ocr-dl-slide {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(330%); }
+}
+.ocr-dl-meta {
+  margin-top: 6px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}

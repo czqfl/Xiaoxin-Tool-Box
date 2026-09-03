@@ -567,6 +567,25 @@ export interface OcrModelInfo {
   ready: boolean;
   active: boolean;
 }
+/** OCR 模型下载进度事件负载（Rust ocr.rs 每份进度 emit 一次，事件名见 OCR_DL_EVENT） */
+export interface OcrDlProgress {
+  /** 档位 id（如 ppocrv6-small） */
+  id: string;
+  /** 当前正在传输的文件（det/rec 模型或字典文件名） */
+  file: string;
+  /** download（传输中）| verify（SHA256 校验）| done（该文件落位完成） */
+  phase: "download" | "verify" | "done";
+  /** 本档位累计已完成字节（含此前已就位/完成的文件） */
+  done: number;
+  /** 本档位需下载总字节（Rust 侧 HEAD 预检汇总）；0 = 未知，走不确定动画 */
+  total: number;
+  /** 当前文件已下字节 */
+  file_done: number;
+  /** 当前文件总字节（0 = 未知） */
+  file_total: number;
+}
+/** OCR 模型下载进度事件名（设置页 listen 它） */
+export const OCR_DL_EVENT = "ocr://dl-progress";
 export const ocrModelStatus = (): Promise<OcrModelInfo[]> =>
   invoke<OcrModelInfo[]>("ocr_model_status");
 /** 下载档位模型到数据目录；返回下载后的最新状态列表 */

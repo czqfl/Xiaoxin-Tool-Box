@@ -1,7 +1,8 @@
 /** Screenshot & Pin settings page with sub-tabs */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useConfigStore } from "../stores/configStore";
-import { ocrModelDownload, ocrModelStatus, shotHistoryClear, type OcrModelInfo } from "../core/tauri";
+import { ocrModelDownload, ocrModelStatus, shotHistoryClear, OCR_DL_EVENT, type OcrModelInfo, type OcrDlProgress } from "../core/tauri";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Segmented, SettingGroup, SettingRow, Slider, Switch } from "./components";
 import { ShortcutRow } from "./ShortcutRow";
 
@@ -35,9 +36,32 @@ function OcrModelRows() {
   const [models, setModels] = useState<OcrModelInfo[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState("");
+  const [prog, setProg] = useState<OcrDlProgress | null>(null);
+  // 瞬时速率测算：相邻两次进度事件（download 阶段）的字节差 / 时间差
+  const lastTick = useRef<{ t: number; done: number } | null>(null);
+  const [speed, setSpeed] = useState(0);
 
   useEffect(() => {
     ocrModelStatus().then(setModels).catch(() => setModels([]));
+    let un: UnlistenFn | null = null;
+    void listen<OcrDlProgress>(OCR_DL_EVENT, (e) => {
+      const p = e.payload;
+      setProg(p);
+      const now = Date.now();
+      if (p.phase === "download") {
+        const prev = lastTick.current;
+        if (prev) {
+          const dt = (now - prev.t) / 1000;
+          const dd = p.done - prev.done;
+          if (dt > 0.1 && dd >= 0) setSpeed(dt > 0 ? Math.max(0, dd / dt) : 0);
+        }
+        lastTick.current = { t: now, done: p.done };
+      } else if (p.phase === "done") {
+        lastTick.current = null;
+        setSpeed(0);
+      }
+    }).then((f) => { un = f; }).catch(() => {});
+    return () => { if (un) un(); };
   }, []);
 
   const pick = async (m: OcrModelInfo) => {
@@ -45,14 +69,21 @@ function OcrModelRows() {
     setErr("");
     if (!m.ready) {
       setBusy(m.id);
+      setProg(null);
+      lastTick.current = null;
+      setSpeed(0);
       try {
         setModels(await ocrModelDownload(m.id));
       } catch (e) {
         setErr(e instanceof Error ? e.message : String(e));
         setBusy(null);
+        setProg(null);
         return;
       }
       setBusy(null);
+      setProg(null);
+      lastTick.current = null;
+      setSpeed(0);
     }
     // 等配置写入+广播完成，Rust 侧 set_model 才会生效；
     // 之后再刷一次状态列表，让"使用中"标记即时更新
@@ -61,12 +92,49 @@ function OcrModelRows() {
   };
 
   if (!models) return null;
+  const dl = prog && busy === prog.id ? prog : null;
+  const busyModel = models.find((m) => m.id === busy);
+  const mb = (b: number) => (b > 0 ? `${(b / 1048576).toFixed(1)} MB` : "…");
+  const fileLabel = (f: string) =>
+    f.includes("det") ? "检测模型" : f.includes("rec") ? "识别模型" : "字典";
+  const pct = dl && dl.total > 0 ? Math.min(100, (dl.done / dl.total) * 100) : null;
+  const speedTxt = speed > 0 ? ` · ${(speed / 1048576).toFixed(1)} MB/s` : "";
   return (
     <SettingGroup>
       <SettingRow
         title="文字识别模型"
         desc={err ? `模型下载失败：${err}` : "离线识别，切换后立即生效；档位越高越准，但体积更大、识别更慢"}
       />
+      {dl && (
+        <SettingRow
+          layout="block"
+          title={`${busyModel ? busyModel.name : "OCR"} 下载中…`}
+          desc={
+            dl.phase === "verify"
+              ? "正在校验文件完整性，马上就好"
+              : dl.total > 0
+                ? `${mb(dl.done)} / ${mb(dl.total)}${speedTxt}`
+                : `${mb(dl.file_done)}${speedTxt}`
+          }
+        >
+          <div className="ocr-dl">
+            <div className="ocr-dl-track">
+              <div
+                className={`ocr-dl-fill${pct === null ? " indet" : ""}`}
+                style={pct !== null ? { width: `${pct}%` } : undefined}
+              />
+            </div>
+            <div className="ocr-dl-meta">
+              {dl.phase === "verify"
+                ? "SHA256 完整性校验"
+                : `正在下载${fileLabel(dl.file)}`}
+              {dl.phase === "download" && dl.file_total > 0
+                ? ` · ${mb(dl.file_done)} / ${mb(dl.file_total)}`
+                : ""}
+            </div>
+          </div>
+        </SettingRow>
+      )}
       {models.map((m) => (
         <SettingRow
           key={m.id}
