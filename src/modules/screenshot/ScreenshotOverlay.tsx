@@ -104,6 +104,9 @@ interface Anno {
   /** 马赛克子形态：draw=手绘涂抹（走 points 笔迹）；rect=选区整块（走 x1y1x2y2）。
    *  不并入 kind——kind 决定工具与光标，子形态只决定蒙版形状，历史标注兼容 */
   mshape?: "draw" | "rect";
+  /** 文字标注字号（CSS 像素）。文字没有"线宽"概念，不能复用 width
+   *  （width 对画笔是描边粗细）——单独存，缺省回落到 TEXT_FS_DEFAULT */
+  fsize?: number;
 }
 
 const MAG = 168, MAG_Z = 2;
@@ -307,6 +310,53 @@ const mosaicSnapshots = new Map<number, HTMLCanvasElement>();
 let mosaicSid = 0;
 /** 换帧/新会话：旧快照全部作废（旧标注已清空，快照随之失效） */
 function clearMosaicSnapshots() { mosaicSnapshots.clear(); }
+
+/** 文字标注默认字号（CSS 像素）；滚轮可调，范围 TEXT_FS_MIN~MAX */
+const TEXT_FS_DEFAULT = 18, TEXT_FS_MIN = 8, TEXT_FS_MAX = 72;
+
+/* ---- 字体度量：DOM 行盒与 canvas 基线的精确对齐 ----
+   文字标注要求"输入框里看到什么位置，落笔就在什么位置"。DOM 的 input 行盒
+   与 canvas 的 fillText 是两套排版，锚点不同是"文字提交后偏移"的根因：
+     · DOM：input 的 content area 高 = 字体的 ascent+descent（line-height:
+       normal 时行盒恰等于它），文字基线在 content area 顶部往下 ascent 处；
+     · canvas：textBaseline="alphabetic" 的 y 就是基线。
+   于是只要把 s.y1 存【基线】位置、canvas 用 alphabetic 画，两侧就是同一个
+   锚点；ascent 由 canvas measureText 量出（与绘制用同一字体的同一套 metrics，
+   不写死经验值，换字体/换 DPI 都不会漂）。 */
+const fontMetricsCache = new Map<number, number>();
+let measureCanvas: HTMLCanvasElement | null = null;
+/** 量 bold ${fs}px sans-serif 的 ascent（基线上方高度，CSS 像素） */
+function fontAscent(fs: number): number {
+  const hit = fontMetricsCache.get(fs);
+  if (hit !== undefined) return hit;
+  let ascent = fs * 0.8; // 量不到时的兜底比例（sans-serif 典型值）
+  if (!measureCanvas) measureCanvas = document.createElement("canvas");
+  const g = measureCanvas.getContext("2d");
+  if (g) {
+    g.font = `bold ${fs}px sans-serif`;
+    const m = g.measureText("Hg");
+    if (typeof m.fontBoundingBoxAscent === "number" && m.fontBoundingBoxAscent > 0) {
+      ascent = m.fontBoundingBoxAscent;
+    }
+  }
+  fontMetricsCache.set(fs, ascent);
+  return ascent;
+}
+
+/* ---- 字号入口图标：一个大 A，A 的大小随当前字号等比变化 ----
+   工具栏方寸固定 22px，直接把标注字号画进去会溢出，所以把 TEXT_FS_MIN~MAX
+   线性映射到 9~20px 的"图标内字号"——滚轮滚到底 A 顶满、滚到最小 A 收缩，
+   视觉上就是这个 A 在随字号长大/变小，一眼能读出当前量级。 */
+function IcoFontSize({ fs }: { fs: number }) {
+  const t = (fs - TEXT_FS_MIN) / (TEXT_FS_MAX - TEXT_FS_MIN);
+  const g = Math.round(9 + Math.min(1, Math.max(0, t)) * 11);
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+      <text x="12" y="12" textAnchor="middle" dominantBaseline="central"
+        style={{ fontSize: `${g}px`, fontWeight: 800, fontFamily: "sans-serif", fill: "currentColor" }}>A</text>
+    </svg>
+  );
+}
 
 /** 当前标注集合仍引用的快照 sid（马赛克专属，其他标注没有 sid） */
 function collectAnnoSids(annos: Anno[]): Set<number> {
@@ -545,12 +595,14 @@ function drawShape(
     cc.drawImage(mask, 0, 0, bw2, bh2, 0, 0, bw2, bh2);
     cc.globalCompositeOperation = "source-over";
     ctx.drawImage(comp, 0, 0, bw2, bh2, bx, by, bw2, bh2);} else if (s.kind === "text" && s.text) {
-    // 与编辑器输入框【完全一致】的字体/字号/行盒：16px 加粗、baseline=top
-    // 对齐 DOM 行盒顶部；坐标取整避免亚像素渲染发虚
-    ctx.font = `bold ${Math.round(16 * scale)}px sans-serif`;
-    ctx.textBaseline = "top";
+    // 字号取标注自己的 fsize（滚轮可调、配置持久化），物理像素 = CSS px × scale。
+    // 【基线对齐】s.y1 存的是【文字基线】（CSS px，见 commitText），这里用
+    // alphabetic 直接画在基线上——与 DOM input 行盒共用同一套 font metrics，
+    // 不再用 textBaseline="top"（em 方顶部）硬套 DOM 行盒顶部，那正是
+    // "回车确定后文字向上偏移一段"的根因。坐标取整避免亚像素渲染发虚
+    const fs = s.fsize ?? TEXT_FS_DEFAULT;
+    ctx.font = `bold ${Math.round(fs * scale)}px sans-serif`;
     ctx.fillText(s.text, Math.round(X1), Math.round(Y1));
-    ctx.textBaseline = "alphabetic";
   } else if (s.kind === "number" && s.num !== undefined) {
     const r = 14 * scale;
     ctx.beginPath(); ctx.arc(X1, Y1, r, 0, Math.PI * 2);
@@ -589,10 +641,11 @@ const distSeg = (p: Pt, a: Pt, b: Pt): number => {
   const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2));
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
 };
-/** 编辑手柄：rect/ellipse = 包围盒四角；arrow/line = 两端点；brush 只可移动无手柄 */
+/** 编辑手柄：rect/ellipse/选区马赛克 = 包围盒四角；arrow/line = 两端点；
+ *  brush（自由笔画）= 包围盒四角（按包围盒等比缩放整条笔迹，主人需求） */
 const shapeHandles = (a: Anno): Pt[] => {
   if (a.kind === "arrow" || a.kind === "sarrow" || a.kind === "line") return [{ x: a.x1, y: a.y1 }, { x: a.x2, y: a.y2 }];
-  if (a.kind === "rect" || a.kind === "ellipse" || isRectMosaic(a)) {
+  if (a.kind === "rect" || a.kind === "ellipse" || isRectMosaic(a) || a.kind === "brush") {
     const b = annoBounds(a);
     return [
       { x: b.x, y: b.y }, { x: b.x + b.w, y: b.y },
@@ -691,6 +744,30 @@ export function ScreenshotOverlay() {
   useEffect(() => { mosaicModeRef.current = mosaicMode; }, [mosaicMode]);
   const setMosaicMode = (m: "draw" | "rect") => {
     void updateCfg({ ...cfg, annotate: { ...cfg.annotate, mosaic_mode: m } });
+  };
+  // 文字字号（CSS 像素）：文字工具二级选项里的大 A 按钮，悬停滚轮无级调节，
+  // 持久化到 cfg.annotate.font_size（旧配置无该值时回落到默认）。
+  // 【跟手 vs 落盘的取舍】本地 state 立即更新保证滚轮跟手；写盘 + 跨窗广播
+  // （saveConfig/broadcastConfigChanged 各一次 IPC）做 400ms 防抖——滚轮
+  // 每格都落盘＋广播，连续滚动会打出一串 IPC，还会把中间值全写进磁盘
+  const clampFs = (v: number) => Math.min(TEXT_FS_MAX, Math.max(TEXT_FS_MIN, Math.round(v)));
+  const cfgFs = clampFs(cfg.annotate?.font_size ?? TEXT_FS_DEFAULT);
+  const [fontSize, setFontSizeState] = useState(cfgFs);
+  const fontSizeRef = useRef(fontSize);
+  useEffect(() => { fontSizeRef.current = fontSize; }, [fontSize]);
+  // 其他窗口广播/重新载入改了配置 → 同步回本地（值未变则不触发重渲染）
+  useEffect(() => { setFontSizeState((p) => (p === cfgFs ? p : cfgFs)); }, [cfgFs]);
+  const fsPersistTimer = useRef(0);
+  useEffect(() => () => window.clearTimeout(fsPersistTimer.current), []);
+  const setFontSize = (v: number) => {
+    const nv = clampFs(v);
+    setFontSizeState(nv);
+    window.clearTimeout(fsPersistTimer.current);
+    fsPersistTimer.current = window.setTimeout(() => {
+      // 取最新 config（防抖期间 cfg 可能已被别的面板改过），避免写回旧值
+      const st = useConfigStore.getState();
+      void st.update({ ...st.config, annotate: { ...st.config.annotate, font_size: nv } });
+    }, 400);
   };
   // 自定义颜色：隐藏的原生取色 input，由色板里的彩虹按钮触发（Snipaste 同款）
   const customColorRef = useRef<HTMLInputElement>(null);
@@ -2463,12 +2540,20 @@ export function ScreenshotOverlay() {
       // 实际位置、以及左对齐垂直居中的偏移都对不上（"保存后错位"根因）
       let ox = te.x, oy = te.y;
       const r = textInputRef.current?.getBoundingClientRect();
-      if (r) { ox = r.left; oy = r.top; }
+      if (r) {
+        ox = r.left;
+        // 【存基线，不存行盒顶部】input 的 CSS 是 line-height:normal，行盒
+        // 高就等于字体的 ascent+descent，行盒顶部即 content area 顶部，
+        // 往下推一个 ascent 就是文字基线。canvas 侧用 alphabetic 画在同一
+        // 条基线上 → DOM 与画布严格同位，不再有"回车后文字向上偏移"。
+        // ascent 由 canvas measureText 量（与绘制同字体同 metrics，不写死）
+        oy = r.top + fontAscent(fontSizeRef.current);
+      }
       setUndos([]);
       // 重做栈清空 → 被撤销马赛克的快照成了永久孤儿，顺手回收
       pruneMosaicSnapshots(collectAnnoSids(annos));
       setAnnos((arr)=>[...arr, { kind:"text", x1:ox, y1:oy, x2:ox, y2:oy,
-        color, width: sw, text: te.value }]);
+        color, width: sw, fsize: fontSizeRef.current, text: te.value }]);
     }
     setTextEdit(null);
   };
@@ -2523,6 +2608,21 @@ export function ScreenshotOverlay() {
         if (i !== idx) return s;
         if (s.kind === "arrow" || s.kind === "sarrow" || s.kind === "line") {
           return hi === 0 ? { ...s, x1: mx, y1: my } : { ...s, x2: mx, y2: my };
+        }
+        // brush（自由笔画）：整条笔迹按【原始包围盒 → 锚点/光标新包围盒】
+        // 等比映射，与矩形同一套语义（锚点固定、拖过锚点即镜像翻转）。
+        // 每次都从 orig 重算、不基于上一次结果累加，反复缩放不漂移。
+        // 只改几何、线宽不变（与矩形/椭圆缩放保持一致）
+        if (s.kind === "brush" && orig.points?.length) {
+          const ob = annoBounds(orig);
+          const ow = Math.max(1, ob.w), oh = Math.max(1, ob.h); // 单点笔迹防除零
+          const pts = orig.points.map((p) => ({
+            x: ax + ((p.x - ob.x) / ow) * (mx - ax),
+            y: ay + ((p.y - ob.y) / oh) * (my - ay),
+          }));
+          return { ...s, points: pts,
+            x1: pts[0].x, y1: pts[0].y,
+            x2: pts[pts.length - 1].x, y2: pts[pts.length - 1].y };
         }
         return { ...s, x1: ax, y1: ay, x2: mx, y2: my };
       }));
@@ -3042,15 +3142,15 @@ export function ScreenshotOverlay() {
       {textEdit && (() => {
         // textEdit 已是【CSS 像素】（toCanvas 产出），left/top 直接用
         const vw = window.innerWidth, vh = window.innerHeight;
-        // 估宽高只用于边界钳制（编辑器为透明方角框，实际约 195×30）
-        const estW = 195, estH = 30;
+        // 估宽高只用于边界钳制；高度随字号走（行盒 ≈ 1.2×字号 + 容器上下 padding 10）
+        const estW = 195, estH = Math.round(fontSize * 1.25) + 12;
         const ex = Math.min(Math.max(textEdit.x, 4), Math.max(4, vw - estW - 4));
         const ey = Math.min(Math.max(textEdit.y, estH / 2 + 4), Math.max(4, vh - estH - 4));
         return (
           <div className="shot-text-editor" style={{ left: ex, top: ey }}
             onMouseDown={(ev)=>ev.stopPropagation()} onMouseUp={(ev)=>ev.stopPropagation()}>
             <input ref={textInputRef} value={textEdit.value}
-              style={{ color, caretColor: color }}
+              style={{ color, caretColor: color, fontSize: `${fontSize}px` }}
               placeholder="输入文字，Enter 确定"
               onChange={(ev)=>setTextEdit({ ...textEditRef.current!, value: ev.target.value })}
               onKeyDown={(ev)=>{
@@ -3195,6 +3295,20 @@ export function ScreenshotOverlay() {
               </>
             ) : (
               <>
+                {/* 文字工具：字号入口——一个大 A，A 的大小随当前字号实时变化，
+                    悬停滚轮无级调节（上滚变大、下滚变小，与其他滚轮入口同向），
+                    Shift 加速一档。与粗细圆点一样是纯滚轮控件，不挂点击行为；
+                    读数不另起徽标：悬停时 tooltip 里的「字号 N px」就是实时值 */}
+                {tool === "text" && (
+                  <button data-tip={`字号 ${fontSize}px（悬停滚轮调节，Shift 加速）`}
+                    onWheel={(ev) => {
+                      ev.stopPropagation();
+                      const step = ev.shiftKey ? 4 : 1;
+                      setFontSize(fontSize + (ev.deltaY > 0 ? -step : step));
+                    }}>
+                    <IcoFontSize fs={fontSize} />
+                  </button>
+                )}
                 {(cfg.annotate?.colors?.length ? cfg.annotate.colors : ANNO_DEFAULT_COLORS).map((c) => (
                   <button key={c} className={`shot-color-btn${color===c?" active":""}`}
                     style={{background:c}} onClick={()=>setColor(c)} />

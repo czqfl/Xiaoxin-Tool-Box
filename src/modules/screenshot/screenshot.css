@@ -292,15 +292,21 @@ html[data-theme="dark"] {
    1px 白线为主 + box-shadow 外圈 1px 深线构成双线，亮/暗截图内容上都有清晰
    轮廓；再叠极轻投影给浮层一点深度。文字【零 shadow】（重影根因）：编辑态
    与 canvas 成品完全同貌，才是真「所见即所得」。
-   【所见即所得契约】input 字体 bold 16px/16px 行盒绝不可改：commitText 量
-   input 的 getBoundingClientRect、canvas 用 baseline="top" 同字体重画；
-   文字色/光标色由内联 style 实时跟随色板。 */
+   【所见即所得契约】编辑器与 canvas 必须用同一锚点：input 行盒取
+   line-height:normal（= 字体 ascent+descent），commitText 量 getBoundingClientRect
+   得到行盒顶部 + fontAscent(当前字号) = 基线存进 y1，canvas 用同字号默认
+   alphabetic 基线重画——写死行高或改用 baseline="top" 都会让文字整体偏移。
+   文字色/光标色由内联 style 实时跟随色板，字号随滚轮调节注入。 */
 .shot-text-editor { position: fixed; z-index: 300; display: inline-flex; align-items: center; gap: 7px;
   background: transparent; border: 1px solid rgba(255,255,255,0.92); border-radius: 0;
   box-shadow: 0 0 0 1px rgba(0,0,0,0.32), 0 3px 14px rgba(0,0,0,0.22);
   padding: 5px 8px 5px 10px; transform: translateY(-50%); }
+/* 行高必须用 normal（= 字体自身 ascent+descent），行盒顶部才等于 content area
+   顶部，commitText 才能用「行盒顶部 + ascent」算出精确基线——写死 16px/16px 时
+   content area（约 1.2em）会在行盒内居中溢出，文字比行盒顶部高一截，
+   正是"回车确定后文字向上偏移"的根因。字号由 JS 按当前字号注入 */
 .shot-text-editor input { border: none; outline: none; background: transparent; padding: 0;
-  font: bold 16px/16px sans-serif; min-width: 150px; }
+  font-family: sans-serif; font-weight: bold; line-height: normal; min-width: 150px; }
 .shot-text-editor input::placeholder { color: rgba(150,150,150,0.85); }
 .shot-text-x { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px;
   padding: 0; border: none; border-radius: 50%; background: rgba(255,255,255,0.16); color: rgba(255,255,255,0.92);
