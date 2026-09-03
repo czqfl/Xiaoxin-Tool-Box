@@ -22,6 +22,7 @@ mod credentials;
 #[cfg(windows)]
 mod apps;
 mod boot;
+mod feedback;
 mod keyhook;
 mod panel;
 mod port;
@@ -247,6 +248,10 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // 自动更新（检查/下载/签名校验/静默安装由前端 updater.ts 驱动）+
+        // 进程插件（安装完成后 relaunch 重启进新版）
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::AppleScript,
             None,
@@ -494,6 +499,10 @@ pub fn run() {
             sticky::particles_layer_ready,
             sticky::set_acrylic,
             sticky::format_with_llm,
+            feedback::feedback_profile,
+            feedback::feedback_save_contact,
+            feedback::feedback_read_image,
+            feedback::submit_feedback,
             sticky::capture_screen_region,
             port::port_query,
             port::port_kill,

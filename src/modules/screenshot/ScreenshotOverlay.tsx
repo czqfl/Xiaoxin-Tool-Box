@@ -14,7 +14,7 @@ import {
 import { translateLines } from "../../core/tauri";
 import { EVT_TRANSLATE_LINE } from "../../core/events";
 import { useConfigStore } from "../../stores/configStore";
-import { Pencil, Undo2, Redo2, X, Download, Copy, BoxSelect } from "lucide-react";
+import { Pencil, Undo2, Redo2, X, Copy, BoxSelect } from "lucide-react";
 import { OcrPanel } from "../shared/OcrPanel";
 import { groupOcrParagraphs } from "../shared/ocr-group";
 import "./screenshot.css";
@@ -241,7 +241,15 @@ const IcoPin = () => (
     <path d={PIN_ICON_PATH} />
   </svg>
 );
-const IcoSaveAs = () => <Download {...IC} />;
+// 另存为/下载：向下箭头 + 底部一条横线（Lucide Download 底部是"盆/|_|"托盘，
+// 略显繁复 → 换成单横线，图标更简洁，语义仍是下沉保存）
+const IcoSaveAs = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M12 16V3" />
+    <path d="m7 11 5 5 5-5" />
+    <path d="M3 21h18" />
+  </svg>
+);
 const IcoCopy = () => <Copy {...IC} />;
 // 选择 / 移动：经典光标箭头（与 Lucide MousePointer 一致的描线风格），
 // 激活时高亮表示当前处于"选区/移动"模式，点击图形图标才进入绘制

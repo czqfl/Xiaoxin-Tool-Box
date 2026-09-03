@@ -12,6 +12,8 @@ dist-v*/
 # Tauri
 src-tauri/target
 src-tauri/gen
+# 更新签名密钥（私钥绝不入库，泄露后任何人都能伪造更新包）
+.tauri-keys/
 
 # Editor
 .vscode/*

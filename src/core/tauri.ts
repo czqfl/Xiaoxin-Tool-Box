@@ -652,3 +652,36 @@ export const pinHideAll = () => invoke<void>("pin_hide_all");
 export const pinShowAll = () => invoke<void>("pin_show_all");
 /** 清除全部贴图（删除窗口 + 文件） */
 export const pinClearAll = () => invoke<void>("pin_clear_all");
+
+// ---- 用户反馈 ----
+/** 本机反馈档案（匿名设备码 + 预填联系人；首次调用生成设备码并落盘） */
+export interface FeedbackProfile {
+  deviceId: string;
+  name: string;
+  contact: string;
+}
+/** 截图预览数据（data URL 直接给 <img src>） */
+export interface FeedbackImagePreview {
+  dataUrl: string;
+  size: number;
+}
+export const feedbackProfile = () => invoke<FeedbackProfile>("feedback_profile");
+export const feedbackSaveContact = (name: string, contact: string) =>
+  invoke<void>("feedback_save_contact", { name, contact });
+export const feedbackReadImage = (path: string) =>
+  invoke<FeedbackImagePreview>("feedback_read_image", { path });
+/** 提交反馈（POST 到反馈服务器；category: bug|suggestion|other） */
+export const submitFeedback = (
+  category: string,
+  text: string,
+  name: string,
+  contact: string,
+  screenshotPath: string | null
+) =>
+  invoke<void>("submit_feedback", {
+    category,
+    text,
+    name,
+    contact,
+    screenshotPath,
+  });

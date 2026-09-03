@@ -26,6 +26,8 @@ pub struct AppPaths {
     pub fs_index_file: PathBuf,
     /// 本机应用列表缓存（含图标 data URL，约 1MB；启动时后台线程预热）
     pub app_cache_file: PathBuf,
+    /// 用户反馈档案（匿名设备码 + 可选联系人预填）
+    pub feedback_file: PathBuf,
 }
 
 impl AppPaths {
@@ -62,6 +64,7 @@ impl AppPaths {
             recent_files_file: data_dir.join("recent_files.json"),
             fs_index_file: data_dir.join("file_index.bin"),
             app_cache_file: data_dir.join("app_cache.json"),
+            feedback_file: data_dir.join("feedback.json"),
             images_dir,
             data_dir,
         }

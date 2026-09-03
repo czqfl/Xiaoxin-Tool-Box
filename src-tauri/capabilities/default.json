@@ -27,6 +27,8 @@
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "core:image:default",
+    "updater:default",
+    "process:allow-restart",
     "opener:default",
     "dialog:default",
     "autostart:allow-enable",

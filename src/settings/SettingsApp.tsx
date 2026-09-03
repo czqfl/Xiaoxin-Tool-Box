@@ -8,6 +8,7 @@ import { useConfigStore } from "../stores/configStore";
 import { Spinner } from "../components/Spinner";
 import { IconClose } from "../components/icons";
 import { EVT_SHORTCUT_FAILED, onEvent } from "../core/events";
+import { scheduleStartupUpdateCheck, useUpdaterStore } from "../core/updater";
 import { ClipboardPage } from "./ClipboardPage";
 import { FolderPage } from "./FolderPage";
 import { CredentialPage } from "./CredentialPage";
@@ -137,6 +138,10 @@ export function SettingsApp() {
   const theme = useConfigStore((s) => s.config.general.theme);
   const [page, setPage] = useState<Page>("general");
   const [shortcutFailed, setShortcutFailed] = useState<string | null>(null);
+  // 发现新版本：「关于」侧栏项亮红点提示（下载中/安装中保持亮，引导用户看进度）
+  const updateAvailable = useUpdaterStore(
+    (s) => s.status === "available" || s.status === "downloading" || s.status === "installing"
+  );
   const shortcuts = useConfigStore((s) => s.config.shortcuts);
   // 任一快捷键保存成功（配置变化）即清除"注册失败"横幅
   // 仅当快捷键【内容】真正变化时才清掉失败横幅：任意配置刷新都会产生新的
@@ -152,6 +157,8 @@ export function SettingsApp() {
 
   useEffect(() => {
     load();
+    // 启动 8 秒后静默检查更新：发现新版则「关于」侧栏项亮红点（失败完全静默）
+    scheduleStartupUpdateCheck();
     // 兜底：窗口 hide/show 切换后偶发"渲染了但状态未就绪"（表现为打不开/空白），
     // 每次获得焦点时若配置尚未加载则补一次加载
     const cleanup: Array<() => void> = [];
@@ -263,6 +270,8 @@ export function SettingsApp() {
           >
             {item.icon}
             {item.label}
+            {/* 新版本红点：仅「关于」项，进入页面即见更新卡片 */}
+            {item.key === "about" && updateAvailable && <span className="nav-update-dot" />}
           </button>
         ))}
         <div className="settings-sidebar-footer">v1.0.0 · Windows</div>
