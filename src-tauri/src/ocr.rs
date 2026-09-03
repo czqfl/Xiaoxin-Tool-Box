@@ -355,7 +355,7 @@ pub struct OcrDlProgress {
     pub phase: String,
     /// 本档位累计已完成字节（含此前已就位/完成的文件）
     pub done: u64,
-    /// 本档位需下载总字节（HEAD 预检汇总）；0 = 未知（进度条转不确定动画）
+    /// 本档位需下载总字节（Range 探测汇总）；0 = 未知（进度条退化为无百分比形态）
     pub total: u64,
     /// 当前文件已下字节
     pub file_done: u64,
@@ -520,16 +520,36 @@ fn ensure_in_dir(
     }
     fs::create_dir_all(dir).map_err(|e| format!("创建模型目录 {} 失败：{e}", dir.display()))?;
     let client = http_client()?;
-    // 先 HEAD 预检缺失文件的真实字节数并加总；任何 HEAD 失败都不致命——total=0
-    // 时前端退化为不确定进度动画。
+    // 预检缺失文件的真实总字节并加总。HEAD 拿不到长度（ModelScope 经 302 跳到
+    // cdn-lfs，响应不含 Content-Length），改用 GET + Range: bytes=0-0 探测：跟随后
+    // 返回 206，响应头 `Content-Range: bytes 0-0/N` 里的 N 就是该文件总字节数。
+    // 任一文件探测失败都不致命——total=0 时前端退化为「已下载量 + 速率」无百分比形态。
     let mut total: u64 = 0;
     let mut unknown = false;
     for a in &todo {
-        match client.head(a.url).send() {
-            Ok(r) => match r.content_length() {
-                Some(n) if n > 0 => total += n,
-                _ => unknown = true,
-            },
+        match client
+            .get(a.url)
+            .header(reqwest::header::RANGE, "bytes=0-0")
+            .send()
+        {
+            Ok(r) => {
+                let from_range = r
+                    .headers()
+                    .get(reqwest::header::CONTENT_RANGE)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.split('/').nth(1))
+                    .and_then(|x| x.trim().parse::<u64>().ok())
+                    .filter(|n| *n > 0);
+                match from_range {
+                    Some(n) => total += n,
+                    // 无 Content-Range（可能 200 全量返回）退到 Content-Length；
+                    // 模型文件皆 MB 级，>1 才当总量，206 单字节响应的 content_length==1 不算。
+                    None => match r.content_length() {
+                        Some(n) if n > 1 => total += n,
+                        _ => unknown = true,
+                    },
+                }
+            }
             Err(_) => unknown = true,
         }
     }

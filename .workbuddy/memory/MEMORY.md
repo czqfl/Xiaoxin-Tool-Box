@@ -1,11 +1,14 @@
 # 项目长期记忆（Xiaoxin-Tool-Box）
 
-## 提交约定（2026-09-02 更新）
+## 提交约定（2026-09-03 更新）
 - 每次完成任务：git commit 并 push 到 GitHub（origin=git@github.com:czqfl/Xiaoxin-Tool-Box.git，
   main 分支）。旧约定「commit only, no push」作废——主人自定义指令明确要求推送。
 - push 走非沙箱 Bash。失败先 `git fetch` 查分叉，勿盲目 force push。
-- 已知坑：git 链式命令偶发「nothing to commit / ahead by N」误报（实际已提交）；
-  遇此先 `git log --oneline -1` + `git status` 复核，再单独 `git push`。
+- 【铁律 2026-09-03】git add / commit / push 严禁 `&&` 链式，必须分步单独执行：
+  1) `git add <files>`（单独）；2) `git commit -m "..."`（单独）；3) `git log --oneline -1`
+  + `git status` 复核确认已提交、工作区干净；4) 最后单独 `git push origin main`。
+  链式末尾常误报「nothing to commit / ahead by N / up-to-date」——实为 commit 已成功、
+  push 根本没跑。主人已点名「不长记性」，此条不再犯，今后每次交付都按四步走。
 
 ## 改文件铁律：非沙箱 Bash + 原生 Windows Python，保 CRLF
 - 本机 D: 经 /d 挂载即真实 D:；但历史上 Edit/Write/Read/沙箱 Bash 曾操作「临时覆盖层」，

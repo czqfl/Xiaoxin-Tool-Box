@@ -123,10 +123,11 @@ function OcrModelRows() {
 
   if (!models) return null;
   const dl = prog && busy === prog.id ? prog : null;
-  const mb = (b: number) => (b > 0 ? `${(b / 1048576).toFixed(1)} MB` : "…");
+  const mb = (b: number) => (b >= 0 ? `${(b / 1048576).toFixed(1)} MB` : "…");
   const fileLabel = (f: string) =>
     f.includes("det") ? "检测模型" : f.includes("rec") ? "识别模型" : "字典";
   const pct = dl && dl.total > 0 ? Math.min(100, (dl.done / dl.total) * 100) : null;
+  const pctTxt = pct !== null ? `${pct.toFixed(0)}%` : "";
   const speedTxt = speed > 0 ? ` · ${(speed / 1048576).toFixed(1)} MB/s` : "";
   const redBtn = { background: "#e5484d", color: "#fff", borderColor: "#e5484d" };
   return (
@@ -142,17 +143,14 @@ function OcrModelRows() {
             <div className="setting-info">
               <div className="setting-title">{m.name}</div>
               <div className="ocr-dl-track">
-                <div
-                  className={`ocr-dl-fill${pct === null ? " indet" : ""}`}
-                  style={pct !== null ? { width: `${pct}%` } : undefined}
-                />
+                <div className="ocr-dl-fill" style={{ width: `${pct ?? 0}%` }} />
               </div>
               <div className="ocr-dl-meta">
                 {dl
                   ? dl.phase === "verify"
                     ? "SHA256 完整性校验"
                     : dl.total > 0
-                      ? `${mb(dl.done)} / ${mb(dl.total)}${speedTxt} · 正在下载${fileLabel(dl.file)}`
+                      ? `${mb(dl.done)} / ${mb(dl.total)} · ${pctTxt}${speedTxt} · 正在下载${fileLabel(dl.file)}`
                       : `${mb(dl.file_done)}${speedTxt} · 正在下载${fileLabel(dl.file)}`
                   : "正在准备下载…"}
               </div>
