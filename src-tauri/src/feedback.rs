@@ -27,8 +27,9 @@ use tauri::{AppHandle, State};
 
 use crate::storage::{save_json, AppPaths};
 
-/// 反馈服务器接收端点（占位符，域名定稿后与更新服务器一起替换）
-const FEEDBACK_ENDPOINT: &str = "https://feedback.xiaoxin.example.com/api/feedback";
+/// 反馈服务器接收端点（服务器 AI 交付的 API 网关地址）
+const FEEDBACK_ENDPOINT: &str =
+    "https://n10f97znpny0-d.space-z.ai/api/feedback?XTransformPort=3007";
 /// 截图体积上限（原始字节；base64 后约为 4/3）
 const MAX_SCREENSHOT_BYTES: u64 = 8 * 1024 * 1024;
 /// 上传超时：截图 + 慢网络余量（共享翻译的 12s 客户端太紧）
