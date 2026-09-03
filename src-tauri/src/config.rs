@@ -475,6 +475,8 @@ pub struct AnnotateConfig {
     pub font_size: u32,
     /// 马赛克块大小（px）
     pub mosaic_block: u32,
+    /// 马赛克子模式（持久化）："draw" = 手绘涂抹；"rect" = 拖选区后整块马赛克
+    pub mosaic_mode: String,
     /// 标注色板（十六进制颜色列表）
     pub colors: Vec<String>,
 }
@@ -485,6 +487,7 @@ impl Default for AnnotateConfig {
             stroke_width: 3,
             font_size: 18,
             mosaic_block: 12,
+            mosaic_mode: "draw".into(),
             colors: vec![
                 "#e5484d".into(),
                 "#ff8d1a".into(),

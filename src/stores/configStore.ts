@@ -132,6 +132,7 @@ const defaultConfig: AppConfig = {
     stroke_width: 3,
     font_size: 18,
     mosaic_block: 12,
+    mosaic_mode: "draw",
     colors: ["#e5484d", "#ff8d1a", "#ffd60a", "#36b37e", "#4c8dff", "#b06fd6", "#ffffff", "#000000"],
   },
   panel_positions: {},

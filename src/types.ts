@@ -353,6 +353,8 @@ export interface AnnotateConfig {
   stroke_width: number;
   font_size: number;
   mosaic_block: number;
+  /** 马赛克子模式（持久化）：draw = 手绘涂抹；rect = 拖出选区后整块马赛克 */
+  mosaic_mode?: "draw" | "rect";
   colors: string[];
 }
 

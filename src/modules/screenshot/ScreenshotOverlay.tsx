@@ -15,7 +15,7 @@ import { translateLines } from "../../core/tauri";
 import { EVT_TRANSLATE_LINE } from "../../core/events";
 import { useConfigStore } from "../../stores/configStore";
 import { scrollBegin } from "../scrollshot/api";
-import { Pencil, Undo2, Redo2, X, Download, Copy } from "lucide-react";
+import { Pencil, Undo2, Redo2, X, Download, Copy, Pointer, BoxSelect } from "lucide-react";
 import { OcrPanel } from "../shared/OcrPanel";
 import { groupOcrParagraphs } from "../shared/ocr-group";
 import "./screenshot.css";
@@ -101,6 +101,9 @@ interface Anno {
   color: string; width: number; points?: Pt[]; text?: string; num?: number;
   /** 马赛克笔画专属：落下顺序号，索引「当时画面」快照（时序马赛克） */
   sid?: number;
+  /** 马赛克子形态：draw=手绘涂抹（走 points 笔迹）；rect=选区整块（走 x1y1x2y2）。
+   *  不并入 kind——kind 决定工具与光标，子形态只决定蒙版形状，历史标注兼容 */
+  mshape?: "draw" | "rect";
 }
 
 const MAG = 168, MAG_Z = 2;
@@ -186,6 +189,10 @@ const IcoMosaic = () => (
     <rect x="12.5" y="12.5" width="6" height="6" rx="1" fill="currentColor" stroke="none"/>
   </svg>
 );
+// 马赛克二级选项（仿企业微信）：手绘 = 手指涂抹；选区 = 四角框。
+// 统一 Lucide 描线、与 IcoBrush=<Pencil {...IC}/> 完全同构
+const IcoMosaicDraw = () => <Pointer {...IC} />;
+const IcoMosaicRect = () => <BoxSelect {...IC} />;
 // 文字：一横 + 一竖的极简 T（Lucide Type 顶部带衬线端点的"刺"观感）
 const IcoTextT = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -270,7 +277,11 @@ const ANNO_MAX_CUSTOM = 6;
 // 使旧层失效（换帧/新会话由 reloadFrameOnly / loadSession 递增）
 interface MosaicLayer { bs: number; w: number; h: number; stamp: number; pix: HTMLCanvasElement }
 const mosaicLayerCache = new WeakMap<HTMLCanvasElement, MosaicLayer>();
-const mosaicScratch: { mask?: HTMLCanvasElement; comp?: HTMLCanvasElement } = {};
+/** 蒙版 / 合成 / 逐级减半用的两块中转画布（dsA/dsB 交替，避免自绘自） */
+const mosaicScratch: {
+  mask?: HTMLCanvasElement; comp?: HTMLCanvasElement;
+  dsA?: HTMLCanvasElement; dsB?: HTMLCanvasElement;
+} = {};
 let mosaicFrameStamp = 0;
 /** 帧内容已更换：马赛克整图层作废（下一帧重绘时重建） */
 function invalidateMosaicLayer() { mosaicFrameStamp++; }
@@ -369,7 +380,7 @@ function drawShape(
     ctx.beginPath(); ctx.moveTo(s.points[0].x * scale, s.points[0].y * scale);
     for (let i = 1; i < s.points.length; i++) ctx.lineTo(s.points[i].x * scale, s.points[i].y * scale);
     ctx.stroke();
-    } else if (s.kind === "mosaic" && s.points && s.points.length > 0 && src && src.width > 0) {
+    } else if (s.kind === "mosaic" && src && src.width > 0 && (s.mshape === "rect" || (s.points && s.points.length > 0))) {
     // 真马赛克（像素化笔刷）——【整图层 + 蒙版合成】写法（tui.image-editor /
     // fabric.js 等开源画板的标准做法）：
     //   1) 整帧降采样成小图再关平滑放大回原尺寸 → 得到全图马赛克层
@@ -391,8 +402,35 @@ function drawShape(
       const pix = document.createElement("canvas");
       pix.width = pw; pix.height = ph;
       const pctx = pix.getContext("2d", { willReadFrequently: true })!;
-      pctx.imageSmoothingEnabled = true; // 降采样平滑 = 区域平均色
-      pctx.drawImage(sampleSrc, 0, 0, pw, ph);
+      // 【逐级减半降采样】一步从 W×H 直接缩到 pw×ph（4K 下缩放比可达 100×）时，
+      // Skia/Chromium 的双线性在大缩放比下退化为稀疏跳采样——每格只命中极少数
+      // 源像素，白底黑字的区域里黑像素几乎被漏采，格子颜色被拉向亮底色，正是
+      // "马赛克比企业微信亮"的根因。改成每步只缩 ≤2×：
+      //   目标像素 i 的中心 i+0.5 反投影回源图 = (i+0.5)×2 = 2i+1.0，
+      //   恰好是相邻两纹素中心（2i+0.5 / 2i+1.5）的正中，双线性四权重各 0.25
+      //   —— 数学上即【精确的 2×2 区域平均】；每一步都成立，逐级递归下去就是
+      //   全图真实均值（偏暗、更"实"，与企业微信一致）。全程 GPU 合成，比 JS
+      //   逐格 getImageData 求平均快一个数量级，且不依赖驱动的 mipmap 行为。
+      let curW = W, curH = H;
+      let curSrc: CanvasImageSource = sampleSrc;
+      let dsA = mosaicScratch.dsA, dsB = mosaicScratch.dsB;
+      if (!dsA) { dsA = document.createElement("canvas"); mosaicScratch.dsA = dsA; }
+      if (!dsB) { dsB = document.createElement("canvas"); mosaicScratch.dsB = dsB; }
+      let dst = dsA;
+      while (curW > pw * 2 || curH > ph * 2) {
+        const nw = Math.max(pw, Math.ceil(curW / 2));
+        const nh = Math.max(ph, Math.ceil(curH / 2));
+        if (dst.width !== nw) dst.width = nw;
+        if (dst.height !== nh) dst.height = nh;
+        const dctx = dst.getContext("2d")!;
+        dctx.imageSmoothingEnabled = true; // 每步 ≤2×：双线性 = 精确 2×2 平均
+        dctx.clearRect(0, 0, nw, nh);
+        dctx.drawImage(curSrc, 0, 0, curW, curH, 0, 0, nw, nh);
+        curSrc = dst; curW = nw; curH = nh;
+        dst = dst === dsA ? dsB : dsA; // 交替两块，避免同一画布自绘自
+      }
+      pctx.imageSmoothingEnabled = true; // 收尾一步（≤2×）同样取平均
+      pctx.drawImage(curSrc, 0, 0, curW, curH, 0, 0, pw, ph);
       // 【次像素色边去色】ClearType 文字边缘在截图像素里带红/蓝色边（R/G/B
       // 子像素分别抗锯齿），正常观看被眼睛积分成灰色；马赛克按格取平均后
       // 色相残留被放大成"黑白背景出彩色块"。对低饱和度格子（RGB 通道极差
@@ -415,51 +453,71 @@ function drawShape(
       // 每次重绘都整帧降采样重建马赛克层（4K 下每帧几十 MB 带宽，白烧）
       mosaicLayerCache.set(sampleSrc, layer);
     }
-    // 2) 笔迹蒙版 + 合成【只在笔迹包围盒内进行】：整屏大小的 clear/合成
+    // 2) 蒙版 + 合成【只在包围盒内进行】：整屏大小的 clear/合成
     //    每帧 ×2 层在弱 GPU 上会拖垮整页（"一用马赛克就卡死"），包围盒
-    //    通常只有笔迹那么大，成本与之成正比
-    const pts = s.points!.map((p) => ({ x: p.x * scale, y: p.y * scale }));
-    const pad = bs * 2.2;
+    //    通常只有笔迹那么大，成本与之成正比。
+    //    两种子形态：draw = 笔迹描成圆头粗线；rect = 拖出的选区整块填充
+    const isRect = s.mshape === "rect";
+    const pts = isRect ? [] : s.points!.map((p) => ({ x: p.x * scale, y: p.y * scale }));
+    // 手绘笔迹要留出圆头线宽的外扩量；矩形蒙版与选框严格等大，一像素不多
+    const pad = isRect ? 0 : bs * 2.2;
     let bw2 = 0, bh2 = 0;
-    let bx = Infinity, by = Infinity, bx2 = -Infinity, by2 = -Infinity;
-    for (const p of pts) {
-      bx = Math.min(bx, p.x); by = Math.min(by, p.y);
-      bx2 = Math.max(bx2, p.x); by2 = Math.max(by2, p.y);
+    let bx: number, by: number, bx2: number, by2: number;
+    if (isRect) {
+      const b = annoBounds(s);
+      bx = b.x * scale; by = b.y * scale;
+      bx2 = (b.x + b.w) * scale; by2 = (b.y + b.h) * scale;
+    } else {
+      bx = Infinity; by = Infinity; bx2 = -Infinity; by2 = -Infinity;
+      for (const p of pts) {
+        bx = Math.min(bx, p.x); by = Math.min(by, p.y);
+        bx2 = Math.max(bx2, p.x); by2 = Math.max(by2, p.y);
+      }
     }
     bx = Math.max(0, Math.floor(bx - pad)); by = Math.max(0, Math.floor(by - pad));
     bw2 = Math.min(W, Math.ceil(bx2 + pad)) - bx; bh2 = Math.min(H, Math.ceil(by2 + pad)) - by;
     if (bw2 <= 0 || bh2 <= 0) { ctx.restore(); return; }
     let mask = mosaicScratch.mask;
     if (!mask) { mask = document.createElement("canvas"); mosaicScratch.mask = mask; }
-    if (mask.width !== bw2) mask.width = bw2;
-    if (mask.height !== bh2) mask.height = bh2;
+    // 只增不减：拖选区/画长笔迹时包围盒逐帧变大，若每帧按新尺寸重设画布
+    // 会反复重新分配位图（全屏选区下 8MB/帧 ×2 块）；保留已分配的最大尺寸，
+    // 只用左上角 bw2×bh2 区域——下面的 drawImage 全部带源矩形，绝不会把
+    // 区域外陈旧像素带进结果
+    if (mask.width < bw2) mask.width = bw2;
+    if (mask.height < bh2) mask.height = bh2;
     const mctx = mask.getContext("2d")!;
     mctx.clearRect(0, 0, bw2, bh2);
     mctx.fillStyle = "#000"; mctx.strokeStyle = "#000";
-    mctx.lineCap = "round"; mctx.lineJoin = "round";
-    mctx.lineWidth = bs * 2.2;
-    if (pts.length === 1) {
-      mctx.beginPath(); mctx.arc(pts[0].x - bx, pts[0].y - by, bs * 1.1, 0, Math.PI * 2); mctx.fill();
+    if (isRect) {
+      // 矩形蒙版：填满整个包围盒（= 选框本身）。destination-in 之后选区内
+      // 像素被整块替换成马赛克，边缘与拖动时的选框严格对齐、无圆角无外扩
+      mctx.fillRect(0, 0, bw2, bh2);
     } else {
-      mctx.beginPath();
-      mctx.moveTo(pts[0].x - bx, pts[0].y - by);
-      for (let i = 1; i < pts.length; i++) mctx.lineTo(pts[i].x - bx, pts[i].y - by);
-      mctx.stroke();
+      mctx.lineCap = "round"; mctx.lineJoin = "round";
+      mctx.lineWidth = bs * 2.2;
+      if (pts.length === 1) {
+        mctx.beginPath(); mctx.arc(pts[0].x - bx, pts[0].y - by, bs * 1.1, 0, Math.PI * 2); mctx.fill();
+      } else {
+        mctx.beginPath();
+        mctx.moveTo(pts[0].x - bx, pts[0].y - by);
+        for (let i = 1; i < pts.length; i++) mctx.lineTo(pts[i].x - bx, pts[i].y - by);
+        mctx.stroke();
+      }
     }
     // 3) 合成：马赛克层区域 ∩ 笔迹蒙版 → 贴回目标画布对应位置
     let comp = mosaicScratch.comp;
     if (!comp) { comp = document.createElement("canvas"); mosaicScratch.comp = comp; }
-    if (comp.width !== bw2) comp.width = bw2;
-    if (comp.height !== bh2) comp.height = bh2;
+    if (comp.width < bw2) comp.width = bw2;
+    if (comp.height < bh2) comp.height = bh2;
     const cc = comp.getContext("2d")!;
     cc.globalCompositeOperation = "source-over";
     cc.clearRect(0, 0, bw2, bh2);
     cc.imageSmoothingEnabled = false; // 放大不平滑 = 硬边像素块
     cc.drawImage(layer.pix, bx / bs, by / bs, bw2 / bs, bh2 / bs, 0, 0, bw2, bh2);
     cc.globalCompositeOperation = "destination-in";
-    cc.drawImage(mask, 0, 0);
+    cc.drawImage(mask, 0, 0, bw2, bh2, 0, 0, bw2, bh2);
     cc.globalCompositeOperation = "source-over";
-    ctx.drawImage(comp, bx, by);} else if (s.kind === "text" && s.text) {
+    ctx.drawImage(comp, 0, 0, bw2, bh2, bx, by, bw2, bh2);} else if (s.kind === "text" && s.text) {
     // 与编辑器输入框【完全一致】的字体/字号/行盒：16px 加粗、baseline=top
     // 对齐 DOM 行盒顶部；坐标取整避免亚像素渲染发虚
     ctx.font = `bold ${Math.round(16 * scale)}px sans-serif`;
@@ -490,10 +548,13 @@ const annoBounds = (a: Anno): Rect => {
   }
   return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
 };
-/** 可二次编辑的图形。马赛克落下即冻结采样快照，移位会换成别处像素、
- *  露出原处内容，语义不对，排除；文字/序号不在编辑范围 */
+/** 马赛克·选区态：蒙版是 x1y1x2y2 的矩形，命中/手柄/移动一律按矩形处理 */
+const isRectMosaic = (a: Anno) => a.kind === "mosaic" && a.mshape === "rect";
+/** 可二次编辑的图形。手绘马赛克落下即冻结采样快照，移位会换成别处像素、
+ *  露出原处内容，语义不对，排除；选区马赛克按矩形自由移动/缩放。
+ *  文字/序号不在编辑范围 */
 const shapeEditable = (a: Anno) =>
-  a.kind === "rect" || a.kind === "ellipse" || a.kind === "arrow" || a.kind === "sarrow" || a.kind === "line" || a.kind === "brush";
+  a.kind === "rect" || a.kind === "ellipse" || a.kind === "arrow" || a.kind === "sarrow" || a.kind === "line" || a.kind === "brush" || isRectMosaic(a);
 const distSeg = (p: Pt, a: Pt, b: Pt): number => {
   const dx = b.x - a.x, dy = b.y - a.y;
   const l2 = dx * dx + dy * dy;
@@ -504,7 +565,7 @@ const distSeg = (p: Pt, a: Pt, b: Pt): number => {
 /** 编辑手柄：rect/ellipse = 包围盒四角；arrow/line = 两端点；brush 只可移动无手柄 */
 const shapeHandles = (a: Anno): Pt[] => {
   if (a.kind === "arrow" || a.kind === "sarrow" || a.kind === "line") return [{ x: a.x1, y: a.y1 }, { x: a.x2, y: a.y2 }];
-  if (a.kind === "rect" || a.kind === "ellipse") {
+  if (a.kind === "rect" || a.kind === "ellipse" || isRectMosaic(a)) {
     const b = annoBounds(a);
     return [
       { x: b.x, y: b.y }, { x: b.x + b.w, y: b.y },
@@ -519,7 +580,7 @@ const hitShapeHandle = (a: Anno, pt: Pt, tol: number): number =>
  *  线条类按笔画距离（容差至少一个线宽，细线也不难点） */
 const shapeHit = (a: Anno, pt: Pt, tol: number): boolean => {
   const t = Math.max(tol, a.width);
-  if (a.kind === "rect") {
+  if (a.kind === "rect" || isRectMosaic(a)) {
     const b = annoBounds(a);
     return pt.x >= b.x - tol && pt.x <= b.x + b.w + tol && pt.y >= b.y - tol && pt.y <= b.y + b.h + tol;
   }
@@ -591,6 +652,15 @@ export function ScreenshotOverlay() {
   const annoRef = useRef<HTMLCanvasElement>(null);
   const cfg = useConfigStore((s) => s.config);
   const updateCfg = useConfigStore((s) => s.update);
+  // 马赛克子模式：draw = 手绘涂抹；rect = 拖出选区后整块打码（企业微信同款
+  // 二级选项）。存进 cfg.annotate.mosaic_mode —— 持久化，下次截图沿用上次选择，
+  // 不用每次重选。旧配置没有该字段时按 draw 兜底。
+  const mosaicMode: "draw" | "rect" = cfg.annotate?.mosaic_mode === "rect" ? "rect" : "draw";
+  const mosaicModeRef = useRef(mosaicMode);
+  useEffect(() => { mosaicModeRef.current = mosaicMode; }, [mosaicMode]);
+  const setMosaicMode = (m: "draw" | "rect") => {
+    void updateCfg({ ...cfg, annotate: { ...cfg.annotate, mosaic_mode: m } });
+  };
   // 自定义颜色：隐藏的原生取色 input，由色板里的彩虹按钮触发（Snipaste 同款）
   const customColorRef = useRef<HTMLInputElement>(null);
   // 取色确认入库：input 的【原生 change】事件在「确定」时触发一次（React 的
@@ -2449,9 +2519,13 @@ export function ScreenshotOverlay() {
         if (hi >= 0) { startShapeResize(editIdx, hi); return; }
         if (shapeHit(cur, pt, HANDLE_HIT)) { startShapeMove(editIdx, pt); return; }
       }
+      // 马赛克两种子形态：手绘走 points 笔迹（圆头粗线蒙版）；选区只记对角
+      // 两点（矩形蒙版），拖动时由 onM 更新 x2/y2 —— 与矩形/椭圆完全同构
+      const mosaicIsRect = tool === "mosaic" && mosaicModeRef.current === "rect";
       const a: Anno = { kind: tool, x1:pt.x, y1:pt.y, x2:pt.x, y2:pt.y, color, width: sw,
-        points: (tool==="brush"||tool==="mosaic") ? [pt] : undefined,
+        points: (tool==="brush"||(tool==="mosaic"&&!mosaicIsRect)) ? [pt] : undefined,
         num: tool==="number" ? numCnt : undefined };
+      if (tool === "mosaic") a.mshape = mosaicIsRect ? "rect" : "draw";
       if (tool==="number") setNumCnt((n)=>n+1);
       // 新动作清空重做栈：撤销后画了新图形，再"重做"若恢复旧标注会把
       // 新画的图形整个吞掉（无提示的数据丢失）
@@ -3032,8 +3106,22 @@ export function ScreenshotOverlay() {
         // 粗细不再随工具挂一份：滚轮全局无级可调，主条上有一个统一入口
         const renderConfigPanel = (
           <div className="shot-toolbar-panel">
-            {/* 马赛克无颜色概念（像素化采样自原图）——色板纯属误导 */}
-            {tool !== "mosaic" && (
+            {tool === "mosaic" ? (
+              /* 马赛克无颜色概念（像素化采样自原图，给色板纯属误导）——
+                 二级选项改为两种打码方式，点选即写入配置持久化 */
+              <>
+                <button className={mosaicMode === "draw" ? "active" : ""}
+                  data-tip="手绘涂抹（按住左键自由打码）"
+                  onClick={() => setMosaicMode("draw")}>
+                  <span style={{ display: "inline-flex" }}><IcoMosaicDraw /></span>
+                </button>
+                <button className={mosaicMode === "rect" ? "active" : ""}
+                  data-tip="选区马赛克（拖出矩形，选区内整块打码）"
+                  onClick={() => setMosaicMode("rect")}>
+                  <span style={{ display: "inline-flex" }}><IcoMosaicRect /></span>
+                </button>
+              </>
+            ) : (
               <>
                 {(cfg.annotate?.colors?.length ? cfg.annotate.colors : ANNO_DEFAULT_COLORS).map((c) => (
                   <button key={c} className={`shot-color-btn${color===c?" active":""}`}
@@ -3067,10 +3155,15 @@ export function ScreenshotOverlay() {
                 const active = b.items.some(([t]) => t === tool);
                 // 一级图标【恒定不变】：形状/线组固定显示类别图标（矩形+椭圆、
                 // 折线+箭头），不随激活变成子工具图标——保持主排图标稳定可认
+                // 一级图标【恒定不变】：形状/线组固定显示类别图标，马赛克也
+                // 恒定显示自己的图标（主人明确：一级图标不要换）——子模式
+                // 只在二级面板里体现选中态
                 const MainIcon = b.groupIcon ?? b.items[0][1];
                 const isGroup = b.items.length > 1;
-                // 马赛克既无颜色也无粗细可选——面板为空，点击只选中工具不展开
-                const hasPanel = isGroup || b.items[0][0] !== "mosaic";
+                // 每个工具都有二级面板：形状/线组 = 子图形+色板；单工具 = 色板；
+                // 马赛克 = 手绘/选区两个子模式（旧版把马赛克当空面板排除，
+                // 导致它的二级选项根本点不出来）
+                const hasPanel = true;
                 return (
                   <div key={i} className={`shot-toolbtn${active ? " active" : ""}${isGroup ? " has-submenu" : ""}`}>
                     <button className={"shot-toolbtn-main" + (active ? " active" : "")} data-tip={btnTip(b)}
