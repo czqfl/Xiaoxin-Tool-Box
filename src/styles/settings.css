@@ -872,6 +872,7 @@
   width: 100%;
 }
 .ocr-dl-track {
+  margin-top: 8px;
   height: 6px;
   border-radius: 999px;
   background: rgba(var(--accent-rgb), 0.14);

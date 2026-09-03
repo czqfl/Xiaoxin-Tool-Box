@@ -1,5 +1,5 @@
 /** Screenshot & Pin settings page with sub-tabs */
-import { Fragment, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useConfigStore } from "../stores/configStore";
 import { ocrModelCancel, ocrModelDelete, ocrModelDownload, ocrModelStatus, shotHistoryClear, OCR_DL_EVENT, type OcrModelInfo, type OcrDlProgress } from "../core/tauri";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -135,16 +135,40 @@ function OcrModelRows() {
         title="文字识别模型"
         desc={err ? `模型下载失败：${err}` : "离线识别，切换后立即生效；档位越高越准，但体积更大、识别更慢"}
       />
-      {models.map((m) => (
-        <Fragment key={m.id}>
+      {models.map((m) =>
+        busy === m.id ? (
+          // 下载中：原卡片就地切换为进度形态（标题保留，进度条与速率嵌入卡片内），不另起卡片
+          <div key={m.id} className="setting-row ocr-dl-row">
+            <div className="setting-info">
+              <div className="setting-title">{m.name}</div>
+              <div className="ocr-dl-track">
+                <div
+                  className={`ocr-dl-fill${pct === null ? " indet" : ""}`}
+                  style={pct !== null ? { width: `${pct}%` } : undefined}
+                />
+              </div>
+              <div className="ocr-dl-meta">
+                {dl
+                  ? dl.phase === "verify"
+                    ? "SHA256 完整性校验"
+                    : dl.total > 0
+                      ? `${mb(dl.done)} / ${mb(dl.total)}${speedTxt} · 正在下载${fileLabel(dl.file)}`
+                      : `${mb(dl.file_done)}${speedTxt} · 正在下载${fileLabel(dl.file)}`
+                  : "正在准备下载…"}
+              </div>
+            </div>
+            <div className="setting-control">
+              <button className="btn btn-sm" style={redBtn} onClick={stop}>停止</button>
+            </div>
+          </div>
+        ) : (
           <SettingRow
+            key={m.id}
             title={m.active ? `${m.name}（使用中）` : m.name}
             desc={`${m.desc} · 约 ${m.size_mb}MB${m.ready ? "" : " · 未下载"}`}
           >
             {m.active ? (
               <button className="btn btn-sm" disabled>使用中</button>
-            ) : busy === m.id ? (
-              <button className="btn btn-sm" style={redBtn} onClick={stop}>停止</button>
             ) : (
               <>
                 <button className="btn btn-sm" disabled={busy !== null} onClick={() => void pick(m)}>
@@ -171,38 +195,8 @@ function OcrModelRows() {
               </>
             )}
           </SettingRow>
-          {dl && dl.id === m.id && (
-            <SettingRow
-              layout="block"
-              title={`${m.name} 下载中…`}
-              desc={
-                dl.phase === "verify"
-                  ? "正在校验文件完整性，马上就好"
-                  : dl.total > 0
-                    ? `${mb(dl.done)} / ${mb(dl.total)}${speedTxt}`
-                    : `${mb(dl.file_done)}${speedTxt}`
-              }
-            >
-              <div className="ocr-dl">
-                <div className="ocr-dl-track">
-                  <div
-                    className={`ocr-dl-fill${pct === null ? " indet" : ""}`}
-                    style={pct !== null ? { width: `${pct}%` } : undefined}
-                  />
-                </div>
-                <div className="ocr-dl-meta">
-                  {dl.phase === "verify"
-                    ? "SHA256 完整性校验"
-                    : `正在下载${fileLabel(dl.file)}`}
-                  {dl.phase === "download" && dl.file_total > 0
-                    ? ` · ${mb(dl.file_done)} / ${mb(dl.file_total)}`
-                    : ""}
-                </div>
-              </div>
-            </SettingRow>
-          )}
-        </Fragment>
-      ))}
+        )
+      )}
     </SettingGroup>
   );
 }
