@@ -15,7 +15,7 @@ import { translateLines } from "../../core/tauri";
 import { EVT_TRANSLATE_LINE } from "../../core/events";
 import { useConfigStore } from "../../stores/configStore";
 import { scrollBegin } from "../scrollshot/api";
-import { Pencil, Undo2, Redo2, X, Download, Copy, Pointer, BoxSelect } from "lucide-react";
+import { Pencil, Undo2, Redo2, X, Download, Copy, BoxSelect } from "lucide-react";
 import { OcrPanel } from "../shared/OcrPanel";
 import { groupOcrParagraphs } from "../shared/ocr-group";
 import "./screenshot.css";
@@ -190,8 +190,20 @@ const IcoMosaic = () => (
   </svg>
 );
 // 马赛克二级选项（仿企业微信）：手绘 = 手指涂抹；选区 = 四角框。
-// 统一 Lucide 描线、与 IcoBrush=<Pencil {...IC}/> 完全同构
-const IcoMosaicDraw = () => <Pointer {...IC} />;
+// 手指沿用 Lucide Pointer 原始路径，但以 (12,12) 为轴横向收 0.9、纵向拉 1.1
+// —— 原比例偏矮胖，收拉后更修长匀称（主人反馈）；vector-effect 让描边
+// 不随 transform 变形，粗细与其他图标严格一致
+const IcoMosaicDraw = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <g transform="translate(12 12) scale(0.9 1.1) translate(-12 -12)">
+      <path vectorEffect="non-scaling-stroke" d="M22 14a8 8 0 0 1-8 8" />
+      <path vectorEffect="non-scaling-stroke" d="M18 11v-1a2 2 0 0 0-2-2a2 2 0 0 0-2 2" />
+      <path vectorEffect="non-scaling-stroke" d="M14 10V9a2 2 0 0 0-2-2a2 2 0 0 0-2 2v1" />
+      <path vectorEffect="non-scaling-stroke" d="M10 9.5V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v10" />
+      <path vectorEffect="non-scaling-stroke" d="M18 11a2 2 0 1 1 4 0v3a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
+    </g>
+  </svg>
+);
 const IcoMosaicRect = () => <BoxSelect {...IC} />;
 // 文字：一横 + 一竖的极简 T（Lucide Type 顶部带衬线端点的"刺"观感）
 const IcoTextT = () => (
@@ -642,6 +654,10 @@ export function ScreenshotOverlay() {
   // 二次编辑中的标注下标（-1=无）：松手后图形仍可移动/缩放，
   // 直到下一次绘制落笔才移交编辑权
   const [editIdx, setEditIdx] = useState(-1);
+  // 选区马赛克拖动中：落点未定型、editIdx 要到松手才设置——用这个标记让
+  // 拖动期间就画虚线边框（否则马赛克与原图颜色接近时选区边界不可辨，
+  // "拖的时候没有边框、松开才出现"）
+  const [drawRectMosaic, setDrawRectMosaic] = useState(false);
   const [dragging, setDragging] = useState(false);
   const dragRef = useRef<Pt|null>(null);
   const regRef = useRef<Rect>({x:0,y:0,w:0,h:0});
@@ -1093,8 +1109,12 @@ export function ScreenshotOverlay() {
     });
     // 二次编辑装饰：虚线包围盒 + 白色方形手柄（非 select 工具下显示——
     // 编辑对象与当前工具不必同种：切工具后上一笔仍可调整；OCR 划选期间
-    // 隐藏，避免与文字选择视觉打架）
-    const es = editIdx >= 0 ? annos[editIdx] : undefined;
+    // 隐藏，避免与文字选择视觉打架）。
+    // 选区马赛克拖动中（editIdx 尚未设置）同样显示虚线框——只画框不画
+    // 手柄，落点没定型时手柄纯属视觉噪音；松手后才出现手柄
+    const es = editIdx >= 0 ? annos[editIdx]
+      : drawRectMosaic ? annos[annos.length - 1]
+      : undefined;
     if (phase === "selected" && ocrPhase === "idle" && es && tool !== "select" && shapeEditable(es)) {
       const b = annoBounds(es);
       ctx.save();
@@ -1103,16 +1123,18 @@ export function ScreenshotOverlay() {
       ctx.setLineDash([4 * scale, 3 * scale]);
       ctx.strokeRect((b.x - 3) * scale, (b.y - 3) * scale, (b.w + 6) * scale, (b.h + 6) * scale);
       ctx.setLineDash([]);
-      const hs = 3.5 * scale;
-      for (const h of shapeHandles(es)) {
-        const hx = h.x * scale, hy = h.y * scale;
-        ctx.fillStyle = "#fff";
-        ctx.fillRect(hx - hs, hy - hs, hs * 2, hs * 2);
-        ctx.strokeRect(hx - hs, hy - hs, hs * 2, hs * 2);
+      if (editIdx >= 0) {
+        const hs = 3.5 * scale;
+        for (const h of shapeHandles(es)) {
+          const hx = h.x * scale, hy = h.y * scale;
+          ctx.fillStyle = "#fff";
+          ctx.fillRect(hx - hs, hy - hs, hs * 2, hs * 2);
+          ctx.strokeRect(hx - hs, hy - hs, hs * 2, hs * 2);
+        }
       }
       ctx.restore();
     }
-  }, [annos, geom, bgReady, editIdx, tool, phase, ocrPhase]);
+  }, [annos, geom, bgReady, editIdx, tool, phase, ocrPhase, drawRectMosaic]);
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -2526,7 +2548,9 @@ export function ScreenshotOverlay() {
         points: (tool==="brush"||(tool==="mosaic"&&!mosaicIsRect)) ? [pt] : undefined,
         num: tool==="number" ? numCnt : undefined };
       if (tool === "mosaic") a.mshape = mosaicIsRect ? "rect" : "draw";
-      if (tool==="number") setNumCnt((n)=>n+1);
+      if (tool === "number") setNumCnt((n)=>n+1);
+      // 选区马赛克：拖动全程画虚线选框（松手后才由 editIdx 接管装饰）
+      if (mosaicIsRect) setDrawRectMosaic(true);
       // 新动作清空重做栈：撤销后画了新图形，再"重做"若恢复旧标注会把
       // 新画的图形整个吞掉（无提示的数据丢失）
       setUndos([]);
@@ -2541,6 +2565,9 @@ export function ScreenshotOverlay() {
       // 下标在函数式更新器里取真值：onDown 入口的 commitText 可能已排入
       // 一条文字标注，闭包里的 annos.length 会偏小
       setAnnos((arr)=>{ newIdx = arr.length; return [...arr, a]; });
+      // 记录最新指针位置：a 在 onM 里会被替换成新对象（{...s} 拷贝），
+      // a.x2/a.y2 恒为落点值，"是否真的拖动过"只能看这里
+      let lastMx = pt.x, lastMy = pt.y;
       const onM = (ev: MouseEvent) => {
         const rc = bgRef.current?.getBoundingClientRect(); if (!rc||!geom) return;
         // 与 onDown 的 toCanvas 保持一致：统一用【CSS 像素】坐标。
@@ -2548,11 +2575,24 @@ export function ScreenshotOverlay() {
         // x2(物理) 不同坐标系、矩形右下角不跟光标——正是"画矩形错位"的根因
         const mx = Math.round(ev.clientX - rc.left);
         const my = Math.round(ev.clientY - rc.top);
+        lastMx = mx; lastMy = my;
         setAnnos((arr)=>{ const last=[...arr]; const s={...last[last.length-1]}; s.x2=mx;s.y2=my;
           if(s.points)s.points=[...s.points,{x:mx,y:my}]; last[last.length-1]=s; return last; });
       };
       const onU = () => {
         window.removeEventListener("mousemove",onM); window.removeEventListener("mouseup",onU);
+        setDrawRectMosaic(false); // 拖动选框结束（丢弃/移交 editIdx 两条路都要清）
+        // 选区马赛克：单击未拖动（位移 <2px）什么也没画成，直接丢弃这条
+        // 空记录 + 它的时序快照——否则白占一次撤销，还留下一个 0 尺寸的
+        // 虚线编辑框（快照是整屏画布，不清会成为无人引用的孤儿内存）
+        if (a.mshape === "rect" && Math.abs(lastMx - a.x1) < 2 && Math.abs(lastMy - a.y1) < 2) {
+          setAnnos((arr) => {
+            const i = arr.findIndex((x) => x.sid === a.sid);
+            return i >= 0 ? [...arr.slice(0, i), ...arr.slice(i + 1)] : arr;
+          });
+          if (a.sid !== undefined) mosaicSnapshots.delete(a.sid);
+          return;
+        }
         // 松手后图形保持可编辑（手柄/本体命中即移动/缩放），
         // 直到下一次落笔才移交编辑权
         if (shapeEditable(a)) setEditIdx(newIdx);
