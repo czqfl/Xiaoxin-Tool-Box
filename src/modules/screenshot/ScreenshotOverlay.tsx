@@ -308,6 +308,21 @@ let mosaicSid = 0;
 /** 换帧/新会话：旧快照全部作废（旧标注已清空，快照随之失效） */
 function clearMosaicSnapshots() { mosaicSnapshots.clear(); }
 
+/** 当前标注集合仍引用的快照 sid（马赛克专属，其他标注没有 sid） */
+function collectAnnoSids(annos: Anno[]): Set<number> {
+  const keep = new Set<number>();
+  for (const s of annos) if (s.sid !== undefined) keep.add(s.sid);
+  return keep;
+}
+/** 快照回收：重做栈被新动作清空后，被撤销的马赛克永远无法恢复，它们引用
+ *  的时序快照（每张 = 整屏物理分辨率画布，4K 约 16MB）成为永久孤儿——
+ *  "画→撤销→画→撤销"循环会无上限累积。只保留 keep 里的 sid，其余全删 */
+function pruneMosaicSnapshots(keep: Set<number>) {
+  for (const sid of mosaicSnapshots.keys()) {
+    if (!keep.has(sid)) mosaicSnapshots.delete(sid);
+  }
+}
+
 function drawShape(
   ctx: CanvasRenderingContext2D,
   s: Anno,
@@ -873,6 +888,9 @@ export function ScreenshotOverlay() {
     // 的子选项面板还开着，不reset则下次呼出工具栏会带着旧面板自动弹出，
     // 且工具已复位成 select、面板里没有任何选中项（观感即"凭空冒出个空面板"）
     setSubmenuOpen(null);
+    // 选区马赛克拖动标记复位：遮罩窗复用（组件不卸载），若上一会话在拖拽中
+    // 被强制收场（Esc 等），残留 true 会让新会话的兜底装饰误触发
+    setDrawRectMosaic(false);
     // OCR 状态复位：新会话不保留上一场的识别结果
     resetOcr();
     // 历史浏览状态复位：新会话永远从实时画面开始
@@ -1035,6 +1053,7 @@ export function ScreenshotOverlay() {
   /** 切换历史帧后的完整可见刷新：作废标注/合成缓存 → 画新帧 → 后台预取邻帧 */
   const showHistFrame = async (file: string) => {
     setAnnos([]); setUndos([]); setEditIdx(-1);
+    setDrawRectMosaic(false); // 历史帧不保留上一场的拖动装饰状态
     mosaicCacheRef.current.clear();
     clearMosaicSnapshots();
     prevAnnoLenRef.current = 0;
@@ -2446,6 +2465,8 @@ export function ScreenshotOverlay() {
       const r = textInputRef.current?.getBoundingClientRect();
       if (r) { ox = r.left; oy = r.top; }
       setUndos([]);
+      // 重做栈清空 → 被撤销马赛克的快照成了永久孤儿，顺手回收
+      pruneMosaicSnapshots(collectAnnoSids(annos));
       setAnnos((arr)=>[...arr, { kind:"text", x1:ox, y1:oy, x2:ox, y2:oy,
         color, width: sw, text: te.value }]);
     }
@@ -2470,6 +2491,8 @@ export function ScreenshotOverlay() {
   const startShapeMove = (idx: number, start: Pt) => {
     const orig = annos[idx];
     setUndos([]); // 移动也是一次"新动作"，清空重做栈
+    // 重做栈清空 → 被撤销马赛克的快照成了永久孤儿，顺手回收
+    pruneMosaicSnapshots(collectAnnoSids(annos));
     const onM = (ev: MouseEvent) => {
       const rc = bgRef.current?.getBoundingClientRect(); if (!rc) return;
       const dx = Math.round(ev.clientX - rc.left) - start.x;
@@ -2487,6 +2510,8 @@ export function ScreenshotOverlay() {
   const startShapeResize = (idx: number, hi: number) => {
     const orig = annos[idx];
     setUndos([]); // 缩放同移动：新动作清空重做栈
+    // 重做栈清空 → 被撤销马赛克的快照成了永久孤儿，顺手回收
+    pruneMosaicSnapshots(collectAnnoSids(annos));
     const b = annoBounds(orig);
     // 手柄序（矩形/椭圆）：0 左上 1 右上 2 右下 3 左下 → 锚点取对角
     const ax = (hi === 0 || hi === 3) ? b.x + b.w : b.x;
@@ -2560,6 +2585,13 @@ export function ScreenshotOverlay() {
         a.sid = ++mosaicSid;
         const snap = captureMosaicUnderlay();
         if (snap) mosaicSnapshots.set(a.sid, snap);
+      }
+      // 重做栈已在上面清空：被撤销的马赛克永远回不来，它们引用的时序快照
+      // 成了永久孤儿——只保留仍被引用的（当前标注 + 本条新笔画），其余回收
+      {
+        const keep = collectAnnoSids(annos);
+        if (a.sid !== undefined) keep.add(a.sid);
+        pruneMosaicSnapshots(keep);
       }
       let newIdx = annos.length;
       // 下标在函数式更新器里取真值：onDown 入口的 commitText 可能已排入
