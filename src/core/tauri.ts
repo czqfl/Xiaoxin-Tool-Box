@@ -591,6 +591,11 @@ export const ocrModelStatus = (): Promise<OcrModelInfo[]> =>
 /** 下载档位模型到数据目录；返回下载后的最新状态列表 */
 export const ocrModelDownload = (model: string): Promise<OcrModelInfo[]> =>
   invoke<OcrModelInfo[]>("ocr_model_download", { model });
+/** 取消进行中的模型下载（半成品 .part 保留，下次从断点接着下） */
+export const ocrModelCancel = (): Promise<void> => invoke<void>("ocr_model_cancel");
+/** 删除档位模型文件（使用中拒删；其它已就位档位共用文件保留）；返回最新状态列表 */
+export const ocrModelDelete = (model: string): Promise<OcrModelInfo[]> =>
+  invoke<OcrModelInfo[]>("ocr_model_delete", { model });
 
 // ---- 贴图 ----
 /** 创建贴图（PNG data URL, 屏幕坐标） */

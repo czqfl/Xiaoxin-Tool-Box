@@ -537,6 +537,8 @@ pub fn run() {
             screenshot::shot_ocr,
             ocr::ocr_model_status,
             ocr::ocr_model_download,
+            ocr::ocr_model_cancel,
+            ocr::ocr_model_delete,
             // 截图历史：列表 / 翻页重截 / 记录某帧的框选范围 / 删除与清空
             screenshot::shot_history_list,
             screenshot::shot_history_step,
