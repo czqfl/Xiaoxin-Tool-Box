@@ -25,12 +25,15 @@ fn main() {
 
     let last = AtomicUsize::new(0);
     let t = Instant::now();
-    let ix = match fsindex::scan(&|n| {
-        let prev = last.swap(n / 200_000, Ordering::Relaxed);
-        if prev != n / 200_000 {
-            println!("  … 已收录 {n} 条");
-        }
-    }) {
+    let ix = match fsindex::scan(
+        &|n| {
+            let prev = last.swap(n / 200_000, Ordering::Relaxed);
+            if prev != n / 200_000 {
+                println!("  … 已收录 {n} 条");
+            }
+        },
+        &|| false,
+    ) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("扫描失败：{e}");

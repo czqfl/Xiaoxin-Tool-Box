@@ -1,6 +1,7 @@
 /** 按窗口 label 路由：各面板窗口 + 翻译弹窗 + 悬浮工具栏 + 设置窗口共用一个入口 */
 import { useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { AppConfig } from "./types";
 import { EVT_CONFIG_CHANGED, onEvent } from "./core/events";
@@ -77,6 +78,13 @@ export default function App() {
 
   // 启动即预热右键菜单窗（隐藏待命），保证首次右键也能瞬时弹出
   useEffect(() => { ensurePinMenu(); }, []);
+
+  // 前端就绪上报：工具栏（主窗口）挂载完成 = 主前端加载完毕，Rust 侧放开
+  // 功能门禁。启动早期触发截图会在遮罩窗页面未加载时被亮出，全屏透明
+  // webview 吃掉所有输入且无法 Esc（Rust 侧 app_frontend_ready 注释）
+  useEffect(() => {
+    if (label === "toolbar") void invoke("app_frontend_ready").catch(() => {});
+  }, [label]);
 
   if (label === "clipboard-panel") {
     return <ClipboardPanel />;

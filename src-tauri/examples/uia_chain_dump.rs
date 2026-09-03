@@ -16,7 +16,7 @@ use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
 };
 use windows::Win32::UI::Accessibility::{
-    CUIAutomation, IUIAutomation, IUIAutomationCacheRequest, IUIAutomationCondition,
+    CUIAutomation, IUIAutomation, IUIAutomationCondition,
     IUIAutomationElement, TreeScope_Children, UIA_BoundingRectanglePropertyId, UIA_ControlTypePropertyId,
 };
 use windows::Win32::UI::WindowsAndMessaging::{

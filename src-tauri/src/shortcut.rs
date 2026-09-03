@@ -490,6 +490,11 @@ pub fn panel_label_for(
 
 /// 供 lib.rs 中全局热键 handler 调用（仅插件注册的非 Win 组合会到这里）
 pub fn handle_shortcut_pressed<R: Runtime>(app: &AppHandle<R>, shortcut: &Shortcut) {
+    // 启动门禁：前端就绪前忽略一切快捷键（防启动期截图遮罩吃输入，见
+    // lib.rs app_frontend_ready 注释）
+    if !crate::boot::features_ready() {
+        return;
+    }
     // 记录具体组合串：区分"哪个键触发了动作"，改键后旧键残留一眼可见
     crate::storage::diag_write(&format!("[shortcut] pressed {}", shortcut.into_string()));
     let Some(bindings) = app.try_state::<ShortcutBindings>() else {

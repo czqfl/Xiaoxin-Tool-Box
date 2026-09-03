@@ -22,6 +22,7 @@ mod recentfiles;
 mod credentials;
 #[cfg(windows)]
 mod apps;
+mod boot;
 mod keyhook;
 mod panel;
 mod port;
@@ -393,6 +394,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            boot::app_frontend_ready,
             config::config_load,
             config::config_save,
             config::config_export_to,

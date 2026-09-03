@@ -1364,6 +1364,11 @@ pub fn shot_history_save_region(window: WebviewWindow, region: Vec<i32>) -> Resu
 }
 
 pub(crate) fn begin_impl<R: Runtime>(app: AppHandle<R>, picker: bool) -> Result<(), String> {
+    // 启动门禁（纵深防御）：快捷键入口已在 shortcut/keyhook 侧拦截，这里再挡
+    // 一道——遮罩窗前端未加载时亮窗会全屏吃输入且无法 Esc（见 lib.rs 注释）
+    if !crate::boot::features_ready() {
+        return Err("starting".into());
+    }
     if SHOOTING.swap(true, Ordering::SeqCst) { return Ok(()); }
     PICKER.store(picker, Ordering::SeqCst);
     // 录屏选区窗若滞留（全屏置顶透明、吃整屏输入），先强制收掉，
@@ -1520,18 +1525,20 @@ pub(crate) fn begin_impl<R: Runtime>(app: AppHandle<R>, picker: bool) -> Result<
                 diag_write(&format!("[shot] begin ok, {} monitors", shots.len()));
                 // 看门狗：只兜底「遮罩从未就绪」的异常会话。前端就绪（OVERLAY_READY）
                 // 说明遮罩正常显示、用户可交互——此后由用户 Esc/输出/取消操作收场，
-                // 看门狗退出，绝不 60s 踢掉正在慢慢选区的正常截图。
+                // 看门狗退出，绝不踢掉正在慢慢选区的正常截图。
                 // 全屏置顶遮罩若前端挂起（页面加载失败、事件链路中断）会吞掉整个桌面
-                // 的输入——表现就是"按什么键都卡死"；此时才 60s 强制收场兜底。
+                // 的输入——表现就是"按什么键都卡死"。启动门禁（APP_READY）已挡住
+                // 绝大多数这种会话，残余场景 10s 强制收场兜底（此前 60s，
+                // "被透明遮罩盖住还要干等一分钟"体感太差）
                 {
                     let app_wd = app.clone();
                     std::thread::spawn(move || {
-                        for _ in 0..120 {
+                        for _ in 0..20 {
                             std::thread::sleep(std::time::Duration::from_millis(500));
                             if !SHOOTING.load(Ordering::SeqCst) { return; }
                             if OVERLAY_READY.load(Ordering::SeqCst) { return; }
                         }
-                        diag_write("[shot] watchdog: overlay never ready >60s, force hide");
+                        diag_write("[shot] watchdog: overlay never ready >10s, force hide");
                         SHOOTING.store(false, Ordering::SeqCst);
                         hide_all(&app_wd);
                     });

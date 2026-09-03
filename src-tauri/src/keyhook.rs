@@ -386,6 +386,10 @@ fn post(action: Action) {
 }
 
 fn run_action<R: Runtime>(app: &AppHandle<R>, action: Action) {
+    // 启动门禁：前端就绪前忽略一切键盘钩子动作（同 shortcut 侧）
+    if !crate::boot::features_ready() {
+        return;
+    }
     match action {
         Action::SeqPaste => {
             // 面板自身聚焦时全局 Ctrl+V：先收起面板，让焦点回到之前的应用

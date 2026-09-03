@@ -16,7 +16,7 @@
  *    （贴图窗不加载 base/theme.css，必须用 fallback 才能拿到可读配色）。
  */
 import { useMemo } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
 import type { ShotOcrLine } from "../../core/tauri";
 import { groupOcrParagraphs } from "./ocr-group";
 import "./ocr-panel.css";
@@ -43,10 +43,14 @@ export interface OcrPanelProps {
   onReturn: () => void;
   /** 定位样式（left/top/right/width/maxHeight 等），由调用方注入 */
   style?: CSSProperties;
+  /** 标题栏按下回调（实现弹窗拖动）：仅当按下目标是标题栏本身（非按钮）且
+   *  为左键时触发。截图模式用它拖 DOM 面板，贴图模式用它 startDragging()
+   *  拖独立原生窗 */
+  onHeadMouseDown?: (e: ReactMouseEvent<HTMLDivElement>) => void;
 }
 
 export function OcrPanel(p: OcrPanelProps) {
-  const { lines, phase, error, trans, translating, onClose, onCopyAll, onCopyTrans, onTranslate, onReturn, style } = p;
+  const { lines, phase, error, trans, translating, onClose, onCopyAll, onCopyTrans, onTranslate, onReturn, style, onHeadMouseDown } = p;
   const tTotal = trans?.pairs.length ?? 0;
   const tDone = trans?.pairs.filter((x) => !x.pending).length ?? 0;
   const hasLines = lines.length > 0;
@@ -54,7 +58,19 @@ export function OcrPanel(p: OcrPanelProps) {
   const paras = useMemo(() => groupOcrParagraphs(lines), [lines]);
   return (
     <div className="ocr-panel" style={style}>
-      <div className="ocr-head">
+      <div
+        className="ocr-head"
+        style={onHeadMouseDown ? { cursor: "grab" } : undefined}
+        onMouseDown={(e) => {
+          if (e.button !== 0) return;
+          // 只排除交互元素（按钮/输入框）；标题文字 <b> 等子元素都算拖拽热点
+          // ——按 exact currentTarget 过滤会让"抓住标题文字拖动"失效
+          const t = e.target as HTMLElement;
+          if (t.closest("button, input, textarea, select")) return;
+          e.preventDefault();
+          onHeadMouseDown?.(e);
+        }}
+      >
         <b>文字识别</b>
         {phase === "done" && hasLines && (
           trans ? (

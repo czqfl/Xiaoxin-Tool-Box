@@ -1,5 +1,6 @@
 /** Fullscreen screenshot overlay: frozen screen + selection + magnifier + toolbar */
 import { useEffect, useRef, useState } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
@@ -342,9 +343,11 @@ function drawShape(
     const px = -uy, py = ux;                          // 左法线
     const lw = Math.max(0.5, s.width * scale);
     // 头部长度随线宽放大，但不超杆长一半（短箭头不至于头比杆大）
-    const hl = Math.min(Math.max(18 * scale, lw * 2), len * 0.5);
-    const hw = hl * 0.5;                      // 三角头半宽（收窄，避免翅膀感）
+    const hl = Math.min(Math.max(18 * scale, lw * 2.6), len * 0.5);
     const sw = Math.max(hl * 0.13, lw * 0.6); // 箭杆半宽（全程一致）
+    // 三角头半宽：粗线时必须显著凸出于杆——hw 下限随 lw 抬高（翅膀每侧
+    // 至少比杆宽出 1.1×lw），否则粗画笔下头与杆糊成一坨、箭头方向感消失
+    const hw = Math.max(hl * 0.5, sw + lw * 1.1);
     const d = hl * 0.35;                      // 头部底边凹进深度
     const bx = X2 - hl * ux, by = Y2 - hl * uy; // 头部底边中点（凹进基准）
     const sx = bx + d * ux, sy = by + d * uy;   // 凹进后的杆接头中点
@@ -387,9 +390,25 @@ function drawShape(
       const pw = Math.max(1, Math.ceil(W / bs)), ph = Math.max(1, Math.ceil(H / bs));
       const pix = document.createElement("canvas");
       pix.width = pw; pix.height = ph;
-      const pctx = pix.getContext("2d")!;
+      const pctx = pix.getContext("2d", { willReadFrequently: true })!;
       pctx.imageSmoothingEnabled = true; // 降采样平滑 = 区域平均色
       pctx.drawImage(sampleSrc, 0, 0, pw, ph);
+      // 【次像素色边去色】ClearType 文字边缘在截图像素里带红/蓝色边（R/G/B
+      // 子像素分别抗锯齿），正常观看被眼睛积分成灰色；马赛克按格取平均后
+      // 色相残留被放大成"黑白背景出彩色块"。对低饱和度格子（RGB 通道极差
+      // < 18，真实彩色内容极少落到这个区间，如淡黄高亮极差≈59）强制取通道
+      // 均值成纯灰。小图上一次性的 getImageData，构建后有缓存，不进重绘热路径
+      const img = pctx.getImageData(0, 0, pw, ph);
+      const d = img.data;
+      for (let i = 0; i < d.length; i += 4) {
+        const mx = Math.max(d[i], d[i + 1], d[i + 2]);
+        const mn = Math.min(d[i], d[i + 1], d[i + 2]);
+        if (mx - mn < 18) {
+          const avg = (d[i] + d[i + 1] + d[i + 2]) / 3;
+          d[i] = d[i + 1] = d[i + 2] = avg;
+        }
+      }
+      pctx.putImageData(img, 0, 0);
       layer = { bs, w: W, h: H, stamp: mosaicFrameStamp, pix };
       // 缓存键必须与查询键一致（sampleSrc）：定稿后的马赛克采样源是时序快照
       // 画布，若存到 src（底图）名下，下次重绘 get(sampleSrc) 永远 miss →
@@ -535,6 +554,16 @@ export function ScreenshotOverlay() {
   const [tool, setTool] = useState<Tool>("select");
   // 子工具选择 popover：哪个组展开了下拉菜单（index or null）
   const [submenuOpen, setSubmenuOpen] = useState<number | null>(null);
+  // 标注工具栏实测宽度（右缘钳制用）：选区贴左屏时工具栏右缘锚定会把左半截
+  // 推出屏幕外，必须按实际宽度钳左缘。首帧用兜底估值，挂载后测得真实值
+  // （只在会话/子菜单开合时重测——工具栏按钮集合静态，宽度恒定）
+  const toolbarFloatRef = useRef<HTMLDivElement|null>(null);
+  const [toolbarW, setToolbarW] = useState(0);
+  useEffect(() => {
+    if (phase !== "selected") return;
+    const w = toolbarFloatRef.current?.offsetWidth ?? 0;
+    if (w > 0) setToolbarW((prev) => (prev === w ? prev : w));
+  }, [phase, submenuOpen]);
   const [color, setColor] = useState("#e5484d");
   const [sw, setSw] = useState(3);
   // 滚轮无级调节粗细时的提示徽标（短暂显示当前像素值）
@@ -1501,6 +1530,36 @@ export function ScreenshotOverlay() {
     setOcrTrans(null); setOcrTranslating(false);
     setAltActive(false); applyScrSel([]);
     ocrRegionRef.current = null;
+    setOcrDrag(null);
+    ocrSideRef.current = null;
+    // 复位识别忙锁：遮罩窗跨会话复用，上一场若识别请求挂死（后端无响应等），
+    // busy 永远 true 会吞掉本场所有 Alt 识别（"按 Alt 弹窗不出现"）；新会话
+    // 的旧请求即使迟到也不该阻塞新识别
+    ocrBusyRef.current = false;
+  };
+
+  // OCR 弹窗拖动：标题栏按住拖动面板（相对自动定位点的偏移）。
+  // 偏移挂在自动定位之上——选区/译文开合改变基准位置时拖后位置仍相对合理
+  const [ocrDrag, setOcrDrag] = useState<{x:number;y:number}|null>(null);
+  // 弹窗横向锚定侧：首次出现时择边并记住，翻译扩宽（320→560）/返回原文时
+  // 不再重新择边——宽度变化会改变"哪边放得下"，重新择边表现为弹窗瞬移
+  const ocrSideRef = useRef<"left"|"right"|null>(null);
+  const startOcrPanelDrag = (e: ReactMouseEvent<HTMLDivElement>) => {
+    const sx = e.clientX, sy = e.clientY;
+    const base = { x: ocrDrag?.x ?? 0, y: ocrDrag?.y ?? 0 };
+    // 【必须挂捕获阶段】弹窗外层容器对 mouseup 做了 stopPropagation（防误触
+    // 选区逻辑），冒泡阶段的 window 监听在 React 根容器处就被拦停、永远收不到
+    // 松手事件 → 拖拽监听不移除，弹窗持续跟随鼠标。capture 在 window 层先于
+    // 一切冒泡处理，不受任何 stopPropagation 影响
+    const onM = (ev: MouseEvent) => {
+      setOcrDrag({ x: base.x + ev.clientX - sx, y: base.y + ev.clientY - sy });
+    };
+    const onU = () => {
+      window.removeEventListener("mousemove", onM, true);
+      window.removeEventListener("mouseup", onU, true);
+    };
+    window.addEventListener("mousemove", onM, true);
+    window.addEventListener("mouseup", onU, true);
   };
 
   // 译文逐行回填：Rust 每译完一行推一行（并发请求，完成顺序不定，按行号对上）
@@ -1538,6 +1597,8 @@ export function ScreenshotOverlay() {
     c.width = rp.w; c.height = rp.h;
     c.getContext("2d")!.drawImage(bg, rp.x, rp.y, rp.w, rp.h, 0, 0, rp.w, rp.h);
     ocrBusyRef.current = true;
+    // 新选区重新识别：清除上一场择边，弹窗按新选区位置重新择边
+    ocrSideRef.current = null;
     setOcrPhase("loading");
     try {
       const blob = await new Promise<Blob | null>((res) => c.toBlob((b) => res(b), "image/png"));
@@ -2924,7 +2985,12 @@ export function ScreenshotOverlay() {
         // region 已是 CSS 像素，工具栏用 position:fixed 定位（CSS 像素）直接算，
         // 不再 ×scale（旧版 ×rc.width/geom.width 把 CSS 又缩了一次、工具栏偏移）
         const rightEdge = region.x + region.w;
-        const rightPx = Math.min(Math.max(vw - rightEdge, 8), Math.max(8, vw - 60));
+        // 右缘钳制【双侧】：下限 8 保右缘在屏内；上限 vw-工具栏宽-8 保左缘也在
+        // 屏内——选区贴左屏时旧钳制（vw-60）只留 60px，工具栏左半截整体出屏。
+        // 宽度用实测值，首帧未测得时用兜底估值（略大于实际宽度只是贴左时
+        // 首帧稍微偏右，测得后一帧内归位；估值偏小则会先出屏再跳回，故取大）
+        const estW = toolbarW || 620;
+        const rightPx = Math.min(Math.max(vw - rightEdge, 8), Math.max(8, vw - estW - 8));
         // 枚举展开时主面板不重复显示（枚举面板里已带颜色/粗细）——
         // 所有工具统一：二次选项一律挂在【一级图标正下方】，不再单独
         // 在主条下方拼接配置面板（旧版单工具与形状/线组行为不一致）
@@ -2987,7 +3053,7 @@ export function ScreenshotOverlay() {
           </div>
         );
         return (
-          <div className={`shot-toolbar-float${tipsAbove ? " tips-above" : ""}${panelAbove ? " panel-above" : ""}`} style={{ right: rightPx, top: ty }}>
+          <div ref={toolbarFloatRef} className={`shot-toolbar-float${tipsAbove ? " tips-above" : ""}${panelAbove ? " panel-above" : ""}`} style={{ right: rightPx, top: ty }}>
             <div className="shot-toolbar">
               <button
                 className={"shot-toolbtn-main" + (tool === "select" ? " active" : "")}
@@ -3237,13 +3303,26 @@ export function ScreenshotOverlay() {
         const transMode = !!ocrTrans || ocrTranslating;
         const pw = transMode ? Math.min(560, vw - 16) : 320;
         const phMax = Math.min(transMode ? 520 : 380, vh - 16);
-        let px2 = region.x + region.w + 10;
-        if (px2 + pw > vw - 8) px2 = Math.max(8, region.x - pw - 10);
+        // 横向定位：首次右优先、放不下翻左并记住；已择边时从锚定边向外延伸
+        // （left 侧右缘贴选区不动向左扩，right 侧左缘贴选区不动向右扩），
+        // 越屏才整体夹回——宽度变化绝不瞬移到另一侧
+        const rightX = region.x + region.w + 10;
+        let px2: number;
+        if (ocrSideRef.current === "left") {
+          px2 = Math.max(8, Math.min(region.x - pw - 10, vw - pw - 8));
+        } else if (ocrSideRef.current === "right") {
+          px2 = Math.max(8, Math.min(rightX, vw - pw - 8));
+        } else if (rightX + pw <= vw - 8) {
+          px2 = rightX; ocrSideRef.current = "right";
+        } else {
+          px2 = Math.max(8, region.x - pw - 10); ocrSideRef.current = "left";
+        }
         const py2 = Math.max(8, Math.min(region.y, vh - phMax - 8));
         return (
           <div onMouseDown={(e) => e.stopPropagation()} onMouseUp={(e) => e.stopPropagation()}>
             <OcrPanel
-              style={{ left: px2, top: py2, width: pw, maxHeight: phMax }}
+              style={{ left: px2 + (ocrDrag?.x ?? 0), top: py2 + (ocrDrag?.y ?? 0), width: pw, maxHeight: phMax }}
+              onHeadMouseDown={startOcrPanelDrag}
               lines={ocrLines}
               phase={ocrPhase === "loading" ? "loading" : ocrPhase === "error" ? "error" : "done"}
               error={ocrError}

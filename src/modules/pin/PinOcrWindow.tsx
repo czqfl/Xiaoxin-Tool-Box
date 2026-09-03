@@ -3,11 +3,11 @@
  *  这样当贴图很小、窗内放不下 OCR 弹窗时，弹窗完整显示在贴图外侧。
  *
  *  设计要点：
- *  - 弹窗优先放贴图【外侧四向】(右/左/下/上)仍有足够余量的一侧——贴图外零重合，
- *    不遮挡原图文字；当前所在侧仍放得下就【不翻侧】(避免位置乱跳)。
- *  - 四向都放不下（贴图巨大）→【不退回贴图内覆盖】，而是展开全部候选
- *    (外侧姿态 + 贴屏幕四角)取与贴图【重合面积最小】者，并列取离当前最近：
- *    结果必是"尽可能靠屏幕边 + 重合最少"，弹窗永远完整可见、挤不掉。
+ *  - 定位四向候选（右/左/下/上）：有零重合方向取余量最大者（当前侧仍零重合
+ *    则稳住不翻侧）；四向都放不下取余量最大方向贴屏幕缘、允许部分与贴图重合
+ *    ——绝不跑屏幕角落，弹窗始终在贴图旁边（主人 2026-09-03 反馈）。
+ *  - 标题栏按住可拖动弹窗（startDragging 原生拖拽）；拖过的位置被记住，
+ *    数据推送/翻译扩宽不再自动挪位，贴图本身挪动/缩放时恢复跟随。
  *  - 与贴图重合期间周期置顶（doRaise watchdog）：贴图窗同为置顶窗，拖拽/滚轮会把
  *    它激活到置顶链顶端盖住本窗；周期 SetWindowPos(HWND_TOPMOST, NOACTIVATE) 保顶。
  *  - 数据由来源贴图窗 emitTo("pin-ocr-show") 推送（识别行 / 译文 / 翻译态 / 贴图几何）；
@@ -71,9 +71,13 @@ function readUrl(): OcrShow | null {
 export default function PinOcrWindow() {
   const [data, setData] = useState<OcrShow | null>(readUrl());
   const panelRef = useRef<HTMLDivElement | null>(null);
-  // 弹窗所在侧：right/left/bottom/top(贴图外) / hug(贴合屏边、与贴图小面积重合)
-  const modeRef = useRef<"right" | "left" | "bottom" | "top" | "hug">("right");
-  const placedRef = useRef(false);   // 首次定侧后才启用"稳住不翻侧"
+  // 用户手动拖过位标记：拖过后自动定位不再干预（数据推送/翻译扩宽都保持
+  // 用户摆放，仅同步尺寸）；贴图几何（位置/尺寸）变化时恢复自动跟随
+  const manualPosRef = useRef(false);
+  const pinGeoRef = useRef<string>("");
+  // 弹窗所在侧（稳侧判定用：当前侧仍零重合就不翻侧，防拖动贴图时位置乱跳）
+  const modeRef = useRef<"right" | "left" | "bottom" | "top">("right");
+  const placedRef = useRef(false);
   const lastXRef = useRef(0);
   const lastYRef = useRef(0);
   // 缓存上次窗口宽——早返回必须包含 mw，否则宽变而 mh 不变时漏掉 setSize，
@@ -125,14 +129,20 @@ export default function PinOcrWindow() {
     }, 300);
   };
 
+  // 标题栏按住拖动原生窗口：手动拖过后 manualPosRef 冻结自动定位
+  const startDrag = () => {
+    manualPosRef.current = true;
+    void getCurrentWindow().startDragging().catch(() => {});
+  };
+
   // 数据/几何变化 → 量尺寸、选位、定位显示。
-  //   选位策略（主人 2026-09-02 反馈重构）：
-  //   1) 优先「贴图外侧四向」——右/左/下/上，取仍有足够余量的一侧（贴图外零重合，
-  //      不遮挡原图文字）；当前所在侧仍放得下就【不翻侧】防位置乱跳；
-  //   2) 四向都放不下（贴图巨大）→【不再退回贴图内覆盖原图】，而是展开全部候选
-  //      （外侧各姿态 + 贴屏幕四角），取与贴图【重合面积最小】者；并列取离当前
-  //      最近 —— 结果必然"尽可能贴屏幕边、重合最少"，弹窗完整可见、挤不掉；
-  //   3) 重叠形态由 doRaise + 周期 watchdog 保顶（贴图窗同为置顶窗，见 doRaise 注释）。
+  //   选位策略（主人 2026-09-03 反馈）：
+  //   1) 四向（右/左/下/上）候选，顶对齐贴边；有【零重合】方向时取余量最大者
+  //      （当前侧仍零重合则稳住不翻侧）——左右不足但上方空间充足时弹窗去上方，
+  //      不再死守左右两侧；
+  //   2) 四向都放不下 → 取余量最大方向并夹到屏幕缘，允许部分与贴图重合
+  //      （绝不跑屏幕角落，弹窗始终在贴图旁边）；
+  //   3) 重合期间由 doRaise 周期保顶（贴图窗同为置顶窗，见 doRaise 注释）。
   //   只 show() 不抢焦点：拖拽/缩放时本窗随动重定位，若每帧 setFocus 会把焦点从
   //   贴图窗抢走导致拖拽/缩放异常；用户点本窗交互时窗口自然获焦。
   useLayoutEffect(() => {
@@ -146,74 +156,79 @@ export default function PinOcrWindow() {
     const mh = Math.min(el.offsetHeight || 200, availH - 4);
     const pinL = data.pinLeft, pinT = data.pinTop;
     const pinR = pinL + data.pinW, pinB = pinT + data.pinH;
-    const rightRoom = availW - pinR;  // 贴图右侧 → 屏右余量
-    const leftRoom = pinL;            // 屏左 → 贴图左侧
-    const topRoom = pinT;             // 屏顶 → 贴图顶部
-    const bottomRoom = availH - pinB; // 贴图底部 → 屏底
-    // 面板矩形与贴图矩形的重合面积（0 = 完全在贴图外）
-    const overlapArea = (x: number, y: number) => {
-      const iw = Math.min(x + mw, pinR) - Math.max(x, pinL);
-      const ih = Math.min(y + mh, pinB) - Math.max(y, pinT);
-      return iw > 0 && ih > 0 ? iw * ih : 0;
+    // ---- 四向候选：x/y 先按贴图边排出，再统一夹进屏幕（夹不进的部分自然
+    // 与贴图重合——左右向贴合屏幕左/右缘，上下向贴合屏幕上/下缘）----
+    const mk = (key: "right" | "left" | "bottom" | "top", x: number, y: number, room: number) => {
+      const cx = Math.max(2, Math.min(x, availW - mw - 2));
+      const cy = Math.max(2, Math.min(y, availH - mh - 2));
+      const iw = Math.min(cx + mw, pinR) - Math.max(cx, pinL);
+      const ih = Math.min(cy + mh, pinB) - Math.max(cy, pinT);
+      return { key, room, x: cx, y: cy, ov: iw > 0 && ih > 0 ? iw * ih : 0 };
     };
-    const mk = (sx: number, sy: number, key: "right" | "left" | "bottom" | "top" | "hug") => {
-      // 统一夹进屏幕内（夹不住的部分自然与贴图产生重合，交给 ov 比较取舍）
-      const x = Math.max(2, Math.min(sx, availW - mw - 2));
-      const y = Math.max(2, Math.min(sy, availH - mh - 2));
-      return { x, y, key, ov: overlapArea(x, y) };
-    };
-    // ---- 候选集：贴图外侧四向，每向取"贴图顶部对齐 / 底部对齐"两种姿态 ----
-    const outer = [
-      mk(pinR + GAP, pinT + GAP, "right"),
-      mk(pinR + GAP, pinB - mh - GAP, "right"),
-      mk(pinL - mw - GAP, pinT + GAP, "left"),
-      mk(pinL - mw - GAP, pinB - mh - GAP, "left"),
-      mk(pinL + GAP, pinB + GAP, "bottom"),
-      mk(pinR - mw - GAP, pinB + GAP, "bottom"),
-      mk(pinL + GAP, pinT - mh - GAP, "top"),
-      mk(pinR - mw - GAP, pinT - mh - GAP, "top"),
+    const cands = [
+      mk("right", pinR + GAP, pinT + GAP, availW - pinR),
+      mk("left", pinL - mw - GAP, pinT + GAP, pinL),
+      mk("bottom", pinL + GAP, pinB + GAP, availH - pinB),
+      mk("top", pinL + GAP, pinT - mh - GAP, pinT),
     ];
-    const zero = outer.filter((c) => c.ov === 0);  // 完全在贴图外 → 不遮挡原图
-    const room = (k: string) =>
-      k === "right" ? rightRoom : k === "left" ? leftRoom
-        : k === "bottom" ? bottomRoom : topRoom;
-    const dist = (c: { x: number; y: number }) =>
-      Math.hypot(c.x - lastXRef.current, c.y - lastYRef.current);
+    const zero = cands.filter((c) => c.ov === 0);
     const sideOrder: Record<string, number> = { right: 0, left: 1, bottom: 2, top: 3 };
-    let cand: { x: number; y: number; key: "right" | "left" | "bottom" | "top" | "hug"; ov: number };
-    if (zero.length > 0) {
-      if (placedRef.current) {
-        // 已定过侧：当前所在侧仍能零重合 → 稳住不翻侧；否则选余量最大的侧
-        const stay = zero.filter((c) => c.key === modeRef.current);
-        cand = (stay.length > 0 ? stay : zero)
-          .sort((a, b) => room(b.key) - room(a.key) || dist(a) - dist(b))[0];
-      } else {
-        // 首次定侧：余量大的方向优先；同余量按 右 > 左 > 下 > 上
-        cand = zero
-          .sort((a, b) => room(b.key) - room(a.key) || sideOrder[a.key] - sideOrder[b.key])[0];
-      }
-    } else {
-      // 四向都放不下 → 全部候选（外侧姿态 + 贴屏幕四角）里取「重合面积最小」；
-      // 并列取离当前最近——拖拽/缩放期间不乱跳，且必然贴屏幕边、重合最少
-      cand = [...outer,
-        mk(2, 2, "hug"),
-        mk(availW - mw - 2, 2, "hug"),
-        mk(2, availH - mh - 2, "hug"),
-        mk(availW - mw - 2, availH - mh - 2, "hug"),
-      ].sort((a, b) => a.ov - b.ov || dist(a) - dist(b))[0];
-    }
+    // 零重合方向里取余量最大（同余量按 右>左>下>上）；当前所在侧仍零重合则稳住；
+    // 全向重合（贴图巨大）取余量最大方向贴屏幕缘部分重合
+    const byRoom = (arr: typeof cands) =>
+      arr.sort((a, b) => b.room - a.room || sideOrder[a.key] - sideOrder[b.key])[0];
+    const stay = placedRef.current ? zero.find((c) => c.key === modeRef.current) : undefined;
+    const cand = stay ?? (zero.length > 0 ? byRoom(zero) : byRoom(cands));
     placedRef.current = true;
     modeRef.current = cand.key;
     overlapRef.current = cand.ov > 0;
-    const { x, y } = cand;
-    // 当前侧边/尺寸都没变 → 跳过本次重定位，省去无谓抖动(且不重跑翻译)
-    // 必须把 mw 也纳入比对：宽度变化（未翻译→翻译）单走 setSize 也会让窗口真的变大，
-    // 仅靠 mh 判断会让独立窗 CSS 切宽后窗口尺寸不变（修「贴图翻译后弹窗没变大」）
-    if (x === lastXRef.current && y === lastYRef.current && mw === lastWRef.current && mh === lastHRef.current) return;
-    lastXRef.current = x; lastYRef.current = y; lastWRef.current = mw; lastHRef.current = mh;
+    // 贴图几何变化 → 恢复自动跟随（用户拖过位也重新贴到贴图旁）
+    const geo = `${data.pinLeft},${data.pinTop},${data.pinW},${data.pinH}`;
+    const geoChanged = pinGeoRef.current !== geo;
+    if (geoChanged) {
+      pinGeoRef.current = geo;
+      manualPosRef.current = false;
+    }
     const win = getCurrentWindow();
+    // 用户拖过位：只同步尺寸（翻译扩宽等），位置保持用户摆放；
+    // 顺带回读当前位置进缓存——后续恢复自动定位时"没变早返回"的比对才准确
+    if (manualPosRef.current) {
+      if (mw !== lastWRef.current || mh !== lastHRef.current) {
+        lastWRef.current = mw; lastHRef.current = mh;
+        void win.setSize(new LogicalSize(mw, mh)).catch(() => {});
+      }
+      void win.outerPosition().then((p) => {
+        const dpr = window.devicePixelRatio || 1;
+        lastXRef.current = p.x / dpr;
+        lastYRef.current = p.y / dpr;
+      }).catch(() => {});
+      return;
+    }
+    // 贴图没动、仅自身尺寸变化（点翻译 300→560 / 返回原文收窄）→ 【原位延伸】：
+    // 背向贴图一侧的边缘锚定不动，向远处扩/缩，越屏才整体夹回——宽度变化会
+    // 改变"哪边放得下"，此时重新择向会让弹窗瞬移到另一侧（观感差，主人反馈）
+    if (placedRef.current && !geoChanged) {
+      let ax = lastXRef.current, ay = lastYRef.current;
+      if (modeRef.current === "left") ax = lastXRef.current + lastWRef.current - mw;
+      if (modeRef.current === "top") ay = lastYRef.current + lastHRef.current - mh;
+      ax = Math.max(2, Math.min(ax, availW - mw - 2));
+      ay = Math.max(2, Math.min(ay, availH - mh - 2));
+      lastXRef.current = ax; lastYRef.current = ay; lastWRef.current = mw; lastHRef.current = mh;
+      void win.setSize(new LogicalSize(mw, mh)).then(() => {
+        void win.setPosition(new LogicalPosition(ax, ay)).catch(() => {});
+      }).catch(() => {});
+      return;
+    }
+    // 当前位置/尺寸都没变 → 跳过重定位省抖动；但【必须补 show】——上次退出
+    // 文字模式把窗口 hide 了，同贴图再次 Alt 时坐标尺寸全部没变，没有这步
+    // show 就永远不再出现（"改变贴图大小才出现"的根因）
+    if (cand.x === lastXRef.current && cand.y === lastYRef.current && mw === lastWRef.current && mh === lastHRef.current) {
+      void win.show().catch(() => {});
+      return;
+    }
+    lastXRef.current = cand.x; lastYRef.current = cand.y; lastWRef.current = mw; lastHRef.current = mh;
     void win.setSize(new LogicalSize(mw, mh)).then(() => {
-      void win.setPosition(new LogicalPosition(x, y)).then(() => {
+      void win.setPosition(new LogicalPosition(cand.x, cand.y)).then(() => {
         void win.show().catch(() => {});
         // 与贴图重合：立即补顶一次让首帧不滞后；随后由周期 watchdog 持续保顶
         if (cand.ov > 0) doRaise();
@@ -273,6 +288,7 @@ export default function PinOcrWindow() {
         trans={data.trans}
         translating={data.translating}
         onClose={selfClose}
+        onHeadMouseDown={startDrag}
         onCopyAll={() => emit("copyAll")}
         onCopyTrans={() => emit("copyTrans")}
         onTranslate={() => emit("translate")}
