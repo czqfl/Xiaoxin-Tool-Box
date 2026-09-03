@@ -173,7 +173,7 @@ npm run pack         # 调用 scripts/build-release.ps1，产出安装包 + 便�
 | 类别 | 窗口 |
 | --- | --- |
 | 预声明（静态） | `settings` 设置、`toolbar` 悬浮工具栏、`toolbar-tip` 悬浮提示、`palette` 命令面板、`clipboard-panel`、`folder-panel`、`git-run`（Git 结果）、`credential-panel`、`port-panel`、`files-panel`、`snippets-panel`、`translate-popup`、`particles` 粒子层 |
-| 运行时动态 | 截图遮罩 `shot-overlay-N`、贴图 `pin-*` 与待命窗 `pin-staging`、滚动截图 `scrollshot-frame` / `scrollshot-bar`、录屏控制条、便签窗口等 |
+| 运行时动态 | 截图遮罩 `shot-overlay-N`、贴图 `pin-*` 与待命窗 `pin-staging`、录屏控制条、便签窗口等 |
 
 ### 前端结构（src/）
 ```
@@ -190,7 +190,7 @@ src/
 │   ├── clipboard/       # 剪贴板面板（含顺序粘贴队列）
 │   ├── screenshot/      # 截图遮罩（选区/标注/放大镜/OCR/历史 UI）
 │   ├── pin/             # 贴图窗（常规窗 + staging 复用窗两种形态）
-│   ├── recorder/ scrollshot/ palette/ translate/
+│   ├── recorder/ palette/ translate/
 │   └── folder/ credential/ port/ quickfiles/ snippets/ shared/
 ├── sticky/              # 桌面便签（独立子应用形态，设置已并入工具箱体系）
 ├── settings/            # 设置中心各页
@@ -205,7 +205,6 @@ src/
 | `pin.rs` | 贴图生命周期：入库落盘、staging 复用窗秒显、缩放/穿透/批量显隐、持久化恢复 |
 | `clipboard.rs` | 剪贴板监听线程、条目构建（文本/图片/文件）、缩略图、写回粘贴、顺序队列 |
 | `recorder.rs` `recframe.rs` `recaudio.rs` `dupl.rs` `h264.rs` | 录屏：桌面采集、录制边框、WASAPI 音频采集、H.264 编码与码率策略 |
-| `scrollshot.rs` | 滚动截图：自动滚动、逐帧拼接、速度控制 |
 | `sticky.rs` | 桌面便签：笔记与设置持久化、窗口编排、粒子层、亚克力、壁纸/背景图、LLM 格式化 |
 | `folder.rs` | 文件夹管理、编辑器探测、Git 执行（一次性 / 流式 + 权威快照轮询）与分支读取 |
 | `quickfiles.rs` `recentfiles.rs` `fsindex.rs` | 快速文件：常用文件、最近打开打点、全盘文件名索引（并行遍历 + 紧凑存储 + 零分配打分搜索） |

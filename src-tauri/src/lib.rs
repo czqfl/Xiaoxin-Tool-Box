@@ -8,7 +8,6 @@ mod dupl;
 pub mod ocr;
 mod screenshot;
 mod pin;
-mod scrollshot;
 pub mod recorder;
 #[cfg(windows)]
 mod recaudio;
@@ -383,14 +382,6 @@ pub fn run() {
                     crate::screenshot::prewarm_overlays(&h);
                 });
             }
-            // 长截图进度条窗预热：同遮罩窗策略，首次点「长截图」瞬时显示
-            {
-                let h = handle.clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(1800));
-                    crate::scrollshot::prewarm(&h);
-                });
-            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -559,17 +550,6 @@ pub fn run() {
             // 原生拖拽层：框选/缩放热路径由 Rust 直绘冻结层，前端只报开始/结束
             screenshot::shot_drag_begin,
             screenshot::shot_drag_end,
-            // 滚动长截图（自动定速滚动 + 拼接，独立模块）
-            scrollshot::scrollshot_begin,
-            scrollshot::scrollshot_stop,
-            scrollshot::scrollshot_cancel,
-            scrollshot::scrollshot_dismiss,
-            scrollshot::scrollshot_frame_info,
-            scrollshot::scrollshot_save_as,
-            scrollshot::scrollshot_set_speed,
-            scrollshot::scrollshot_get_speed,
-            // 空格/「开始」按钮：进入长截图后由用户择时启动自动滚动
-            scrollshot::scrollshot_start_scroll,
             // 屏幕录制（独立选区 + 控制条）
             recorder::rec_begin,
             recorder::rec_select_cancel,
@@ -629,12 +609,6 @@ pub fn run() {
             {
                 if label.starts_with(screenshot::OVERLAY_PREFIX) {
                     screenshot::on_overlay_destroyed(app_handle);
-                } else if label.starts_with(scrollshot::BAR_LABEL) {
-                    // 长截图控制条被 Alt+F4 等途径关闭：置停止标志，
-                    // 后台线程收尾落盘（已有内容不丢）
-                    scrollshot::on_bar_destroyed(app_handle);
-                } else if label.starts_with(scrollshot::FRAME_LABEL) {
-                    scrollshot::on_frame_destroyed(app_handle);
                 } else if label.starts_with(recorder::SELECT_LABEL) {
                     recorder::on_select_destroyed(app_handle);
                 } else if label.starts_with(recorder::BAR_LABEL) {

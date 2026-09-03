@@ -14,7 +14,6 @@ import {
 import { translateLines } from "../../core/tauri";
 import { EVT_TRANSLATE_LINE } from "../../core/events";
 import { useConfigStore } from "../../stores/configStore";
-import { scrollBegin } from "../scrollshot/api";
 import { Pencil, Undo2, Redo2, X, Download, Copy, BoxSelect } from "lucide-react";
 import { OcrPanel } from "../shared/OcrPanel";
 import { groupOcrParagraphs } from "../shared/ocr-group";
@@ -244,18 +243,6 @@ const IcoPin = () => (
 );
 const IcoSaveAs = () => <Download {...IC} />;
 const IcoCopy = () => <Copy {...IC} />;
-// 长截图：页面（顶边+两侧实线、底边点线 = 内容未截完继续向下）+ 下方
-// 向下箭头（继续滚动拼接）。与复制（叠页）造型明确区分
-const IcoLongShot = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    {/* 页面主体：底边开口，用点线收口表达「未完待续」 */}
-    <path d="M4.5 15.5V6A2.5 2.5 0 0 1 7 3.5H17A2.5 2.5 0 0 1 19.5 6V15.5" />
-    <path d="M4.5 15.5H19.5" strokeDasharray="0.1 3.5" />
-    {/* 向下箭头 */}
-    <path d="M12 18.2v3.3" />
-    <path d="m9.8 19.6 2.2 2.2 2.2-2.2" />
-  </svg>
-);
 // 选择 / 移动：经典光标箭头（与 Lucide MousePointer 一致的描线风格），
 // 激活时高亮表示当前处于"选区/移动"模式，点击图形图标才进入绘制
 const IcoSelect = () => (
@@ -3022,23 +3009,6 @@ export function ScreenshotOverlay() {
     }
   };
 
-  // 长截图：把当前选区（换算全局物理像素）交给 scrollshot 模块，
-  // Rust 端收掉遮罩并接管后续流程（滚动+拼接+落盘），本页不再参与
-  const startLongShot = () => {
-    const r = regRef.current;
-    if (!geom || r.w <= 0 || r.h <= 0) return;
-    const sc = cssScale();
-    void scrollBegin({
-      x: Math.round(r.x * sc) + geom.x,
-      y: Math.round(r.y * sc) + geom.y,
-      w: Math.round(r.w * sc),
-      h: Math.round(r.h * sc),
-    }).catch(async (e) => {
-      void diagLog(`[shot] longshot begin failed: ${String(e)}`);
-      await shotCancel().catch(() => {});
-    });
-  };
-
   // doOutput 的 ref 镜像：下方事件监听只注册一次，经此始终调到最新闭包
   const doOutputRef = useRef<typeof doOutput | null>(null);
   useEffect(() => { doOutputRef.current = doOutput; });
@@ -3414,8 +3384,6 @@ export function ScreenshotOverlay() {
                 onClick={()=>{if(undos.length>0){setEditIdx(-1);setAnnos(undos[undos.length-1]);setUndos(u=>u.slice(0,-1));}}}><IcoRedo/></button>
               <div className="shot-toolbar-sep" />
               <div className="shot-toolbar-group shot-toolbar-actions">
-                <button data-tip="长截图（自动滚动拼接长图）" onClick={startLongShot}>
-                  <span style={{ display: "inline-flex" }}><IcoLongShot /></span></button>
                 <button data-tip="文字识别 (OCR)" className={ocrPhase !== "idle" ? "active" : ""}
                   onClick={() => { if (ocrPhase === "idle" || ocrPhase === "error") void runOcr(); else resetOcr(); }}>
                   <span style={{ display: "inline-flex" }}><IcoOcr /></span></button>

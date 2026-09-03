@@ -22,8 +22,6 @@ import { ScreenshotOverlay } from "./modules/screenshot/ScreenshotOverlay";
 import { PinWindow } from "./modules/pin/PinWindow";
 import PinMenu from "./modules/pin/PinMenu";
 import PinOcrWindow from "./modules/pin/PinOcrWindow";
-import { ScrollShotBar } from "./modules/scrollshot/ScrollShotBar";
-import { ScrollShotFrame } from "./modules/scrollshot/ScrollShotFrame";
 import { RecorderSelect } from "./modules/recorder/RecorderSelect";
 import { RecorderBar } from "./modules/recorder/RecorderBar";
 import { VolumePopover } from "./modules/recorder/VolumePopover";
@@ -122,12 +120,6 @@ export default function App() {
   }
   if (label.startsWith("shot-overlay")) {
     return <ScreenshotOverlay />;
-  }
-  if (label.startsWith("scrollshot-frame")) {
-    return <ScrollShotFrame />;
-  }
-  if (label.startsWith("scrollshot-bar")) {
-    return <ScrollShotBar />;
   }
   if (label.startsWith("rec-select")) {
     return <RecorderSelect />;

@@ -113,8 +113,6 @@ async function bootstrap() {
     "palette",
     "toolbar",
     // 悬浮控制条/指示窗：同一套透明底 + 主题变量（亚克力由 Rust 端应用）
-    "scrollshot-bar",
-    "scrollshot-frame",
     "rec-select",
     "rec-bar",
   ];
