@@ -55,8 +55,11 @@ pub struct FrameInfo {
 /// 拼接结果上限：高度像素与内存双保险
 const MAX_HEIGHT_PX: usize = 20_000;
 const MAX_BYTES: usize = 400 * 1024 * 1024;
-/// 抓帧节奏
-const CAPTURE_INTERVAL_MS: u64 = 120;
+/// 抓帧节奏：停稳判定靠「相邻两抓帧逐字节相同」，粒度直接决定每步
+/// 节奏上限——120ms 时动画结束后还要再等 1~2 个周期才判停稳（实测步
+/// 间隔 0.55~1.4s 抖动，观感"顿一下再继续滚"）；60ms 让动画一停立刻
+/// 衔接下一步，节奏抖动显著收窄。60ms 全帧 memcmp 开销可忽略
+const CAPTURE_INTERVAL_MS: u64 = 60;
 /// 对齐条带最大行数：新帧顶部与画布匹配用的参考条带（兼顾精度与速度）
 const ALIGN_STRIP_MAX: usize = 240;
 /// 灰度横向抽样步长
@@ -149,24 +152,29 @@ impl Canvas {
         if k < 8 || fgray.len() < fh { return None; }
         let cw = self.w / GS;
 
-        // score(p)：条带内逐行（步距2）与画布对应行的 ±2px 邻域取最小差再平均
+        // score(p)：条带内逐行（步距2）与画布对应行求平均差；【整体偏移】
+        // 评分——±2px 的五种整体错位各算一遍条带总差取最优，而不是逐行
+        // 独立取邻域最小。逐行独立会让「整体错 1~2px」的假匹配每行都找到
+        // 替身（重复纹理：表格线/文本行），分数与真匹配同样合格，接口处
+        // 整段错位被拼进画布；且 score(p±1) 被邻域取整拉平失真，整像素
+        // 滚动也输出 frac=±0.5 伪影（diag 实锤：diff=0 的会话 frac 恒 0.50，
+        // Bresenham 被骗着每两步 ±1 行乱切）。整体偏移保持行间相对关系，
+        // 错位候选总差显著变大被自然淘汰，峰回归单点、插值恢复意义
         let score_at = |p: usize| -> u64 {
             if p + k > h { return u64::MAX; }
-            let mut total = 0u64;
-            let mut n = 0u64;
-            for r in (0..k).step_by(2) {
-                let fr = &fgray[r];
-                let mut best = u64::MAX;
-                for dp in -2i32..=2 {
-                    let q = p as i32 + r as i32 + dp;
-                    if q < 0 || q >= h as i32 { continue; }
-                    let v = row_diff(&self.gray[q as usize], fr, cw);
-                    if v < best { best = v; }
+            let mut best_total = u64::MAX;
+            for dp in -2i32..=2 {
+                let base = p as i32 + dp;
+                if base < 0 || base + k as i32 > h as i32 { continue; }
+                let base = base as usize;
+                let mut total = 0u64;
+                for r in (0..k).step_by(2) {
+                    total += row_diff(&self.gray[base + r], &fgray[r], cw);
                 }
-                if best != u64::MAX { total += best; n += 1; }
+                if total < best_total { best_total = total; }
             }
-            if n == 0 { return u64::MAX; }
-            total / n
+            if best_total == u64::MAX { return u64::MAX; }
+            best_total / ((k + 1) / 2).max(1) as u64
         };
 
         let best_in = |lo: usize, hi: usize, step: usize| -> Option<(usize, u64)> {
@@ -582,9 +590,6 @@ fn run<R: Runtime + 'static>(
     // 上一次成功追加的新增行数：滚动步长已知（本程序自己发的滚轮），
     // 作为本次对齐落点的搜索提示，避免全画布盲搜被重复纹理骗走
     let mut last_shift: Option<usize> = None;
-    // 亚像素累计误差（Bresenham）：真实位移的小数部分在此累积，
-    // 每满一像素回调切割点一行，长图累计漂移压在 ±1px 内
-    let mut sub_err: f64 = 0.0;
     // 实测单格滚轮的滚动像素数：不同应用差异大（~50~150px），
     // 用它把「每步目标高度」换算成格数；初始按常见值 100px 估
     #[cfg(windows)]
@@ -664,18 +669,12 @@ fn run<R: Runtime + 'static>(
                                 trim = 0;
                             }
                             j_start += trim;
-                            // 亚像素累计误差补偿（Bresenham）：真实位移含小数，
-                            // 整行切割的余数逐帧累积；每凑满一像素回调一行，
-                            // 长图的累计漂移被压在 ±1px 内
-                            sub_err += trim as f64 + frac;
-                            let corr = sub_err.round();
-                            if corr <= -1.0 && j_start + 1 < fh {
-                                j_start += 1;
-                                sub_err += 1.0;
-                            } else if corr >= 1.0 && j_start >= 1 {
-                                j_start -= 1;
-                                sub_err -= 1.0;
-                            }
+                            // 【Bresenham 亚像素 ±1 行补偿已移除】diag 实锤它是
+                            // 接口错位源头：整像素滚动（diff=0）时旧逐行容差
+                            // 评分让 frac 恒输出 ±0.5 伪影，err 交替触发 ±1 行
+                            // 切割，每两步就在接口处错开一行。分数滚动交给
+                            // trim 丢混合行处理，接口无重影；代价是总高每步
+                            // 可能少 1px（肉眼无感），换来每条接口严格对齐
                             if j_start < fh {
                                 c.push_from(&f.bgra, &fgray, fh, j_start);
                                 last_shift = Some(c.h - h_before);
@@ -694,7 +693,7 @@ fn run<R: Runtime + 'static>(
                                     pending_notches = 0;
                                 }
                                 crate::storage::diag_write(&format!(
-                                    "[scrollshot] +{}px (p={p} diff={diff} frac={frac:.2} err={sub_err:.2} notch={notch_px:.0}) total={}px",
+                                    "[scrollshot] +{}px (p={p} diff={diff} frac={frac:.2} notch={notch_px:.0}) total={}px",
                                     c.h - h_before, c.h
                                 ));
                                 let _ = app.emit(EVT_PROGRESS, Progress { height: c.h as u32 });
