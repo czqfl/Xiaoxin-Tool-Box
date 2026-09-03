@@ -225,10 +225,12 @@ html[data-theme="dark"] {
 .shot-submenu-divider { width: 1px; height: 18px; flex: none; margin: 0 3px;
   background: linear-gradient(180deg, transparent, var(--tb-line) 28% 72%, transparent); }
 /* 枚举内嵌的颜色/粗细面板：复用主面板内容，去掉自己的底（枚举已有玻璃底），
-   与子图形严格同行、不换行；内发丝描边一并去掉（枚举容器已有） */
+   与子图形严格同行、不换行；【边框整圈去掉】——枚举容器已有完整描边，
+   旧规则只 none 了 top/left，右/下残留描边在矮面板（马赛克/文字）里与
+   外框错开成"双框"、高面板里贴成粗线，都是内层框没隐藏干净 */
 .shot-toolbtn-submenu .shot-toolbar-panel {
   background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none;
-  padding: 0; align-self: center; border-top: none; border-left: none;
+  padding: 0; align-self: center; border: none;
   flex-wrap: nowrap; white-space: nowrap; flex: none; box-shadow: none;
 }
 @keyframes shot-submenu-in { from { opacity: 0; } to { opacity: 1; } }
