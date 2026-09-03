@@ -37,8 +37,16 @@ const PX_PER_LEVEL: f64 = 40.0;
 /// 用户观感就是"没点停止它自己停了"）
 static SCROLLING: AtomicBool = AtomicBool::new(false);
 
-/// 对齐接受阈值（弹性逐行匹配后的平均灰度差 /255）
-const THRESH_ALIGN: u32 = 22;
+/// 对齐接受阈值（整体偏移评分后的平均灰度差 /255）：比旧「逐行邻域取
+/// 最小」评分更严格——真实匹配的分数普遍升高，22 会大量误拒
+const THRESH_ALIGN: u32 = 30;
+/// 相邻帧最小重叠（行）：低于此无法可靠对齐；与选区高共同决定帧间
+/// 物理窗口宽度
+const MIN_OVERLAP: usize = 64;
+/// 全局置信度边际（平均灰度差）：best 与「距 best>4px 的次优落点」
+/// 差距低于此 = 重复纹理多峰歧义，宁缺勿错（开源 xutianyi1999/scrollshot
+/// 的 global margin 思路，换算到本实现的灰度差尺度）
+const MARGIN_AMBIGUOUS: u64 = 4;
 
 /// 边框指示窗的几何（全局物理像素）：前端挂载后经命令查询绘制边框条。
 /// 用命令而非事件：事件在页面 JS 就绪前发出会丢，命令查询天然无竞态。
@@ -133,33 +141,34 @@ impl Canvas {
         self.h += fh - j_start;
     }
 
-    /// 垂直对齐：在画布中找新帧顶部内容的最佳落点 p（新帧第 j 行 ≈ 画布
-    /// 第 p+j 行）。返回 (p, 平均灰度差, 亚像素偏移)，失败 None。
+    /// 帧间对齐：在【物理窗口】[lo, hi] 内找新帧顶部内容的最佳落点 p
+    /// （新帧第 j 行 ≈ 画布第 p+j 行）。返回 (p, 平均灰度差, 全局次优差)。
     ///
-    /// - 每一行允许 ±2px 垂直容差取最小差——浏览器按物理像素分数滚动时
-    ///   衔接行是混合像素，固定整行硬比会把真匹配判死；
-    /// - 【带落点提示时】只在提示窗口内逐像素密搜：滚动由本程序控制、
-    ///   步长已知，全画布盲搜会被重复纹理（文本行/表格线）骗到错误位置，
-    ///   造成重影与漏行。窗口内搜不到合格落点再回退全画布粗搜。
+    /// - 窗口由调用方按几何必然给出：向下滚动时新帧顶只可能落在
+    ///   [c.h - fh, c.h - 最小重叠]，历史滚动距离绝不缩窄或偏置搜索范围
+    ///   （开源 xutianyi1999/scrollshot 同款原则）——旧版「last_shift hint
+    ///   窗收窄」被 diag 实锤会套住错误匹配（每步只拼 3~21px，位移被系统
+    ///   性低估，内容静默丢失 → "滚了很长图很短"），hint 失效回退全画布
+    ///   又被长距离重复纹理骗走；
+    /// - score 为「整体偏移」评分：±2px 五种整体错位各算条带总差取最优，
+    ///   保持行间相对关系（逐行独立取邻域最小会让整体错位的假匹配每行
+    ///   找到替身，还会让 score(p±1) 失真产生伪影）；
+    /// - 返回的 third = 距 best 超过 4px 的次优落点分数，供调用方做全局
+    ///   置信度边际（歧义）检测：重复纹理会造出多个几乎同分的落点
     fn find_align(
         &self,
         fgray: &[Vec<u8>],
         fh: usize,
-        hint: Option<(usize, usize)>,
-    ) -> Option<(usize, u32, f64)> {
+        lo: usize,
+        hi: usize,
+    ) -> Option<(usize, u32, u64)> {
         let h = self.h;
         let k = fh.min(ALIGN_STRIP_MAX).min(h);
         if k < 8 || fgray.len() < fh { return None; }
+        let hi = hi.min(h - k);
+        if lo > hi { return None; }
         let cw = self.w / GS;
 
-        // score(p)：条带内逐行（步距2）与画布对应行求平均差；【整体偏移】
-        // 评分——±2px 的五种整体错位各算一遍条带总差取最优，而不是逐行
-        // 独立取邻域最小。逐行独立会让「整体错 1~2px」的假匹配每行都找到
-        // 替身（重复纹理：表格线/文本行），分数与真匹配同样合格，接口处
-        // 整段错位被拼进画布；且 score(p±1) 被邻域取整拉平失真，整像素
-        // 滚动也输出 frac=±0.5 伪影（diag 实锤：diff=0 的会话 frac 恒 0.50，
-        // Bresenham 被骗着每两步 ±1 行乱切）。整体偏移保持行间相对关系，
-        // 错位候选总差显著变大被自然淘汰，峰回归单点、插值恢复意义
         let score_at = |p: usize| -> u64 {
             if p + k > h { return u64::MAX; }
             let mut best_total = u64::MAX;
@@ -177,52 +186,24 @@ impl Canvas {
             best_total / ((k + 1) / 2).max(1) as u64
         };
 
-        let best_in = |lo: usize, hi: usize, step: usize| -> Option<(usize, u64)> {
-            let hi = hi.min(h - k);
-            if lo > hi { return None; }
-            let mut best_p = lo;
-            let mut best_v = score_at(lo);
-            let mut p = lo;
-            while p < hi {
-                p = (p + step).min(hi);
-                let v = score_at(p);
-                if v < best_v { best_v = v; best_p = p; }
-            }
-            // 邻域精修 ±step
-            let lo2 = best_p.saturating_sub(step);
-            for q in lo2..=best_p + step {
-                if q > hi { break; }
-                let v = score_at(q);
-                if v < best_v { best_v = v; best_p = q; }
-            }
-            if best_v == u64::MAX { None } else { Some((best_p, best_v)) }
-        };
-
-        // 先试落点提示窗口（逐像素密搜），不合格回退全画布
-        let mut cand: Option<(usize, u64)> = None;
-        if let Some((lo, hi)) = hint {
-            if let Some(res) = best_in(lo, hi, 1) {
-                if res.1 <= THRESH_ALIGN as u64 { cand = Some(res); }
-            }
+        // 窗口逐像素密搜并缓存全部分数（供次优/歧义统计；窗口宽 ≤ 选区高，
+        // 总成本 ~数万次 row_diff，10ms 级）
+        let mut scores: Vec<(usize, u64)> = Vec::with_capacity(hi - lo + 1);
+        let mut p = lo;
+        loop {
+            scores.push((p, score_at(p)));
+            if p >= hi { break; }
+            p += 1;
         }
-        let (p, v) = match cand {
-            Some(x) => x,
-            None => best_in(0, h - k, ((h / 60).max(2)).max(4))?,
-        };
-        if v > THRESH_ALIGN as u64 { return None; }
-
-        // 亚像素估计：对 score(p-1/p/p+1) 抛物线插值取顶点偏移。
-        // 平滑滚动常停在分数像素上，真实位移是「整数+小数」，只按整数切
-        // 会每步留下 ≤1px 系统误差，逐帧累积成长距离漂移
-        let s_m = if p > 0 { score_at(p - 1) } else { v };
-        let s_p = score_at((p + 1).min(h - k));
-        let denom = (s_m + s_p) as i64 - 2 * (v as i64);
-        let frac: f64 = if denom > 0 {
-            (0.5 * (s_m as f64 - s_p as f64) / denom as f64).clamp(-0.5, 0.5)
-        } else {
-            0.0
-        };
-        Some((p, v as u32, frac))
+        let (best_p, best_v) = *scores.iter().min_by_key(|s| s.1)?;
+        if best_v == u64::MAX { return None; }
+        let second_v = scores
+            .iter()
+            .filter(|(q, _)| q.abs_diff(best_p) > 4)
+            .map(|s| s.1)
+            .min()
+            .unwrap_or(u64::MAX);
+        Some((best_p, best_v as u32, second_v))
     }
 }
 
@@ -587,9 +568,9 @@ fn run<R: Runtime + 'static>(
     let mut target_hwnd: Option<isize> = window_at_region_center(rx, ry, rw, rh);
 
     let mut canvas: Option<Canvas> = None;
-    // 上一次成功追加的新增行数：滚动步长已知（本程序自己发的滚轮），
-    // 作为本次对齐落点的搜索提示，避免全画布盲搜被重复纹理骗走
-    let mut last_shift: Option<usize> = None;
+    // 连续拒收计数（歧义/低质）：页面停稳后每帧相同，无限拒收 = 永久卡死；
+    // 连续 >=3 次强制接受窗口最优——真匹配稳定重现，孤立假匹配挡 2~3 帧足够
+    let mut reject_run: u32 = 0;
     // 实测单格滚轮的滚动像素数：不同应用差异大（~50~150px），
     // 用它把「每步目标高度」换算成格数；初始按常见值 100px 估
     #[cfg(windows)]
@@ -646,66 +627,104 @@ fn run<R: Runtime + 'static>(
             }
             Some(c) => {
                 if c.h < MAX_HEIGHT_PX && c.bgra.len() < MAX_BYTES {
-                    // 预期落点窗口：上次新增 s 行 → 本帧顶部应落在
-                    // c.h + s - fh 附近（±s/2，至少 ±16px）
-                    let hint = last_shift.map(|s| {
-                        let exp = c.h as isize + s as isize - fh as isize;
-                        let w = ((s / 2) as isize).max(16).min(140);
-                        ((exp - w).max(0) as usize, (exp + w).max(0) as usize)
-                    });
-                    if let Some((p, diff, frac)) = c.find_align(&fgray, fh, hint) {
-                        let h_before = c.h;
-                        let cw = c.w / GS;
-                        // 新帧第 j 行对应画布第 p+j 行；超出画布底部的内容为新增
-                        let mut j_start = h_before.saturating_sub(p);
-                        if j_start < fh {
-                            // 衔接行自适应：只有画布末行与新帧首行对不上
-                            // （亚像素混合行）才跳一行；整像素滚动时边界行
-                            // 本来就吻合，固定跳行会每步白丢一行内容
-                            let mut trim = 1usize;
-                            if j_start > 0
-                                && row_diff(&c.gray[h_before - 1], &fgray[j_start - 1], cw) <= 8
-                            {
-                                trim = 0;
-                            }
-                            j_start += trim;
-                            // 【Bresenham 亚像素 ±1 行补偿已移除】diag 实锤它是
-                            // 接口错位源头：整像素滚动（diff=0）时旧逐行容差
-                            // 评分让 frac 恒输出 ±0.5 伪影，err 交替触发 ±1 行
-                            // 切割，每两步就在接口处错开一行。分数滚动交给
-                            // trim 丢混合行处理，接口无重影；代价是总高每步
-                            // 可能少 1px（肉眼无感），换来每条接口严格对齐
-                            if j_start < fh {
-                                c.push_from(&f.bgra, &fgray, fh, j_start);
-                                last_shift = Some(c.h - h_before);
-                                // 用【实际滚动高度】校准单格像素数：不同应用
-                                // 一格滚的距离差异大（~50~150px）。到底/钳制
-                                // 时实测会偏小，偏差超 35% 视为异常不更新，
-                                // 防止到底阶段把估计值拖歪
-                                if pending_notches > 0 {
-                                    let measured =
-                                        (c.h - h_before) as f64 / pending_notches as f64;
-                                    if measured > 10.0
-                                        && (measured - notch_px).abs() <= notch_px * 0.35
-                                    {
-                                        notch_px = notch_px * 0.7 + measured * 0.3;
-                                    }
-                                    pending_notches = 0;
+                    // 【帧间物理窗口】向下滚动时新帧顶只可能落在
+                    // [c.h - fh, c.h - 最小重叠]：更小 = 内容向上滚（长截图
+                    // 不支持），更大 = 与上一帧失去全部重叠（数学上无法对齐）。
+                    // 窗口是几何必然而非启发式——旧版「全画布盲搜 + last_shift
+                    // hint 收窄」被 diag 实锤是"滚了很长图很短"的元凶
+                    let min_ov = MIN_OVERLAP.min(fh / 2);
+                    let lo = c.h.saturating_sub(fh);
+                    let hi = c.h.saturating_sub(min_ov);
+                    if let Some((p, diff, second)) = c.find_align(&fgray, fh, lo, hi) {
+                        // 本步视口位移（0 = 画面没滚 / 已到底）
+                        let shift = p as i64 - (c.h as i64 - fh as i64);
+                        let mut ok = diff <= THRESH_ALIGN;
+                        let mut why = if ok { "" } else { "quality" };
+                        // 全局置信度边际：距 best>4px 的次优落点几乎同分 =
+                        // 重复纹理多峰歧义，宁缺勿错。到底判定（shift=0）
+                        // 不受此限——静止画面处处吻合是常态
+                        if ok && shift > 0 && second < u64::MAX
+                            && second - (diff as u64) < MARGIN_AMBIGUOUS
+                        {
+                            ok = false;
+                            why = "ambiguous";
+                        }
+                        // 位移守恒校验（仅自动滚动、发过格时）：实测位移须与
+                        // 「发格数 × 单格像素」一致——对不上就是匹配落错了位置。
+                        // 这是防"图短"的第二道闸：hint 时代的 +3px/+21px 惨案
+                        // 在这里会被直接拒收
+                        #[cfg(windows)]
+                        {
+                            if ok && scrolling && pending_notches > 0 && shift > 0 {
+                                let expected = pending_notches as f64 * notch_px;
+                                let tol = (expected * 0.45).max(48.0);
+                                if (shift as f64 - expected).abs() > tol {
+                                    ok = false;
+                                    why = "shift-mismatch";
                                 }
-                                crate::storage::diag_write(&format!(
-                                    "[scrollshot] +{}px (p={p} diff={diff} frac={frac:.2} notch={notch_px:.0}) total={}px",
-                                    c.h - h_before, c.h
-                                ));
-                                let _ = app.emit(EVT_PROGRESS, Progress { height: c.h as u32 });
                             }
                         }
-                        // 整帧都在画布里：本步没滚出新内容，继续滚即可
+                        if ok {
+                            reject_run = 0;
+                        } else {
+                            reject_run += 1;
+                            crate::storage::diag_write(&format!(
+                                "[scrollshot] reject p={p} shift={shift} diff={diff} why={why} run={reject_run}"));
+                            if why == "shift-mismatch" {
+                                // 守恒失配：放弃本轮守恒约束（清 pending），
+                                // 由窗口+阈值+歧义继续把关；不清会永久卡死
+                                #[cfg(windows)]
+                                {
+                                    pending_notches = 0;
+                                }
+                            }
+                        }
+                        if ok || (reject_run >= 3 && why != "shift-mismatch") {
+                            reject_run = 0;
+                            let h_before = c.h;
+                            let cw = c.w / GS;
+                            // 新帧第 j 行对应画布第 p+j 行；超出画布底部的内容为新增
+                            let mut j_start = h_before.saturating_sub(p);
+                            if j_start < fh {
+                                // 衔接行自适应：只有画布末行与新帧首行对不上
+                                // （亚像素混合行）才跳一行；整像素滚动时边界行
+                                // 本来就吻合，固定跳行会每步白丢一行内容
+                                let mut trim = 1usize;
+                                if j_start > 0
+                                    && row_diff(&c.gray[h_before - 1], &fgray[j_start - 1], cw) <= 8
+                                {
+                                    trim = 0;
+                                }
+                                j_start += trim;
+                                if j_start < fh {
+                                    c.push_from(&f.bgra, &fgray, fh, j_start);
+                                    // 用【实际滚动高度】校准单格像素数：不同应用
+                                    // 一格滚的距离差异大（~50~150px）。到底/钳制
+                                    // 时实测会偏小，偏差超 35% 视为异常不更新，
+                                    // 防止到底阶段把估计值拖歪
+                                    if pending_notches > 0 {
+                                        let measured =
+                                            (c.h - h_before) as f64 / pending_notches as f64;
+                                        if measured > 10.0
+                                            && (measured - notch_px).abs() <= notch_px * 0.35
+                                        {
+                                            notch_px = notch_px * 0.7 + measured * 0.3;
+                                        }
+                                        pending_notches = 0;
+                                    }
+                                    crate::storage::diag_write(&format!(
+                                        "[scrollshot] +{}px (p={p} shift={shift} diff={diff} sec={second} notch={notch_px:.0}) total={}px",
+                                        c.h - h_before, c.h
+                                    ));
+                                    let _ = app.emit(EVT_PROGRESS, Progress { height: c.h as u32 });
+                                }
+                            }
+                            // 整帧都在画布里：本步没滚出新内容（到底/没滚），继续即可
+                        }
                     } else {
-                        // 窗口与全画布都搜不到合格落点：画面变化过大或滚距突变，
-                        // 作废提示让下一帧重新全画布定位
-                        last_shift = None;
+                        crate::storage::diag_write(&format!(
+                            "[scrollshot] align none (window empty, total={})", c.h));
                     }
-                    // 对齐失败：画面变化过大（动画/弹窗），跳过该帧继续观察
                 }
             }
         }
