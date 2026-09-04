@@ -189,7 +189,8 @@ export function ClipboardItem({
 
   /** 贴图：图片条目直贴原图（Rust 直读文件，超大图自动缩小）；文字条目渲染成
    *  卡片贴到屏幕（显示器中心）。贴完隐藏面板——贴图落在屏幕中心，面板继续
-   *  停留会正好盖住它。 */
+   *  停留会正好盖住它。成功不弹 toast：面板随即隐藏、toast 根本来不及看，
+   *  贴图出现在桌面上就是最直接的反馈；失败时面板还在，提示可见。 */
   const pinAsImage = async () => {
     if (pinning) return;
     setPinning(true);
@@ -199,7 +200,6 @@ export function ClipboardItem({
       } else {
         await pinTextToScreen(entry.text ?? entry.preview ?? "");
       }
-      toast.show("已贴图到屏幕", "success");
       hideCurrentWindow();
     } catch (err) {
       console.error("贴图失败：", err);
