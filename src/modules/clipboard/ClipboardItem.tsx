@@ -4,6 +4,8 @@ import type { PointerEvent } from "react";
 import type { ClipEntry } from "../../types";
 import { relativeTime } from "../../core/format";
 import { copyText } from "../../core/tauri";
+import { hideCurrentWindow } from "../../core/usePanel";
+import { pinTextToScreen } from "./textPin";
 import { useClipboardStore } from "../../stores/clipboardStore";
 import { useToast } from "../../components/Toast";
 import { ContextMenu, type MenuItem } from "../folder/ContextMenu";
@@ -11,12 +13,13 @@ import { detectActions, type TransformAction } from "./transform";
 import {
   IconArrowDown,
   IconArrowUp,
-  IconCopy,
   IconEdit,
   IconFiles,
   IconImage,
   IconLink,
+  IconPaste,
   IconPin,
+  IconPinCard,
   IconPlus,
   IconRichText,
   IconStar,
@@ -142,6 +145,8 @@ export function ClipboardItem({
   const [draft, setDraft] = useState("");
   /** 删除两步确认：首次点击进入确认态（短暂窗口内再次点击才真删） */
   const [confirmDel, setConfirmDel] = useState(false);
+  /** 贴图进行中：防连点重复创建贴图（渲染 PNG + 建窗有百毫秒级开销） */
+  const [pinning, setPinning] = useState(false);
   useEffect(() => {
     if (!confirmDel) return;
     const id = window.setTimeout(() => setConfirmDel(false), 2500);
@@ -179,6 +184,23 @@ export function ClipboardItem({
       // 不用 alert：WebView2 透明置顶窗口弹原生对话框有崩溃风险
       console.error("智能转换失败", err);
       toast.show(`转换失败：${String(err)}`, "error");
+    }
+  };
+
+  /** 贴图：把这条记录的文字渲染成卡片贴到屏幕（显示器中心）。
+   *  贴完隐藏面板——贴图落在屏幕中心，面板继续停留会正好盖住它。 */
+  const pinAsImage = async () => {
+    if (pinning) return;
+    setPinning(true);
+    try {
+      await pinTextToScreen(entry.text ?? entry.preview ?? "");
+      toast.show("已贴图到屏幕", "success");
+      hideCurrentWindow();
+    } catch (err) {
+      console.error("贴图失败：", err);
+      toast.show(`贴图失败：${String(err)}`, "error");
+    } finally {
+      setPinning(false);
     }
   };
 
@@ -361,9 +383,20 @@ export function ClipboardItem({
               <IconEdit size={14} />
             </button>
           )}
-          <button className="icon-btn" title="粘贴" onClick={onPaste}>
-            <IconCopy size={14} />
+          <button className="icon-btn" title="粘贴到当前光标处" onClick={onPaste}>
+            <IconPaste size={14} />
           </button>
+          {/* 图片条目贴图应贴图片本身（待补），这里先只对文字类开放 */}
+          {entry.kind !== "image" && (
+            <button
+              className="icon-btn"
+              title="贴图（把这段内容做成贴图钉在屏幕上）"
+              disabled={pinning}
+              onClick={() => void pinAsImage()}
+            >
+              <IconPinCard size={14} />
+            </button>
+          )}
           <button
             className={`icon-btn icon-btn-danger${confirmDel ? " confirming" : ""}`}
             title={confirmDel ? "再次点击确认删除" : "删除"}

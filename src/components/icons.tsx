@@ -55,6 +55,28 @@ export const IconClipboard = (p: IconProps) => (
   </svg>
 );
 
+/** 粘贴：剪贴板 + 板内向下箭头（内容落到光标处）。
+ *  与 IconCopy（两个重叠方块 = 复制）明确区分，避免"粘贴按钮看着像复制"。 */
+export const IconPaste = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M15 3H9a1 1 0 0 0-1 1v1.6a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1Z" />
+    <path d="M16 6.6h1.5A1.5 1.5 0 0 1 19 8.1V18a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V8.1a1.5 1.5 0 0 1 1.5-1.5H8" />
+    <path d="M12 10v7" />
+    <path d="m9 14.5 3 2.5 3-2.5" />
+  </svg>
+);
+
+/** 贴图（把内容钉到屏幕上）：文字卡片 + 右上角斜插的图钉。
+ *  与 IconPin（竖直图钉 = 置顶）姿态区分，避免同一面板内两个"图钉"混淆。 */
+export const IconPinCard = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="3" y="7" width="13" height="13" rx="2" />
+    <path d="M6.5 11h4M6.5 14.5h2.5" />
+    <circle cx="17.5" cy="6.5" r="2" />
+    <path d="m16 8-4.2 4.2" />
+  </svg>
+);
+
 export const IconFolder = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />  </svg>
