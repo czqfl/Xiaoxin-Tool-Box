@@ -403,6 +403,7 @@ pub fn run() {
             clipboard::clipboard_toggle_favorite,
             clipboard::clipboard_toggle_pin,
             clipboard::clipboard_image_data,
+            clipboard::clipboard_pin_image,
             clipboard::clipboard_write_back,
             clipboard::clipboard_paste,
             clipboard::clipboard_copy_text,

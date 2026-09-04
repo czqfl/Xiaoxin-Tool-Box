@@ -60,6 +60,10 @@ export const togglePin = (id: string) =>
   safe(invoke("clipboard_toggle_pin", { id }), undefined);
 export const fetchImageData = (id: string) =>
   safe(invoke<string>("clipboard_image_data", { id }), "");
+/** 把图片类条目贴到屏幕：Rust 直读原图落盘（超大图等比缩小、GIF 保持动画），
+ *  返回贴图 id。与 fetchImageData 的缩略图无关，贴出来是原图清晰度。 */
+export const clipboardPinImage = (id: string) =>
+  invoke<string>("clipboard_pin_image", { id });
 export const writeBackEntry = (id: string) =>
   invoke<void>("clipboard_write_back", { id });
 export const pasteEntry = (id: string) =>

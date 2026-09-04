@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { PointerEvent } from "react";
 import type { ClipEntry } from "../../types";
 import { relativeTime } from "../../core/format";
-import { copyText } from "../../core/tauri";
+import { clipboardPinImage, copyText } from "../../core/tauri";
 import { hideCurrentWindow } from "../../core/usePanel";
 import { pinTextToScreen } from "./textPin";
 import { useClipboardStore } from "../../stores/clipboardStore";
@@ -187,13 +187,18 @@ export function ClipboardItem({
     }
   };
 
-  /** 贴图：把这条记录的文字渲染成卡片贴到屏幕（显示器中心）。
-   *  贴完隐藏面板——贴图落在屏幕中心，面板继续停留会正好盖住它。 */
+  /** 贴图：图片条目直贴原图（Rust 直读文件，超大图自动缩小）；文字条目渲染成
+   *  卡片贴到屏幕（显示器中心）。贴完隐藏面板——贴图落在屏幕中心，面板继续
+   *  停留会正好盖住它。 */
   const pinAsImage = async () => {
     if (pinning) return;
     setPinning(true);
     try {
-      await pinTextToScreen(entry.text ?? entry.preview ?? "");
+      if (entry.kind === "image") {
+        await clipboardPinImage(entry.id);
+      } else {
+        await pinTextToScreen(entry.text ?? entry.preview ?? "");
+      }
       toast.show("已贴图到屏幕", "success");
       hideCurrentWindow();
     } catch (err) {
@@ -386,17 +391,14 @@ export function ClipboardItem({
           <button className="icon-btn" title="粘贴到当前光标处" onClick={onPaste}>
             <IconPaste size={14} />
           </button>
-          {/* 图片条目贴图应贴图片本身（待补），这里先只对文字类开放 */}
-          {entry.kind !== "image" && (
-            <button
-              className="icon-btn"
-              title="贴图（把这段内容做成贴图钉在屏幕上）"
-              disabled={pinning}
-              onClick={() => void pinAsImage()}
-            >
-              <IconPinCard size={14} />
-            </button>
-          )}
+          <button
+            className="icon-btn"
+            title={entry.kind === "image" ? "贴图（把这张图钉在屏幕上）" : "贴图（把这段内容做成贴图钉在屏幕上）"}
+            disabled={pinning}
+            onClick={() => void pinAsImage()}
+          >
+            <IconPinCard size={14} />
+          </button>
           <button
             className={`icon-btn icon-btn-danger${confirmDel ? " confirming" : ""}`}
             title={confirmDel ? "再次点击确认删除" : "删除"}

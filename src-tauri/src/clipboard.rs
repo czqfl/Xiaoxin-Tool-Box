@@ -861,6 +861,103 @@ pub fn clipboard_image_data(
     Ok(format!("data:image/png;base64,{}", base64_encode(&bytes)))
 }
 
+/// 把图片类条目贴到屏幕上（复用贴图管线）。
+///
+/// 走 Rust 直读【原图】文件字节 → `pin::create_from_bytes`，而不是把前端拿到的
+/// data-url 传回来再发出去：① `clipboard_image_data` 优先返回缩略图，只够面板
+/// 预览、贴出来必糊；② 大图经 base64 往返 IPC 多花数百毫秒到数秒。
+/// 超出主显示器工作区 85% 的大图等比缩小后再贴——否则贴图大半落在屏幕外；
+/// GIF 原样传递（重编码会压成单帧，动画就没了）。
+#[tauri::command]
+pub fn clipboard_pin_image(
+    app: AppHandle,
+    id: String,
+    store: State<'_, ClipboardStore>,
+    paths: State<'_, AppPaths>,
+) -> Result<String, String> {
+    let rel = {
+        let entries = store.0.lock().unwrap();
+        entries
+            .iter()
+            .find(|e| e.id == id)
+            // 原图优先；只有旧记录的缩略图时退而求其次
+            .and_then(|e| e.image_path.clone().or_else(|| e.image_thumb_path.clone()))
+            .ok_or_else(|| "该记录没有图片".to_string())?
+    };
+    let path = paths.images_dir.join(&rel);
+    let bytes = std::fs::read(&path).map_err(|e| format!("读取图片失败：{e}"))?;
+
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("png")
+        .to_ascii_lowercase();
+    let mime = match ext.as_str() {
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "jpg" | "jpeg" => "image/jpeg",
+        "bmp" => "image/bmp",
+        _ => "image/png",
+    };
+
+    // 落位基准：主显示器工作区（物理像素；pin 的 x/y 同为物理像素）
+    let (wa_x, wa_y, wa_w, wa_h) = match app.primary_monitor() {
+        Ok(Some(m)) => {
+            let wa = m.work_area();
+            (
+                wa.position.x,
+                wa.position.y,
+                wa.size.width as i32,
+                wa.size.height as i32,
+            )
+        }
+        _ => (0, 0, 1920, 1080),
+    };
+
+    let bytes = if mime == "image/gif" {
+        bytes // 动图不缩放：重编码会丢动画
+    } else {
+        // 先只读头探尺寸（不整图解开），确实超界才解码缩放
+        let (w, h) = image::ImageReader::new(std::io::Cursor::new(&bytes))
+            .with_guessed_format()
+            .map_err(|e| format!("probe: {e}"))?
+            .into_dimensions()
+            .map_err(|e| format!("dimensions: {e}"))?;
+        let max_w = ((wa_w as f64) * 0.85) as u32;
+        let max_h = ((wa_h as f64) * 0.85) as u32;
+        if w <= max_w && h <= max_h {
+            bytes
+        } else {
+            let img = image::load_from_memory(&bytes).map_err(|e| format!("decode: {e}"))?;
+            let scaled = img.resize(
+                max_w.max(1),
+                max_h.max(1),
+                image::imageops::FilterType::Triangle,
+            );
+            let mut out: Vec<u8> = Vec::new();
+            scaled
+                .write_to(
+                    &mut std::io::Cursor::new(&mut out),
+                    image::ImageFormat::Png,
+                )
+                .map_err(|e| format!("encode: {e}"))?;
+            out
+        }
+    };
+
+    // 最终尺寸决定居中落位（缩放过则取新尺寸）
+    let (w, h) = image::ImageReader::new(std::io::Cursor::new(&bytes))
+        .with_guessed_format()
+        .map_err(|e| format!("probe: {e}"))?
+        .into_dimensions()
+        .map_err(|e| format!("dimensions: {e}"))?;
+    let x = wa_x + (wa_w - w as i32) / 2;
+    let y = wa_y + (wa_h - h as i32) / 2;
+
+    let pin = crate::pin::create_from_bytes(&app, &bytes, mime, x, y)?;
+    Ok(pin.id)
+}
+
 /// 将条目内容写回系统剪贴板（不触发重复记录）
 #[tauri::command]
 pub fn clipboard_write_back(
