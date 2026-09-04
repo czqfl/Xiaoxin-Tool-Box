@@ -1,4 +1,8 @@
+# 依赖
 node_modules
+*.local
+
+# 前端构建产物
 dist
 dist-ssr
 # 临时验证/对比用构建输出（dist_check*/dist_ocr_check/dist_sticky_check 等），与 dist 一样不入库
@@ -7,22 +11,23 @@ dist_verify/
 dist-verify/
 # 迭代构建临时目录（dist-v*）：曾经误入库，现已清理，禁止再跟踪
 dist-v*/
-*.local
 
-# Tauri
+# Tauri 构建产物
 src-tauri/target
 src-tauri/gen
 # 更新签名密钥（私钥绝不入库，泄露后任何人都能伪造更新包）
 .tauri-keys/
+
+# 运行时数据（根目录 data\：dev 模式便携检测落在此处；属用户数据，绝不入库）
+/data/
+
+# 打包产物（统一输出到顶层 release\；升版打包.ps1 / npm run pack 生成）
+/release/
+# 便携版临时组装目录（build-portable.ps1 生成）
+/dist-portable/
 
 # Editor
 .vscode/*
 !.vscode/extensions.json
 .idea
 .DS_Store
-
-# 打包产物（npm run pack 输出到项目根）
-小心工具箱-安装版-*.exe
-小心工具箱-安装版-*.msi
-小心工具箱-便携版-*.zip
-stage/

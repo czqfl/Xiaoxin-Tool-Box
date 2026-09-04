@@ -1,11 +1,11 @@
-﻿# 小心工具箱 - 便携版打包脚本
+# 小心工具箱 - 便携版打包脚本
 # 用法：
 #   .\scripts\build-portable.ps1            # 完整构建（tauri build + 打包 zip）
 #   .\scripts\build-portable.ps1 -SkipBuild # 仅打包（已执行过 tauri build 时）
 #
 # 产出：
 #   - src-tauri\target\release\bundle\nsis\*.exe  NSIS 安装包（tauri build 顺带产出）
-#   - dist-portable\小心工具箱-便携版-v<版本>.zip  便携版（exe 同级 data/ 目录存数据）
+#   - release\小心工具箱-便携版-v<版本>.zip  便携版（exe 同级 data/ 目录存数据）
 
 param(
     [switch]$SkipBuild
@@ -56,8 +56,8 @@ Copy-Item (Join-Path $ocrModels "*") $stage -Force
 4. 默认快捷键：Alt+C 呼出剪贴板面板，Alt+F 呼出文件夹面板，可在设置中修改。
 '@ | Out-File -FilePath (Join-Path $stage "使用说明.txt") -Encoding utf8
 
-# 打包 zip
-$out = Join-Path $root "dist-portable\小心工具箱-便携版-v$version.zip"
+# 打包 zip（统一输出到顶层 release\，与安装版产物同目录）
+$out = Join-Path $root "release\小心工具箱-便携版-v$version.zip"
 if (Test-Path $out) { Remove-Item $out -Force }
 Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $out -CompressionLevel Optimal
 

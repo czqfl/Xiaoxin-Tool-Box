@@ -90,8 +90,8 @@ if ($nsisExe) {
 
 # ---- 3. 汇总 ----
 Write-Host ""
-Write-Host "==> 打包完成，产物在项目根目录：" -ForegroundColor Cyan
+Write-Host "==> 打包完成，产物在 release\ 目录：" -ForegroundColor Cyan
 # 同时匹配「小心工具箱-安装版.exe」（开发用，无版本）与「...-v<x>.exe」（升版）
-Get-ChildItem $root -File | Where-Object { $_.Name -like "小心工具箱-安装版*" } | ForEach-Object {
+Get-ChildItem $releaseDir -File | Where-Object { $_.Name -like "小心工具箱-安装版*" } | ForEach-Object {
     Write-Host ("    {0}  ({1:N2} MB)" -f $_.Name, ($_.Length / 1MB))
 }
