@@ -1,4 +1,4 @@
-# 剪贴板格式诊断工具
+﻿# 剪贴板格式诊断工具
 # 用法：先在任意应用（如 Snipaste）中复制内容，然后运行：
 #   powershell -ExecutionPolicy Bypass -File scripts\clipboard-debug.ps1
 # 输出系统剪贴板中当前所有数据格式，用于排查"复制了但应用读不到"的问题。

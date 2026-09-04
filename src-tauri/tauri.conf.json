@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "小心工具箱",
-  "version": "1.0.1",
+  "version": "1.0.6",
   "identifier": "com.xiaoxin.toolbox.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -20,7 +20,8 @@
         "minHeight": 520,
         "center": true,
         "resizable": true,
-        "visible": false
+        "visible": false,
+        "decorations": false
       },
       {
         "label": "clipboard-panel",
@@ -218,8 +219,9 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://n10f97znpny0-d.space-z.ai/api/updates/check?XTransformPort=3007"
+        "http://82.157.156.62/updates/xiaoxin/latest.json"
       ],
+      "dangerousInsecureTransportProtocol": true,
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVGNzE2RDNDRTZDRTg0RUEKUldUcWhNN21QRzF4WC9PTmYxQzhzcVhQbThKMjdsSis4ZzdhaU1wQWczTEhIMFZxemUvK2tmekkK",
       "windows": {
         "installMode": "passive"

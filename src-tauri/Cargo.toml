@@ -1,6 +1,6 @@
 [package]
 name = "xiaoxin-toolbox"
-version = "1.0.1"
+version = "1.0.6"
 description = "小心工具箱 - Windows 桌面快捷工具集"
 authors = ["xiaoxin"]
 edition = "2021"
@@ -22,6 +22,8 @@ tauri-plugin-dialog = "2"
 # 自动更新：updater 检查/下载/静默安装；process 供更新完成后 relaunch 重启
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+# 系统通知：反馈回复轮询到新消息时弹 Windows 通知（仅 Rust 侧使用）
+tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 arboard = "3"

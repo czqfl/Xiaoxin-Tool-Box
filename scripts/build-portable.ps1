@@ -1,4 +1,4 @@
-# 小心工具箱 - 便携版打包脚本
+﻿# 小心工具箱 - 便携版打包脚本
 # 用法：
 #   .\scripts\build-portable.ps1            # 完整构建（tauri build + 打包 zip）
 #   .\scripts\build-portable.ps1 -SkipBuild # 仅打包（已执行过 tauri build 时）

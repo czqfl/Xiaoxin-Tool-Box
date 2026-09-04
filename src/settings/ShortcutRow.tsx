@@ -226,7 +226,11 @@ export function ShortcutRow({
       setError("");
       onSaved?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "保存失败，请重试");
+      // invoke 拒绝值是纯字符串（后端 Err(String)），不是 Error 实例——
+      // instanceof 分支会吞掉真实原因只剩"请重试"，必须按字符串透传
+      const msg =
+        err instanceof Error ? err.message : typeof err === "string" && err ? err : "保存失败，请重试";
+      setError(msg);
       setOk(false);
     } finally {
       savingTarget = null;

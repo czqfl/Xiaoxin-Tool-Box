@@ -28,6 +28,8 @@ pub struct AppPaths {
     pub app_cache_file: PathBuf,
     /// 用户反馈档案（匿名设备码 + 可选联系人预填）
     pub feedback_file: PathBuf,
+    /// 开发者回复留档（增量游标 + 已读游标 + 本地消息列表）
+    pub feedback_replies_file: PathBuf,
 }
 
 impl AppPaths {
@@ -65,6 +67,7 @@ impl AppPaths {
             fs_index_file: data_dir.join("file_index.bin"),
             app_cache_file: data_dir.join("app_cache.json"),
             feedback_file: data_dir.join("feedback.json"),
+            feedback_replies_file: data_dir.join("feedback_replies.json"),
             images_dir,
             data_dir,
         }

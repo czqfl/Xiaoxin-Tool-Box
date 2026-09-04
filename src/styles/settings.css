@@ -2,8 +2,146 @@
 
 .settings {
   display: flex;
+  flex-direction: column;
   height: 100vh;
   background: var(--bg-app);
+}
+
+/* 自定义标题栏：无边框窗口顶部拖拽区 + 窗口控制按钮 + 更新入口。
+   标题区带 data-tauri-drag-region（拖拽移动 + 双击最大化由 Tauri 内置处理）；
+   背景与侧栏同色，视觉上「标题栏=侧栏延伸」，任何主题一致 */
+.settings-titlebar {
+  display: flex;
+  align-items: stretch;
+  height: 40px;
+  flex-shrink: 0;
+  background: var(--bg-sidebar);
+  border-bottom: 1px solid var(--border-subtle);
+  user-select: none;
+}
+.settings-titlebar-title {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  padding-left: 14px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.settings-titlebar-right {
+  display: flex;
+  align-items: stretch;
+}
+/* 窗口控制按钮：Windows 11 风格（宽命中区、悬停底色、关闭悬停红） */
+.titlebar-ctl {
+  width: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: default;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.titlebar-ctl:hover {
+  background: var(--bg-item-hover);
+  color: var(--text-primary);
+}
+.titlebar-ctl-close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+/* 标题栏更新按钮组：新版本出现才渲染（见 TitlebarUpdateButton） */
+.titlebar-update {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px 0 6px;
+  margin-right: 2px;
+}
+.titlebar-update-btn {
+  height: 26px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: none;
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+  color: var(--accent-text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: filter var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+.titlebar-update-btn:hover {
+  filter: brightness(1.1);
+}
+.titlebar-update-btn:active {
+  transform: scale(0.96);
+}
+.titlebar-update-later {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.titlebar-update-later:hover {
+  color: var(--text-primary);
+  border-color: var(--text-tertiary);
+}
+/* 下载中：迷你进度条 + 百分比 */
+.titlebar-update-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px;
+}
+.titlebar-update-bar {
+  width: 84px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border-subtle);
+  overflow: hidden;
+}
+.titlebar-update-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width 0.3s var(--ease-out);
+}
+.titlebar-update-pct {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  min-width: 34px;
+}
+.titlebar-update-installing {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+/* 标题栏以下的主体：侧栏 + 内容区 */
+.settings-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+/* 配置加载中的占位（标题栏始终渲染，保证加载期窗口可拖拽/关闭） */
+.settings-loading {
+  flex: 1;
+  display: grid;
+  place-items: center;
 }
 
 /* 左侧导航 */
@@ -408,7 +546,8 @@
 .about-hero h3 {
   font-size: 17px;
 }
-.about-hero .about-version {
+/* 品牌卡副标语（版本信息统一由「软件更新」卡展示，避免双版本卡片） */
+.about-hero .about-tagline {
   color: var(--text-tertiary);
   font-size: 12px;
 }
@@ -959,7 +1098,51 @@
   word-break: break-all;
 }
 
+/* 已下载待安装：立即/稍后按钮组 + 安装包落盘路径 */
+.update-actions {
+  display: flex;
+  gap: 8px;
+}
+.update-saved-path {
+  margin: 4px 0 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  background: var(--bg-input);
+  word-break: break-all;
+}
+
 /* ==== 问题反馈表单（关于页） ==== */
+/* 开发者回复列表（关于页）：左缘强调线区分"来自开发者的消息" */
+.feedback-replies {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 16px 16px;
+}
+.feedback-reply-item {
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+}
+.feedback-reply-msg {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+.feedback-reply-time {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
 .feedback-form {
   display: flex;
   flex-direction: column;

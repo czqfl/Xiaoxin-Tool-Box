@@ -27,6 +27,7 @@ import { RecorderSelect } from "./modules/recorder/RecorderSelect";
 import { RecorderBar } from "./modules/recorder/RecorderBar";
 import { VolumePopover } from "./modules/recorder/VolumePopover";
 import { SettingsApp } from "./settings/SettingsApp";
+import { runStartupUpdateCheckOnce } from "./core/updater";
 import { diagLog } from "./core/tauri";
 
 // 预热贴图右键菜单单例窗：应用启动（设置窗挂载即触发）预建 pin-menu（隐藏），
@@ -74,6 +75,10 @@ export default function App() {
       cleanup?.();
     };
   }, [load, sync]);
+
+  // 应用启动即调度一次静默更新检查（延迟 8s，进程内仅一次，跨窗口不重复）；
+  // 此前误放在设置窗里，不开设置窗就永不检查。发现新版会反映到标题栏/关于页
+  useEffect(() => { runStartupUpdateCheckOnce(); }, []);
 
   // 启动即预热右键菜单窗（隐藏待命），保证首次右键也能瞬时弹出
   useEffect(() => { ensurePinMenu(); }, []);

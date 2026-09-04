@@ -1,14 +1,16 @@
 /** 设置中心：左侧边栏导航 + 右侧内容区。
  *  菜单以功能模块划分（每个模块一页，含各自的功能开关与快捷键设置）；
- *  停用的功能其模块页从侧栏隐藏（重新启用走「功能开关」页）。 */
+ *  停用的功能其模块页从侧栏隐藏（重新启用走「功能开关」页）。
+ *  窗口为无边框 + 顶部自定义标题栏（拖拽/最小化/最大化/关闭 + 更新按钮）。 */
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { useConfigStore } from "../stores/configStore";
 import { Spinner } from "../components/Spinner";
 import { IconClose } from "../components/icons";
-import { EVT_SHORTCUT_FAILED, onEvent } from "../core/events";
-import { scheduleStartupUpdateCheck, useUpdaterStore } from "../core/updater";
+import { EVT_SHORTCUT_FAILED, EVT_FEEDBACK_REPLIES, onEvent } from "../core/events";
+import { feedbackListReplies } from "../core/tauri";
+import { useUpdaterStore } from "../core/updater";
 import { ClipboardPage } from "./ClipboardPage";
 import { FolderPage } from "./FolderPage";
 import { CredentialPage } from "./CredentialPage";
@@ -110,38 +112,162 @@ const FAILED_TARGET_NAME: Record<string, string> = {
    palette: "全局命令面板",
  };
 
-/** 把 CSS 颜色（#rgb / #rrggbb / rgb()）解析成 "r,g,b" 字符串；失败返回 null */
-function cssColorToRgb(input: string): string | null {
-  const s = input.trim();
-  if (s.startsWith("#")) {
-    if (s.length === 7) {
-      const r = parseInt(s.slice(1, 3), 16);
-      const g = parseInt(s.slice(3, 5), 16);
-      const b = parseInt(s.slice(5, 7), 16);
-      if ([r, g, b].every((v) => !Number.isNaN(v))) return `${r},${g},${b}`;
-    } else if (s.length === 4) {
-      const r = parseInt(s[1] + s[1], 16);
-      const g = parseInt(s[2] + s[2], 16);
-      const b = parseInt(s[3] + s[3], 16);
-      if ([r, g, b].every((v) => !Number.isNaN(v))) return `${r},${g},${b}`;
-    }
-  }
-  const m = s.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
-  if (m) return `${m[1]},${m[2]},${m[3]}`;
-  return null;
+/** 标题栏更新按钮：有新版本才出现。
+ *  状态流转：available「更新 v1.0.5」→ downloading 迷你进度条 → downloaded
+ *  「立即安装 / 稍后」→ 选稍后（saved）按钮常驻为「安装 v1.0.5」，随时可装；
+ *  下载失败（error 且已知新版本）变「重试下载」。与关于页共用同一 updater store。 */
+function TitlebarUpdateButton() {
+  const { status, newVersion, downloaded, total, download, installSaved, postpone } =
+    useUpdaterStore();
+  const pct = total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : 0;
+  const retryable = status === "error" && newVersion != null;
+  const active =
+    retryable ||
+    status === "available" ||
+    status === "downloading" ||
+    status === "downloaded" ||
+    status === "saved" ||
+    status === "installing";
+  if (!active) return null;
+
+  return (
+    <div className="titlebar-update">
+      {status === "downloading" ? (
+        <div className="titlebar-update-progress" title="正在下载新版本">
+          <div className="titlebar-update-bar">
+            <div
+              className="titlebar-update-fill"
+              style={{ width: total > 0 ? `${pct}%` : "100%" }}
+            />
+          </div>
+          <span className="titlebar-update-pct">{total > 0 ? `${pct}%` : "下载中…"}</span>
+        </div>
+      ) : status === "downloaded" ? (
+        <>
+          <button className="titlebar-update-btn" onClick={() => void installSaved()}>
+            立即安装
+          </button>
+          <button className="titlebar-update-later" onClick={postpone}>
+            稍后
+          </button>
+        </>
+      ) : status === "saved" ? (
+        <button
+          className="titlebar-update-btn"
+          title={`安装包已保存，可随时安装 v${newVersion}`}
+          onClick={() => void installSaved()}
+        >
+          安装 v{newVersion}
+        </button>
+      ) : status === "installing" ? (
+        <span className="titlebar-update-installing">
+          <Spinner size="sm" />
+          安装中…
+        </span>
+      ) : status === "error" ? (
+        <button className="titlebar-update-btn" onClick={() => void download()}>
+          重试下载
+        </button>
+      ) : (
+        <button
+          className="titlebar-update-btn"
+          title={`发现新版本 v${newVersion}，点击下载`}
+          onClick={() => void download()}
+        >
+          更新 v{newVersion}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** 自定义标题栏：标题拖拽区（Tauri 内置拖拽移动 + 双击最大化）
+ *  + 右侧更新按钮与最小化/最大化/关闭。关闭走 close() → 后端拦截为隐藏。 */
+function SettingsTitleBar() {
+  const [maximized, setMaximized] = useState(false);
+
+  useEffect(() => {
+    const w = getCurrentWindow();
+    let disposed = false;
+    const cleanup: Array<() => void> = [];
+    const sync = () => {
+      w.isMaximized()
+        .then((m) => {
+          if (!disposed) setMaximized(m);
+        })
+        .catch(() => {});
+    };
+    sync();
+    w.onResized(sync).then((un) => (disposed ? un() : cleanup.push(un)));
+    return () => {
+      disposed = true;
+      cleanup.forEach((fn) => fn());
+    };
+  }, []);
+
+  const w = getCurrentWindow();
+  return (
+    <div className="settings-titlebar">
+      <div className="settings-titlebar-title" data-tauri-drag-region>
+        小心工具箱 - 设置
+      </div>
+      <div className="settings-titlebar-right">
+        <TitlebarUpdateButton />
+        <button className="titlebar-ctl" title="最小化" onClick={() => void w.minimize()}>
+          <svg width="10" height="10" viewBox="0 0 10 10">
+            <path d="M0 5h10" stroke="currentColor" strokeWidth="1" />
+          </svg>
+        </button>
+        <button
+          className="titlebar-ctl"
+          title={maximized ? "还原" : "最大化"}
+          onClick={() => void w.toggleMaximize()}
+        >
+          {maximized ? (
+            <svg width="10" height="10" viewBox="0 0 10 10">
+              <rect x="0.5" y="2.5" width="7" height="7" rx="1" fill="none" stroke="currentColor" />
+              <path d="M2.5 2.5V0.5h7v7h-2" fill="none" stroke="currentColor" />
+            </svg>
+          ) : (
+            <svg width="10" height="10" viewBox="0 0 10 10">
+              <rect x="0.5" y="0.5" width="9" height="9" rx="1" fill="none" stroke="currentColor" />
+            </svg>
+          )}
+        </button>
+        <button
+          className="titlebar-ctl titlebar-ctl-close"
+          title="关闭"
+          onClick={() => void w.close()}
+        >
+          <svg width="10" height="10" viewBox="0 0 10 10">
+            <path d="M0 0l10 10M10 0L0 10" stroke="currentColor" strokeWidth="1" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export function SettingsApp() {
   const load = useConfigStore((s) => s.load);
   const loaded = useConfigStore((s) => s.loaded);
   const config = useConfigStore((s) => s.config);
-  const theme = useConfigStore((s) => s.config.general.theme);
   const [page, setPage] = useState<Page>("general");
   const [shortcutFailed, setShortcutFailed] = useState<string | null>(null);
-  // 发现新版本：「关于」侧栏项亮红点提示（下载中/安装中保持亮，引导用户看进度）
+  // 左下角版本号（真实运行版本，随发版自动变化；不再硬编码）
+  const [version, setVersion] = useState("");
+  // 发现新版本：「关于」侧栏项亮红点提示（下载中/待选择/安装中保持亮，引导用户看进度）
   const updateAvailable = useUpdaterStore(
-    (s) => s.status === "available" || s.status === "downloading" || s.status === "installing"
+    (s) =>
+      s.status === "available" ||
+      s.status === "downloading" ||
+      s.status === "downloaded" ||
+      s.status === "installing"
   );
+  // 开发者回复未读：「关于」侧栏项同样亮红点（打开关于页后熄灭）
+  const [repliesDot, setRepliesDot] = useState(false);
+  // 事件回调里读当前页避免闭包过期：正停在关于页时不亮（页面自身实时刷新列表）
+  const pageRef = useRef<Page>("general");
   const shortcuts = useConfigStore((s) => s.config.shortcuts);
   // 任一快捷键保存成功（配置变化）即清除"注册失败"横幅
   // 仅当快捷键【内容】真正变化时才清掉失败横幅：任意配置刷新都会产生新的
@@ -157,8 +283,9 @@ export function SettingsApp() {
 
   useEffect(() => {
     load();
-    // 启动 8 秒后静默检查更新：发现新版则「关于」侧栏项亮红点（失败完全静默）
-    scheduleStartupUpdateCheck();
+    // 左下角版本号（真实运行版本，打包配置读取）
+    getVersion().then(setVersion).catch(() => {});
+    // 启动更新检查已前移到 App.tsx 顶层（应用启动即调度，不再依赖打开设置窗）
     // 兜底：窗口 hide/show 切换后偶发"渲染了但状态未就绪"（表现为打不开/空白），
     // 每次获得焦点时若配置尚未加载则补一次加载
     const cleanup: Array<() => void> = [];
@@ -177,48 +304,34 @@ export function SettingsApp() {
     onEvent<void>("sticky://goto-settings", () => {
       setPage("sticky");
     }).then((un) => (disposed ? un() : cleanup.push(un)));
+    // 开发者回复：启动时查一次未读数；轮询线程拉到新回复时亮红点
+    feedbackListReplies()
+      .then((s) => {
+        if (!disposed && pageRef.current !== "about") setRepliesDot(s.unread > 0);
+      })
+      .catch(() => {});
+    onEvent<number>(EVT_FEEDBACK_REPLIES, () => {
+      if (pageRef.current !== "about") setRepliesDot(true);
+    }).then((un) => (disposed ? un() : cleanup.push(un)));
     return () => {
       disposed = true;
       cleanup.forEach((fn) => fn());
     };
   }, [load]);
 
-  // 设置窗口原生标题栏底色精确跟随侧栏 --bg-sidebar（任何主题一致）。
-  // 原生 setTheme 只能 light/dark，浅色主题下 Windows 默认标题栏纯白、与浅灰侧栏
-  // 有可见差异；改用 Rust 命令 set_settings_caption_color（DWMWA_CAPTION_COLOR）
-  // 把标题栏底色设为与侧栏完全相同的色。theme 变化（含 system 跟随系统切换）后重设，
-  // 并监听系统深浅变化，保证 system 模式实时一致。
-  useEffect(() => {
-    if (!loaded) return;
-    const apply = () => {
-      try {
-        // 令牌值可能是 light-dark(...) 未解析流（主题单源化后），
-        // 直接 getPropertyValue 拿不到最终色；用隐藏探针元素借真实属性解析
-        const probe = document.createElement("span");
-        probe.style.position = "absolute";
-        probe.style.visibility = "hidden";
-        probe.style.backgroundColor = "var(--bg-sidebar)";
-        document.body.appendChild(probe);
-        const raw = getComputedStyle(probe).backgroundColor;
-        probe.remove();
-        const rgb = cssColorToRgb(raw);
-        if (rgb) void invoke("set_settings_caption_color", { rgb }).catch(() => {});
-      } catch {
-        /* 非 Windows / 不支持则忽略 */
-      }
-    };
-    apply();
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    mq.addEventListener("change", apply);
-    return () => mq.removeEventListener("change", apply);
-  }, [loaded, theme]);
-
   if (!loaded) {
-    // 配置加载期间给个居中 Spinner，替代"整窗空白"
+    // 配置加载期间：标题栏照常渲染（窗口可拖拽/关闭），主体给居中 Spinner
     return (
-      <div style={{ height: "100vh", display: "grid", placeItems: "center" }}>
-        <Spinner size="lg" />
-      </div>
+      <SettingsErrorBoundary>
+        <div className="settings">
+          <SettingsTitleBar />
+          <div className="settings-body">
+            <div className="settings-loading">
+              <Spinner size="lg" />
+            </div>
+          </div>
+        </div>
+      </SettingsErrorBoundary>
     );
   }
 
@@ -234,6 +347,8 @@ export function SettingsApp() {
   return (
     <SettingsErrorBoundary>
       <div className="settings">
+      <SettingsTitleBar />
+      <div className="settings-body">
       <aside className="settings-sidebar">
         <div className="settings-brand">
           <span className="brand-dot">⚡</span>
@@ -270,11 +385,13 @@ export function SettingsApp() {
           >
             {item.icon}
             {item.label}
-            {/* 新版本红点：仅「关于」项，进入页面即见更新卡片 */}
-            {item.key === "about" && updateAvailable && <span className="nav-update-dot" />}
+            {/* 红点：新版本或开发者回复未读时「关于」项亮起，进入页面即见 */}
+            {item.key === "about" && (updateAvailable || repliesDot) && (
+              <span className="nav-update-dot" />
+            )}
           </button>
         ))}
-        <div className="settings-sidebar-footer">v1.0.0 · Windows</div>
+        <div className="settings-sidebar-footer">v{version || "…"} · Windows</div>
       </aside>
 
       <main className="settings-content">
@@ -333,6 +450,7 @@ export function SettingsApp() {
           </>
         )}
       </main>
+      </div>
       </div>
     </SettingsErrorBoundary>
   );

@@ -9,9 +9,14 @@ import {
   feedbackProfile,
   feedbackReadImage,
   feedbackSaveContact,
+  feedbackListReplies,
+  feedbackPollRepliesNow,
+  feedbackMarkRepliesRead,
   submitFeedback,
+  type FeedbackReply,
 } from "../core/tauri";
-import { IconClose } from "../components/icons";
+import { EVT_FEEDBACK_REPLIES, onEvent } from "../core/events";
+import { IconClose, IconRefresh } from "../components/icons";
 
 /** 字节数人性化显示（KB/MB） */
 function fmtBytes(n: number): string {
@@ -20,9 +25,20 @@ function fmtBytes(n: number): string {
   return `${n} B`;
 }
 
-function UpdateSection() {
-  const { status, newVersion, notes, downloaded, total, error, manualCheck, downloadAndInstall } =
-    useUpdaterStore();
+function UpdateSection({ version }: { version: string }) {
+  const {
+    status,
+    newVersion,
+    notes,
+    downloaded,
+    total,
+    savedPath,
+    error,
+    manualCheck,
+    download,
+    installSaved,
+    postpone,
+  } = useUpdaterStore();
 
   const pct = total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : 0;
 
@@ -32,20 +48,24 @@ function UpdateSection() {
         title="软件更新"
         desc={
           status === "available"
-            ? `发现新版本 v${newVersion}`
+            ? `发现新版本 v${newVersion}（当前 v${version}）`
             : status === "downloading"
-              ? "正在下载更新…"
-              : status === "installing"
-                ? "下载完成，即将重启安装…"
-                : status === "latest"
-                  ? "已是最新版本"
-                  : status === "error"
-                    ? "检查更新失败：服务器可能未就绪或网络不可用"
-                    : "启动时自动检查，也可手动检查"
+              ? `正在下载 v${newVersion}…`
+              : status === "downloaded"
+                ? `v${newVersion} 已下载完成，是否立即安装？`
+                : status === "saved"
+                  ? `v${newVersion} 安装包已保存，可随时安装`
+                  : status === "installing"
+                    ? "正在安装，应用即将重启…"
+                    : status === "latest"
+                      ? `已是最新版本 v${version}`
+                      : status === "error"
+                        ? "检查更新失败：服务器可能未就绪或网络不可用"
+                        : `当前版本 v${version}，启动时自动检查，也可手动检查`
         }
       >
-        {/* 下载中/安装中：进度条替代按钮；其余状态给检查或安装按钮 */}
-        {status === "downloading" || status === "installing" ? (
+        {/* 下载中：进度条；已下载/已保存：立即/稍后；其余按状态给动作按钮 */}
+        {status === "downloading" ? (
           <div className="update-progress">
             <div className="update-progress-bar">
               <div
@@ -54,21 +74,33 @@ function UpdateSection() {
               />
             </div>
             <span className="update-progress-text">
-              {status === "installing"
-                ? "安装中…"
-                : total > 0
-                  ? `${pct}% · ${fmtBytes(downloaded)} / ${fmtBytes(total)}`
-                  : fmtBytes(downloaded)}
+              {total > 0
+                ? `${pct}% · ${fmtBytes(downloaded)} / ${fmtBytes(total)}`
+                : fmtBytes(downloaded)}
             </span>
           </div>
+        ) : status === "downloaded" ? (
+          <div className="update-actions">
+            <button className="btn btn-primary btn-sm" onClick={() => void installSaved()}>
+              立即安装
+            </button>
+            <button className="btn btn-sm" onClick={postpone}>
+              稍后
+            </button>
+          </div>
         ) : status === "available" ? (
-          <button
-            className="btn btn-primary btn-sm"
-            onClick={() => void downloadAndInstall()}
-          >
-            下载并安装
+          <button className="btn btn-primary btn-sm" onClick={() => void download()}>
+            下载更新
+          </button>
+        ) : status === "saved" ? (
+          <button className="btn btn-primary btn-sm" onClick={() => void installSaved()}>
+            立即安装
           </button>
         ) : status === "checking" ? (
+          <button className="btn btn-sm" disabled>
+            <Spinner size="sm" />
+          </button>
+        ) : status === "installing" ? (
           <button className="btn btn-sm" disabled>
             <Spinner size="sm" />
           </button>
@@ -79,6 +111,15 @@ function UpdateSection() {
         )}
       </SettingRow>
 
+      {/* 已下载安装包的落盘位置（downloaded/saved 都展示，方便用户日后找到文件） */}
+      {(status === "downloaded" || status === "saved") && savedPath && (
+        <div className="update-saved-path">
+          {status === "downloaded"
+            ? `安装包已保存至：${savedPath}（选择"稍后"可随时双击该文件安装）`
+            : `安装包已保存至：${savedPath}。随时可双击该文件安装；安装过程会自动处理正在运行的应用。`}
+        </div>
+      )}
+
       {/* 新版说明 + 错误详情：占整行的次级信息 */}
       {status === "available" && notes && (
         <div className="update-notes">
@@ -87,6 +128,96 @@ function UpdateSection() {
         </div>
       )}
       {status === "error" && error && <div className="update-error-detail">{error}</div>}
+    </SettingGroup>
+  );
+}
+
+/* ==== 开发者回复 ==== */
+
+/** 服务器时间串截短展示："2026-09-04T15:30:00.000Z" → "2026-09-04 15:30" */
+function fmtReplyTime(s: string): string {
+  return s ? s.slice(0, 19).replace("T", " ") : "";
+}
+
+function RepliesSection() {
+  const [replies, setReplies] = useState<FeedbackReply[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshErr, setRefreshErr] = useState(false);
+
+  useEffect(() => {
+    let disposed = false;
+    const cleanup: Array<() => void> = [];
+    const load = () => {
+      feedbackListReplies()
+        .then((s) => {
+          if (!disposed) setReplies(s.replies);
+        })
+        .catch(() => {});
+    };
+    load();
+    // 打开关于页即全部标记已读（侧栏红点熄灭），标记后再拉一次保证列表最新
+    feedbackMarkRepliesRead()
+      .then(load)
+      .catch(load);
+    // 用户正停在关于页时轮询到新回复：实时刷新列表
+    onEvent<number>(EVT_FEEDBACK_REPLIES, load).then((un) =>
+      disposed ? un() : cleanup.push(un)
+    );
+    return () => {
+      disposed = true;
+      cleanup.forEach((fn) => fn());
+    };
+  }, []);
+
+  /** 手动拉取一次（不等 7 分钟轮询）：拉完直接以返回值刷新列表 */
+  const refresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    setRefreshErr(false);
+    try {
+      const s = await feedbackPollRepliesNow();
+      setReplies(s.replies);
+    } catch {
+      setRefreshErr(true);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  return (
+    <SettingGroup>
+      <div className="setting-row">
+        <div className="setting-info">
+          <div className="setting-title">开发者回复</div>
+          <div className="setting-desc">
+            {refreshErr
+              ? "刷新失败：服务器可能未就绪或网络不可用"
+              : replies.length === 0
+                ? "暂无回复；你提交的反馈有新进展时会在这里展示（也会以系统通知提醒）"
+                : "你提交的反馈有新的处理进展（回复也会以系统通知提醒）"}
+          </div>
+        </div>
+        <button
+          className="icon-btn"
+          title="立即检查新回复"
+          disabled={refreshing}
+          onClick={() => void refresh()}
+        >
+          {refreshing ? <Spinner size="sm" /> : <IconRefresh size={14} />}
+        </button>
+      </div>
+      {replies.length > 0 && (
+        <div className="feedback-replies">
+          {replies.map((r) => (
+            <div key={r.id} className="feedback-reply-item">
+              <div className="feedback-reply-msg">{r.message}</div>
+              {r.created_at && (
+                <div className="feedback-reply-time">{fmtReplyTime(r.created_at)}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </SettingGroup>
   );
 }
@@ -117,7 +248,7 @@ function FeedbackSection() {
   useEffect(() => {
     feedbackProfile()
       .then((p) => {
-        setDeviceId(p.deviceId);
+        setDeviceId(p.device_id);
         setName(p.name);
         setContact(p.contact);
       })
@@ -136,7 +267,7 @@ function FeedbackSection() {
     if (typeof selected !== "string") return;
     try {
       const preview = await feedbackReadImage(selected);
-      setShot({ path: selected, dataUrl: preview.dataUrl, size: preview.size });
+      setShot({ path: selected, dataUrl: preview.data_url, size: preview.size });
       setError("");
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
@@ -268,15 +399,18 @@ export function AboutPage() {
       <h2>关于</h2>
       <p className="page-desc">小心工具箱 · Windows 桌面快捷工具集</p>
 
+      {/* 品牌卡不放版本号：版本信息统一由下方「软件更新」卡展示，
+          避免检查后出现两张"版本卡片"的重复观感 */}
       <SettingGroup>
         <div className="about-hero">
           <div className="about-logo">⚡</div>
           <h3>小心工具箱</h3>
-          <div className="about-version">版本 v{version}</div>
+          <div className="about-tagline">Windows 桌面快捷工具集</div>
         </div>
       </SettingGroup>
 
-      <UpdateSection />
+      <UpdateSection version={version} />
+      <RepliesSection />
       <FeedbackSection />
 
       <SettingGroup>

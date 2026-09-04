@@ -296,8 +296,9 @@ pub fn shortcut_apply(
     let mut next = current.clone();
     set_config_shortcut(&mut next, &target, shortcut.clone());
 
-    // 全清 → 按新配置重建
-    if let Err(e) = resync_all_result(&app, &next) {
+    // 全清 → 按新配置重建（仅"被改的 target"失败才回滚；其他 target 的环境性
+    // 占用冲突容忍留痕——曾因录屏键被第三方程序占用导致任何快捷键都保存不了）
+    if let Err(e) = resync_inner(&app, &next, Some(&target)) {
         // 回滚：全清 → 按原配置重建，保证运行时与磁盘一致、绝不混存
         crate::storage::diag_write(&format!(
             "[shortcut] apply {target}={shortcut} FAILED: {e} → rollback to previous"
@@ -393,15 +394,30 @@ fn feature_of_target(target: &str) -> &str {
     }
 }
 
-/// 全量重建：注销全部 → 按给定配置逐个注册。任一 target 失败即返回错误
-/// （此时运行时处于"已清空+部分重建"状态，调用方必须回滚/重试）。
+/// 全量重建：注销全部 → 按给定配置逐个注册。
+/// 任一失败即返回错误（启动 / 回滚 / 导入场景，需整体感知）；
+/// 但失败不再中断流程——先跑完所有 target 并补注册便签热键再返回，
+/// 尽早返回会让运行时停在"半套热键 + 便签热键全灭"的更糟状态。
 /// 功能停用的 target 直接跳过注册（绑定表保持 None，热键不生效）。
 pub fn resync_all_result<R: Runtime>(
     app: &AppHandle<R>,
     config: &AppConfig,
 ) -> Result<(), String> {
+    resync_inner(app, config, None)
+}
+
+/// resync 核心：critical=Some(t) 时仅 t 注册失败视为错误（apply 场景——用户
+/// 改的是 t，其他 target 的环境性冲突（如录屏键被第三方程序长期占用）不应
+/// 阻塞保存，否则用户永远改不了任何快捷键）；其余失败仅留痕容忍，
+/// 该键保持未注册，与启动时同样的环境状态一致。
+fn resync_inner<R: Runtime>(
+    app: &AppHandle<R>,
+    config: &AppConfig,
+    critical: Option<&str>,
+) -> Result<(), String> {
     unregister_all_runtime(app);
     crate::storage::diag_write("[shortcut] resync: all cleared, re-registering");
+    let mut first_err: Option<String> = None;
     for target in TARGETS {
         if !config.feature_enabled(feature_of_target(target)) {
             crate::storage::diag_write(&format!(
@@ -411,13 +427,28 @@ pub fn resync_all_result<R: Runtime>(
             continue;
         }
         let s = config_shortcut(config, target);
-        register_one_result(app, target, &s)?;
+        if let Err(e) = register_one_result(app, target, &s) {
+            if critical == Some(target) {
+                // 用户正在改的这个键注册失败：必须报错触发回滚
+                return Err(e);
+            }
+            crate::storage::diag_write(&format!(
+                "[shortcut] tolerated non-critical failure: {e}"
+            ));
+            if first_err.is_none() {
+                first_err = Some(e);
+            }
+        }
     }
     // 【恢复便签全局快捷键】unregister_all 会连便签注册的 F4 等一起注销，
     // 而便签热键注册在独立的 sticky_settings.json（不在 config.shortcuts）——
     // 不补注册的话，用户在工具箱保存任何一次配置后便签快捷键就全部失效
     crate::sticky::register_all_shortcuts(app);
-    Ok(())
+    match (&first_err, critical) {
+        // 严格模式（启动/回滚/导入）：任一失败都要让调用方感知
+        (Some(e), None) => Err(e.clone()),
+        _ => Ok(()),
+    }
 }
 
 /// 推倒重来：全量注销后按给定配置重新注册全部快捷键（失败仅留痕，不中断）。

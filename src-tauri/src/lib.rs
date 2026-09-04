@@ -22,6 +22,7 @@ mod credentials;
 #[cfg(windows)]
 mod apps;
 mod boot;
+mod appupdate;
 mod feedback;
 mod keyhook;
 mod panel;
@@ -359,6 +360,9 @@ pub fn run() {
             clipboard::start_watcher(handle.clone());
             #[cfg(windows)]
             explorer::start_explorer_watcher(handle.clone());
+            // 开发者回复轮询：后台线程每 7 分钟增量拉取（since=上次最大回复 id），
+            // 有新回复 → 本地留档 + 广播事件 + 系统通知（见 feedback.rs）
+            feedback::spawn_reply_poller(handle.clone());
 
             // 悬浮工具栏启用时启动即显示（常驻工具条，配置开关可随时收起）。
             // 启动定位：有记忆位置则恢复，否则固定工作区右下角（确定、可见，
@@ -504,6 +508,11 @@ pub fn run() {
             feedback::feedback_save_contact,
             feedback::feedback_read_image,
             feedback::submit_feedback,
+            feedback::feedback_list_replies,
+            feedback::feedback_poll_replies_now,
+            feedback::feedback_mark_replies_read,
+            appupdate::updater_download,
+            appupdate::updater_install_saved,
             sticky::capture_screen_region,
             port::port_query,
             port::port_kill,

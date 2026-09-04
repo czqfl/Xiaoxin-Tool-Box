@@ -1,4 +1,4 @@
-# 将 1024x1024 源图转换为 Tauri 所需的各尺寸 PNG 与多尺寸 ICO
+﻿# 将 1024x1024 源图转换为 Tauri 所需的各尺寸 PNG 与多尺寸 ICO
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Drawing
 

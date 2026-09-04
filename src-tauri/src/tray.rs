@@ -39,6 +39,8 @@ fn ensure_settings_window<R: Runtime>(app: &AppHandle<R>) -> Option<tauri::Webvi
         .center()
         .resizable(true)
         .visible(false)
+        // 无边框 + 前端自定义标题栏（与 tauri.conf.json 的 settings 窗口配置一致）
+        .decorations(false)
         .build();
     // 重建的窗口同样要挂上"关闭=隐藏"拦截，防止再次被销毁
     protect_settings_window(app);

@@ -658,22 +658,43 @@ export const pinShowAll = () => invoke<void>("pin_show_all");
 export const pinClearAll = () => invoke<void>("pin_clear_all");
 
 // ---- 用户反馈 ----
-/** 本机反馈档案（匿名设备码 + 预填联系人；首次调用生成设备码并落盘） */
+/** 本机反馈档案（匿名设备码 + 预填联系人；首次调用生成设备码并落盘）。
+ *  注意：IPC 返回值字段是 snake_case（serde 原样序列化，与 types.ts 全库约定一致） */
 export interface FeedbackProfile {
-  deviceId: string;
+  device_id: string;
   name: string;
   contact: string;
 }
 /** 截图预览数据（data URL 直接给 <img src>） */
 export interface FeedbackImagePreview {
-  dataUrl: string;
+  data_url: string;
   size: number;
+}
+/** 开发者回复（本地留档，最新在前） */
+export interface FeedbackReply {
+  id: number;
+  message: string;
+  created_at: string;
+}
+/** 关于页展示用：留档列表 + 未读条数 */
+export interface FeedbackRepliesSummary {
+  replies: FeedbackReply[];
+  unread: number;
 }
 export const feedbackProfile = () => invoke<FeedbackProfile>("feedback_profile");
 export const feedbackSaveContact = (name: string, contact: string) =>
   invoke<void>("feedback_save_contact", { name, contact });
 export const feedbackReadImage = (path: string) =>
   invoke<FeedbackImagePreview>("feedback_read_image", { path });
+/** 本地留档的开发者回复 + 未读数 */
+export const feedbackListReplies = () =>
+  invoke<FeedbackRepliesSummary>("feedback_list_replies");
+/** 立即向服务器拉取一次新回复（不等 7 分钟轮询），返回最新留档 */
+export const feedbackPollRepliesNow = () =>
+  invoke<FeedbackRepliesSummary>("feedback_poll_replies_now");
+/** 标记全部回复已读（打开「关于」页时调用，侧栏红点熄灭） */
+export const feedbackMarkRepliesRead = () =>
+  invoke<void>("feedback_mark_replies_read");
 /** 提交反馈（POST 到反馈服务器；category: bug|suggestion|other） */
 export const submitFeedback = (
   category: string,

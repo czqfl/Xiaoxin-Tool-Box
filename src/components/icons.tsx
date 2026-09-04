@@ -24,6 +24,13 @@ export const IconSearch = (p: IconProps) => (
   </svg>
 );
 
+export const IconRefresh = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+    <path d="M21 3v6h-6" />
+  </svg>
+);
+
 export const IconTrash = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 10v7M14 10v7" />

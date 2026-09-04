@@ -20,6 +20,9 @@ export const EVT_FSINDEX_PROGRESS = "fsindex://progress";
 export const EVT_FSINDEX_DONE = "fsindex://done";
 /** 逐行翻译的单行结果（payload: { i, out, ok }）：译文逐行冒出来用 */
 export const EVT_TRANSLATE_LINE = "translate://line";
+/** 反馈有新回复（Rust 轮询线程广播，payload: 新回复条数；
+ *  设置窗口据此刷新「关于」页回复列表与侧栏红点） */
+export const EVT_FEEDBACK_REPLIES = "feedback://replies";
 
 export function broadcastConfigChanged(config: unknown): Promise<void> {
   return emit(EVT_CONFIG_CHANGED, config);
