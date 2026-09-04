@@ -97,12 +97,17 @@
   color: var(--text-primary);
   border-color: var(--text-tertiary);
 }
-/* 下载中：迷你进度条 + 百分比 */
+/* 下载中：文字说明 + 迷你进度条 + 百分比 */
 .titlebar-update-progress {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 0 6px;
+}
+.titlebar-update-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 .titlebar-update-bar {
   width: 84px;

@@ -441,6 +441,7 @@ pub fn run() {
             folder::folder_detect_editors,
             folder::folder_set_vscode_path,
             folder::folder_git_exec,
+            folder::folder_git_open_remote,
             folder::folder_git_run,
             folder::folder_git_run_stream,
             folder::folder_git_run_last,

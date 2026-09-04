@@ -127,6 +127,9 @@ export const detectEditors = () =>
 /** 在默认终端中执行命令（git 等）：shell 取 "wt" | "cmd" | "powershell" */
 export const gitExec = (path: string, command: string, shell: string) =>
   invoke<void>("folder_git_exec", { path, command, shell });
+/** 用系统默认浏览器打开远程 Git 仓库（GitHub 等）网页 */
+export const gitOpenRemote = (path: string) =>
+  invoke<void>("folder_git_open_remote", { path });
 /** 面板内逐条执行命令并捕获输出（友好展示每条结果） */
 export const gitRun = (path: string, commands: string[]) =>
   safe(invoke<GitRunResult[]>("folder_git_run", { path, commands }), []);

@@ -496,6 +496,14 @@ function FolderPanelInner() {
       toast.show("Git 命令执行失败：" + String(e), "error");
     }
   };
+  /** 用系统默认浏览器打开远程仓库（GitHub 等）网页 */
+  const openRemoteRepo = async (folder: FolderEntry) => {
+    try {
+      await api.gitOpenRemote(folder.path);
+    } catch (e) {
+      toast.show(String(e), "error");
+    }
+  };
   const menuItems = (folder: FolderEntry): MenuItem[] => [
     {
       label: "打开",
@@ -546,11 +554,18 @@ function FolderPanelInner() {
           {
             label: `Git 命令（${branches[folder.id]}）`,
             icon: <IconBranch size={14} />,
-            children: GIT_COMMANDS.map(({ label, cmd }) => ({
-              label,
-              icon: <IconBranch size={13} />,
-              onClick: () => void execGitCommand(folder, cmd),
-            })),
+            children: [
+              {
+                label: "在浏览器查看远程仓库",
+                icon: <IconExternal size={13} />,
+                onClick: () => void openRemoteRepo(folder),
+              },
+              ...GIT_COMMANDS.map(({ label, cmd }) => ({
+                label,
+                icon: <IconBranch size={13} />,
+                onClick: () => void execGitCommand(folder, cmd),
+              })),
+            ],
           },
         ]
       : []),

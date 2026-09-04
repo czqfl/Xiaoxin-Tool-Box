@@ -16,6 +16,7 @@ export {
   pickVscodeExecutable,
   detectEditors,
   gitExec,
+  gitOpenRemote,
   gitRun,
   gitRunStream,
   folderGitBranches,

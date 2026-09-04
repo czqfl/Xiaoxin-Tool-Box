@@ -133,7 +133,8 @@ function TitlebarUpdateButton() {
   return (
     <div className="titlebar-update">
       {status === "downloading" ? (
-        <div className="titlebar-update-progress" title="正在下载新版本">
+        <div className="titlebar-update-progress">
+          <span className="titlebar-update-label">正在下载 v{newVersion}</span>
           <div className="titlebar-update-bar">
             <div
               className="titlebar-update-fill"

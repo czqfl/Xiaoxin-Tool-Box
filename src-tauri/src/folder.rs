@@ -357,6 +357,67 @@ pub fn folder_git_exec(path: String, command: String, shell: String) -> CmdResul
     exec_in_shell(&path, &shell, &command)
 }
 
+/// 用系统默认浏览器打开远程 Git 仓库（GitHub 等）网页。
+/// 读取 `git remote get-url origin`，把 scp/ssh/https 地址规整为 https 网页地址打开。
+#[tauri::command]
+pub fn folder_git_open_remote(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    if !Path::new(&path).is_dir() {
+        return Err("文件夹不存在或已被移动".into());
+    }
+    let out = Command::new("git")
+        .args(["remote", "get-url", "origin"])
+        .current_dir(&path)
+        .output()
+        .map_err(|e| format!("执行 git remote get-url origin 失败：{e}"))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "该目录不是 Git 仓库或未配置 origin 远程".into()
+        } else {
+            stderr
+        });
+    }
+    let remote = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let url = normalize_remote_url(&remote)
+        .ok_or_else(|| format!("无法识别的远程地址：{remote}"))?;
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|e| format!("打开浏览器失败：{e}"))?;
+    Ok(())
+}
+
+/// 把 git remote 地址规整为浏览器可打开的 https 页面地址。
+/// 支持：`https://github.com/owner/repo.git`、`git@github.com:owner/repo.git`、
+/// `ssh://git@github.com/owner/repo.git`；http 地址升级为 https。
+fn normalize_remote_url(remote: &str) -> Option<String> {
+    let r = remote.trim();
+    if r.is_empty() {
+        return None;
+    }
+    // scp 风格：git@host:owner/repo.git
+    if let Some(rest) = r.strip_prefix("git@") {
+        let (host, path) = rest.split_once(':')?;
+        let p = path.trim_end_matches(".git").trim_end_matches('/');
+        return Some(format!("https://{host}/{p}"));
+    }
+    // ssh://git@host/owner/repo.git
+    if let Some(rest) = r.strip_prefix("ssh://git@") {
+        let (host, path) = rest.split_once('/')?;
+        let p = path.trim_end_matches(".git").trim_end_matches('/');
+        return Some(format!("https://{host}/{p}"));
+    }
+    // https:// 原样（去尾部 .git）
+    if r.starts_with("https://") {
+        return Some(r.trim_end_matches(".git").trim_end_matches('/').to_string());
+    }
+    // http:// 升级为 https
+    if r.starts_with("http://") {
+        let p = r.trim_end_matches(".git").trim_end_matches('/');
+        return Some(format!("https://{}", p.trim_start_matches("http://")));
+    }
+    None
+}
+
 /// 单条命令执行结果（面板内友好展示用）
 #[derive(Clone, Serialize)]
 pub struct GitRunResult {

@@ -31,3 +31,7 @@ src-tauri/gen
 !.vscode/extensions.json
 .idea
 .DS_Store
+
+# AI 工作区数据（本地记忆/计划，不入库）
+.workbuddy/
+.zcode/
